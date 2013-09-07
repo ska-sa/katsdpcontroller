@@ -15,7 +15,12 @@ EXPECTED_SENSOR_LIST = [
 ]
 
 EXPECTED_REQUEST_LIST = [
-    'subarray-configure','sdp-status',
+    'subarray-configure',
+    'sdp-status',
+    'capture-done',
+    'capture-init',
+    'capture-status',
+    'postproc-init',
 ]
 
 class TestSDPProxy(unittest.TestCase, SimulatorTestMixin):
