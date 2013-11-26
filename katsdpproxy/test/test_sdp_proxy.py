@@ -11,13 +11,17 @@ from katsdpproxy.sdpproxy import SDPProxyServer
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 
+ANTENNAS = 'm063,m064'
+
+TEST_ID = "sub32_c16n400m1k"
+
 EXPECTED_SENSOR_LIST = [
     ('api-version', '', '', 'string'),
     ('build-state', '', '', 'string'),
 ]
 
 EXPECTED_REQUEST_LIST = [
-    'subarray-configure',
+    'data-product-configure',
     'sdp-status',
     'capture-done',
     'capture-init',
@@ -45,25 +49,32 @@ class TestSDPProxy(unittest.TestCase):
         self.proxy.join()
 
     def test_capture_init(self):
-        my_id = 3
-        self.client.assert_request_fails("capture-init",my_id)
-        self.client.assert_request_succeeds("subarray-configure",my_id,"64","16384","2.1","0","127.0.0.1:9000")
-        self.client.assert_request_succeeds("capture-init",my_id)
+        self.client.assert_request_fails("capture-init",TEST_ID)
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID,ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("capture-init",TEST_ID)
 
-        reply, informs = self.client.blocking_request(Message.request("capture-status",my_id))
+        reply, informs = self.client.blocking_request(Message.request("capture-status",TEST_ID))
         self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok",SA_STATES[2])))
 
-    def test_configure_subarray(self):
-        self.client.assert_request_fails("subarray-configure","1")
-        self.client.assert_request_succeeds("subarray-configure")
-        self.client.assert_request_succeeds("subarray-configure","1","64","16384","2.1","0","127.0.0.1:9000")
-        self.client.assert_request_succeeds("subarray-configure","1")
+    def test_capture_done(self):
+        self.client.assert_request_fails("capture-done",TEST_ID)
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID,ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_fails("capture-done",TEST_ID)
 
-        reply, informs = self.client.blocking_request(Message.request("subarray-configure"))
-        self.assertEqual(repr(reply),repr(Message.reply("subarray-configure","ok",1)))
+        self.client.assert_request_succeeds("capture-init",TEST_ID)
+        self.client.assert_request_succeeds("capture-done",TEST_ID)
 
-        self.client.assert_request_succeeds("subarray-configure","1","0")
-        self.client.assert_request_fails("subarray-configure","1")
+    def test_configure_data_product(self):
+        self.client.assert_request_fails("data-product-configure","1")
+        self.client.assert_request_succeeds("data-product-configure")
+        self.client.assert_request_succeeds("data-product-configure","1",ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure","1")
+
+        reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
+        self.assertEqual(repr(reply),repr(Message.reply("data-product-configure","ok",1)))
+
+        self.client.assert_request_succeeds("data-product-configure","1","")
+        self.client.assert_request_fails("data-product-configure","1")
 
     def test_sensor_list(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
