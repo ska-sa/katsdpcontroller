@@ -11,9 +11,11 @@ SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_co
 class SDPSubArray(object):
     """SDP Sub Array
 
-    Represents an instance on an SDP subarray from the ingest perspective.
+    Represents an instance of an SDP subarray. This includes ingest, an appropriate
+    telescope model, and any required post-processing.
+
     """
-    def __init__(self, subarray_id, n_antennas, n_channels, dump_rate, n_beams, sources):
+    def __init__(self, subarray_id, antennas, n_channels, dump_rate, n_beams, sources):
         self.subarray_id = subarray_id
         self.n_antennas = n_antennas
         self.n_channels = n_channels
@@ -70,7 +72,7 @@ class SDPSubArray(object):
 
     def __repr__(self):
         return "Subarray %i: %i antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.subarray_id, self.n_antennas, self.n_channels, self.dump_rate, self.data_rate, self.state, self.psb_id)
-		
+
 class SDPProxyServer(DeviceServer):
 
     VERSION_INFO = ("sdpproxy", 0, 1)
@@ -101,16 +103,18 @@ class SDPProxyServer(DeviceServer):
 
     @request(Int(optional=True),Int(min=0,max=64,optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(multiple=True,optional=True),include_msg=True)
     @return_reply(Str())
-    def request_subarray_configure(self, req, req_msg, subarray_id, n_antennas, n_channels, dump_rate, n_beams, *sources):
+    def request_subarray_configure(self, req, req_msg, subarray_id, antennas, n_channels, dump_rate, n_beams, *sources):
         """Configure a SDP subarray instance.
 
         Inform Arguments
         ----------------
         subarray_id : int
             The ID to use for this subarray.
-        n_antennas : int
-            Number of antennas used in this subarray (based on CBF config)
-            If n_antennas == 0, then this subarray is de-configured. Trailing arguments can be omitted.
+        antennas : string
+            A space seperated list of antenna names to use in this subarray.
+            These will be matched to the CBF output and used to pull only the specific
+            data.
+            If antennas == "", then this subarray is de-configured. Trailing arguments can be omitted.
         n_channels : int
             Number of channels used in this subarray (based on CBF config)
         dump_rate : float
@@ -130,12 +134,12 @@ class SDPProxyServer(DeviceServer):
                 req.inform(subarray_id,subarray)
             return ('ok',"%i" % len(self.subarrays));
 
-        if not n_antennas >= 0:
+        if antennas is None:
             if subarray_id in self.subarrays:
                 return ('ok',"%i is currently configured: %s" % (subarray_id,repr(self.subarrays[subarray_id])))
-            else: return ('fail',"This subarray id has no current configuration.") 
+            else: return ('fail',"This subarray id has no current configuration.")
 
-        if n_antennas == 0:
+        if antennas == -1:
             try:
                 self.subarrays.pop(subarray_id)
                 return ('ok',"Subarray has been deconfigured.")
@@ -148,7 +152,7 @@ class SDPProxyServer(DeviceServer):
          # all good so far, lets check arguments for validity
         if not(n_antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and sources):
             return ('fail',"You must specify n_antennas, n_channels, dump_rate, n_beams and at least one source to configure a subarray")
-        
+
         self.subarrays[subarray_id] = SDPSubArray(subarray_id, n_antennas, n_channels, dump_rate, n_beams, sources)
 
         return ('ok',"New array configured")
