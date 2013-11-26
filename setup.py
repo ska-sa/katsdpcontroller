@@ -10,15 +10,15 @@ install_requires = [
 ]
 
 setup (
-    name = "katsdpproxy",
+    name = "katsdpcontroller",
     version = "trunk",
-    description = "Proxy providing control and monitoring services for the MeerKAT Science Data Processor",
+    description = "Service providing control and monitoring services for the MeerKAT Science Data Processor",
     author = "Simon Ratcliffe",
     packages = find_packages(),
     package_data={'': ['conf/*']},
     include_package_data = True,
     scripts = [
-        "scripts/sdp_proxy.py",
+        "scripts/sdp_master_controller.py",
         ],
     #install_requires = install_requires,
     tests_require=tests_require,

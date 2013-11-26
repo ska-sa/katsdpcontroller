@@ -1,4 +1,4 @@
-"""Core classes for the SDP Proxy.
+"""Core classes for the SDP Controller.
 
 """
 
@@ -74,19 +74,19 @@ class SDPSubArray(object):
     def __repr__(self):
         return "Data product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.data_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state, self.psb_id)
 
-class SDPProxyServer(DeviceServer):
+class SDPControllerServer(DeviceServer):
 
-    VERSION_INFO = ("sdpproxy", 0, 1)
-    BUILD_INFO = ("sdpproxy", 0, 1, "rc2")
+    VERSION_INFO = ("sdpcontroller", 0, 1)
+    BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
 
     def __init__(self, *args, **kwargs):
 
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state",
-            "SDP Proxy build state.", "")
+            "SDP Controller build state.", "")
         self._build_state_sensor.set_value(self.build_state())
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version",
-            "SDP Proxy API version.", "")
+            "SDP Controller API version.", "")
         self._api_version_sensor.set_value(self.version())
 
         self.components = {}
@@ -95,7 +95,7 @@ class SDPProxyServer(DeviceServer):
         self.data_products = {}
          # dict of currently configured SDP data_products
 
-        super(SDPProxyServer, self).__init__(*args, **kwargs)
+        super(SDPControllerServer, self).__init__(*args, **kwargs)
 
     def setup_sensors(self):
         """Add sensors for processes."""

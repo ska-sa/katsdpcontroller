@@ -1,8 +1,8 @@
-"""katsdpproxy library."""
+"""katsdpcontroller library."""
 
 try:
     import pkg_resources as _pkg_resources
-    dist = _pkg_resources.get_distribution("katsdpproxy")
+    dist = _pkg_resources.get_distribution("katsdpcontroller")
     # ver needs to be a list since tuples in Python <= 2.5 don't have
     # a .index method.
     ver = list(dist.parsed_version)

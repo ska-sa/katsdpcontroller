@@ -1,4 +1,4 @@
-"""Tests for the sdp proxy module."""
+"""Tests for the sdp controller module."""
 
 import unittest2 as unittest
 
@@ -7,7 +7,7 @@ import os, time
 from katcp.testutils import BlockingTestClient
 from katcp import Message
 
-from katsdpproxy.sdpproxy import SDPProxyServer
+from katsdpcontroller.sdpcontroller import SDPControllerServer
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 
@@ -29,15 +29,15 @@ EXPECTED_REQUEST_LIST = [
     'postproc-init',
 ]
 
-class TestSDPProxy(unittest.TestCase):
-    """Testing of the SDP proxy.
+class TestSDPController(unittest.TestCase):
+    """Testing of the SDP controller.
 
-    Note: The proxy itself is only started once, so state remains between tests. For
+    Note: The controller itself is only started once, so state remains between tests. For
     this reason unique subarray_ids are used by each test to try and avoid clashes.
     """
     def setUp(self):
-        self.proxy = SDPProxyServer('127.0.0.1',5000)
-        self.proxy.start()
+        self.controller = SDPControllerServer('127.0.0.1',5000)
+        self.controller.start()
         self.client = BlockingTestClient(self,'127.0.0.1',5000)
         self.client.start(timeout=1)
         self.client.wait_connected(timeout=1)
@@ -45,8 +45,8 @@ class TestSDPProxy(unittest.TestCase):
     def tearDown(self):
         self.client.stop()
         self.client.join()
-        self.proxy.stop()
-        self.proxy.join()
+        self.controller.stop()
+        self.controller.join()
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init",TEST_ID)

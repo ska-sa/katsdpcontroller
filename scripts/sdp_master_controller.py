@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Script for launching the Science Data Processor Proxy Server.
+"""Script for launching the Science Data Processor Master Controller.
 
    Copyright (c) 2013 SKA/KAT. All Rights Reserved.
 """
@@ -23,14 +23,14 @@ if __name__ == "__main__":
     parser.add_option('-p', '--port', dest='port', type="int", default=5000, metavar='N',
                       help='katcp listen port (default=%default)')
     parser.add_option('-w', '--working-folder', dest='workpath',
-                      default=os.path.join("/", "var", "kat", "sdpproxy"), metavar='WORKING_PATH',
+                      default=os.path.join("/", "var", "kat", "sdpcontroller"), metavar='WORKING_PATH',
                       help='folder to write process standard out logs into (default=%default)')
     parser.add_option('-l', '--loglevel', dest='loglevel', type="string",
                       default="info", metavar='LOGLEVEL',
                       help='set the Python logging level (default=%default)')
     parser.add_option('-s', '--simulate', dest='simulate', default=False,
                       action='store_true', metavar='SIMULATE',
-                      help='run proxy in simulation mode (default: %default)')
+                      help='run controller in simulation mode (default: %default)')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
                       action='store_true', metavar='VERBOSE',
                       help='print verbose output (default: %default)')
@@ -43,25 +43,25 @@ if __name__ == "__main__":
             parser.print_help()
         sys.exit(1)
 
-    logger = logging.getLogger('sdpproxy')
+    logger = logging.getLogger('sdpcontroller')
     if isinstance(opts.loglevel, basestring):
         opts.loglevel = getattr(logging, opts.loglevel.upper())
     logger.setLevel(opts.loglevel)
-    fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpproxy.log'), maxBytes=1e6, backupCount=10)
+    fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
     formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s"
         " - %(levelname)s - %(message)s"), datefmt="%Y-%m-%d %H:%M:%S")
     fh.setFormatter(formatter)
     logger.addHandler(fh)
      # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
 
-    from katsdpproxy import sdpproxy
+    from katsdpcontroller import sdpcontroller
 
     if opts.simulate:
-        logger.info("Starting SDP Proxy (**Simulation Mode**)...")
-        server = sdpproxy.SDPProxySimulationServer(opts.host, opts.port)
+        logger.info("Starting SDP Controller (**Simulation Mode**)...")
+        server = sdpcontroller.SDPControllerSimulationServer(opts.host, opts.port)
     else:
-        logger.info("Starting SDP Proxy...")
-        server = sdpproxy.SDPProxyServer(opts.host, opts.port)
+        logger.info("Starting SDP Controller...")
+        server = sdpcontroller.SDPControllerServer(opts.host, opts.port)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)
