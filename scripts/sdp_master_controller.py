@@ -56,12 +56,8 @@ if __name__ == "__main__":
 
     from katsdpcontroller import sdpcontroller
 
-    if opts.simulate:
-        logger.info("Starting SDP Controller (**Simulation Mode**)...")
-        server = sdpcontroller.SDPControllerSimulationServer(opts.host, opts.port)
-    else:
-        logger.info("Starting SDP Controller...")
-        server = sdpcontroller.SDPControllerServer(opts.host, opts.port)
+    logger.info("Starting SDP Controller...")
+    server = sdpcontroller.SDPControllerServer(opts.host, opts.port, opts.simulate)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)

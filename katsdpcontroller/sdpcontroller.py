@@ -3,19 +3,35 @@
 """
 
 import time
-from katcp import DeviceServer, Sensor, Message
+import logging
+import subprocess
+from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 
-class SDPSubArray(object):
-    """SDP Sub Array
+INGEST_BASE_PORT = 2040
+ # base port to use for ingest processes
+
+MAX_DATA_PRODUCTS = 255
+ # the maximum possible number of simultaneously configured data products
+ # pretty arbitrary, could be increased, but we need some limits
+
+logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+
+class SDPDataProductBase(object):
+    """SDP Data Product Base
 
     Represents an instance of an SDP data product. This includes ingest, an appropriate
     telescope model, and any required post-processing.
 
+    In general each telescope data product is handled in a completely parallel fashion by the SDP.
+    This class encapsulates these instances, handling control input and sensor feedback to CAM.
+
+    ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
+    It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, sources):
+    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port):
         self.data_product_id = data_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
@@ -26,10 +42,15 @@ class SDPSubArray(object):
         self._state = 0
         self.set_state(1)
         self.psb_id = 0
+        self.ingest_port = ingest_port
+        self.ingest_host = 'localhost'
+        self.ingest_process = None
+        self.ingest_katcp = None
         if self.n_beams == 0:
            self.data_rate = (((self.n_antennas*(self.n_antennas+1))/2) * 4 * dump_rate * n_channels * 64) / 1e9
         else:
            self.data_rate = (n_beams * dump_rate * n_channels * 32) / 1e9
+        logger.info("Created: {0}".format(self.__repr__()))
 
     def set_psb(self, psb_id):
         if self.psb_id > 0:
@@ -46,33 +67,95 @@ class SDPSubArray(object):
         return ('fail','No post processing block is active on this data product')
 
     def _set_state(self, state_id):
+        if state_id == 5: state_id = 1
+         # handle capture done in simulator
         self._state = state_id
         self.state = SA_STATES[self._state]
+        return ('ok','')
 
-    def force_done(self):
-        self._set_state(1)
-        self.psb_id = 0
-        time.sleep(2) # simulate
+    def deconfigure(self):
+        if self._state == 1:
+            self._deconfigure()
+            return ('ok', 'Data product has been deconfigured')
+        else:
+            return ('fail','Data product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
+
+    def _deconfigure(self):
+        self._set_state(0)
 
     def set_state(self, state_id):
         # TODO: check that state change is allowed.
         if state_id == 5:
             if self._state < 2:
                 return ('fail','Can only halt data_products that have been inited')
-            self.force_done()
-             # array is now idle again...
-            return ('ok','Forced a capture done on data product')
 
         if state_id == 2:
             if self._state != 1:
                 return ('fail','Data product is currently in state %s, not %s as expected. Cannot be inited.' % (self.state,SA_STATES[1]))
-            time.sleep(2) # simulation
 
-        self._set_state(state_id)
-        return ('ok','State changed to %s' % self.state)
+        rcode, rval = self._set_state(state_id)
+        if rcode == 'fail': return ('fail',rval)
+        else:
+            if rval == '': return ('ok','State changed to %s' % self.state)
+        return ('ok', rval)
 
     def __repr__(self):
         return "Data product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.data_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state, self.psb_id)
+
+class SDPDataProduct(SDPDataProductBase):
+    def __init__(self, *args, **kwargs):
+        super(SDPDataProduct, self).__init__(*args, **kwargs)
+
+    def connect(self):
+        try:
+            self.ingest = subprocess.Popen(['ingest.py',"-p {0}".format(self.ingest_port)])
+            self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
+            try:
+                self.ingest_katcp.start(timeout=5)
+                self.ingest_katcp.wait_connected(timeout=5)
+            except RuntimeError:
+                self.ingest.kill()
+                self.ingest_katcp.stop()
+                 # no need for these to lurk around
+                retmsg = "Failed to connect to ingest process via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ingest_host, self.ingest_port)
+                logger.error(retmsg)
+                return ('fail',retmsg)
+        except OSError:
+            retmsg = "Failed to launch ingest process for data product. Make sure that katspdingest is installed and ingest.py is in the path."
+            logger.error(retmsg)
+            return ('fail',retmsg)
+        return ('ok','')
+
+    def _deconfigure(self):
+        if self.ingest_katcp is not None:
+            self.ingest_katcp.stop()
+            self.ingest_katcp.join()
+        if self.ingest is not None:
+            self.ingest.terminate()
+
+    def _issue_req(self, req):
+        reply, informs = self.ingest_katcp.blocking_request(Message.request(req))
+        if not reply.reply_ok():
+            retmsg = "Failed to issue req to ingest. {0}".format(req, reply.arguments[-1])
+            logger.warning(retmsg)
+            return ('fail', retmsg)
+        return ('ok', reply.arguments[-1])
+
+    def _set_state(self, state_id):
+        """The meat of the problem. Handles starting and stopping ingest processes and echo'ing requests."""
+        rcode = 'ok'
+        rval = ''
+        if state_id == 2: rcode, rval = self._issue_req('capture-init')
+        if state_id == 5:
+            rcode, rval = self._issue_req('capture-done')
+
+        if state_id == 5 or rcode == 'ok':
+            if state_id == 5: state_id = 1
+             # make sure that we dont get stuck if capture-done is failing...
+            self._state = state_id
+            self.state = SA_STATES[self._state]
+        if rval == '': rval = "State changed to {0}".format(self.state)
+        return (rcode, rval)
 
 class SDPControllerServer(DeviceServer):
 
@@ -80,7 +163,7 @@ class SDPControllerServer(DeviceServer):
     BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
 
     def __init__(self, *args, **kwargs):
-
+        logging.basicConfig(level=logging.INFO)
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state",
             "SDP Controller build state.", "")
@@ -88,12 +171,14 @@ class SDPControllerServer(DeviceServer):
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version",
             "SDP Controller API version.", "")
         self._api_version_sensor.set_value(self.version())
-
+        self.simulate = args[2]
+        if self.simulate: logger.warning("Note: Running in simulation mode...")
         self.components = {}
          # dict of currently managed SDP components
 
         self.data_products = {}
          # dict of currently configured SDP data_products
+        self.ingest_ports = {}
 
         super(SDPControllerServer, self).__init__(*args, **kwargs)
 
@@ -128,12 +213,12 @@ class SDPControllerServer(DeviceServer):
         Returns
         -------
         success : {'ok', 'fail'}
-            Whether the data product was succesfully configured.
+            If ok, returns the port on which the ingest process for this product is running.
         """
         if not data_product_id:
             for (data_product_id,data_product) in self.data_products.iteritems():
                 req.inform(data_product_id,data_product)
-            return ('ok',"%i" % len(self.data_products));
+            return ('ok',"%i" % len(self.data_products))
 
         if antennas is None:
             if data_product_id in self.data_products:
@@ -142,10 +227,14 @@ class SDPControllerServer(DeviceServer):
 
         if antennas == "":
             try:
+                dp_handle = self.data_products[data_product_id]
+                rcode, rval = dp_handle.deconfigure()
+                if rcode == 'fail': return (rcode, rval)
                 self.data_products.pop(data_product_id)
-                return ('ok',"Data product has been deconfigured.")
+                self.ingest_ports.pop(data_product_id)
+                return (rcode, rval)
             except KeyError:
-                return ('fail',"Deconfiguration of data product %s requested, but extant configuration found." % data_product_id)
+                return ('fail',"Deconfiguration of data product %s requested, but no configuration found." % data_product_id)
 
         if data_product_id in self.data_products:
             return ('ok',"Array already configured")
@@ -154,9 +243,18 @@ class SDPControllerServer(DeviceServer):
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and sources):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and at least one source to configure a data product")
 
-        self.data_products[data_product_id] = SDPSubArray(data_product_id, antennas, n_channels, dump_rate, n_beams, sources)
-
-        return ('ok',"New array configured")
+         # determine a suitable port for ingest
+        ingest_port = min([port+INGEST_BASE_PORT for port in range(MAX_DATA_PRODUCTS) if port+INGEST_BASE_PORT not in self.ingest_ports.values()])
+        self.ingest_ports[data_product_id] = ingest_port
+        if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
+        else:
+            self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
+            rcode, rval = self.data_products[data_product_id].connect()
+            if rcode == 'fail':
+                self.data_products.pop(data_product_id)
+                self.ingest_ports.pop(data_product_id)
+                return (rcode, rval)
+        return ('ok',str(ingest_port))
 
     @request(Str())
     @return_reply(Str())
@@ -189,7 +287,7 @@ class SDPControllerServer(DeviceServer):
          # attempt to set state to init
         return ('ok','SDP ready')
 
-    @request(Str())
+    @request(Str(optional=True))
     @return_reply(Str())
     def request_capture_status(self, req, data_product_id):
         """Returns the status of the specified data product.
@@ -204,6 +302,11 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
         state : str
         """
+        if not data_product_id:
+            for (data_product_id,data_product) in self.data_products.iteritems():
+                req.inform(data_product_id,data_product.state)
+            return ('ok',"%i" % len(self.data_products))
+
         if data_product_id not in self.data_products:
             return ('fail','No existing data product configuration with this id found')
         return ('ok',self.data_products[data_product_id].state)
