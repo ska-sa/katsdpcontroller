@@ -83,16 +83,16 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',"")
 
     def test_configure_data_product(self):
-        self.client.assert_request_fails("data-product-configure","1")
+        self.client.assert_request_fails("data-product-configure",TEST_ID+'3')
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure","1",ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
-        self.client.assert_request_succeeds("data-product-configure","1")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3')
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
         self.assertEqual(repr(reply),repr(Message.reply("data-product-configure","ok",1)))
 
-        self.client.assert_request_succeeds("data-product-configure","1","")
-        self.client.assert_request_fails("data-product-configure","1")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',"")
+        self.client.assert_request_fails("data-product-configure",TEST_ID+'3')
 
     def test_sensor_list(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)

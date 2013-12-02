@@ -35,7 +35,7 @@ class SDPTask(object):
 
     This is a very thin wrapper for now to support RTS.
     """
-    def __init__(self, task_id, task_cmd, host):
+    def __init__(self, task_id, task_cmd, host=None):
         self.task_id = task_id
         self.task_cmd = task_cmd
         self._task_cmd_array = shlex.split(task_cmd)
@@ -49,6 +49,7 @@ class SDPTask(object):
             self._task = subprocess.Popen(self._task_cmd_array)
             self.state = TASK_STATES[1]
             self.start_time = time.time()
+            logger.info("Launched task ({}): {}".format(self.task_id, self.task_cmd))
         except OSError, err:
             retmsg = "Failed to launch SDP task. {0}".format(err)
             logger.error(retmsg)
@@ -336,11 +337,17 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (data_product_id,repr(self.data_products[data_product_id])))
             else: return ('fail',"This data product id has no current configuration.")
 
+        disp_id = "{}_disp".format(data_product_id)
+
         if antennas == "":
             try:
                 dp_handle = self.data_products[data_product_id]
                 rcode, rval = dp_handle.deconfigure()
                 if rcode == 'fail': return (rcode, rval)
+                 # cleanup signal displays
+                if disp_id in self.tasks:
+                    disp_task = self.tasks.pop(disp_id)
+                    disp_task.halt()
                 self.data_products.pop(data_product_id)
                 self.ingest_ports.pop(data_product_id)
                 return (rcode, rval)
@@ -359,9 +366,13 @@ class SDPControllerServer(DeviceServer):
         self.ingest_ports[data_product_id] = ingest_port
         if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
         else:
+            self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py")
+            self.tasks[disp_id].launch()
             self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
             rcode, rval = self.data_products[data_product_id].connect()
             if rcode == 'fail':
+                disp_task = self.tasks.pop(disp_id)
+                if disp_task: disp_task.halt()
                 self.data_products.pop(data_product_id)
                 self.ingest_ports.pop(data_product_id)
                 return (rcode, rval)
