@@ -27,6 +27,8 @@ EXPECTED_REQUEST_LIST = [
     'capture-init',
     'capture-status',
     'postproc-init',
+    'task-launch',
+    'task-terminate'
 ]
 
 class TestSDPController(unittest.TestCase):
@@ -47,6 +49,13 @@ class TestSDPController(unittest.TestCase):
         self.client.join()
         self.controller.stop()
         self.controller.join()
+
+    def test_task_launch(self):
+        self.client.assert_request_fails("task-launch","task1")
+        self.client.assert_request_succeeds("task-launch","task1","/bin/sleep 5")
+        reply, informs = self.client.blocking_request(Message.request("task-launch"))
+        self.assertEqual(repr(reply),repr(Message.reply("task-launch","ok",1)))
+        self.client.assert_request_succeeds("task-terminate","task1")
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init",TEST_ID)
@@ -74,16 +83,16 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',"")
 
     def test_configure_data_product(self):
-        self.client.assert_request_fails("data-product-configure","1")
+        self.client.assert_request_fails("data-product-configure",TEST_ID+'3')
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure","1",ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
-        self.client.assert_request_succeeds("data-product-configure","1")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3')
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
         self.assertEqual(repr(reply),repr(Message.reply("data-product-configure","ok",1)))
 
-        self.client.assert_request_succeeds("data-product-configure","1","")
-        self.client.assert_request_fails("data-product-configure","1")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',"")
+        self.client.assert_request_fails("data-product-configure",TEST_ID+'3')
 
     def test_sensor_list(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
