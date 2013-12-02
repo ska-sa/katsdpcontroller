@@ -35,7 +35,7 @@ class SDPTask(object):
 
     This is a very thin wrapper for now to support RTS.
     """
-    def __init__(self, task_id, task_cmd, host=None):
+    def __init__(self, task_id, task_cmd, host):
         self.task_id = task_id
         self.task_cmd = task_cmd
         self._task_cmd_array = shlex.split(task_cmd)
@@ -366,7 +366,7 @@ class SDPControllerServer(DeviceServer):
         self.ingest_ports[data_product_id] = ingest_port
         if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
         else:
-            self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py")
+            self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
             self.tasks[disp_id].launch()
             self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
             rcode, rval = self.data_products[data_product_id].connect()
