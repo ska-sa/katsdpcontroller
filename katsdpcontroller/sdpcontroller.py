@@ -5,10 +5,12 @@
 import time
 import logging
 import subprocess
+import shlex
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
+TASK_STATES = {0:'init',1:'running',2:'killed'}
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -18,6 +20,52 @@ MAX_DATA_PRODUCTS = 255
  # pretty arbitrary, could be increased, but we need some limits
 
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+
+class SDPTask(object):
+    """SDP Task wrapper.
+
+    Represents an executing task within the scope of the SDP.
+
+    Eventually this management will be fairly intelligent and will
+    deploy and provision tasks automatically based on the available
+    resources within the SDP.
+
+    It is expected that SDPTask will be subclassed for specific types
+    of execution.
+
+    This is a very thin wrapper for now to support RTS.
+    """
+    def __init__(self, task_id, task_cmd, host):
+        self.task_id = task_id
+        self.task_cmd = task_cmd
+        self._task_cmd_array = shlex.split(task_cmd)
+        self.host = host
+        self._task = None
+        self.state = TASK_STATES[0]
+        self.start_time = None
+
+    def launch(self):
+        try:
+            self._task = subprocess.Popen(self._task_cmd_array)
+            self.state = TASK_STATES[1]
+            self.start_time = time.time()
+        except OSError, err:
+            retmsg = "Failed to launch SDP task. {0}".format(err)
+            logger.error(retmsg)
+            return ('fail',retmsg)
+        return ('ok',"New task launched successfully")
+
+    def halt(self):
+        self._task.terminate()
+        self.state = TASK_STATES[2]
+        return ('ok',"Task terminated successfully.")
+
+    def uptime(self):
+        if self.start_time is None: return 0
+        else: return time.time() - self.start_time
+
+    def __repr__(self):
+        return "SDP Task: status => {0}, uptime => {1:.2f}, cmd => {2}".format(self.state, self.uptime(), self._task_cmd_array[0])
 
 class SDPDataProductBase(object):
     """SDP Data Product Base
@@ -179,6 +227,8 @@ class SDPControllerServer(DeviceServer):
         self.data_products = {}
          # dict of currently configured SDP data_products
         self.ingest_ports = {}
+        self.tasks = {}
+         # dict of currently managed SDP tasks
 
         super(SDPControllerServer, self).__init__(*args, **kwargs)
 
@@ -186,6 +236,67 @@ class SDPControllerServer(DeviceServer):
         """Add sensors for processes."""
         self.add_sensor(self._build_state_sensor)
         self.add_sensor(self._api_version_sensor)
+
+    @request(Str())
+    @return_reply(Str())
+    def request_task_terminate(self, req, task_id):
+        """Terminate the specified SDP task.
+        
+        Inform Arguments
+        ----------------
+        task_id : string
+            The ID of the task to terminate
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        """
+        if not task_id in self.tasks: return ('fail',"Specified task ID ({0}) is unknown".format(task_id))
+        task = self.tasks.pop(task_id)
+        rcode, rval = task.halt()
+        return (rcode, rval)
+
+
+    @request(Str(optional=True),Str(optional=True),Str(optional=True))
+    @return_reply(Str())
+    def request_task_launch(self, req, task_id, task_cmd, host):
+        """Launch a task within the SDP.
+        This command allows tasks to be listed and launched within the SDP. Specification of a desired host
+        is optional, as in general the master controller will decide on the most appropriate location on
+        which to run the task.
+        
+        Inform Arguments
+        ----------------
+        task_id : string
+            The unique ID used to identify this task.
+            If empty then all managed tasks are listed.
+        task_cmd : string
+            The complete command to run including fully qualified executable and arguments
+            If empty then the status of the specified id is shown
+        host : string
+            Force the controller to launch the task on the specified host
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        host,port : If appropriate, the host/port pair to connect to the task via katcp is returned.
+        """
+        if not task_id:
+            for (task_id, task) in self.tasks.iteritems():
+                req.inform(task_id, task)
+            return ('ok', "{0}".format(len(self.tasks)))
+
+        if task_id in self.tasks:
+            if not task_cmd: return ('ok',"{0}: {1}".format(task_id, self.tasks[task_id]))
+            else: return ('fail',"A task with the specified ID is already running and cannot be reconfigured.")
+
+        if task_id not in self.tasks and not task_cmd: return ('fail',"You must specify a command line to run for a new task")
+
+        self.tasks[task_id] = SDPTask(task_id, task_cmd, host)
+        rcode, rval = self.tasks[task_id].launch()
+        if rcode == 'fail': self.tasks.pop(task_id)
+         # launch failed, discard task
+        return (rcode, rval)
 
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())

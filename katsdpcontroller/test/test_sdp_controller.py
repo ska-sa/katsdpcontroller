@@ -27,6 +27,8 @@ EXPECTED_REQUEST_LIST = [
     'capture-init',
     'capture-status',
     'postproc-init',
+    'task-launch',
+    'task-terminate'
 ]
 
 class TestSDPController(unittest.TestCase):
@@ -47,6 +49,13 @@ class TestSDPController(unittest.TestCase):
         self.client.join()
         self.controller.stop()
         self.controller.join()
+
+    def test_task_launch(self):
+        self.client.assert_request_fails("task-launch","task1")
+        self.client.assert_request_succeeds("task-launch","task1","/bin/sleep 5")
+        reply, informs = self.client.blocking_request(Message.request("task-launch"))
+        self.assertEqual(repr(reply),repr(Message.reply("task-launch","ok",1)))
+        self.client.assert_request_succeeds("task-terminate","task1")
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init",TEST_ID)
