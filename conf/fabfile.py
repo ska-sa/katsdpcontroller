@@ -28,7 +28,7 @@ PIP_PKGS = ['ipython',
             'iniparse',                                           # cbf simulator
             'sqlalchemy',                                         # katcorelib
             'python-dateutil','pyparsing','tornado','nose',       # matplotlib
-            'matplotlib',                                         # katsdisp
+            'matplotlib','mplh5canvas'                            # katsdpdisp
             'ply','zope.interface','twisted','unittest2','mock',  # katcp
             'genshi', 'jsobject',                                 # katconf
             'blinker',                                            # katcore
@@ -72,6 +72,7 @@ ARCHIVE_APACHE_HOME = '/var/www/archive'
 # Where we're going to put the oodt configuration files
 OODT_CONF = os.path.join(OODT_HOME, "conf")
 # Primary staging directory
+SOLR_COLLECTIONS_HOME = os.path.join(ARCHIVE_HOME, "catalogs/solr")
 STAGING_INGEST = os.path.join(STAGING_HOME, "staging")
 # Where files go when ingest fails
 STAGING_FAILED = os.path.join(STAGING_HOME, "failed")
@@ -162,6 +163,8 @@ def make_oodt_home():
 
 def check_and_make_directory(dir_to_make):
     sudo("if [[ ! -d %s ]]; then mkdir -p %s; fi" % (dir_to_make, dir_to_make))
+    sudo("chown -R %s %s" % (env.user, dir_to_make))
+    sudo("chgrp -R %s %s" % (env.user, dir_to_make))
 
 def make_dc_directory_trees():
     #staging directories
@@ -169,6 +172,7 @@ def make_dc_directory_trees():
     check_and_make_directory(STAGING_NFS_INGEST)
     check_and_make_directory(STAGING_FAILED)
     check_and_make_directory(ARCHIVE_DATA)
+    check_and_make_directory(SOLR_COLLECTIONS_HOME)
     check_and_make_directory(RTS_DATA)
     check_and_make_directory(SDP_MC)
 
