@@ -122,8 +122,8 @@ class SDPDataProductBase(object):
         self.state = SA_STATES[self._state]
         return ('ok','')
 
-    def deconfigure(self):
-        if self._state == 1:
+    def deconfigure(self, force=False):
+        if self._state == 1 or force:
             self._deconfigure()
             return ('ok', 'Data product has been deconfigured')
         else:
@@ -157,7 +157,15 @@ class SDPDataProduct(SDPDataProductBase):
 
     def connect(self):
         try:
-            self.ingest = subprocess.Popen(['ingest.py',"-p {0}".format(self.ingest_port)])
+            (data_host,data_port) = self.sources.split(":",2)
+        except ValueError:
+            retmsg = "Failed to parse CBF data source specification ({}), should be in the form <ip>[+<count>]:port".format(self.sources)
+            logger.error(retmsg)
+            return ('fail',retmsg)
+        try:
+            cmd = ["ingest.py","-p {0}".format(self.ingest_port),"--data-port={}".format(data_port),"--data-host={}".format(data_host)]
+            self.ingest = subprocess.Popen(cmd)
+            logger.info("Launching new ingest process with configuration: {}".format(cmd))
             self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
             try:
                 self.ingest_katcp.start(timeout=5)
@@ -174,6 +182,16 @@ class SDPDataProduct(SDPDataProductBase):
             logger.error(retmsg)
             return ('fail',retmsg)
         return ('ok','')
+
+    def deconfigure(self, force=False):
+        if self._state == 1 or force:
+            if self._state != 1:
+                logger.warning("Forcing capture_done on external request.")
+                self._issue_req('capture-done')
+            self._deconfigure()
+            return ('ok', 'Data product has been deconfigured')
+        else:
+            return ('fail','Data product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
 
     def _deconfigure(self):
         if self.ingest_katcp is not None:
@@ -299,6 +317,33 @@ class SDPControllerServer(DeviceServer):
          # launch failed, discard task
         return (rcode, rval)
 
+    def deregister_product(self,data_product_id,force=False):
+        """Deregister a data product.
+
+        This first checks to make sure the product is in an appropriate state
+        (ideally idle), and then shuts down the ingest and plotting
+        processes associated with it.
+
+        Forcing skips the check on state and is basically used in an emergency."""
+        dp_handle = self.data_products[data_product_id]
+        rcode, rval = dp_handle.deconfigure(force=force)
+        if rcode == 'fail': return (rcode, rval)
+             # cleanup signal displays (if any)
+        disp_id = "{}_disp".format(data_product_id)
+        if disp_id in self.tasks:
+            disp_task = self.tasks.pop(disp_id)
+            disp_task.halt()
+        self.data_products.pop(data_product_id)
+        self.ingest_ports.pop(data_product_id)
+        return (rcode, rval)
+
+    def handle_interrupt(self):
+        """Try to shutdown as gracefully as possible when interrupted."""
+        logger.warning("SDP Master Controller interrupted.")
+        for data_product_id in self.data_products.keys():
+            rcode, rval = self.deregister_product(data_product_id,force=True)
+            logger.info("Deregistered data product {} ({},{})".format(data_product_id, rcode, rval))
+
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
     def request_data_product_configure(self, req, req_msg, data_product_id, antennas, n_channels, dump_rate, n_beams, sources):
@@ -337,25 +382,19 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (data_product_id,repr(self.data_products[data_product_id])))
             else: return ('fail',"This data product id has no current configuration.")
 
-        disp_id = "{}_disp".format(data_product_id)
-
         if antennas == "":
             try:
-                dp_handle = self.data_products[data_product_id]
-                rcode, rval = dp_handle.deconfigure()
-                if rcode == 'fail': return (rcode, rval)
-                 # cleanup signal displays
-                if disp_id in self.tasks:
-                    disp_task = self.tasks.pop(disp_id)
-                    disp_task.halt()
-                self.data_products.pop(data_product_id)
-                self.ingest_ports.pop(data_product_id)
+                (rcode, rval) = self.deregister_product(data_product_id)
                 return (rcode, rval)
             except KeyError:
                 return ('fail',"Deconfiguration of data product %s requested, but no configuration found." % data_product_id)
 
         if data_product_id in self.data_products:
-            return ('ok',"Array already configured")
+            dp = self.data_products[data_product_id]
+            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams and dp.sources == sources:
+                return ('ok',"Data product with this configuration already exists. Pass.")
+            else:
+                return ('fail',"A data product with this id ({}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(data_product_id))
 
          # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and sources):
@@ -364,6 +403,8 @@ class SDPControllerServer(DeviceServer):
          # determine a suitable port for ingest
         ingest_port = min([port+INGEST_BASE_PORT for port in range(MAX_DATA_PRODUCTS) if port+INGEST_BASE_PORT not in self.ingest_ports.values()])
         self.ingest_ports[data_product_id] = ingest_port
+        disp_id = "{}_disp".format(data_product_id)
+
         if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
         else:
             self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")

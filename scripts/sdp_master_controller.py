@@ -87,8 +87,6 @@ if __name__ == "__main__":
                 device.start()
                 logger.info("Started.")
     except KeyboardInterrupt:
-        pass
-    finally:
-        logger.info("Shutting down...")
+        server.handle_interrupt()
         server.stop()
         server.join()
