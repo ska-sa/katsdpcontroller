@@ -80,14 +80,15 @@ class SDPDataProductBase(object):
     ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port):
+    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port):
         self.data_product_id = data_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
         self.n_channels = n_channels
         self.dump_rate = dump_rate
         self.n_beams = n_beams
-        self.sources = sources
+        self.cam_source = cam_source
+        self.cbf_source = cbf_source
         self._state = 0
         self.set_state(1)
         self.psb_id = 0
@@ -157,13 +158,14 @@ class SDPDataProduct(SDPDataProductBase):
 
     def connect(self):
         try:
-            (data_host,data_port) = self.sources.split(":",2)
+            (cbf_host,cbf_port) = self.cbf_source.split(":",2)
+            (cam_host,cam_port) = self.cam_source.split(":",2)
         except ValueError:
-            retmsg = "Failed to parse CBF data source specification ({}), should be in the form <ip>[+<count>]:port".format(self.sources)
+            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(self.cbf_source,self.cam_source)
             logger.error(retmsg)
             return ('fail',retmsg)
         try:
-            cmd = ["ingest.py","-p {0}".format(self.ingest_port),"--data-port={}".format(data_port),"--data-host={}".format(data_host)]
+            cmd = ["ingest.py","-p {0}".format(self.ingest_port),"--cbf-spead-port={}".format(cbf_port),"--cbf-spead-host={}".format(cbf_host),"--cam-spead-port={}".format(cam_port),"--cam-spead-host={}".format(cam_host)]
             self.ingest = subprocess.Popen(cmd)
             logger.info("Launching new ingest process with configuration: {}".format(cmd))
             self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
@@ -344,9 +346,9 @@ class SDPControllerServer(DeviceServer):
             rcode, rval = self.deregister_product(data_product_id,force=True)
             logger.info("Deregistered data product {} ({},{})".format(data_product_id, rcode, rval))
 
-    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
+    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
-    def request_data_product_configure(self, req, req_msg, data_product_id, antennas, n_channels, dump_rate, n_beams, sources):
+    def request_data_product_configure(self, req, req_msg, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source):
         """Configure a SDP data product instance.
 
         Inform Arguments
@@ -364,8 +366,10 @@ class SDPControllerServer(DeviceServer):
             Dump rate of data product in Hz
         n_beams : int
             Number of beams in the data product (0 = Correlator output, 1+ = Beamformer)
-        sources : string
-            A specification of the multicasts sources from which to receive data in the form <ip>[+<count>]:<port>
+        cbf_source : string
+            A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
+        cam_source : string
+            A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
         
         Returns
         -------
@@ -391,25 +395,25 @@ class SDPControllerServer(DeviceServer):
 
         if data_product_id in self.data_products:
             dp = self.data_products[data_product_id]
-            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams and dp.sources == sources:
+            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams and dp.cbf_source == cbf_source and dp.cam_source == cam_source:
                 return ('ok',"Data product with this configuration already exists. Pass.")
             else:
                 return ('fail',"A data product with this id ({}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(data_product_id))
 
          # all good so far, lets check arguments for validity
-        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and sources):
-            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and at least one source to configure a data product")
+        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and cbf_source and cam_source):
+            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a data product")
 
          # determine a suitable port for ingest
         ingest_port = min([port+INGEST_BASE_PORT for port in range(MAX_DATA_PRODUCTS) if port+INGEST_BASE_PORT not in self.ingest_ports.values()])
         self.ingest_ports[data_product_id] = ingest_port
         disp_id = "{}_disp".format(data_product_id)
 
-        if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
+        if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
         else:
             self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
             self.tasks[disp_id].launch()
-            self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, sources, ingest_port)
+            self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
             rcode, rval = self.data_products[data_product_id].connect()
             if rcode == 'fail':
                 disp_task = self.tasks.pop(disp_id)
