@@ -59,7 +59,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init",TEST_ID)
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID,ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
         self.client.assert_request_succeeds("capture-init",TEST_ID)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",TEST_ID))
@@ -67,7 +67,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",TEST_ID+'1')
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'1',ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'1',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
         self.client.assert_request_fails("capture-done",TEST_ID+'1')
 
         self.client.assert_request_succeeds("capture-init",TEST_ID+'1')
@@ -75,7 +75,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_deconfigure_data_product(self):
         self.client.assert_request_fails("data-product-configure",TEST_ID+'2',"")
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
         self.client.assert_request_succeeds("capture-init",TEST_ID+'2')
         self.client.assert_request_fails("data-product-configure",TEST_ID+'2',"")
          # should not be able to deconfigure when not in idle state
@@ -85,7 +85,7 @@ class TestSDPController(unittest.TestCase):
     def test_configure_data_product(self):
         self.client.assert_request_fails("data-product-configure",TEST_ID+'3')
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',ANTENNAS,"16384","2.1","0","127.0.0.1:9000")
+        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
         self.client.assert_request_succeeds("data-product-configure",TEST_ID+'3')
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
