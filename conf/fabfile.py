@@ -139,6 +139,24 @@ def install_git_package(package, repo='ska-sa', **kwargs):
         # install the package
         sudo('pip install '+package+'/')
 
+def update_git_package(package, repo='ska-sa', **kwargs):
+    """Git update and pip update git package"""
+    print ' ---- Update', package, ' ---- \n'
+    full_git_dir = GIT_DIR+'/'+package
+    with cd(full_git_dir):
+        # clone the package
+        try:
+            # if the repository is private, user and password info must be provided
+            user = kwargs['user']
+            password = kwargs['password']
+            run('git pull https://'+user+':'+password+'@github.com/'+repo+'/'+package+'.git')
+        except KeyError:
+            # if no user and password provided, assume the repository is public
+            run('git pull https://@github.com/'+repo+'/'+package+'.git')
+    with cd(GIT_DIR):
+        # install the package
+        sudo('pip install -U '+package+'/')
+
 def install_svn_package(package, user, password, base=KAT_SVN_BASE):
     """Checkout and pip install svn package"""
     print ' ---- Install', package, ' ---- \n'
@@ -147,11 +165,26 @@ def install_svn_package(package, user, password, base=KAT_SVN_BASE):
         run('svn checkout https://'+base+'/'+package+'/trunk '+package+' --username='+user+' --password='+password)
         sudo('pip install '+package+'/')
 
+def update_svn_package(package, user, password, base=KAT_SVN_BASE):
+    """Svn update and pip update svn package"""
+    print ' ---- Update', package, ' ---- \n'
+    with cd(SVN_DIR):
+        # check out and install the package
+        run('svn up '+package+' --username='+user+' --password='+password)
+        sudo('pip install -U '+package+'/')
+
 def checkout_svn_files(base, loc, user, password, use_sudo=True):
     """Checkout files that don't need to be installed"""
     run_ = sudo if use_sudo else run
     print ' ---- Checkout svn files ---- \n'
     run_('svn checkout https://'+base+' '+loc+' --username='+user+' --password='+password)
+
+def update_svn_files(loc, user, password, use_sudo=True):
+    """Update files that don't need to be installed"""
+    run_ = sudo if use_sudo else run
+    print ' ---- Update svn files ---- \n'
+    with cd(loc):
+        run_('svn up --username='+user+' --password='+password)
 
 def remove_dir(rmdir):
     sudo("rm -rf %s" % (rmdir,))
@@ -290,6 +323,29 @@ def deploy():
     oodt_setup()
     # install the katoodt package - might be temporary
     install_svn_package('katoodt',SVN_USER,SVN_PASSWORD)
+
+@task
+def update():
+    # update git/svn packages to current master/trunk versions
+
+    # update public ska-sa git packages
+    for name in PUBLIC_SKA_GIT: update_git_package(name)
+
+    # update private ska-sa git packages
+    for name in PRIVATE_SKA_GIT: update_git_package(name,user=GIT_USER,password=GIT_PASSWORD)
+
+    # update svn packages
+    for name in SVN_PKGS: update_svn_package(name,SVN_USER,SVN_PASSWORD)
+
+    # update katconfig files
+    print ' ---- Update katconfig ---- \n'
+    update_svn_files(CONFIG_DIR,SVN_USER,SVN_PASSWORD)
+
+    # update RTS scripts from svnScience
+    print ' ---- Update RTS scripts ---- \n'
+    update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+
+    # still outstanding - oodt updates
 
 @task
 def clear():
