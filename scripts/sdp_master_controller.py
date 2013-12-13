@@ -87,6 +87,8 @@ if __name__ == "__main__":
                 device.start()
                 logger.info("Started.")
     except KeyboardInterrupt:
-        server.handle_interrupt()
-        server.stop()
-        server.join()
+        pass
+     # handle all exit conditions, including keyboard interrupt, katcp halt and sigterm
+    server.handle_exit()
+    server.stop()
+    server.join()
