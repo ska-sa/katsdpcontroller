@@ -339,7 +339,7 @@ class SDPControllerServer(DeviceServer):
         self.ingest_ports.pop(data_product_id)
         return (rcode, rval)
 
-    def handle_interrupt(self):
+    def handle_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
         logger.warning("SDP Master Controller interrupted.")
         for data_product_id in self.data_products.keys():
