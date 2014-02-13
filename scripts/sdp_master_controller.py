@@ -49,8 +49,8 @@ if __name__ == "__main__":
     logger.setLevel(opts.loglevel)
     try:
         fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
-        formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),\
-                                       datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),
+                                      datefmt="%Y-%m-%d %H:%M:%S")
         fh.setFormatter(formatter)
         logger.addHandler(fh)
          # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
