@@ -47,12 +47,17 @@ if __name__ == "__main__":
     if isinstance(opts.loglevel, basestring):
         opts.loglevel = getattr(logging, opts.loglevel.upper())
     logger.setLevel(opts.loglevel)
-    fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
-    formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s"
-        " - %(levelname)s - %(message)s"), datefmt="%Y-%m-%d %H:%M:%S")
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-     # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
+    try:
+        fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
+        formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),
+                                      datefmt="%Y-%m-%d %H:%M:%S")
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+         # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
+    except IOError:
+        logging.basicConfig()
+        (logger.warn("Failed to create log file so reverting to console output. Most likely issue is that {0} does not exist or is not writeable"
+         .format(os.path.join(opts.workpath))))
 
     from katsdpcontroller import sdpcontroller
 

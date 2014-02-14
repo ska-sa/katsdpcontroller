@@ -234,12 +234,13 @@ class SDPControllerServer(DeviceServer):
     def __init__(self, *args, **kwargs):
         logging.basicConfig(level=logging.INFO)
          # setup sensors
-        self._build_state_sensor = Sensor(Sensor.STRING, "build-state",
-            "SDP Controller build state.", "")
-        self._build_state_sensor.set_value(self.build_state())
-        self._api_version_sensor = Sensor(Sensor.STRING, "api-version",
-            "SDP Controller API version.", "")
-        self._api_version_sensor.set_value(self.version())
+        self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
+        self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
+        self._device_status_sensor = Sensor(Sensor.DISCRETE, "device-status", "Devices status of the Antenna Positioner", "", ["ok", "degraded", "fail"])
+        self._fmeca_sensors = {}
+        self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
+         # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
+
         self.simulate = args[2]
         if self.simulate: logger.warning("Note: Running in simulation mode...")
         self.components = {}
@@ -255,8 +256,17 @@ class SDPControllerServer(DeviceServer):
 
     def setup_sensors(self):
         """Add sensors for processes."""
+        self._build_state_sensor.set_value(self.build_state())
         self.add_sensor(self._build_state_sensor)
+        self._api_version_sensor.set_value(self.version())
         self.add_sensor(self._api_version_sensor)
+        self._device_status_sensor.set_value('ok')
+        self.add_sensor(self._device_status_sensor)
+
+          # until we know any better, failure modes are all inactive
+        for s in self._fmeca_sensors.itervalues():
+            s.set_value(0)
+            self.add_sensor(s)
 
     @request(Str())
     @return_reply(Str())
