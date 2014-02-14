@@ -18,6 +18,8 @@ TEST_ID = 'rts_wbc'
 EXPECTED_SENSOR_LIST = [
     ('api-version', '', '', 'string'),
     ('build-state', '', '', 'string'),
+    ('device-status', '', '', 'discrete', 'ok', 'degraded', 'fail'),
+    ('fmeca.FD0001', '', '', 'boolean'),
 ]
 
 EXPECTED_REQUEST_LIST = [
