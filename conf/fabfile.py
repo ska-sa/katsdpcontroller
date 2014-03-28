@@ -285,7 +285,15 @@ def remove_oodt_directories():
     remove_dir(SDP_MC)
 
 @task
-def deploy():
+def deploy_for_rts_imager():
+    #install deb packages: thin plooging
+    #install pip packages: thin plooging
+    #install from git: katdal, katpoint, katsdpdata
+    #install from svnDS: RTS workflow manager, scape
+    #install from svnScience: RTS scripts
+
+@task
+def deploy_for_rts_ingest():
     # update the apt-get database. Warn, rather than abort, if repos are missing
     with settings(warn_only=True):
         sudo('yes | DEBIAN_FRONTEND=noninteractive apt-get update')
@@ -348,6 +356,13 @@ def update():
     # still outstanding - oodt updates
 
 @task
+def clear_for_rts_imager():
+    clear()
+
+@task
+def clear_for_rts_ingest():
+    clear()
+
 def clear():
     # remove oodt directories and packages
     remove_oodt_directories()
@@ -373,8 +388,3 @@ def clear():
 
     # remove ubuntu deb packages
     for pkg_list in reversed(DEB_PKGS): remove_deb_packages(pkg_list)
-
-
-
-
-
