@@ -2,10 +2,6 @@ from fabric.api import sudo, run, env, task, cd, settings
 from fabric.contrib import files
 import os
 
-# user and machine to install on
-env.user = 'kat'
-env.hosts = ['kat-sdp-ingest1']
-
 # debian package install info
 # install packages grouped by main packages and their dependencies
 DEB_PKGS = ['gcc binutils cpp cpp-4.7 gcc-4.7 libc-dev-bin libc6-dev libcloog-ppl1 libgcc-4.7-dev libgmp10 libgmpxx4ldbl libgomp1 libitm1 libmpc2 libmpfr4 libppl-c4 libppl12 libquadmath0 linux-libc-dev manpages-dev', # pyspead
@@ -51,13 +47,37 @@ SVN_PASSWORD = 'kat'
 KAT_SVN_BASE = 'katfs.kat.ac.za/svnDS/code'
 SVN_PKGS = ['katconf','katcore','katlogger','katcorelib','katmisc','katdeploy'] # katoodt is svn installed separately
 
-# kat config info
-CONFIG_DIR = '/var/kat/katconfig'
-CONFIG_SVN_BASE = os.path.join(KAT_SVN_BASE, 'katconfig/trunk')
+###################### Package lists for rts-imager ######################################
+# Deb packages for rts-imager
+IMAGER_DEB_PKGS = [ 'python-dev',                                                        #general
+                    'gfortran libatlas-base-dev libblas-dev libexpat1-dev',              #numpy/scipy
+                    'git git-man',                                                       #git
+                    'python-pip python-setuptools python-pkg-resources',                 #pip
+                    'libhdf5-dev',                                                       #h5py
+                    'libpng12-dev libfreetype6-dev zlib1g-dev',                          #Matplotlib
+                    'subversion', 'nfs-kernel-server'
+                    ]
+
+# Pip packages for rts-imager
+IMAGER_PIP_PKGS = ['ipython',
+                   'numpy','scipy',
+                   'h5py', 'scikits.fitting',
+                   'matplotlib', 'pyfits']
+
+# git for rts imager
+IMAGER_SKA_GIT = ['katpoint','katdal','katholog']
+
+#svn for rts imager
+IMAGER_SVN_PKGS = ['scape','katarchive','katoodt']
 
 # scripts svn install info
 SCRIPT_SVN_DIR = '/home/kat/reduce'
 SCRIPT_SVN_BASE = 'katfs.kat.ac.za/svnScience/RTS'
+
+
+# kat config info
+CONFIG_DIR = '/var/kat/katconfig'
+CONFIG_SVN_BASE = os.path.join(KAT_SVN_BASE, 'katconfig/trunk')
 
 # dictionary of deploy names to package names, where they differ
 PKG_DICT = {'PySPEAD':'spead','katcp-python':'katcp'}
@@ -88,7 +108,7 @@ SOLR_VER = "4.4.0"
 TOMCAT_VER = "7.0.42"
 TOMCAT_CONF = os.path.join(OODT_HOME, 'apache-tomcat/conf/server.xml')
 
-def install_deb_packages(packages, extra_apt_parameters='', use_sudo=True, with_yes=False):
+def install_deb_packages(packages, extra_apt_parameters='', use_sudo=True, with_yes=True):
     """Install debian packages listed in space-separated string"""
     print ' ---- Install debian packages ---- \n', packages, '\n'
     run_ = sudo if use_sudo else run
@@ -172,6 +192,10 @@ def update_svn_package(package, user, password, base=KAT_SVN_BASE):
         # check out and install the package
         run('svn up '+package+' --username='+user+' --password='+password)
         sudo('pip install -U '+package+'/')
+
+def install_workflow_manager(user, password, base=KAT_SVN_BASE):
+    """Get the workflow manager"""
+    pass
 
 def checkout_svn_files(base, loc, user, password, use_sudo=True):
     """Checkout files that don't need to be installed"""
@@ -264,7 +288,7 @@ def check_and_make_sym_link(L_src, L_dest):
 
 def export_dc_nfs_staging():
     files.append('/etc/exports',
-                 '%s sp-test.kat.ac.za(rw,sync,no_subtree_check)' % (STAGING_NFS_INGEST),
+                 '%s rts-imager.kat.ac.za(rw,sync,no_subtree_check)' % (STAGING_NFS_INGEST),
                  use_sudo=True)
     sudo('exportfs -a')
 
@@ -286,11 +310,47 @@ def remove_oodt_directories():
 
 @task
 def deploy_for_rts_imager():
+    # update the apt-get database. Warn, rather than abort, if repos are missing
+    with settings(warn_only=True):
+        sudo('yes | DEBIAN_FRONTEND=noninteractive apt-get update')
+
     #install deb packages: thin plooging
+    # install ubuntu deb packages
+    for pkg_list in IMAGER_DEB_PKGS: install_deb_packages(pkg_list)
+
     #install pip packages: thin plooging
-    #install from git: katdal, katpoint, katsdpdata
-    #install from svnDS: RTS workflow manager, scape
-    #install from svnScience: RTS scripts
+    # pip install python packages
+    for name in IMAGER_PIP_PKGS: install_pip_packages(name)
+
+    # create git package directory
+    check_and_make_directory(GIT_DIR)
+    
+    # Make svn directory
+    check_and_make_directory(SVN_DIR)
+
+    # install svn packages
+    for name in IMAGER_SVN_PKGS: install_svn_package(name,SVN_USER,SVN_PASSWORD)
+
+    # install public ska-sa git packages
+    #for name in IMAGER_PUBLIC_SKA_GIT: install_git_package(name)
+
+    # install private ska-sa git packages
+    for name in IMAGER_SKA_GIT: install_git_package(name,user=GIT_USER,password=GIT_PASSWORD)
+
+    # update katconfig files
+    #print ' ---- Update katconfig ---- \n'
+    #update_svn_files(CONFIG_DIR,SVN_USER,SVN_PASSWORD)
+    
+    #Create RTS scripts directory
+    check_and_make_directory(SCRIPT_SVN_DIR)
+
+    # update RTS scripts from svnScience
+    print ' ---- Update RTS scripts ---- \n'
+    checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+
+    # oodt setup and install
+    oodt_setup()
+
 
 @task
 def deploy_for_rts_ingest():
@@ -325,12 +385,29 @@ def deploy_for_rts_ingest():
 
     # install RTS scripts from svnScience
     print ' ---- Install RTS scripts ---- \n'
+    checkout_svn_files(base, loc, user, password, use_sudo=True)
     checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
 
     # oodt setup and install
     oodt_setup()
     # install the katoodt package - might be temporary
     install_svn_package('katoodt',SVN_USER,SVN_PASSWORD)
+
+@task
+def update_for_rts_imager():
+    # update git/svn packages to current master/trunk versions
+
+    # update public ska-sa git packages
+    for name in IMAGER_SKA_GIT: update_git_package(name)
+
+    # update svn packages
+    for name in IMAGER_SVN_PKGS: update_svn_package(name,SVN_USER,SVN_PASSWORD)
+
+    # update RTS scripts from svnScience
+    print ' ---- Update RTS scripts ---- \n'
+    update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+
+    # still outstanding - oodt updates
 
 @task
 def update():
@@ -357,7 +434,26 @@ def update():
 
 @task
 def clear_for_rts_imager():
-    clear()
+    # remove oodt directories and packages
+    remove_oodt_directories()
+    remove_pip_packages('katoodt')
+
+    # remove git and svn directories
+    remove_dir(GIT_DIR)
+    remove_dir(SVN_DIR)
+    remove_dir(SCRIPT_SVN_DIR)
+    remove_dir(CONFIG_DIR)
+
+    # remove ska-sa git packages
+    for name in reversed(IMAGER_SKA_GIT): remove_pip_packages(name)
+
+    # pip uninstall python packages
+    for name in reversed(IMAGER_PIP_PKGS): remove_pip_packages(name)
+    # hack to remove scikits, which is still hanging around
+    sudo('rm -rf /usr/local/lib/python2.7/dist-packages/scikits')
+
+    # remove ubuntu deb packages
+    for pkg_list in reversed(IMAGER_DEB_PKGS): remove_deb_packages(pkg_list)
 
 @task
 def clear_for_rts_ingest():
