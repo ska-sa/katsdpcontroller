@@ -65,14 +65,14 @@ IMAGER_PIP_PKGS = ['ipython',
                    'matplotlib', 'pyfits']
 
 # git for rts imager
-IMAGER_SKA_GIT = ['katpoint','katdal','katholog']
+IMAGER_SKA_GIT = ['katpoint','katdal','katholog','katsdpscripts']
 
 #svn for rts imager
 IMAGER_SVN_PKGS = ['scape','katarchive','katoodt']
 
-# scripts svn install info
-SCRIPT_SVN_DIR = '/home/kat/reduce'
-SCRIPT_SVN_BASE = 'katfs.kat.ac.za/svnScience/RTS'
+# scripts svn install info - no longer needed as scripts are in github in katsdpscripts
+#SCRIPT_SVN_DIR = '/home/kat/reduce'
+#SCRIPT_SVN_BASE = 'katfs.kat.ac.za/svnScience/RTS'
 
 
 # kat config info
@@ -342,11 +342,11 @@ def deploy_for_rts_imager():
     #update_svn_files(CONFIG_DIR,SVN_USER,SVN_PASSWORD)
     
     #Create RTS scripts directory
-    check_and_make_directory(SCRIPT_SVN_DIR)
+    #check_and_make_directory(SCRIPT_SVN_DIR)
 
     # update RTS scripts from svnScience
-    print ' ---- Update RTS scripts ---- \n'
-    checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+    #print ' ---- Update RTS scripts ---- \n'
+    #checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
 
     # oodt setup and install
     oodt_setup()
@@ -384,9 +384,9 @@ def deploy_for_rts_ingest():
     checkout_svn_files(CONFIG_SVN_BASE,CONFIG_DIR,SVN_USER,SVN_PASSWORD)
 
     # install RTS scripts from svnScience
-    print ' ---- Install RTS scripts ---- \n'
-    checkout_svn_files(base, loc, user, password, use_sudo=True)
-    checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+    #print ' ---- Install RTS scripts ---- \n'
+    #checkout_svn_files(base, loc, user, password, use_sudo=True)
+    #checkout_svn_files(SCRIPT_SVN_BASE,SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
 
     # oodt setup and install
     oodt_setup()
@@ -404,8 +404,8 @@ def update_for_rts_imager():
     for name in IMAGER_SVN_PKGS: update_svn_package(name,SVN_USER,SVN_PASSWORD)
 
     # update RTS scripts from svnScience
-    print ' ---- Update RTS scripts ---- \n'
-    update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+    #print ' ---- Update RTS scripts ---- \n'
+    #update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
 
     # still outstanding - oodt updates
 
@@ -427,8 +427,8 @@ def update():
     update_svn_files(CONFIG_DIR,SVN_USER,SVN_PASSWORD)
 
     # update RTS scripts from svnScience
-    print ' ---- Update RTS scripts ---- \n'
-    update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
+    #print ' ---- Update RTS scripts ---- \n'
+    #update_svn_files(SCRIPT_SVN_DIR,SVN_USER,SVN_PASSWORD,False)
 
     # still outstanding - oodt updates
 
@@ -441,7 +441,7 @@ def clear_for_rts_imager():
     # remove git and svn directories
     remove_dir(GIT_DIR)
     remove_dir(SVN_DIR)
-    remove_dir(SCRIPT_SVN_DIR)
+    #remove_dir(SCRIPT_SVN_DIR)
     remove_dir(CONFIG_DIR)
 
     # remove ska-sa git packages
@@ -467,7 +467,7 @@ def clear():
     # remove git and svn directories
     remove_dir(GIT_DIR)
     remove_dir(SVN_DIR)
-    remove_dir(SCRIPT_SVN_DIR)
+    #remove_dir(SCRIPT_SVN_DIR)
     remove_dir(CONFIG_DIR)
 
     # remove svn packages
