@@ -38,7 +38,7 @@ GIT_DIR = '/home/kat/git'
 GIT_USER = 'katpull'
 GIT_PASSWORD = 'katpull4git'
 PUBLIC_SKA_GIT = ['PySPEAD','katcp-python'] # can get pyephem and scikits.fitting from ska git too
-PRIVATE_SKA_GIT = ['katpoint','katsdpingest','katdal','katholog','katsdpdisp','katsdpcontroller']
+PRIVATE_SKA_GIT = ['katpoint','katsdpingest','katdal','katholog','katsdpdisp','katsdpcontroller','katsdpscripts']
 
 # svn install info
 SVN_DIR = '/home/kat/svn'
