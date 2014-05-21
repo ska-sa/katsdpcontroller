@@ -55,7 +55,8 @@ IMAGER_DEB_PKGS = [ 'python-dev',                                               
                     'python-pip python-setuptools python-pkg-resources',                 #pip
                     'libhdf5-dev',                                                       #h5py
                     'libpng12-dev libfreetype6-dev zlib1g-dev',                          #Matplotlib
-                    'subversion', 'nfs-kernel-server'
+                    'subversion', 'nfs-kernel-server',
+                    'tree'
                     ]
 
 # Pip packages for rts-imager
