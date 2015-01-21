@@ -6,6 +6,7 @@ import time
 import logging
 import subprocess
 import shlex
+import docker
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
@@ -20,6 +21,197 @@ MAX_DATA_PRODUCTS = 255
  # pretty arbitrary, could be increased, but we need some limits
 
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+
+class SDPContainer(object):
+    """Wrapper around a docker container"""
+    def __init__(self, docker_client, descriptor_json):
+        self._docker_client = docker_client
+        self.id = None
+        for (k,v) in descriptor_json.iteritems():
+            setattr(self, str(k).lower(), v)
+        if self.id is None:
+            logger.warning("Container created without valid ID. This is likely a mistake.")
+
+    def log(self, tail='5'):
+        """Print a portion of the STDOUT/STDERR log"""
+        print self._docker_client.logs(self.id, tail=tail)
+
+    def diff(self):
+        """Print a list of changes to the containers filesystem since launch."""
+        print self._docker_client.diff(self.id)
+
+    def __repr__(self):
+        return "{}\t\t{}\t{}\t\t\t{}".format(self.names[0][1:], self.status, self.image, self.command)
+
+class SDPHost(object):
+    """A host compute device that is running an accessible docker engine."""
+    def __init__(self, ip, port=2375):
+        self._docker_client = docker.Client(base_url='{}:{}'.format(ip,port))
+         # seems to return an object regardless of connect status
+        info = self._docker_client.info()
+        for (k,v) in info.iteritems():
+            setattr(self, str(k).lower(), v)
+        self.container_list = {}
+        self.update_containers()
+
+    def get_container(self, container_name):
+        """Get an active container by name."""
+        _container = None
+        for c in self.container_list.itervalues():
+            if c.names[0][1:] == container_name:
+                _container = c
+                break
+        return _container
+
+    def update_containers(self):
+         # update our container list
+        containers = self._docker_client.containers()
+        for descriptor_json in containers:
+            self.container_list[descriptor_json['Id']] = SDPContainer(self._docker_client, descriptor_json)
+
+    def ps(self):
+        self.update_containers()
+        print "NAME\t\t\tSTATUS\t\tIMAGE\t\t\tCOMMAND\n====\t\t\t======\t\t=====\t\t\t======="
+        for c in self.container_list.itervalues():
+            print c
+
+    def terminate(self, container_name):
+        """Terminate the specified container name."""
+        _container = get_container(container_name)
+
+        if _container is None:
+            logger.error("Invalid container name specified")
+            return None
+        self._docker_client.stop(_container.id)
+
+    def launch(self, image):
+        """Launch this image as a container on the host."""
+         # we may need to investigate container reuse at this point
+
+         # create a container from the specied image, using the build context provided
+        _container = self._docker_client.create_container(image.image)
+        logger.debug("Built container {}".format(_container['Id']))
+
+         # launch
+        try:
+            self._docker_client.start(_container['Id'], port_bindings=image.port_bindings, devices=image.devices,\
+                                  network_mode=image.network)
+        except docker.errors.APIError,e:
+            logger.error("Failed to launch container ({})".format(e))
+            return None
+
+         # check to see if we launched correctly
+        self.update_containers()
+        try:
+            return self.container_list[_container['Id']]
+        except KeyError:
+            logger.error("Failed to launch container")
+            return None
+
+    def __repr__(self):
+        return "{}\t{}\t{}\t{}\n".format(self.name, self.operatingsystem, self.ncpu, \
+                                                          self.memtotal)
+class SDPImage(object):
+    """Wrapper around a docker image.
+    
+    In lieu of a better method of controlling the launch environment, 
+    we rely on an img_class variable pulled as the description of the image.
+    This sets up ports, network and device pass through.
+    
+    """
+    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None):
+        self.image = image
+        self.port_bindings = port_bindings
+        self.network = network
+        self.devices = devices
+        self.volumes = volumes
+        self.cmd = cmd
+
+        if image_class == 'sdpmc':
+            self.port_bindings = {5000:5000}
+
+        if image_class == 'nvidia_gpu':
+            self.network = 'host'
+            self.devices = ['/dev/nvidiactl:/dev/nvidiactl','/dev/nvidia-uvm:/dev/nvidia-uvm',\
+                            '/dev/nvidia0:/dev/nvidia0']
+    def __repr__(self):
+        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}".format(self.image,\
+                self.port_bindings, self.network, self.devices, self.volumes)
+
+class SDPArray(object):
+    """SDP Array wrapper.
+
+    Allows management of tasks / processes within the scope of the SDP, 
+    particularly in the context of a subarray instance.
+    
+    Each Array will have a dedicated redis backed TelescopeModel which
+    will hold static configuration and dynamic values (like sensor data).
+    
+    This is used by all components launched as part of the Array to pull
+    initial configuration (such as ip and port settings).
+    
+    Launch management is handled by launching docker container instances
+    on relevant hardware platforms.
+    
+    Images are looked for in the referenced registry under the repository
+    name 'katsdp'.
+    """
+    def __init__(self, docker_engine_url='127.0.0.1:2375', docker_registry='127.0.0.1:4500', docker_hosts=['192.168.1.164']):
+        self.docker_registry = docker_registry
+        self.docker_engine_url = docker_engine_url
+        self._docker_client = docker.Client(base_url=self.docker_engine_url)
+        self.image_list = {}
+        self.refresh_image_list()
+        self.host_list = {}
+        self.refresh_host_list(docker_hosts)
+        self._containers = {}
+
+    def refresh_host_list(self, docker_hosts):
+        if docker_hosts is None:
+            pass
+            # todo - auto discovery - perhaps nmap or zeroconf
+        else:
+            for host in docker_hosts:
+                _host = SDPHost(host)
+                self.host_list[_host.name] = _host
+
+    def refresh_image_list(self):
+        try:
+            self._image_list = self._docker_client.search('{}/{}'.format(t.docker_registry,'kat'))
+            for image in self._image_list:
+                (null, base_name) = image['name'].split("/")
+                _image = SDPImage('{}/{}'.format(t.docker_registry,base_name),image_class=image['description'])
+                self.image_list[base_name] = _image
+        except docker.errors.APIError, e:
+            logger.warning("Failed to retrieve image list ({})".format(e))
+
+    def hosts(self):
+        print "Name\t\tOS\t\t#CPU\tMemory\n====\t\t==\t\t====\t======"
+        for h in self.host_list.itervalues():
+            print h
+
+    def images(self):
+        print "Name\t\t\tDescription\n=====\t\t\t==========="
+        for (k,v) in self.image_list.iteritems():
+            print "{}\t{}".format(k,v)
+
+    def launch(self, host_name, image_name):
+        try:
+            _host = self.host_list[host_name]
+            _image = self.image_list[image_name]
+        except KeyError:
+            logger.error("Invalid host or image specified")
+            raise KeyError
+        return _host.launch(_image)
+
+    def __repr__(self):
+        retval = ""
+        for host in self.host_list.itervalues():
+            retval += "{}\n====================\n".format(host.name)
+            host.update_containers()
+            for container in host.container_list.itervalues():
+                retval += "{}\n".format(container)
+        return retval
 
 class SDPTask(object):
     """SDP Task wrapper.
