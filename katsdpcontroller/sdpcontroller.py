@@ -177,10 +177,10 @@ class SDPArray(object):
 
     def refresh_image_list(self):
         try:
-            self._image_list = self._docker_client.search('{}/{}'.format(t.docker_registry,'kat'))
+            self._image_list = self._docker_client.search('{}/{}'.format(self.docker_registry,'kat'))
             for image in self._image_list:
                 (null, base_name) = image['name'].split("/")
-                _image = SDPImage('{}/{}'.format(t.docker_registry,base_name),image_class=image['description'])
+                _image = SDPImage('{}/{}'.format(self.docker_registry,base_name),image_class=image['description'])
                 self.image_list[base_name] = _image
         except docker.errors.APIError, e:
             logger.warning("Failed to retrieve image list ({})".format(e))
