@@ -7,6 +7,8 @@ import logging
 import subprocess
 import shlex
 import docker
+import importlib
+import netifaces
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
@@ -21,6 +23,137 @@ MAX_DATA_PRODUCTS = 255
  # pretty arbitrary, could be increased, but we need some limits
 
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+
+class SDPResources(object):
+    """Helper class to allocate and track assigned IP and ports from a predefined range."""
+    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24'):
+        self.safe_ports = safe_port_range
+        self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
+
+        self.allocated_ports = {}
+        self.allocated_mip = {}
+        self.hosts = {}
+        self.hosts_by_class = {}
+        self._discover_hosts()
+
+        try:
+            self.allocated_ip = {'sdpmc':self.get_sdpmc_ip()}
+        except KeyError:
+            logge.error("Failed to retrieve IP address of SDP Master Controller. Unable to continue.")
+            raise
+
+    def get_sdpmc_ip(self):
+         # returns the IP address of the SDPMC host.
+        return self.hosts_by_class['sdpmc'][0].ip
+
+    def get_host(self, host_class='sdpmc'):
+         # retrieve a host of the specified class to use for launching resources
+         # TODO: This should manage resource availability and round robin
+         # services across multiple hosts of the same type. For now it just
+         # serves the first available host of the correct type
+        return self.hosts_by_class[host_class]
+        
+    def _discover_hosts(self):
+        # TODO: Eventually this will contain the docker host autodiscovery code
+        # For AR1 purposes, especially in the lab, we harcode some hosts to use
+        # in our resource pool
+        available_hosts = {'sdp-ingest4.kat.ac.za':\
+                             {'ip':'127.0.0.1','host_class':'nvidia_gpu'},
+                           'sdp-ingest5.kat.ac.za':\
+                             {'ip':'127.0.0.1','host_class':'generic'}}
+
+         # add the SDPMC as a non docker host
+        sdpmc_local_ip = '127.0.0.1'
+        for iface in netifaces.interfaces():
+            for addr in netifaces.ifaddresses(iface).get(netifaces.AF_INET, []):
+             # Skip point-to-point links (includes loopback)
+                if 'peer' in addr:
+                    continue
+                sdpmc_local_ip = addr['addr']
+
+        available_hosts['localhost.localdomain'] = \
+                        {'ip':sdpmc_local_ip,'host_class':'sdpmc'}
+
+        for host, param in available_hosts.iteritems():
+            try:
+                self.hosts[host] = SDPHost(**param)
+            except docker.errors.requests.ConnectionError:
+                logger.error("Host {} not added.".format(host))
+                continue
+            self.hosts_by_class[param['host_class']] = self.hosts_by_class.get(param['host_class'],[])
+            self.hosts_by_class[param['host_class']].append(self.hosts[host])
+        
+    def _ip_range(self, ip_cidr):
+        (start_ip, cidr) = ip_cidr.split('/')
+        start = list(map(int,start_ip.split('.')))
+        iprange=[]
+        for x in range(2**(32-int(cidr))):
+            for i in range(len(start)-1,-1,-1):
+                if start[i]<255:
+                    start[i]+=1
+                    break
+                else:
+                    start[i]=0
+            iprange.append('.'.join(map(str,start)))
+        return iprange
+
+    def get_host_ip(self, host_class):
+         # for the specified host class
+         # return an available / assigned ip
+        return self.allocated_ip.get(host_class, None)
+
+    def _new_mip(self, host_class):
+        mip = self.safe_multicast_range.pop()
+        self.allocated_mip[host_class] = mip
+        return mip
+
+    def get_multicast_ip(self, host_class):
+         # for the specified host class
+         # return an available / assigned multicast address
+        mip = self.allocated_mip.get(host_class, None)
+        if mip is None: mip = self._new_mip(host_class)
+        return mip
+
+    def _new_port(self, host_class):
+        port = self.safe_ports.pop()
+        self.allocated_ports[host_class] = port
+        return port
+
+    def get_port(self, host_class):
+         # for the specified host class
+         # return an available / assigned port]
+        port = self.allocated_ports.get(host_class, None)
+        if port is None: port = self._new_port(host_class)
+        return port
+
+class SDPGraph(object):
+    """Wrapper around a physical graph used to instantiate
+    a particular SDP product/capability/subarray."""
+    def __init__(self, graph_name, resources):
+        gp = importlib.import_module(graph_name) 
+        self.graph = gp.build_physical_graph(resources)
+
+    def execute(self):
+         # encode metadata into the telescope state for use
+         # in component configuration
+
+         # traverse all nodes in the graph looking for those that
+         # require docker containers to be launched.
+        for node, data in self.graph.nodes_iter(data=True):
+            host_class = data['host_class']
+            if not 'docker_image' in data: continue
+            img = SDPImage(data['docker_image'], image_class=host_class)
+             # prepare a docker image
+            host = resources.get_host(host_class)
+            container_id = host.launch(img)
+             # launch the specified image in a new container
+            if container_id is not None:
+                logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
+            else:
+                logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
+
+         # traverse edges to configure any networking, including
+         # multicast group subscriptions that may be needed.
 
 class SDPContainer(object):
     """Wrapper around a docker container"""
@@ -45,14 +178,21 @@ class SDPContainer(object):
 
 class SDPHost(object):
     """A host compute device that is running an accessible docker engine."""
-    def __init__(self, ip, port=2375):
-        self._docker_client = docker.Client(base_url='{}:{}'.format(ip,port))
-         # seems to return an object regardless of connect status
-        info = self._docker_client.info()
-        for (k,v) in info.iteritems():
-            setattr(self, str(k).lower(), v)
+    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='generic'):
+        self.ip = ip
         self.container_list = {}
-        self.update_containers()
+        if host_class != 'sdpmc':
+            self._docker_client = docker.Client(base_url='{}:{}'.format(ip,docker_port))
+             # seems to return an object regardless of connect status
+            try:
+                info = self._docker_client.info()
+            except docker.errors.requests.ConnectionError:
+                logger.error("Failed to connect to docker engine on {}:{}".format(ip,docker_port))
+                raise
+            for (k,v) in info.iteritems():
+                setattr(self, str(k).lower(), v)
+            self.update_containers()
+        self.host_class = [host_class]
 
     def get_container(self, container_name):
         """Get an active container by name."""
