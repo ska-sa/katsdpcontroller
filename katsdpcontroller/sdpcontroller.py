@@ -9,6 +9,7 @@ import shlex
 import docker
 import importlib
 import netifaces
+import katsdptelstate
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
@@ -130,30 +131,61 @@ class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
     def __init__(self, graph_name, resources):
+        self.resources = resources
         gp = importlib.import_module(graph_name) 
         self.graph = gp.build_physical_graph(resources)
 
-    def execute(self):
+    def _execute(self, node, data):
+        for edge in G.in_edges_iter('sdp.ingest.1',data=True):
+            data.update(edge[2])
+             # update the data dict with any edge information (in and out)
+        host_class = data['host_class']
+        if not 'docker_image' in data: continue
+        cmd = None
+        if data.has_key['docker_cmd']:
+            cmd = "{} --telstate {} --name {}".format(data['docker_cmd'], data['telstate'], node)
+         # cmd always includes telstate connection and name of process
+        img = SDPImage(data['docker_image'], cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
+         # prepare a docker image and pass through any override parameters specified
+        logger.info("Preparing to launch image {}".format(img))
+        host = resources.get_host(host_class)
+        container_id = host.launch(img)
+         # launch the specified image in a new container
+        if container_id is None:
+            logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
+            raise docker.errors.DockerException("Failed to launch image")
+        logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
+        return container_id
+
+    def execute(self, telstate_node='sdp.telstate'):
+        nodes = self.graph.node
+
+         # make sure the telstate node is launched
+        data = nodes.pop(telstate_node)
+        telstate_cid = self._execute(telstate_node, data)
+
          # encode metadata into the telescope state for use
          # in component configuration
+        config = {}
+        for node, data in nodes.iteritems():
+            config[node] = data
+             # place node config items into config
+            config[node].update(self.graph.edges(node,data=True)[0][2])
+             # place config items from in and out edges to this node into config
+
+         # connect to telstate store
+        telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
+        telstate = katsdptelstate.TelescopeState(host=telstate_host)
+
+        telstate.add('config',config, immutable=True)
+         # set the configuration
 
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
-        for node, data in self.graph.nodes_iter(data=True):
-            host_class = data['host_class']
-            if not 'docker_image' in data: continue
-            img = SDPImage(data['docker_image'], image_class=host_class)
-             # prepare a docker image
-            host = resources.get_host(host_class)
-            container_id = host.launch(img)
-             # launch the specified image in a new container
-            if container_id is not None:
-                logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
-            else:
-                logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
+        for node, data in nodes.iteritems():
+            self._execute(node, data)
 
-         # traverse edges to configure any networking, including
-         # multicast group subscriptions that may be needed.
+         # check to see if everything we expected as launched
 
 class SDPContainer(object):
     """Wrapper around a docker container"""
@@ -229,7 +261,7 @@ class SDPHost(object):
          # we may need to investigate container reuse at this point
 
          # create a container from the specied image, using the build context provided
-        _container = self._docker_client.create_container(image.image)
+        _container = self._docker_client.create_container(image=image.image, command=image.cmd)
         logger.debug("Built container {}".format(_container['Id']))
 
          # launch
