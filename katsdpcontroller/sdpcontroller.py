@@ -52,8 +52,8 @@ class SDPResources(object):
          # TODO: This should manage resource availability and round robin
          # services across multiple hosts of the same type. For now it just
          # serves the first available host of the correct type
-        return self.hosts_by_class[host_class]
-        
+        return self.hosts_by_class[host_class][0]
+
     def _discover_hosts(self):
         # TODO: Eventually this will contain the docker host autodiscovery code
         # For AR1 purposes, especially in the lab, we harcode some hosts to use
@@ -83,7 +83,7 @@ class SDPResources(object):
                 continue
             self.hosts_by_class[param['host_class']] = self.hosts_by_class.get(param['host_class'],[])
             self.hosts_by_class[param['host_class']].append(self.hosts[host])
-        
+
     def _ip_range(self, ip_cidr):
         (start_ip, cidr) = ip_cidr.split('/')
         start = list(map(int,start_ip.split('.')))
@@ -132,23 +132,27 @@ class SDPGraph(object):
     a particular SDP product/capability/subarray."""
     def __init__(self, graph_name, resources):
         self.resources = resources
-        gp = importlib.import_module(graph_name) 
+        gp = importlib.import_module(graph_name)
         self.graph = gp.build_physical_graph(resources)
+        self.telstate = None
 
     def _execute(self, node, data):
-        for edge in G.in_edges_iter('sdp.ingest.1',data=True):
+        for edge in self.graph.in_edges_iter('sdp.ingest.1',data=True):
             data.update(edge[2])
              # update the data dict with any edge information (in and out)
-        host_class = data['host_class']
-        if not 'docker_image' in data: continue
+        host_class = data['docker_host_class']
         cmd = None
-        if data.has_key['docker_cmd']:
+        if data.has_key('docker_cmd'):
             cmd = "{} --telstate {} --name {}".format(data['docker_cmd'], data['telstate'], node)
          # cmd always includes telstate connection and name of process
         img = SDPImage(data['docker_image'], cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
          # prepare a docker image and pass through any override parameters specified
-        logger.info("Preparing to launch image {}".format(img))
-        host = resources.get_host(host_class)
+        logger.info("Preparing to launch image {} on node class {}".format(img, host_class))
+        try:
+            host = self.resources.get_host(host_class)
+        except KeyError:
+            logger.error("Tried to launch a container on host_class {}, but no hosts of this type are available in the resource pool.".format(host_class))
+            return 0
         container_id = host.launch(img)
          # launch the specified image in a new container
         if container_id is None:
@@ -170,20 +174,27 @@ class SDPGraph(object):
         for node, data in nodes.iteritems():
             config[node] = data
              # place node config items into config
-            config[node].update(self.graph.edges(node,data=True)[0][2])
-             # place config items from in and out edges to this node into config
+            try:
+                config[node].update(self.graph.edges(node,data=True)[0][2])
+                 # place config items from in and out edges to this node into config
+            except IndexError:
+                 # must be an edgeless node
+                pass
 
          # connect to telstate store
         telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
-        telstate = katsdptelstate.TelescopeState(host=telstate_host)
+        self.telstate = katsdptelstate.TelescopeState(host=telstate_host)
 
-        telstate.add('config',config, immutable=True)
+        self.telstate.delete('config')
+         # TODO: needed for now as redis tends to save config between sessions at the moment
+        self.telstate.add('config',config, immutable=True)
          # set the configuration
 
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
         for node, data in nodes.iteritems():
-            self._execute(node, data)
+            if 'docker_image' in data:
+                self._execute(node, data)
 
          # check to see if everything we expected as launched
 
@@ -210,10 +221,11 @@ class SDPContainer(object):
 
 class SDPHost(object):
     """A host compute device that is running an accessible docker engine."""
-    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='generic'):
+    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='no_docker'):
+        logger.debug("New host object on {} with class {}".format(ip,host_class))
         self.ip = ip
         self.container_list = {}
-        if host_class != 'sdpmc':
+        if host_class != 'no_docker':
             self._docker_client = docker.Client(base_url='{}:{}'.format(ip,docker_port))
              # seems to return an object regardless of connect status
             try:
@@ -224,7 +236,7 @@ class SDPHost(object):
             for (k,v) in info.iteritems():
                 setattr(self, str(k).lower(), v)
             self.update_containers()
-        self.host_class = [host_class]
+        self.host_class = host_class
 
     def get_container(self, container_name):
         """Get an active container by name."""
@@ -261,7 +273,12 @@ class SDPHost(object):
          # we may need to investigate container reuse at this point
 
          # create a container from the specied image, using the build context provided
-        _container = self._docker_client.create_container(image=image.image, command=image.cmd)
+        try:
+            _container = self._docker_client.create_container(image=image.image, command=image.cmd)
+        except docker.errors.APIError, e:
+            logger.error("Failed to build container ({})".format(e))
+            return None
+
         logger.debug("Built container {}".format(_container['Id']))
 
          # launch
@@ -281,8 +298,14 @@ class SDPHost(object):
             return None
 
     def __repr__(self):
-        return "{}\t{}\t{}\t{}\n".format(self.name, self.operatingsystem, self.ncpu, \
+        try:
+            t = "{}\t{}\t{}\t{}\n".format(self.name, self.operatingsystem, self.ncpu, \
                                                           self.memtotal)
+        except AttributeError:
+             # likely not a docker host...
+            t = "{}\t{}".format(self.ip, self.host_class)
+        return t
+
 class SDPImage(object):
     """Wrapper around a docker image.
     
@@ -299,13 +322,13 @@ class SDPImage(object):
         self.volumes = volumes
         self.cmd = cmd
 
-        if image_class == 'sdpmc':
-            self.port_bindings = {5000:5000}
+        #if image_class == 'sdpmc':
+        #    self.port_bindings = {5000:5000}
 
-        if image_class == 'nvidia_gpu':
-            self.network = 'host'
-            self.devices = ['/dev/nvidiactl:/dev/nvidiactl','/dev/nvidia-uvm:/dev/nvidia-uvm',\
-                            '/dev/nvidia0:/dev/nvidia0']
+        #if image_class == 'nvidia_gpu':
+        #    self.network = 'host'
+        #    self.devices = ['/dev/nvidiactl:/dev/nvidiactl','/dev/nvidia-uvm:/dev/nvidia-uvm',\
+        #                    '/dev/nvidia0:/dev/nvidia0']
     def __repr__(self):
         return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}".format(self.image,\
                 self.port_bindings, self.network, self.devices, self.volumes)
@@ -724,6 +747,17 @@ class SDPControllerServer(DeviceServer):
     @return_reply(Str())
     def request_data_product_configure(self, req, req_msg, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source):
         """Configure a SDP data product instance.
+
+        A data product instance is comprised of a telescope state, a collection of
+        containers running required SDP services, and a networking configuration 
+        appropriate for the required data movement.
+
+        On configuring a new product, several steps occur:
+         * Build initial static configuration. Includes elements such as IP addresses of deployment machines, multicast subscription details, etc...
+         * Launch a new Telescope State Repository (redis instance) for this product and copy in static config.
+         * Launch service containers as described in the static configuration.
+         * Verify all services are running and reachable.
+
 
         Inform Arguments
         ----------------

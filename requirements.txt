@@ -1,2 +1,3 @@
 katcp==0.5.2
 docker-py
+git+ssh://git@github.com/ska-sa/katsdptelstate
