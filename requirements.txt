@@ -1,3 +1,4 @@
 katcp==0.5.2
 docker-py
+netifaces
 git+ssh://git@github.com/ska-sa/katsdptelstate
