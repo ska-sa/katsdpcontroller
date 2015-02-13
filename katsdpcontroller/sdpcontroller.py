@@ -27,7 +27,7 @@ logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24'):
+    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',simulate=False):
         self.safe_ports = safe_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
 
@@ -127,16 +127,49 @@ class SDPResources(object):
         if port is None: port = self._new_port(host_class)
         return port
 
+class SDPNode(object):
+    """Lightweight container for various node related objects."""
+    def __init__(self, name, data, host, container_id):
+        self.name = name
+        self.host = host
+        self.ip = host.ip
+        self.container_id = container_id
+        self.katcp_connection = None
+        self.data = data
+
+    def is_alive(self):
+         # is this node alive
+         # basic check to make sure the container is still running
+
+    def establish_katcp_connection(self):
+         # establish katcp connection to this node if appropriate
+        if 'port' in self.data:
+            self.katcp_connection = BlockingClient(self.ip, self.data['port'])
+            try:
+                self.katcp_connection.start(timeout=5)
+                self.katcp_connection.wait_connected(timeout=5)
+                return True
+            except RuntimeError:
+                self.katcp_connection.stop()
+                 # no need for these to lurk around
+                retmsg = "Failed to connect to ingest process via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ip, self.data['port'])
+                logger.error(retmsg)
+                raise
+        else:
+            return False
+
 class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, graph_name, resources):
+    def __init__(self, graph_name, resources, telstate_node='sdp.telstate'):
+        self.telstate_node = telstate_node
         self.resources = resources
         gp = importlib.import_module(graph_name)
         self.graph = gp.build_physical_graph(resources)
         self.telstate = None
+        self.nodes = {}
 
-    def _execute(self, node, data):
+    def _launch(self, node, data):
         for edge in self.graph.in_edges_iter('sdp.ingest.1',data=True):
             data.update(edge[2])
              # update the data dict with any edge information (in and out)
@@ -158,28 +191,33 @@ class SDPGraph(object):
         if container_id is None:
             logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
             raise docker.errors.DockerException("Failed to launch image")
+        self.nodes[node] = SDPNode(node, data, host, container_id)
         logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
         return container_id
 
-    def execute(self, telstate_node='sdp.telstate'):
-        nodes = self.graph.node
+    def launch_telstate(self, additional_config={}):
 
          # make sure the telstate node is launched
-        data = nodes.pop(telstate_node)
-        telstate_cid = self._execute(telstate_node, data)
+        data = self.graph.node.pop(self.telstate_node)
+        telstate_cid = self._launch(self.telstate_node, data)
 
          # encode metadata into the telescope state for use
          # in component configuration
         config = {}
-        for node, data in nodes.iteritems():
+        for (node, data) in self.graph.nodes_iter(data=True):
             config[node] = data
              # place node config items into config
-            try:
-                config[node].update(self.graph.edges(node,data=True)[0][2])
-                 # place config items from in and out edges to this node into config
-            except IndexError:
-                 # must be an edgeless node
-                pass
+            edges = self.graph.in_edges(node,data=True)
+            edges += self.graph.out_edges(node,data=True)
+            for edge in edges:
+                try:
+                    config[node].update(edge[2])
+                        # place config items from in and out edges to this node into config
+                except IndexError:
+                     # must be an edgeless node
+                    continue
+
+        config.update(additional_config)
 
          # connect to telstate store
         telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
@@ -190,13 +228,26 @@ class SDPGraph(object):
         self.telstate.add('config',config, immutable=True)
          # set the configuration
 
+    def execute_graph(self):
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
-        for node, data in nodes.iteritems():
+        for (node, data) in self.graph.nodes_iter(data=True):
+            if node == self.telstate_node: continue
+             # make sure we don't launch the telstate node again
             if 'docker_image' in data:
-                self._execute(node, data)
+                self._launch(node, data)
 
-         # check to see if everything we expected as launched
+    def check_nodes(self):
+         # check if all requested nodes are actually running
+        alive = True
+        for node in self.nodes:
+            alive = alive and node.is_alive()
+        return alive
+
+    def establish_katcp_connections(self):
+         # traverse all nodes in the graph that provide katcp connections
+        for node in self.nodes:
+            node.establish_katcp_connection()
 
 class SDPContainer(object):
     """Wrapper around a docker container"""
@@ -211,6 +262,10 @@ class SDPContainer(object):
     def log(self, tail='5'):
         """Print a portion of the STDOUT/STDERR log"""
         print self._docker_client.logs(self.id, tail=tail)
+
+    def is_alive(self):
+        c_state = self._docker_client.inspect_container(self.id)
+        return c_state['State']['Running']
 
     def diff(self):
         """Print a list of changes to the containers filesystem since launch."""
@@ -627,11 +682,15 @@ class SDPControllerServer(DeviceServer):
         self._fmeca_sensors = {}
         self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
          # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
+         # TODO: Add more sensors exposing resource usage and currently executing graphs
 
         self.simulate = args[2]
         if self.simulate: logger.warning("Note: Running in simulation mode...")
         self.components = {}
          # dict of currently managed SDP components
+
+        self.resources = SDPResources(simulate=self.simulate)
+         # create a new resource pool. 
 
         self.data_products = {}
          # dict of currently configured SDP data_products
@@ -812,23 +871,53 @@ class SDPControllerServer(DeviceServer):
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and cbf_source and cam_source):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a data product")
 
-         # determine a suitable port for ingest
-        ingest_port = min([port+INGEST_BASE_PORT for port in range(MAX_DATA_PRODUCTS) if port+INGEST_BASE_PORT not in self.ingest_ports.values()])
-        self.ingest_ports[data_product_id] = ingest_port
-        disp_id = "{0}_disp".format(data_product_id)
+         # determine graph name
+        graph_name = "{}{}_logical.py".format("mkat_ar1_cbf", "sim" if self.simulate else "")
+        logger.info("Launching graph {}.".format(graph))
 
-        if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
-        else:
-            self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
-            self.tasks[disp_id].launch()
-            self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
-            rcode, rval = self.data_products[data_product_id].connect()
-            if rcode == 'fail':
-                disp_task = self.tasks.pop(disp_id)
-                if disp_task: disp_task.halt()
-                self.data_products.pop(data_product_id)
-                self.ingest_ports.pop(data_product_id)
-                return (rcode, rval)
+        graph = SDPGraph(graph_name, self.resources)
+         # create graph object and build physical graph from specified resources
+
+         # determine additional configuration
+        config = {'antennas':antennas, 'n_channels':n_channels, 'dump_rate':dump_rate}
+
+        logger.debug("Launching telstate. Additional_config {}".format(config))
+        graph.launch_telstate(additional_config=config)
+         # launch the telescope state for this graph
+
+        graph.execute_graph()
+         # launch containers for those nodes that require them
+
+        alive = graph.check_nodes()
+         # is everything we asked for alive
+        if not alive:
+            ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+            logger.error(ret_msg)
+            return ('fail', ret_msg)
+
+        try:
+            graph.establish_katcp_connections()
+             # connect to all nodes we need
+        except RuntimeError:
+            ret_msg = "Failed to establish katcp connections as needed. Check error log for details."
+            logger.error(ret_msg)
+            return ('fail', ret_msg)
+
+        self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
+        self.data_product_graphs[data_product_id] = graph
+
+        #if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
+        #else:
+        #    self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
+        #    self.tasks[disp_id].launch()
+        #    self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
+        #    rcode, rval = self.data_products[data_product_id].connect()
+        #    if rcode == 'fail':
+        #        disp_task = self.tasks.pop(disp_id)
+        #        if disp_task: disp_task.halt()
+        #        self.data_products.pop(data_product_id)
+        #        self.ingest_ports.pop(data_product_id)
+        #        return (rcode, rval)
         return ('ok',str(ingest_port))
 
     @request(Str())
