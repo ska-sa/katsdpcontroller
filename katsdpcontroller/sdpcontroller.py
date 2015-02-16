@@ -148,7 +148,7 @@ class SDPNode(object):
             try:
                 self.katcp_connection.start(timeout=5)
                 self.katcp_connection.wait_connected(timeout=5)
-                return True
+                return self.katcp_connection
             except RuntimeError:
                 self.katcp_connection.stop()
                  # no need for these to lurk around
@@ -156,7 +156,7 @@ class SDPNode(object):
                 logger.error(retmsg)
                 raise
         else:
-            return False
+            return None
 
 class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
@@ -168,6 +168,8 @@ class SDPGraph(object):
         self.graph = gp.build_physical_graph(resources)
         self.telstate = None
         self.nodes = {}
+        self._katcp = {}
+         # node keyed dict of established katcp connections
 
     def _launch(self, node, data):
         for edge in self.graph.in_edges_iter('sdp.ingest.1',data=True):
@@ -247,7 +249,8 @@ class SDPGraph(object):
     def establish_katcp_connections(self):
          # traverse all nodes in the graph that provide katcp connections
         for node in self.nodes:
-            node.establish_katcp_connection()
+            katcp = node.establish_katcp_connection()
+            if katcp is not None: self._katcp[node] = katcp
 
 class SDPContainer(object):
     """Wrapper around a docker container"""
@@ -522,7 +525,7 @@ class SDPDataProductBase(object):
     ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port):
+    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port, graph):
         self.data_product_id = data_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
@@ -538,6 +541,8 @@ class SDPDataProductBase(object):
         self.ingest_host = 'localhost'
         self.ingest_process = None
         self.ingest_katcp = None
+         # TODO: Most of the above parameters are now deprecated - remove
+        self.graph = graph
         if self.n_beams == 0:
            self.data_rate = (((self.n_antennas*(self.n_antennas+1))/2) * 4 * dump_rate * n_channels * 64) / 1e9
         else:
@@ -598,35 +603,6 @@ class SDPDataProduct(SDPDataProductBase):
     def __init__(self, *args, **kwargs):
         super(SDPDataProduct, self).__init__(*args, **kwargs)
 
-    def connect(self):
-        try:
-            (cbf_host,cbf_port) = self.cbf_source.split(":",2)
-            (cam_host,cam_port) = self.cam_source.split(":",2)
-        except ValueError:
-            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(self.cbf_source,self.cam_source)
-            logger.error(retmsg)
-            return ('fail',retmsg)
-        try:
-            cmd = ["ingest.py","-p {0}".format(self.ingest_port),"--cbf-spead-port={0}".format(cbf_port),"--cbf-spead-host={0}".format(cbf_host),"--cam-spead-port={0}".format(cam_port),"--cam-spead-host={0}".format(cam_host)]
-            self.ingest = subprocess.Popen(cmd)
-            logger.info("Launching new ingest process with configuration: {0}".format(cmd))
-            self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
-            try:
-                self.ingest_katcp.start(timeout=5)
-                self.ingest_katcp.wait_connected(timeout=5)
-            except RuntimeError:
-                self.ingest.kill()
-                self.ingest_katcp.stop()
-                 # no need for these to lurk around
-                retmsg = "Failed to connect to ingest process via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ingest_host, self.ingest_port)
-                logger.error(retmsg)
-                return ('fail',retmsg)
-        except OSError:
-            retmsg = "Failed to launch ingest process for data product. Make sure that katspdingest is installed and ingest.py is in the path."
-            logger.error(retmsg)
-            return ('fail',retmsg)
-        return ('ok','')
-
     def deconfigure(self, force=False):
         if self._state == 1 or force:
             if self._state != 1:
@@ -644,18 +620,29 @@ class SDPDataProduct(SDPDataProductBase):
         if self.ingest is not None:
             self.ingest.terminate()
 
-    def _issue_req(self, req):
-        reply, informs = self.ingest_katcp.blocking_request(Message.request(req))
-        if not reply.reply_ok():
-            retmsg = "Failed to issue req to ingest. {0}".format(req, reply.arguments[-1])
-            logger.warning(retmsg)
-            return ('fail', retmsg)
+    def _issue_req(self, req, node_type='ingest'):
+         # issue a request against all nodes of a particular type.
+         # typically usage is to issue a command such as 'capture-init'
+         # to all ingest nodes. A single failure is treated as terminal.
+        logger.debug("Issuing request {} to node_type {}".format(req, node_type))
+        for (node, katcp) in self._katcp:
+            try:
+                node.index(node_type)
+                 # filter out node_type(s) we don't want
+                 # TODO: probably needs a regexp
+                reply, informs = katcp.blocking_request(Message.request(req))
+                if not reply.reply_ok():
+                    retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
+                    logger.warning(retmsg)
+                    return ('fail', retmsg)
+                ret_args += "," + reply.arguments[-1]
         return ('ok', reply.arguments[-1])
 
     def _set_state(self, state_id):
         """The meat of the problem. Handles starting and stopping ingest processes and echo'ing requests."""
         rcode = 'ok'
         rval = ''
+        logger.debug("Switching state to {} from state {}".format(SA_STATES[state_id],self.state))
         if state_id == 2: rcode, rval = self._issue_req('capture-init')
         if state_id == 5:
             rcode, rval = self._issue_req('capture-done')
@@ -871,6 +858,22 @@ class SDPControllerServer(DeviceServer):
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and cbf_source and cam_source):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a data product")
 
+        try:
+            (cbf_host,cbf_port) = self.cbf_source.split(":",2)
+            (cam_host,cam_port) = self.cam_source.split(":",2)
+        except ValueError:
+            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(self.cbf_source,self.cam_source)
+            logger.error(retmsg)
+            return ('fail',retmsg)
+
+        self.resources.set_ip('cbf_spead',cbf_host)
+        self.resources.set_ip('cam_spead',cam_host)
+        self.resources.set_port('cbf_spead',cbf_port)
+        self.resources.set_port('cam_spead',cam_port)
+         # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
+         # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
+
+
          # determine graph name
         graph_name = "{}{}_logical.py".format("mkat_ar1_cbf", "sim" if self.simulate else "")
         logger.info("Launching graph {}.".format(graph))
@@ -903,7 +906,7 @@ class SDPControllerServer(DeviceServer):
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
-        self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
+        self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph)
         self.data_product_graphs[data_product_id] = graph
 
         #if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
