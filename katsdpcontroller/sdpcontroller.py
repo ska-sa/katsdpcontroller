@@ -2,6 +2,7 @@
 
 """
 
+import os
 import time
 import logging
 import subprocess
@@ -10,6 +11,7 @@ import docker
 import importlib
 import netifaces
 import katsdptelstate
+import json
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
@@ -28,9 +30,10 @@ logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
     def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',simulate=False):
+        self.simulate = simulate
         self.safe_ports = safe_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
-
+        self.private_registry = None
         self.allocated_ports = {}
         self.allocated_mip = {}
         self.hosts = {}
@@ -40,7 +43,7 @@ class SDPResources(object):
         try:
             self.allocated_ip = {'sdpmc':self.get_sdpmc_ip()}
         except KeyError:
-            logge.error("Failed to retrieve IP address of SDP Master Controller. Unable to continue.")
+            logger.error("Failed to retrieve IP address of SDP Master Controller. Unable to continue.")
             raise
 
     def get_sdpmc_ip(self):
@@ -54,14 +57,30 @@ class SDPResources(object):
          # serves the first available host of the correct type
         return self.hosts_by_class[host_class][0]
 
+    def get_image_path(self, image):
+         # return a fully qualified docker images path from the base
+         # docker image name. Uses private registry if currently defined
+        return "{}/{}".format(self.private_registry if self.private_registry is not None else 'sdp',image)
+
     def _discover_hosts(self):
         # TODO: Eventually this will contain the docker host autodiscovery code
         # For AR1 purposes, especially in the lab, we harcode some hosts to use
         # in our resource pool
-        available_hosts = {'sdp-ingest4.kat.ac.za':\
+        if self.simulate:
+            available_hosts = {'sdp-ingest4.kat.ac.za':\
                              {'ip':'127.0.0.1','host_class':'nvidia_gpu'},
                            'sdp-ingest5.kat.ac.za':\
                              {'ip':'127.0.0.1','host_class':'generic'}}
+            self.private_registry = None
+            docker_port = 2375
+             # no SSL for local simulation
+        else:
+            available_hosts = {'sdp-ingest4.kat.ac.za':\
+                             {'ip':'sdp-ingest4.kat.ac.za','host_class':'nvidia_gpu'},
+                           'sdp-ingest5.kat.ac.za':\
+                             {'ip':'sdp-ingest5.kat.ac.za','host_class':'generic'}}
+            self.private_registry = 'sdp-ingest5.kat.ac.za:5000'
+            docker_port = 2376
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
@@ -77,7 +96,7 @@ class SDPResources(object):
 
         for host, param in available_hosts.iteritems():
             try:
-                self.hosts[host] = SDPHost(**param)
+                self.hosts[host] = SDPHost(docker_port=docker_port, private_registry=self.private_registry, **param)
             except docker.errors.requests.ConnectionError:
                 logger.error("Host {} not added.".format(host))
                 continue
@@ -108,6 +127,10 @@ class SDPResources(object):
         self.allocated_mip[host_class] = mip
         return mip
 
+    def set_multicast_ip(self, host_class, ip):
+         # override system generated mip with specified one
+        self.allocated_mip[host_class] = ip
+
     def get_multicast_ip(self, host_class):
          # for the specified host class
          # return an available / assigned multicast address
@@ -119,6 +142,10 @@ class SDPResources(object):
         port = self.safe_ports.pop()
         self.allocated_ports[host_class] = port
         return port
+
+    def set_port(self, host_class, port):
+         # override system generated port with the specified one
+        self.allocated_ports[host_class] = port
 
     def get_port(self, host_class):
          # for the specified host class
@@ -139,11 +166,13 @@ class SDPNode(object):
 
     def is_alive(self):
          # is this node alive
-         # basic check to make sure the container is still running
+         # TODO: basic check to make sure the container is still running
+        return True
 
     def establish_katcp_connection(self):
          # establish katcp connection to this node if appropriate
         if 'port' in self.data:
+            logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(self.ip, self.data['port'], self.name))
             self.katcp_connection = BlockingClient(self.ip, self.data['port'])
             try:
                 self.katcp_connection.start(timeout=5)
@@ -197,6 +226,10 @@ class SDPGraph(object):
         logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
         return container_id
 
+    def get_json(self):
+        from networkx.readwrite import json_graph
+        return json_graph.node_link_data(self.graph)
+
     def launch_telstate(self, additional_config={}):
 
          # make sure the telstate node is launched
@@ -223,7 +256,7 @@ class SDPGraph(object):
 
          # connect to telstate store
         telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
-        self.telstate = katsdptelstate.TelescopeState(host=telstate_host)
+        self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
 
         self.telstate.delete('config')
          # TODO: needed for now as redis tends to save config between sessions at the moment
@@ -241,9 +274,8 @@ class SDPGraph(object):
 
     def check_nodes(self):
          # check if all requested nodes are actually running
+         # TODO: Health state sensors should be controlled from here
         alive = True
-        for node in self.nodes:
-            alive = alive and node.is_alive()
         return alive
 
     def establish_katcp_connections(self):
@@ -279,15 +311,22 @@ class SDPContainer(object):
 
 class SDPHost(object):
     """A host compute device that is running an accessible docker engine."""
-    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='no_docker'):
+    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='no_docker', private_registry=None):
         logger.debug("New host object on {} with class {}".format(ip,host_class))
         self.ip = ip
         self.container_list = {}
+        self.private_registry = private_registry
         if host_class != 'no_docker':
-            self._docker_client = docker.Client(base_url='{}:{}'.format(ip,docker_port))
+            user_home = os.path.expanduser("~")
+            tls_config = docker.tls.TLSConfig(client_cert=('{}/.docker/cert.pem'.format(user_home), '{}/.docker/key.pem'.format(user_home)), verify=False)
+            self._docker_client = docker.Client(base_url='https://{}:{}'.format(ip,docker_port), tls=tls_config)
              # seems to return an object regardless of connect status
             try:
                 info = self._docker_client.info()
+                if self.private_registry is not None:
+                    logger.debug("Docker login on host to private registry https://{}".format(self.private_registry))
+                    self._docker_client.login('kat',password='kat',registry='https://{}'.format(self.private_registry))
+                     # authenticate to the specified private registry
             except docker.errors.requests.ConnectionError:
                 logger.error("Failed to connect to docker engine on {}:{}".format(ip,docker_port))
                 raise
@@ -332,6 +371,9 @@ class SDPHost(object):
 
          # create a container from the specied image, using the build context provided
         try:
+            logger.info("Pulling image {} to host {}".format(image.image, self.ip))
+            for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
+                logger.debug(json.dumps(json.loads(pull_result), indent=4))
             _container = self._docker_client.create_container(image=image.image, command=image.cmd)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
@@ -341,6 +383,7 @@ class SDPHost(object):
 
          # launch
         try:
+            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}".format(_container['Id'], image.port_bindings, image.devices, image.network))
             self._docker_client.start(_container['Id'], port_bindings=image.port_bindings, devices=image.devices,\
                                   network_mode=image.network)
         except docker.errors.APIError,e:
@@ -636,6 +679,9 @@ class SDPDataProduct(SDPDataProductBase):
                     logger.warning(retmsg)
                     return ('fail', retmsg)
                 ret_args += "," + reply.arguments[-1]
+            except ValueError:
+                 # node name does not match requested node_type so ignore
+                continue
         return ('ok', reply.arguments[-1])
 
     def _set_state(self, state_id):
@@ -676,6 +722,7 @@ class SDPControllerServer(DeviceServer):
         self.components = {}
          # dict of currently managed SDP components
 
+        logger.debug("Building initial resource pool")
         self.resources = SDPResources(simulate=self.simulate)
          # create a new resource pool. 
 
@@ -859,15 +906,15 @@ class SDPControllerServer(DeviceServer):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a data product")
 
         try:
-            (cbf_host,cbf_port) = self.cbf_source.split(":",2)
-            (cam_host,cam_port) = self.cam_source.split(":",2)
+            (cbf_host,cbf_port) = cbf_source.split(":",2)
+            (cam_host,cam_port) = cam_source.split(":",2)
         except ValueError:
             retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(self.cbf_source,self.cam_source)
             logger.error(retmsg)
             return ('fail',retmsg)
 
-        self.resources.set_ip('cbf_spead',cbf_host)
-        self.resources.set_ip('cam_spead',cam_host)
+        self.resources.set_multicast_ip('cbf_spead',cbf_host)
+        self.resources.set_multicast_ip('cam_spead',cam_host)
         self.resources.set_port('cbf_spead',cbf_port)
         self.resources.set_port('cam_spead',cam_port)
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
@@ -875,12 +922,13 @@ class SDPControllerServer(DeviceServer):
 
 
          # determine graph name
-        graph_name = "{}{}_logical.py".format("mkat_ar1_cbf", "sim" if self.simulate else "")
-        logger.info("Launching graph {}.".format(graph))
+        graph_name = "katsdpgraphs.{}{}_logical".format("mkat_ar1_cbf", "sim" if self.simulate else "")
+        logger.info("Launching graph {}.".format(graph_name))
 
         graph = SDPGraph(graph_name, self.resources)
          # create graph object and build physical graph from specified resources
 
+        logger.debug(graph.get_json())
          # determine additional configuration
         config = {'antennas':antennas, 'n_channels':n_channels, 'dump_rate':dump_rate}
 
@@ -888,6 +936,7 @@ class SDPControllerServer(DeviceServer):
         graph.launch_telstate(additional_config=config)
          # launch the telescope state for this graph
 
+        logger.debug("Executing graph {}".format(graph_name))
         graph.execute_graph()
          # launch containers for those nodes that require them
 
@@ -898,6 +947,7 @@ class SDPControllerServer(DeviceServer):
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
+        logger.debug("Establishing katcp connections to appropriate nodes.")
         try:
             graph.establish_katcp_connections()
              # connect to all nodes we need
@@ -906,6 +956,8 @@ class SDPControllerServer(DeviceServer):
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
+         # at this point telstate is up, nodes have been launched, katcp connections established
+         # TODO: The data product class will need to be reworked
         self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph)
         self.data_product_graphs[data_product_id] = graph
 
