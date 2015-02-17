@@ -85,6 +85,7 @@ class SDPResources(object):
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
         for iface in netifaces.interfaces():
+            if not iface.startswith('e'): continue # Fix to handle strange docker interface enumeration
             for addr in netifaces.ifaddresses(iface).get(netifaces.AF_INET, []):
              # Skip point-to-point links (includes loopback)
                 if 'peer' in addr:
@@ -407,7 +408,7 @@ class SDPHost(object):
 
          # launch
         try:
-            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}".format(_container['Id'], image.port_bindings, image.devices, image.network))
+            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}, Cmd: {}".format(_container['Id'], image.port_bindings, image.devices, image.network, image.cmd))
             self._docker_client.start(_container['Id'], port_bindings=image.port_bindings, devices=image.devices,\
                                   network_mode=image.network)
         except docker.errors.APIError,e:
@@ -455,8 +456,8 @@ class SDPImage(object):
         #    self.devices = ['/dev/nvidiactl:/dev/nvidiactl','/dev/nvidia-uvm:/dev/nvidia-uvm',\
         #                    '/dev/nvidia0:/dev/nvidia0']
     def __repr__(self):
-        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}".format(self.image,\
-                self.port_bindings, self.network, self.devices, self.volumes)
+        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, Cmd: {}".format(self.image,\
+                self.port_bindings, self.network, self.devices, self.volumes, self.cmd)
 
 class SDPArray(object):
     """SDP Array wrapper.
