@@ -169,6 +169,13 @@ class SDPNode(object):
          # TODO: basic check to make sure the container is still running
         return True
 
+    def shutdown(self):
+         # shutdown this node
+        if self.katcp_connection is not None:
+            self.katcp_connection.stop()
+            self.katcp_connection.join()
+        self.host.stop_container(self.container_id)
+
     def establish_katcp_connection(self):
          # establish katcp connection to this node if appropriate
         if 'port' in self.data:
@@ -217,14 +224,14 @@ class SDPGraph(object):
         except KeyError:
             logger.error("Tried to launch a container on host_class {}, but no hosts of this type are available in the resource pool.".format(host_class))
             return 0
-        container_id = host.launch(img)
+        container = host.launch(img)
          # launch the specified image in a new container
-        if container_id is None:
+        if container is None:
             logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
             raise docker.errors.DockerException("Failed to launch image")
-        self.nodes[node] = SDPNode(node, data, host, container_id)
-        logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container_id))
-        return container_id
+        self.nodes[node] = SDPNode(node, data, host, container.id)
+        logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container.id))
+        return container.id
 
     def get_json(self):
         from networkx.readwrite import json_graph
@@ -280,9 +287,9 @@ class SDPGraph(object):
 
     def establish_katcp_connections(self):
          # traverse all nodes in the graph that provide katcp connections
-        for node in self.nodes:
+        for node in self.nodes.itervalues():
             katcp = node.establish_katcp_connection()
-            if katcp is not None: self._katcp[node] = katcp
+            if katcp is not None: self._katcp[node.name] = katcp
 
 class SDPContainer(object):
     """Wrapper around a docker container"""
@@ -316,6 +323,7 @@ class SDPHost(object):
         self.ip = ip
         self.container_list = {}
         self.private_registry = private_registry
+        self._docker_client = None
         if host_class != 'no_docker':
             user_home = os.path.expanduser("~")
             tls_config = docker.tls.TLSConfig(client_cert=('{}/.docker/cert.pem'.format(user_home), '{}/.docker/key.pem'.format(user_home)), verify=False)
@@ -334,6 +342,15 @@ class SDPHost(object):
                 setattr(self, str(k).lower(), v)
             self.update_containers()
         self.host_class = host_class
+
+    def shutdown(self):
+        """Terminates any running containers on this host,
+        and cleans up any connections still active."""
+        for cid in self.container_list.iterkeys():
+            logger.debug("Terminating container id {}.".format(cid))
+            self._docker_client.stop(cid)
+        self.container_list = {}
+        if self._docker_client is not None: self._docker_client.close()
 
     def get_container(self, container_name):
         """Get an active container by name."""
@@ -356,9 +373,13 @@ class SDPHost(object):
         for c in self.container_list.itervalues():
             print c
 
-    def terminate(self, container_name):
-        """Terminate the specified container name."""
-        _container = get_container(container_name)
+    def stop_container(self, container_name):
+        """Stop the specified container name."""
+        logger.debug("Stopping container {} on host {}".format(container_name, self.ip))
+        if container_name.rfind("_") > 0:
+            _container = get_container(container_name)
+        else:
+            _container = self.container_list[container_name]
 
         if _container is None:
             logger.error("Invalid container name specified")
@@ -371,9 +392,12 @@ class SDPHost(object):
 
          # create a container from the specied image, using the build context provided
         try:
-            logger.info("Pulling image {} to host {}".format(image.image, self.ip))
-            for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
-                logger.debug(json.dumps(json.loads(pull_result), indent=4))
+            logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
+            if image.image != "redis":
+                 # TODO: Skip redis pull for now as it is very slow...
+                for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
+                    print ".",
+                    #logger.debug(json.dumps(json.loads(pull_result), indent=4))
             _container = self._docker_client.create_container(image=image.image, command=image.cmd)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
@@ -568,22 +592,17 @@ class SDPDataProductBase(object):
     ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port, graph):
+    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, graph):
         self.data_product_id = data_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
         self.n_channels = n_channels
         self.dump_rate = dump_rate
         self.n_beams = n_beams
-        self.cam_source = cam_source
-        self.cbf_source = cbf_source
         self._state = 0
+        self.state = SA_STATES[self._state]
         self.set_state(1)
         self.psb_id = 0
-        self.ingest_port = ingest_port
-        self.ingest_host = 'localhost'
-        self.ingest_process = None
-        self.ingest_katcp = None
          # TODO: Most of the above parameters are now deprecated - remove
         self.graph = graph
         if self.n_beams == 0:
@@ -657,18 +676,23 @@ class SDPDataProduct(SDPDataProductBase):
             return ('fail','Data product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
 
     def _deconfigure(self):
-        if self.ingest_katcp is not None:
-            self.ingest_katcp.stop()
-            self.ingest_katcp.join()
-        if self.ingest is not None:
-            self.ingest.terminate()
+         # handle shutdown of this data product in as graceful a fashion as possible.
+         # TODO: be graceful :)
+        logger.info("Deconfiguring data product")
+         # issue shutdown commands for individual nodes via katcp
+         # then terminate katcp connection
+        self._issue_req('capture-done',node_type='ingest')
+        for node in self.graph.nodes.itervalues():
+            logger.info("Shutting down node {}".format(node.name))
+            node.shutdown()
 
     def _issue_req(self, req, node_type='ingest'):
          # issue a request against all nodes of a particular type.
          # typically usage is to issue a command such as 'capture-init'
          # to all ingest nodes. A single failure is treated as terminal.
         logger.debug("Issuing request {} to node_type {}".format(req, node_type))
-        for (node, katcp) in self._katcp:
+        ret_args = ""
+        for (node, katcp) in self.graph._katcp:
             try:
                 node.index(node_type)
                  # filter out node_type(s) we don't want
@@ -682,7 +706,9 @@ class SDPDataProduct(SDPDataProductBase):
             except ValueError:
                  # node name does not match requested node_type so ignore
                 continue
-        return ('ok', reply.arguments[-1])
+        if ret_args == "":
+            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(req, node_type)
+        return ('ok', ret_args)
 
     def _set_state(self, state_id):
         """The meat of the problem. Handles starting and stopping ingest processes and echo'ing requests."""
@@ -728,6 +754,8 @@ class SDPControllerServer(DeviceServer):
 
         self.data_products = {}
          # dict of currently configured SDP data_products
+        self.data_product_graphs = {}
+         # shortcut dict to established graphs
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
@@ -820,13 +848,7 @@ class SDPControllerServer(DeviceServer):
         dp_handle = self.data_products[data_product_id]
         rcode, rval = dp_handle.deconfigure(force=force)
         if rcode == 'fail': return (rcode, rval)
-             # cleanup signal displays (if any)
-        disp_id = "{0}_disp".format(data_product_id)
-        if disp_id in self.tasks:
-            disp_task = self.tasks.pop(disp_id)
-            disp_task.halt()
         self.data_products.pop(data_product_id)
-        self.ingest_ports.pop(data_product_id)
         return (rcode, rval)
 
     def handle_exit(self):
@@ -973,7 +995,7 @@ class SDPControllerServer(DeviceServer):
         #        self.data_products.pop(data_product_id)
         #        self.ingest_ports.pop(data_product_id)
         #        return (rcode, rval)
-        return ('ok',str(ingest_port))
+        return ('ok',"")
 
     @request(Str())
     @return_reply(Str())
