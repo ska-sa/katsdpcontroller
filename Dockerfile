@@ -2,6 +2,10 @@ FROM ubuntu:14.04
 
 MAINTAINER Simon Ratcliffe "simonr@ska.ac.za"
 
+COPY conf/id_rsa /root/.ssh/
+RUN echo "Host *\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
+RUN chmod -R go-rwx ~/.ssh
+
 # Try and suppress debconf warnings
 ENV DEBIAN_FRONTEND noninteractive
 
