@@ -29,8 +29,8 @@ logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',simulate=False):
-        self.simulate = simulate
+    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',test=False):
+        self.test = test
         self.safe_ports = safe_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
         self.private_registry = None
@@ -66,7 +66,7 @@ class SDPResources(object):
         # TODO: Eventually this will contain the docker host autodiscovery code
         # For AR1 purposes, especially in the lab, we harcode some hosts to use
         # in our resource pool
-        if self.simulate:
+        if self.test:
             available_hosts = {'sdp-ingest4.kat.ac.za':\
                              {'ip':'127.0.0.1','host_class':'nvidia_gpu'},
                            'sdp-ingest5.kat.ac.za':\
@@ -173,8 +173,11 @@ class SDPNode(object):
     def shutdown(self):
          # shutdown this node
         if self.katcp_connection is not None:
-            self.katcp_connection.stop()
-            self.katcp_connection.join()
+            try:
+                self.katcp_connection.stop()
+                self.katcp_connection.join()
+            except RuntimeError:
+                pass # best effort
         self.host.stop_container(self.container_id)
 
     def establish_katcp_connection(self):
@@ -228,8 +231,9 @@ class SDPGraph(object):
         container = host.launch(img)
          # launch the specified image in a new container
         if container is None:
-            logger.error("Failed to launch image {} on host {}.".format(data['docker_image'], host.ip))
-            raise docker.errors.DockerException("Failed to launch image")
+            ret_msg = "Failed to launch image {} on host {}.".format(data['docker_image'], host.ip)
+            logger.error(ret_msg)
+            raise docker.errors.DockerException(ret_msg)
         self.nodes[node] = SDPNode(node, data, host, container.id)
         logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container.id))
         return container.id
@@ -279,6 +283,11 @@ class SDPGraph(object):
              # make sure we don't launch the telstate node again
             if 'docker_image' in data:
                 self._launch(node, data)
+
+    def shutdown(self):
+        for node in self.nodes.itervalues():
+            logger.info("Shutting down node {}".format(node.name))
+            node.shutdown()
 
     def check_nodes(self):
          # check if all requested nodes are actually running
@@ -593,7 +602,7 @@ class SDPDataProductBase(object):
     ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, graph):
+    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, graph, simulate):
         self.data_product_id = data_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
@@ -605,6 +614,7 @@ class SDPDataProductBase(object):
         self.set_state(1)
         self.psb_id = 0
          # TODO: Most of the above parameters are now deprecated - remove
+        self.simulate = simulate
         self.graph = graph
         if self.n_beams == 0:
            self.data_rate = (((self.n_antennas*(self.n_antennas+1))/2) * 4 * dump_rate * n_channels * 64) / 1e9
@@ -683,22 +693,21 @@ class SDPDataProduct(SDPDataProductBase):
          # issue shutdown commands for individual nodes via katcp
          # then terminate katcp connection
         self._issue_req('capture-done',node_type='ingest')
-        for node in self.graph.nodes.itervalues():
-            logger.info("Shutting down node {}".format(node.name))
-            node.shutdown()
+        self.graph.shutdown()
 
-    def _issue_req(self, req, node_type='ingest'):
+    def _issue_req(self, req, args=[], node_type='ingest'):
          # issue a request against all nodes of a particular type.
          # typically usage is to issue a command such as 'capture-init'
          # to all ingest nodes. A single failure is treated as terminal.
         logger.debug("Issuing request {} to node_type {}".format(req, node_type))
         ret_args = ""
-        for (node, katcp) in self.graph._katcp:
+        for (node, katcp) in self.graph._katcp.iteritems():
             try:
                 node.index(node_type)
                  # filter out node_type(s) we don't want
                  # TODO: probably needs a regexp
-                reply, informs = katcp.blocking_request(Message.request(req))
+                logger.info("Issued request {} {} to node {}".format(req, args, node))
+                reply, informs = katcp.blocking_request(Message.request(req, args))
                 if not reply.reply_ok():
                     retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
                     logger.warning(retmsg)
@@ -716,8 +725,17 @@ class SDPDataProduct(SDPDataProductBase):
         rcode = 'ok'
         rval = ''
         logger.debug("Switching state to {} from state {}".format(SA_STATES[state_id],self.state))
-        if state_id == 2: rcode, rval = self._issue_req('capture-init')
+        if state_id == 2:
+            rcode, rval = self._issue_req('capture-init')
+            if self.simulate:
+                logger.info("SIMULATE: Issuing a capture-start to the simulator")
+                time.sleep(2) # only needed for simulator...
+                rcode, rval = self._issue_req('capture-start', args=['k7'], node_type='cbf.sim')
         if state_id == 5:
+            if self.simulate:
+                logger.info("SIMULATE: Issuing a capture-stop to the simulator")
+                time.sleep(2) # only needed for simulator...
+                rcode, rval = self._issue_req('capture-stop', args=['k7'], node_type='cbf.sim')
             rcode, rval = self._issue_req('capture-done')
 
         if state_id == 5 or rcode == 'ok':
@@ -745,12 +763,14 @@ class SDPControllerServer(DeviceServer):
          # TODO: Add more sensors exposing resource usage and currently executing graphs
 
         self.simulate = args[2]
-        if self.simulate: logger.warning("Note: Running in simulation mode...")
+        if self.simulate: logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
         self.components = {}
          # dict of currently managed SDP components
+        self.test = False
+         # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
-        self.resources = SDPResources(simulate=self.simulate)
+        self.resources = SDPResources(test=self.test)
          # create a new resource pool. 
 
         self.data_products = {}
@@ -883,7 +903,7 @@ class SDPControllerServer(DeviceServer):
             A space seperated list of antenna names to use in this data product.
             These will be matched to the CBF output and used to pull only the specific
             data.
-            If antennas == "", then this data product is de-configured. Trailing arguments can be omitted.
+            If antennas == 0, then this data product is de-configured. Trailing arguments can be omitted.
         n_channels : int
             Number of channels used in this data product (based on CBF config)
         dump_rate : float
@@ -910,7 +930,7 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (data_product_id,repr(self.data_products[data_product_id])))
             else: return ('fail',"This data product id has no current configuration.")
 
-        if antennas == "":
+        if antennas == "0":
             try:
                 (rcode, rval) = self.deregister_product(data_product_id)
                 return (rcode, rval)
@@ -953,20 +973,26 @@ class SDPControllerServer(DeviceServer):
 
         logger.debug(graph.get_json())
          # determine additional configuration
-        config = {'antennas':antennas, 'n_channels':n_channels, 'dump_rate':dump_rate}
+        config = {'dump_rate':dump_rate}
+         # parameters such as antennas and channels are encoded in the logical graphs
 
         logger.debug("Launching telstate. Additional_config {}".format(config))
         graph.launch_telstate(additional_config=config)
          # launch the telescope state for this graph
 
         logger.debug("Executing graph {}".format(graph_name))
-        graph.execute_graph()
-         # launch containers for those nodes that require them
+        try:
+            graph.execute_graph()
+             # launch containers for those nodes that require them
+        except docker.errors.DockerException, e:
+            graph.shutdown()
+            return ('fail',e)
 
         alive = graph.check_nodes()
          # is everything we asked for alive
         if not alive:
             ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+            graph.shutdown()
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
@@ -976,12 +1002,13 @@ class SDPControllerServer(DeviceServer):
              # connect to all nodes we need
         except RuntimeError:
             ret_msg = "Failed to establish katcp connections as needed. Check error log for details."
+            graph.shutdown()
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
          # at this point telstate is up, nodes have been launched, katcp connections established
          # TODO: The data product class will need to be reworked
-        self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph)
+        self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
         self.data_product_graphs[data_product_id] = graph
 
         #if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)

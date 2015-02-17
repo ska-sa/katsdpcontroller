@@ -12,6 +12,8 @@ def define_hosts():
 
 def build_physical_graph(r):
 
+    telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
+
     G = nx.DiGraph()
 
      # list of nodes in the graph. Typically this includes a specification for the docker
@@ -21,12 +23,12 @@ def build_physical_graph(r):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
-    G.add_node('cbf.sim.1',{'channels':'8192','padding':'0','docker_image':r.get_image_path('katsdpingest-simulator'),'docker_params':\
-        {"port_bindings":{5000:5000}}, 'docker_cmd':'simulator.py', 'docker_host_class':'generic'})
+    G.add_node('cbf.sim.1',{'port':2041, 'channels':'8192','padding':'0','docker_image':r.get_image_path('katsdpingest-simulator'),'docker_params':\
+        {"network":"host"}, 'docker_host_class':'nvidia_gpu'})
      # simulator node
 
-    G.add_node('sdp.ingest.1',{'output_int_time':2, 'antennas':2, 'antenna-mask':'m0062,m0063', 'continuum_factor': 32,\
-        'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
+    G.add_node('sdp.ingest.1',{'port':2040, 'output_int_time':2, 'antennas':2, 'antenna-mask':'m0062,m0063', 'continuum_factor': 32,\
+        'docker_image':r.get_image_path('katsdpingest_k40'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
         'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
                           "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]}
         })
@@ -42,7 +44,6 @@ def build_physical_graph(r):
 
     # establish node connections
 
-    telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
     G.add_edge('sdp.telstate','sdp.ingest.1',{'telstate': telstate})
     G.add_edge('sdp.telstate','sdp.file_writer.1',{'telstate': telstate})
      # connections to the telescope state. 
