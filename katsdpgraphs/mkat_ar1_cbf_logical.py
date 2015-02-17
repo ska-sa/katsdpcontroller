@@ -12,6 +12,8 @@ def define_hosts():
 
 def build_physical_graph(r):
 
+    telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
+
     G = nx.DiGraph()
 
      # list of nodes in the graph. Typically this includes a specification for the docker
@@ -42,7 +44,6 @@ def build_physical_graph(r):
 
     # establish node connections
 
-    telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
     G.add_edge('sdp.telstate','sdp.ingest.1',{'telstate': telstate})
     G.add_edge('sdp.telstate','sdp.file_writer.1',{'telstate': telstate})
      # connections to the telescope state. 
