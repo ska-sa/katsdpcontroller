@@ -170,6 +170,10 @@ class SDPNode(object):
          # TODO: basic check to make sure the container is still running
         return True
 
+    def get_transition(self, state):
+         # if this node has a specified state transition action return it
+        return self.data.get('state_transitions',{}).get(state,None)
+
     def shutdown(self):
          # shutdown this node
         if self.katcp_connection is not None:
@@ -720,13 +724,23 @@ class SDPDataProduct(SDPDataProductBase):
             ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(req, node_type)
         return ('ok', ret_args)
 
+    def exec_transitions(self, state):
+        """Check for nodes that require action on state transitions."""
+        for node in self.graph.nodes.itervalues():
+             # TODO: For now this is a dumb loop through all nodes.
+             # when we have more this will need to be improved
+            req = node.get_transition(state)
+            if req is not None:
+                self._issue_req(req, node.name)
+             # failure not necessarily catastrophic, follow the schwardtian approach of bumble on...
+
     def _set_state(self, state_id):
         """The meat of the problem. Handles starting and stopping ingest processes and echo'ing requests."""
         rcode = 'ok'
         rval = ''
-        logger.debug("Switching state to {} from state {}".format(SA_STATES[state_id],self.state))
+        logger.info("Switching state to {} from state {}".format(SA_STATES[state_id],self.state))
         if state_id == 2:
-            rcode, rval = self._issue_req('capture-init')
+            self.exec_transitions(2)
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-start to the simulator")
                 time.sleep(2) # only needed for simulator...
@@ -736,7 +750,10 @@ class SDPDataProduct(SDPDataProductBase):
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
                 time.sleep(2) # only needed for simulator...
                 rcode, rval = self._issue_req('capture-stop', args=['k7'], node_type='cbf.sim')
-            rcode, rval = self._issue_req('capture-done')
+            self.exec_transitions(5)
+             # called in an explicit fashion (above as well) so we can manage
+             # execution order correctly when dealing with a simulator
+             # all other commands can execute in arbitrary order
 
         if state_id == 5 or rcode == 'ok':
             if state_id == 5: state_id = 1
