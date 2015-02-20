@@ -190,8 +190,8 @@ class SDPNode(object):
             logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(self.ip, self.data['port'], self.name))
             self.katcp_connection = BlockingClient(self.ip, self.data['port'])
             try:
-                self.katcp_connection.start(timeout=5)
-                self.katcp_connection.wait_connected(timeout=5)
+                self.katcp_connection.start(timeout=10)
+                self.katcp_connection.wait_connected(timeout=10)
                 return self.katcp_connection
             except RuntimeError:
                 self.katcp_connection.stop()
@@ -219,7 +219,11 @@ class SDPGraph(object):
         for edge in self.graph.in_edges_iter('sdp.ingest.1',data=True):
             data.update(edge[2])
              # update the data dict with any edge information (in and out)
-        host_class = data['docker_host_class']
+        try:
+            host_class = data['docker_host_class']
+        except KeyError:
+            logger.error("Failed to launch node {} as no docker_host_class is specified.".format(node))
+            return 0
         cmd = None
         if data.has_key('docker_cmd'):
             cmd = "{} --telstate {} --name {}".format(data['docker_cmd'], data['telstate'], node)
@@ -246,7 +250,7 @@ class SDPGraph(object):
         from networkx.readwrite import json_graph
         return json_graph.node_link_data(self.graph)
 
-    def launch_telstate(self, additional_config={}):
+    def launch_telstate(self, additional_config={}, base_params={}):
 
          # make sure the telstate node is launched
         data = self.graph.node.pop(self.telstate_node)
@@ -276,8 +280,26 @@ class SDPGraph(object):
 
         self.telstate.delete('config')
          # TODO: needed for now as redis tends to save config between sessions at the moment
-        self.telstate.add('config',config, immutable=True)
+        h_config = self.to_hierarchical_dict(config)
+        logger.debug("CONFIG:{}".format(h_config))
+        self.telstate.add('config', h_config, immutable=True)
          # set the configuration
+        for k,v in base_params.iteritems():
+            self.telstate.add(k,v, immutable=True)
+
+    def to_hierarchical_dict(self, config):
+         # take a flat dict of key:values where some of the keys
+         # may have form x.y.z and turn these into a nested hierarchy
+         # of dicts.
+        d = {}
+        for k,v in config.iteritems():
+            last = d
+            key_parts = k.split(".")
+            for ks in key_parts[:-1]:
+                last[ks] = last.get(ks,{})
+                last = last[ks]
+            last[key_parts[-1]] = v
+        return d
 
     def execute_graph(self):
          # traverse all nodes in the graph looking for those that
@@ -412,7 +434,7 @@ class SDPHost(object):
                 for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
                     print ".",
                     #logger.debug(json.dumps(json.loads(pull_result), indent=4))
-            _container = self._docker_client.create_container(image=image.image, command=image.cmd)
+            _container = self._docker_client.create_container(image=image.image, command=image.cmd, volumes=image.volumes)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
             return None
@@ -421,9 +443,9 @@ class SDPHost(object):
 
          # launch
         try:
-            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}, Cmd: {}".format(_container['Id'], image.port_bindings, image.devices, image.network, image.cmd))
+            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}, Volumes: {}, Cmd: {}".format(_container['Id'], image.port_bindings, image.devices, image.network, image.volumes, image.cmd))
             self._docker_client.start(_container['Id'], port_bindings=image.port_bindings, devices=image.devices,\
-                                  network_mode=image.network)
+                                  network_mode=image.network, binds=image.binds)
         except docker.errors.APIError,e:
             logger.error("Failed to launch container ({})".format(e))
             return None
@@ -453,12 +475,13 @@ class SDPImage(object):
     This sets up ports, network and device pass through.
     
     """
-    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None):
+    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None):
         self.image = image
         self.port_bindings = port_bindings
         self.network = network
         self.devices = devices
         self.volumes = volumes
+        self.binds = binds
         self.cmd = cmd
 
         #if image_class == 'sdpmc':
@@ -711,7 +734,10 @@ class SDPDataProduct(SDPDataProductBase):
                  # filter out node_type(s) we don't want
                  # TODO: probably needs a regexp
                 logger.info("Issued request {} {} to node {}".format(req, args, node))
-                reply, informs = katcp.blocking_request(Message.request(req, args))
+                if args == []:
+                    reply, informs = katcp.blocking_request(Message.request(req))
+                else:
+                    reply, informs = katcp.blocking_request(Message.request(req, args))
                 if not reply.reply_ok():
                     retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
                     logger.warning(retmsg)
@@ -731,7 +757,7 @@ class SDPDataProduct(SDPDataProductBase):
              # when we have more this will need to be improved
             req = node.get_transition(state)
             if req is not None:
-                self._issue_req(req, node.name)
+                self._issue_req(req, node_type=node.name)
              # failure not necessarily catastrophic, follow the schwardtian approach of bumble on...
 
     def _set_state(self, state_id):
@@ -990,11 +1016,12 @@ class SDPControllerServer(DeviceServer):
 
         logger.debug(graph.get_json())
          # determine additional configuration
-        config = {'dump_rate':dump_rate}
+        config = graph.graph.graph
+         # it is very graphy - indeed...
          # parameters such as antennas and channels are encoded in the logical graphs
 
-        logger.debug("Launching telstate. Additional_config {}".format(config))
-        graph.launch_telstate(additional_config=config)
+        logger.debug("Launching telstate. Base parameters {}".format(config))
+        graph.launch_telstate(base_params=config)
          # launch the telescope state for this graph
 
         logger.debug("Executing graph {}".format(graph_name))
