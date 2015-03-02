@@ -1023,7 +1023,7 @@ class SDPControllerServer(DeviceServer):
             (cbf_host,cbf_port) = cbf_source.split(":",2)
             (cam_host,cam_port) = cam_source.split(":",2)
         except ValueError:
-            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(self.cbf_source,self.cam_source)
+            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(cbf_source, cam_source)
             logger.error(retmsg)
             return ('fail',retmsg)
 
