@@ -15,6 +15,11 @@ import json
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
+import faulthandler
+import signal
+
+faulthandler.register(signal.SIGUSR2, all_threads=True)
+
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
 

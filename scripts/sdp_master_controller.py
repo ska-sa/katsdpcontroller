@@ -13,6 +13,7 @@ import signal
 from optparse import OptionParser
 import logging
 import logging.handlers
+import manhole
 
 if __name__ == "__main__":
 
@@ -79,6 +80,9 @@ if __name__ == "__main__":
 
     server.start()
     logger.info("Started SDP Controller.")
+
+    manhole.install(locals={'server':server, 'opts':opts})
+     # allow remote debug connections and expose server and opts
 
     try:
         while running:
