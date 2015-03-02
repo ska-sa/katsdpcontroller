@@ -29,8 +29,8 @@ def build_physical_graph(r):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
-    G.add_node('cbf.sim.1',{'port': 2041, 'channels':'8192','padding':'0','docker_image':r.get_image_path('katsdpingest-simulator'),'docker_params':\
-        {"network":"host"}, 'docker_host_class':'nvidia_gpu'})
+    #G.add_node('cbf.sim.1',{'port': 2041, 'channels':'8192','padding':'0','docker_image':r.get_image_path('katsdpingest-simulator'),'docker_params':\
+    #    {"network":"host"}, 'docker_host_class':'nvidia_gpu'})
      # simulator node
 
     G.add_node('sdp.ingest.1',{'port': r.get_port('sdp_ingest_1_katcp'), 'output_int_time':2, 'antennas':2, 'continuum_factor': 32,\
@@ -61,9 +61,12 @@ def build_physical_graph(r):
     G.add_edge('sdp.telstate','sdp.cal.1',{'telstate': telstate})
      # connections to the telescope state. 
 
-    G.add_edge('cbf.sim.1','sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('cbf_spead'),r.get_port('cbf_spead'))\
+    G.add_edge('cbf.sim.1','sdp.ingest.1',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('cbf_spead'))\
                , 'input_rate':10e6})
-     # spead data from simulator to ingest node
+     # spead data from simulator to ingest node. For simulation this is hardcoded, as the simulator is run by CAM.
+
+    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':':7147'})
+     # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
      # ingest to cal node transfers L0 visibility data (no calibration)
