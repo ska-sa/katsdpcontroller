@@ -190,8 +190,9 @@ class SDPNode(object):
             logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(self.ip, self.data['port'], self.name))
             self.katcp_connection = BlockingClient(self.ip, self.data['port'])
             try:
-                self.katcp_connection.start(timeout=10)
-                self.katcp_connection.wait_connected(timeout=10)
+                self.katcp_connection.start(timeout=20)
+                self.katcp_connection.wait_connected(timeout=20)
+                 # some katcp connections, particularly to ingest can take a while to establish
                 return self.katcp_connection
             except RuntimeError:
                 self.katcp_connection.stop()
@@ -840,6 +841,28 @@ class SDPControllerServer(DeviceServer):
             s.set_value(0)
             self.add_sensor(s)
 
+    def request_halt(self, req, msg):
+        """Halt the device server.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+            Whether scheduling the halt succeeded.
+
+        Examples
+        --------
+        ::
+
+            ?halt
+            !halt ok
+        """
+        self.stop()
+        logger.warning("Halt requested. Attempting cleanup...")
+        # this message makes it through because stop
+        # only registers in .run(...) after the reply
+        # has been sent.
+        return req.make_reply("ok")
+
     @request(Str())
     @return_reply(Str())
     def request_task_terminate(self, req, task_id):
@@ -973,7 +996,7 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (data_product_id,repr(self.data_products[data_product_id])))
             else: return ('fail',"This data product id has no current configuration.")
 
-        if antennas == "0":
+        if antennas == "0" or antennas == "":
             try:
                 (rcode, rval) = self.deregister_product(data_product_id)
                 return (rcode, rval)
@@ -982,7 +1005,7 @@ class SDPControllerServer(DeviceServer):
 
         if data_product_id in self.data_products:
             dp = self.data_products[data_product_id]
-            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams and dp.cbf_source == cbf_source and dp.cam_source == cam_source:
+            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
                 return ('ok',"Data product with this configuration already exists. Pass.")
             else:
                 return ('fail',"A data product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(data_product_id))

@@ -78,7 +78,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, stop_running)
 
     server.start()
-    logger.info("Started.")
+    logger.info("Started SDP Controller.")
 
     try:
         while running:
