@@ -81,7 +81,7 @@ if __name__ == "__main__":
     server.start()
     logger.info("Started SDP Controller.")
 
-    manhole.install(locals={'server':server, 'opts':opts})
+    manhole.install(oneshot_on='USR1', locals={'server':server, 'opts':opts})
      # allow remote debug connections and expose server and opts
 
     try:
