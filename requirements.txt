@@ -1,1 +1,7 @@
 katcp==0.5.2
+docker-py
+netifaces
+redis
+manhole
+faulthandler
+git+ssh://git@github.com/ska-sa/katsdptelstate

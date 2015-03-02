@@ -13,6 +13,7 @@ import signal
 from optparse import OptionParser
 import logging
 import logging.handlers
+import manhole
 
 if __name__ == "__main__":
 
@@ -43,21 +44,23 @@ if __name__ == "__main__":
             parser.print_help()
         sys.exit(1)
 
+    logging.basicConfig()
     logger = logging.getLogger('sdpcontroller')
     if isinstance(opts.loglevel, basestring):
         opts.loglevel = getattr(logging, opts.loglevel.upper())
-    logger.setLevel(opts.loglevel)
-    try:
-        fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
-        formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),
-                                      datefmt="%Y-%m-%d %H:%M:%S")
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-         # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
-    except IOError:
-        logging.basicConfig()
-        (logger.warn("Failed to create log file so reverting to console output. Most likely issue is that {0} does not exist or is not writeable"
-         .format(os.path.join(opts.workpath))))
+
+    logging.root.setLevel(opts.loglevel)
+
+    #try:
+    #    fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
+    #    formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(name)s - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),
+    #                                  datefmt="%Y-%m-%d %H:%M:%S")
+    #    fh.setFormatter(formatter)
+    #    logger.addHandler(fh)
+    #     # we assume this is the SDP ur process and so we setup logging in a fairly manual fashion
+    #except IOError:
+    #    (logger.warn("Failed to create log file so reverting to console output. Most likely issue is that {0} does not exist or is not writeable"
+    #     .format(os.path.join(opts.workpath))))
 
     from katsdpcontroller import sdpcontroller
 
@@ -76,7 +79,10 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, stop_running)
 
     server.start()
-    logger.info("Started.")
+    logger.info("Started SDP Controller.")
+
+    manhole.install(oneshot_on='USR1', locals={'server':server, 'opts':opts})
+     # allow remote debug connections and expose server and opts
 
     try:
         while running:
