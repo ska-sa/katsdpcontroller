@@ -1,7 +1,8 @@
 katcp==0.5.2
-docker-py
+docker-py==0.7.0
 netifaces
 redis
 manhole
 faulthandler
+networkx
 git+ssh://git@github.com/ska-sa/katsdptelstate
