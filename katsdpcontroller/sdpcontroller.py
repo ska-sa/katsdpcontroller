@@ -1036,7 +1036,7 @@ class SDPControllerServer(DeviceServer):
 
 
          # determine graph name
-        graph_name = "katsdpgraphs.{}{}_logical".format("mkat_ar1_cbf", "sim" if self.simulate else "")
+        graph_name = "katsdpgraphs.{}{}_logical".format(data_product_id, "sim" if self.simulate else "")
         logger.info("Launching graph {}.".format(graph_name))
 
         graph = SDPGraph(graph_name, self.resources)
