@@ -3,20 +3,33 @@
 """
 
 import os
+import re
 import time
 import logging
 import subprocess
 import shlex
-import docker
 import importlib
 import netifaces
-import katsdptelstate
 import json
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 
 import faulthandler
 import signal
+
+try:
+    import docker
+except ImportError:
+    docker = None
+     # docker is not needed when running in interface only mode.
+     # when not running in this mode we check to make sure that
+     # docker has been imported or we exit.
+
+try:
+    import katsdptelstate
+except ImportError:
+    katsdptelstate = None
+     # as above - katsdptelstate not needed in interface only mode
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
 
@@ -34,7 +47,7 @@ logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',test=False):
+    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',test=False, interface_mode=False):
         self.test = test
         self.safe_ports = safe_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
@@ -43,13 +56,16 @@ class SDPResources(object):
         self.allocated_mip = {}
         self.hosts = {}
         self.hosts_by_class = {}
-        self._discover_hosts()
-
-        try:
-            self.allocated_ip = {'sdpmc':self.get_sdpmc_ip()}
-        except KeyError:
-            logger.error("Failed to retrieve IP address of SDP Master Controller. Unable to continue.")
-            raise
+        self.interface_mode = interface_mode
+        if not self.interface_mode:
+            self._discover_hosts()
+            try:
+                self.allocated_ip = {'sdpmc':self.get_sdpmc_ip()}
+            except KeyError:
+                logger.error("Failed to retrieve IP address of SDP Master Controller. Unable to continue.")
+                raise
+        else:
+            self.allocated_ip = {'sdpmc':'127.0.0.1'}
 
     def get_sdpmc_ip(self):
          # returns the IP address of the SDPMC host.
@@ -632,7 +648,7 @@ class SDPDataProductBase(object):
     In general each telescope data product is handled in a completely parallel fashion by the SDP.
     This class encapsulates these instances, handling control input and sensor feedback to CAM.
 
-    ** This can be used directly as a stubbed simulator for use in standalone testing and validation. 
+    ** This can be used directly as a stubbed interface for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
     def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, graph, simulate):
@@ -811,15 +827,17 @@ class SDPControllerServer(DeviceServer):
          # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
          # TODO: Add more sensors exposing resource usage and currently executing graphs
 
-        self.simulate = args[2]
+        self.simulate = kwargs['simulate']
         if self.simulate: logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
+        self.interface_mode = kwargs['interface_mode']
+        if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
         self.test = False
          # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
-        self.resources = SDPResources(test=self.test)
+        self.resources = SDPResources(test=self.test, interface_mode=self.interface_mode)
          # create a new resource pool. 
 
         self.data_products = {}
@@ -830,7 +848,7 @@ class SDPControllerServer(DeviceServer):
         self.tasks = {}
          # dict of currently managed SDP tasks
 
-        super(SDPControllerServer, self).__init__(*args, **kwargs)
+        super(SDPControllerServer, self).__init__(*args)
 
     def setup_sensors(self):
         """Add sensors for processes."""
@@ -1034,10 +1052,15 @@ class SDPControllerServer(DeviceServer):
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
-
          # determine graph name
-        graph_name = "katsdpgraphs.{}{}_logical".format(data_product_id, "sim" if self.simulate else "")
-        logger.info("Launching graph {}.".format(graph_name))
+        try:
+            sane_name = re.findall('[a-z]+_[a-zA-Z0-9]+',data_product_id)[0]
+            graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
+            logger.info("Launching graph {}.".format(graph_name))
+        except IndexError:
+            retmsg = "Data product id {} does not match expected format of [a-z]+_[a-zA-Z0-9]+_*[0-9]* (e.g. rts_c856M4k or rts_c856M4k_2)".format(data_product_id)
+            logger.error(retmsg)
+            return ('fail',retmsg)
 
         graph = SDPGraph(graph_name, self.resources)
          # create graph object and build physical graph from specified resources
@@ -1047,6 +1070,25 @@ class SDPControllerServer(DeviceServer):
         config = graph.graph.graph
          # it is very graphy - indeed...
          # parameters such as antennas and channels are encoded in the logical graphs
+
+        if self.interface_mode:
+            logger.debug("Telstate configured. Base parameters {}".format(config))
+            logger.warning("No components will be started - running in interface mode")
+            self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            self.data_product_graphs[data_product_id] = graph
+            return ('ok',"")
+
+        if docker is None:
+             # from here onwards we require the docker module to be installed.
+            retmsg = "You must have the docker python library installed to use the master controller in non interface only mode."
+            logger.error(retmsg)
+            return ('fail',retmsg)
+
+        if katsdptelstate is None:
+             # from here onwards we require the katsdptelstate module to be installed.
+            retmsg = "You must have the katsdptelstate library installed to use the master controller in non interface only mode."
+            logger.error(retmsg)
+            return ('fail',retmsg)
 
         logger.debug("Launching telstate. Base parameters {}".format(config))
         graph.launch_telstate(base_params=config)
@@ -1083,18 +1125,6 @@ class SDPControllerServer(DeviceServer):
         self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
         self.data_product_graphs[data_product_id] = graph
 
-        #if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
-        #else:
-        #    self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
-        #    self.tasks[disp_id].launch()
-        #    self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
-        #    rcode, rval = self.data_products[data_product_id].connect()
-        #    if rcode == 'fail':
-        #        disp_task = self.tasks.pop(disp_id)
-        #        if disp_task: disp_task.halt()
-        #        self.data_products.pop(data_product_id)
-        #        self.ingest_ports.pop(data_product_id)
-        #        return (rcode, rval)
         return ('ok',"")
 
     @request(Str())

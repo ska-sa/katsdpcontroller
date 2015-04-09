@@ -13,7 +13,11 @@ import signal
 from optparse import OptionParser
 import logging
 import logging.handlers
-import manhole
+
+try:
+    import manhole
+except ImportError:
+    manhole = None
 
 if __name__ == "__main__":
 
@@ -31,7 +35,10 @@ if __name__ == "__main__":
                       help='set the Python logging level (default=%default)')
     parser.add_option('-s', '--simulate', dest='simulate', default=False,
                       action='store_true', metavar='SIMULATE',
-                      help='run controller in simulation mode (default: %default)')
+                      help='run controller in simulation mode suitable for lab testing (default: %default)')
+    parser.add_option('-i', '--interface_mode', dest='interface_mode', default=False,
+                      action='store_true', metavar='INTERFACE',
+                      help='run the controller in interface only mode for testing integration and ICD compliance. (default: %default)')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
                       action='store_true', metavar='VERBOSE',
                       help='print verbose output (default: %default)')
@@ -65,7 +72,7 @@ if __name__ == "__main__":
     from katsdpcontroller import sdpcontroller
 
     logger.info("Starting SDP Controller...")
-    server = sdpcontroller.SDPControllerServer(opts.host, opts.port, opts.simulate)
+    server = sdpcontroller.SDPControllerServer(opts.host, opts.port, simulate=opts.simulate, interface_mode=opts.interface_mode)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)
@@ -81,9 +88,9 @@ if __name__ == "__main__":
     server.start()
     logger.info("Started SDP Controller.")
 
-    manhole.install(oneshot_on='USR1', locals={'server':server, 'opts':opts})
-     # allow remote debug connections and expose server and opts
-
+    if manhole:
+        manhole.install(oneshot_on='USR1', locals={'server':server, 'opts':opts})
+         # allow remote debug connections and expose server and opts
     try:
         while running:
             try:
