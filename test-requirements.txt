@@ -1,0 +1,4 @@
+katcp==0.5.2
+netifaces
+faulthandler
+networkx
