@@ -45,6 +45,31 @@ MAX_DATA_PRODUCTS = 255
 
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
+class CallbackSensor(Sensor):
+    def __init__(self, *args, **kwargs):
+        self._read_callback = None
+        super(CallbackSensor, self).__init__(*args, **kwargs)
+
+    def set_read_callback(self, callback=None):
+        self._read_callback = callback
+
+    def read(self):
+        """Provide a callback function that is executed when read is called.
+
+        Returns
+        -------
+        timestamp : float in seconds
+           The time at which the sensor value was determined.
+        status : Sensor status constant
+            Whether the value represents an error condition or not.
+        value : object
+            The value of the sensor (the type will be appropriate to the
+            sensor's type).
+        """
+        if self._read_callback:
+            self.set_value(self._read_callback())
+        return self._value_tuple
+
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
     def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',test=False, interface_mode=False):
@@ -826,6 +851,7 @@ class SDPControllerServer(DeviceServer):
         self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
          # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
          # TODO: Add more sensors exposing resource usage and currently executing graphs
+        self._ntp_sensor = CallbackSensor(Sensor.BOOLEAN, "time-synchronised","SDP Controller container (and host) is synchronised to NTP", "")
 
         self.simulate = kwargs['simulate']
         if self.simulate: logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
@@ -859,10 +885,20 @@ class SDPControllerServer(DeviceServer):
         self._device_status_sensor.set_value('ok')
         self.add_sensor(self._device_status_sensor)
 
+        self._ntp_sensor.set_value(False)
+        self._ntp_sensor.set_read_callback(self._check_ntp_status)
+        self.add_sensor(self._ntp_sensor)
+
           # until we know any better, failure modes are all inactive
         for s in self._fmeca_sensors.itervalues():
             s.set_value(0)
             self.add_sensor(s)
+
+    def _check_ntp_status(self):
+        try:
+            return subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0
+        except OSError:
+            return False
 
     def request_halt(self, req, msg):
         """Halt the device server.
