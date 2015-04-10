@@ -20,6 +20,7 @@ EXPECTED_SENSOR_LIST = [
     ('build-state', '', '', 'string'),
     ('device-status', '', '', 'discrete', 'ok', 'degraded', 'fail'),
     ('fmeca.FD0001', '', '', 'boolean'),
+    ('time-synchronised', '', '', 'boolean'),
 ]
 
 EXPECTED_REQUEST_LIST = [
