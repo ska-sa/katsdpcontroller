@@ -29,7 +29,8 @@ The clients will also need to be configured with the CA certificate. There are t
  1. Pass --insecure-registry=<host>:5000 to the Docker daemon. On Ubuntu, this can be done
     by editing `/etc/default/docker` and adding it to DOCKER_OPTS.
 
- 2. Add the certificate to the client machine. On Ubuntu, one can do this by copying it to
+ 2. Add the certificate to the client machine. On Ubuntu, one can do this by copying
+    [the CA certificate](../certs/ca.pem) to
     `/usr/local/share/ca-certificates/ska_sa_sdp.crt`, running `update-ca-certificates`,
     and then restarting Docker.
 
