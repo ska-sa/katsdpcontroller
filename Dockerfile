@@ -21,8 +21,8 @@ RUN pip install --no-deps .
 EXPOSE 5000
 
 # Launch configuration
-USER kat
-WORKDIR /home/kat
+USER root
+WORKDIR /root
 
-RUN mkdir ~/.docker
-COPY ./conf/docker_keys /home/kat/.docker/
+RUN mkdir /root/.docker
+COPY ./conf/docker_keys /root/.docker/
