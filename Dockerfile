@@ -24,5 +24,5 @@ EXPOSE 5000
 USER root
 WORKDIR /root
 
-RUN mkdir ~/.docker
-COPY ./conf/docker_keys /home/kat/.docker/
+RUN mkdir /root/.docker
+COPY ./conf/docker_keys /root/.docker/
