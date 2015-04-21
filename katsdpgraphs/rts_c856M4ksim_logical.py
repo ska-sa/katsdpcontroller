@@ -17,7 +17,7 @@ def build_physical_graph(r):
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
-    attributes = {'antenna_mask':'m062,m063', 'l0_int_time':2,\
+    attributes = {'antenna_mask':'m062,m063', 'l0_int_time':2, 'cbf_channels': 4096,
                   'cal_refant':'m062', 'cal_g_solint':10, 'cal_bp_solint':10, 'cal_k_solint':10, 'cal_k_chan_sample':10}
 
     G.graph.update(attributes)
