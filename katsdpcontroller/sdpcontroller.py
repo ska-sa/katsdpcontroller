@@ -19,7 +19,7 @@ MAX_DATA_PRODUCTS = 255
  # the maximum possible number of simultaneously configured data products
  # pretty arbitrary, could be increased, but we need some limits
 
-logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+logger = logging.getLogger("sdpcontroller")
 
 class CallbackSensor(Sensor):
     def __init__(self, *args, **kwargs):
@@ -190,7 +190,11 @@ class SDPDataProduct(SDPDataProductBase):
             logger.error(retmsg)
             return ('fail',retmsg)
         try:
-            cmd = ["ingest.py","-p {0}".format(self.ingest_port),"--cbf-spead-port={0}".format(cbf_port),"--cbf-spead-host={0}".format(cbf_host),"--cam-spead-port={0}".format(cam_port),"--cam-spead-host={0}".format(cam_host)]
+            eff_log_level = logging.getLevelName(logger.getEffectiveLevel())
+             # match the log level of the launched ingest to the master controller
+            cmd = ["ingest.py","--loglevel={}".format(eff_log_level), "--antennas={}".format(self.antennas), "-p {}".format(self.ingest_port), \
+                   "--cbf-spead-port={}".format(cbf_port),"--cbf-spead-host={}".format(cbf_host),"--cam-spead-port={}".format(cam_port),\
+                   "--cam-spead-host={}".format(cam_host)]
             self.ingest = subprocess.Popen(cmd)
             logger.info("Launching new ingest process with configuration: {0}".format(cmd))
             self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
@@ -257,7 +261,6 @@ class SDPControllerServer(DeviceServer):
     BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
 
     def __init__(self, *args, **kwargs):
-        logging.basicConfig(level=logging.INFO)
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
@@ -434,7 +437,7 @@ class SDPControllerServer(DeviceServer):
 
         if antennas == "":
             try:
-                (rcode, rval) = self.deregister_product(data_product_id)
+                (rcode, rval) = self.deregister_product(data_product_id, force=True)
                 return (rcode, rval)
             except KeyError:
                 return ('fail',"Deconfiguration of data product %s requested, but no configuration found." % data_product_id)
@@ -457,13 +460,13 @@ class SDPControllerServer(DeviceServer):
 
         if self.simulate: self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
         else:
-            self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
-            self.tasks[disp_id].launch()
+            #self.tasks[disp_id] = SDPTask(disp_id,"time_plot.py","127.0.0.1")
+            #self.tasks[disp_id].launch()
             self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source, ingest_port)
             rcode, rval = self.data_products[data_product_id].connect()
             if rcode == 'fail':
-                disp_task = self.tasks.pop(disp_id)
-                if disp_task: disp_task.halt()
+                #disp_task = self.tasks.pop(disp_id)
+                #if disp_task: disp_task.halt()
                 self.data_products.pop(data_product_id)
                 self.ingest_ports.pop(data_product_id)
                 return (rcode, rval)
