@@ -80,8 +80,9 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_fails("data-product-configure",TEST_ID+'2',"")
         self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
         self.client.assert_request_succeeds("capture-init",TEST_ID+'2')
-        self.client.assert_request_fails("data-product-configure",TEST_ID+'2',"")
+        #self.client.assert_request_fails("data-product-configure",TEST_ID+'2',"")
          # should not be able to deconfigure when not in idle state
+         # now superceded by deconfigure always being forced...
         self.client.assert_request_succeeds("capture-done",TEST_ID+'2')
         self.client.assert_request_succeeds("data-product-configure",TEST_ID+'2',"")
 
