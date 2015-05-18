@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser.add_option('-p', '--port', dest='port', type="int", default=5000, metavar='N',
                       help='katcp listen port (default=%default)')
     parser.add_option('-w', '--working-folder', dest='workpath',
-                      default=os.path.join("/", "var", "kat", "sdpcontroller"), metavar='WORKING_PATH',
+                      default=os.path.join("/", "var", "kat", "log"), metavar='WORKING_PATH',
                       help='folder to write process standard out logs into (default=%default)')
     parser.add_option('-l', '--loglevel', dest='loglevel', type="string",
                       default="info", metavar='LOGLEVEL',
