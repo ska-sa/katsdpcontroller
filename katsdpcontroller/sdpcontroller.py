@@ -46,6 +46,7 @@ MAX_DATA_PRODUCTS = 255
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 class CallbackSensor(Sensor):
+    """KATCP Sensor that uses a callback to obtain the next sensor value."""
     def __init__(self, *args, **kwargs):
         self._read_callback = None
         super(CallbackSensor, self).__init__(*args, **kwargs)
@@ -58,17 +59,13 @@ class CallbackSensor(Sensor):
 
         Returns
         -------
-        timestamp : float in seconds
-           The time at which the sensor value was determined.
-        status : Sensor status constant
-            Whether the value represents an error condition or not.
-        value : object
-            The value of the sensor (the type will be appropriate to the
-            sensor's type).
+        reading : :class:`katcp.core.Reading` object
+            Sensor reading as a (timestamp, status, value) tuple
+
         """
         if self._read_callback:
             self.set_value(self._read_callback())
-        return self._value_tuple
+        return self._current_reading
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
