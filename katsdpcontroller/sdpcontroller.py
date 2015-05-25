@@ -49,6 +49,7 @@ class CallbackSensor(Sensor):
     """KATCP Sensor that uses a callback to obtain the next sensor value."""
     def __init__(self, *args, **kwargs):
         self._read_callback = None
+        self._busy_updating = False
         super(CallbackSensor, self).__init__(*args, **kwargs)
 
     def set_read_callback(self, callback=None):
@@ -63,8 +64,12 @@ class CallbackSensor(Sensor):
             Sensor reading as a (timestamp, status, value) tuple
 
         """
-        if self._read_callback:
+        if self._read_callback and not self._busy_updating:
+            self._busy_updating = True
             self.set_value(self._read_callback())
+        # Having this outside the above if-statement ensures that we cannot get
+        # stuck with busy_updating=True if read callback crashes in one thread
+        self._busy_updating = False
         return self._current_reading
 
 class SDPResources(object):
