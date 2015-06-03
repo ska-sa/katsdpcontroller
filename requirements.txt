@@ -1,4 +1,4 @@
-katcp==0.5.2
+git+ssh://git@github.com/ska-sa/katcp-python
 docker-py==0.7.0
 netifaces
 redis
