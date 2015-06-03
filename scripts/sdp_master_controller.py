@@ -48,7 +48,7 @@ if __name__ == "__main__":
         opts.loglevel = getattr(logging, opts.loglevel.upper())
     logger.setLevel(opts.loglevel)
     try:
-        fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e6, backupCount=10)
+        fh = logging.handlers.RotatingFileHandler(os.path.join(opts.workpath, 'sdpcontroller.log'), maxBytes=1e7, backupCount=10)
         formatter = logging.Formatter(("%(asctime)s.%(msecs)dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s"),
                                       datefmt="%Y-%m-%d %H:%M:%S")
         fh.setFormatter(formatter)
