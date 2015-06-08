@@ -1092,7 +1092,9 @@ class SDPControllerServer(DeviceServer):
 
          # determine graph name
         try:
-            sane_name = re.findall('[a-z]+_[a-zA-Z0-9]+',data_product_id)[0]
+            name_parts = data_product_id.split("_")
+             # expect product name to be of form [<array_name>_]<product_name>
+            sane_name = name_parts[-1]
             graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
             logger.info("Launching graph {}.".format(graph_name))
         except IndexError:
