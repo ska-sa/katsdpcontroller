@@ -39,10 +39,6 @@ TASK_STATES = {0:'init',1:'running',2:'killed'}
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
 
-MAX_DATA_PRODUCTS = 255
- # the maximum possible number of simultaneously configured subarray products
- # pretty arbitrary, could be increased, but we need some limits
-
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 class CallbackSensor(Sensor):
@@ -1091,16 +1087,11 @@ class SDPControllerServer(DeviceServer):
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
          # determine graph name
-        try:
-            name_parts = subarray_product_id.split("_")
-             # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
-            sane_name = name_parts[-1]
-            graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
-            logger.info("Launching graph {}.".format(graph_name))
-        except IndexError:
-            retmsg = "Subarray product id {} does not match expected format of [a-z]+_[a-zA-Z0-9]+_*[0-9]* (e.g. rts_c856M4k or rts_c856M4k_2)".format(subarray_product_id)
-            logger.error(retmsg)
-            return ('fail',retmsg)
+        name_parts = subarray_product_id.split("_")
+         # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
+        sane_name = name_parts[-1]
+        graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
+        logger.info("Launching graph {}.".format(graph_name))
 
         graph = SDPGraph(graph_name, self.resources)
          # create graph object and build physical graph from specified resources
