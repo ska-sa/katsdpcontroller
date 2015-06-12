@@ -3,19 +3,19 @@
 """
 
 import os
-import re
 import time
 import logging
 import subprocess
 import shlex
 import importlib
-import netifaces
 import json
+import signal
+
+import netifaces
+import faulthandler
+
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
-
-import faulthandler
-import signal
 
 try:
     import docker
@@ -458,7 +458,7 @@ class SDPHost(object):
         """Stop the specified container name."""
         logger.debug("Stopping container {} on host {}".format(container_name, self.ip))
         if container_name.rfind("_") > 0:
-            _container = get_container(container_name)
+            _container = self.get_container(container_name)
         else:
             _container = self.container_list[container_name]
 

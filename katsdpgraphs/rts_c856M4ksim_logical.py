@@ -1,5 +1,4 @@
 import networkx as nx
-import numpy as np
 
 def define_hosts():
      # in the future this will be discovered at master controller boot time

@@ -2,8 +2,6 @@
 
 import unittest2 as unittest
 
-import os, time
-
 from katcp.testutils import BlockingTestClient
 from katcp import Message
 

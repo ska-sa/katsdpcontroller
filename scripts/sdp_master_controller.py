@@ -7,7 +7,6 @@
 
 import sys
 import os
-import time
 import Queue
 import signal
 from optparse import OptionParser
