@@ -11,7 +11,11 @@ SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_co
 
 ANTENNAS = 'm063,m064'
 
-TEST_ID = 'rts_c856M4k'
+PRODUCT = 'c856M4k'
+SUBARRAY_PRODUCT1 = 'array_1_' + PRODUCT
+SUBARRAY_PRODUCT2 = 'array_2_' + PRODUCT
+SUBARRAY_PRODUCT3 = 'array_3_' + PRODUCT
+SUBARRAY_PRODUCT4 = 'array_4_' + PRODUCT
 
 EXPECTED_SENSOR_LIST = [
     ('api-version', '', '', 'string'),
@@ -59,41 +63,41 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("task-terminate","task1")
 
     def test_capture_init(self):
-        self.client.assert_request_fails("capture-init",TEST_ID)
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
-        self.client.assert_request_succeeds("capture-init",TEST_ID)
+        self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
-        reply, informs = self.client.blocking_request(Message.request("capture-status",TEST_ID))
+        reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
         self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok",SA_STATES[2])))
 
     def test_capture_done(self):
-        self.client.assert_request_fails("capture-done",TEST_ID+'_1')
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_1',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
-        self.client.assert_request_fails("capture-done",TEST_ID+'_1')
+        self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
 
-        self.client.assert_request_succeeds("capture-init",TEST_ID+'_1')
-        self.client.assert_request_succeeds("capture-done",TEST_ID+'_1')
+        self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT2)
+        self.client.assert_request_succeeds("capture-done",SUBARRAY_PRODUCT2)
 
     def test_deconfigure_subarray_product(self):
-        self.client.assert_request_fails("data-product-configure",TEST_ID+'_2',"")
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_2',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
-        self.client.assert_request_succeeds("capture-init",TEST_ID+'_2')
-        self.client.assert_request_fails("data-product-configure",TEST_ID+'_2',"")
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT3)
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
          # should not be able to deconfigure when not in idle state
-        self.client.assert_request_succeeds("capture-done",TEST_ID+'_2')
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_2',"")
+        self.client.assert_request_succeeds("capture-done",SUBARRAY_PRODUCT3)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,"")
 
     def test_configure_subarray_product(self):
-        self.client.assert_request_fails("data-product-configure",TEST_ID+'_3')
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_3',ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_3')
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4)
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
         self.assertEqual(repr(reply),repr(Message.reply("data-product-configure","ok",1)))
 
-        self.client.assert_request_succeeds("data-product-configure",TEST_ID+'_3',"")
-        self.client.assert_request_fails("data-product-configure",TEST_ID+'_3')
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,"")
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
 
     def test_sensor_list(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
