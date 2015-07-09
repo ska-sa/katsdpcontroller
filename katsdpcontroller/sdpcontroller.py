@@ -3,19 +3,19 @@
 """
 
 import os
-import re
 import time
 import logging
 import subprocess
 import shlex
 import importlib
-import netifaces
 import json
+import signal
+
+import netifaces
+import faulthandler
+
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
-
-import faulthandler
-import signal
 
 try:
     import docker
@@ -38,10 +38,6 @@ TASK_STATES = {0:'init',1:'running',2:'killed'}
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
-
-MAX_DATA_PRODUCTS = 255
- # the maximum possible number of simultaneously configured data products
- # pretty arbitrary, could be increased, but we need some limits
 
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
@@ -462,7 +458,7 @@ class SDPHost(object):
         """Stop the specified container name."""
         logger.debug("Stopping container {} on host {}".format(container_name, self.ip))
         if container_name.rfind("_") > 0:
-            _container = get_container(container_name)
+            _container = self.get_container(container_name)
         else:
             _container = self.container_list[container_name]
 
@@ -666,20 +662,20 @@ class SDPTask(object):
     def __repr__(self):
         return "SDP Task: status => {0}, uptime => {1:.2f}, cmd => {2}".format(self.state, self.uptime(), self._task_cmd_array[0])
 
-class SDPDataProductBase(object):
-    """SDP Data Product Base
+class SDPSubarrayProductBase(object):
+    """SDP Subarray Product Base
 
-    Represents an instance of an SDP data product. This includes ingest, an appropriate
+    Represents an instance of an SDP subarray product. This includes ingest, an appropriate
     telescope model, and any required post-processing.
 
-    In general each telescope data product is handled in a completely parallel fashion by the SDP.
+    In general each telescope subarray product is handled in a completely parallel fashion by the SDP.
     This class encapsulates these instances, handling control input and sensor feedback to CAM.
 
     ** This can be used directly as a stubbed interface for use in standalone testing and validation. 
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, data_product_id, antennas, n_channels, dump_rate, n_beams, graph, simulate):
-        self.data_product_id = data_product_id
+    def __init__(self, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, simulate):
+        self.subarray_product_id = subarray_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
         self.n_channels = n_channels
@@ -700,17 +696,17 @@ class SDPDataProductBase(object):
 
     def set_psb(self, psb_id):
         if self.psb_id > 0:
-            return ('fail', 'An existing processing schedule block is already active. Please stop the data product before adding a new one.')
+            return ('fail', 'An existing processing schedule block is already active. Please stop the subarray product before adding a new one.')
         if self._state < 2:
-            return ('fail','The data product specified has not yet be inited. Please do this before init post processing.')
+            return ('fail','The subarray product specified has not yet be inited. Please do this before init post processing.')
         self.psb_id = psb_id
         time.sleep(2) # simulation
         return ('ok','Post processing has been initialised')
 
     def get_psb(self, psb_id):
         if self.psb_id > 0:
-            return ('ok','Post processing id %i is configured and active on this data product' % self.psb_id)
-        return ('fail','No post processing block is active on this data product')
+            return ('ok','Post processing id %i is configured and active on this subarray product' % self.psb_id)
+        return ('fail','No post processing block is active on this subarray product')
 
     def _set_state(self, state_id):
         if state_id == 5: state_id = 1
@@ -722,9 +718,9 @@ class SDPDataProductBase(object):
     def deconfigure(self, force=False):
         if self._state == 1 or force:
             self._deconfigure()
-            return ('ok', 'Data product has been deconfigured')
+            return ('ok', 'Subarray product has been deconfigured')
         else:
-            return ('fail','Data product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
+            return ('fail','Subarray product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
 
     def _deconfigure(self):
         self._set_state(0)
@@ -733,11 +729,11 @@ class SDPDataProductBase(object):
         # TODO: check that state change is allowed.
         if state_id == 5:
             if self._state < 2:
-                return ('fail','Can only halt data_products that have been inited')
+                return ('fail','Can only halt subarray_products that have been inited')
 
         if state_id == 2:
             if self._state != 1:
-                return ('fail','Data product is currently in state %s, not %s as expected. Cannot be inited.' % (self.state,SA_STATES[1]))
+                return ('fail','Subarray product is currently in state %s, not %s as expected. Cannot be inited.' % (self.state,SA_STATES[1]))
 
         rcode, rval = self._set_state(state_id)
         if rcode == 'fail': return ('fail',rval)
@@ -746,11 +742,11 @@ class SDPDataProductBase(object):
         return ('ok', rval)
 
     def __repr__(self):
-        return "Data product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.data_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state, self.psb_id)
+        return "Subarray product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.subarray_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state, self.psb_id)
 
-class SDPDataProduct(SDPDataProductBase):
+class SDPSubarrayProduct(SDPSubarrayProductBase):
     def __init__(self, *args, **kwargs):
-        super(SDPDataProduct, self).__init__(*args, **kwargs)
+        super(SDPSubarrayProduct, self).__init__(*args, **kwargs)
 
     def deconfigure(self, force=False):
         if self._state == 1 or force:
@@ -758,14 +754,14 @@ class SDPDataProduct(SDPDataProductBase):
                 logger.warning("Forcing capture_done on external request.")
                 self._issue_req('capture-done')
             self._deconfigure()
-            return ('ok', 'Data product has been deconfigured')
+            return ('ok', 'Subarray product has been deconfigured')
         else:
-            return ('fail','Data product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
+            return ('fail','Subarray product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
 
     def _deconfigure(self):
-         # handle shutdown of this data product in as graceful a fashion as possible.
+         # handle shutdown of this subarray product in as graceful a fashion as possible.
          # TODO: be graceful :)
-        logger.info("Deconfiguring data product")
+        logger.info("Deconfiguring subarray product")
          # issue shutdown commands for individual nodes via katcp
          # then terminate katcp connection
         self._issue_req('capture-done',node_type='ingest')
@@ -868,9 +864,9 @@ class SDPControllerServer(DeviceServer):
         self.resources = SDPResources(test=self.test, interface_mode=self.interface_mode)
          # create a new resource pool. 
 
-        self.data_products = {}
-         # dict of currently configured SDP data_products
-        self.data_product_graphs = {}
+        self.subarray_products = {}
+         # dict of currently configured SDP subarray_products
+        self.subarray_product_graphs = {}
          # shortcut dict to established graphs
         self.ingest_ports = {}
         self.tasks = {}
@@ -985,33 +981,33 @@ class SDPControllerServer(DeviceServer):
          # launch failed, discard task
         return (rcode, rval)
 
-    def deregister_product(self,data_product_id,force=False):
-        """Deregister a data product.
+    def deregister_product(self,subarray_product_id,force=False):
+        """Deregister a subarray product.
 
         This first checks to make sure the product is in an appropriate state
         (ideally idle), and then shuts down the ingest and plotting
         processes associated with it.
 
         Forcing skips the check on state and is basically used in an emergency."""
-        dp_handle = self.data_products[data_product_id]
+        dp_handle = self.subarray_products[subarray_product_id]
         rcode, rval = dp_handle.deconfigure(force=force)
         if rcode == 'fail': return (rcode, rval)
-        self.data_products.pop(data_product_id)
+        self.subarray_products.pop(subarray_product_id)
         return (rcode, rval)
 
     def handle_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
         logger.warning("SDP Master Controller interrupted.")
-        for data_product_id in self.data_products.keys():
-            rcode, rval = self.deregister_product(data_product_id,force=True)
-            logger.info("Deregistered data product {0} ({1},{2})".format(data_product_id, rcode, rval))
+        for subarray_product_id in self.subarray_products.keys():
+            rcode, rval = self.deregister_product(subarray_product_id,force=True)
+            logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
 
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
-    def request_data_product_configure(self, req, req_msg, data_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source):
-        """Configure a SDP data product instance.
+    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source):
+        """Configure a SDP subarray product instance.
 
-        A data product instance is comprised of a telescope state, a collection of
+        A subarray product instance is comprised of a telescope state, a collection of
         containers running required SDP services, and a networking configuration 
         appropriate for the required data movement.
 
@@ -1024,19 +1020,19 @@ class SDPControllerServer(DeviceServer):
 
         Inform Arguments
         ----------------
-        data_product_id : string
-            The ID to use for this data product.
+        subarray_product_id : string
+            The ID to use for this subarray product, in the form [<subarray_name>_]<data_product_name>.
         antennas : string
-            A space seperated list of antenna names to use in this data product.
+            A space-separated list of antenna names to use in this subarray product.
             These will be matched to the CBF output and used to pull only the specific
-            data.
-            If antennas == 0, then this data product is de-configured. Trailing arguments can be omitted.
+            data. If antennas is "0" or "", then this subarray product is de-configured.
+            Trailing arguments can be omitted.
         n_channels : int
-            Number of channels used in this data product (based on CBF config)
+            Number of channels used in this subarray product (based on CBF config)
         dump_rate : float
-            Dump rate of data product in Hz
+            Dump rate of subarray product in Hz
         n_beams : int
-            Number of beams in the data product (0 = Correlator output, 1+ = Beamformer)
+            Number of beams in the subarray product (0 = Correlator output, 1+ = Beamformer)
         cbf_source : string
             A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
         cam_source : string
@@ -1047,33 +1043,33 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
             If ok, returns the port on which the ingest process for this product is running.
         """
-        if not data_product_id:
-            for (data_product_id,data_product) in self.data_products.iteritems():
-                req.inform(data_product_id,data_product)
-            return ('ok',"%i" % len(self.data_products))
+        if not subarray_product_id:
+            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
+                req.inform(subarray_product_id,subarray_product)
+            return ('ok',"%i" % len(self.subarray_products))
 
         if antennas is None:
-            if data_product_id in self.data_products:
-                return ('ok',"%s is currently configured: %s" % (data_product_id,repr(self.data_products[data_product_id])))
-            else: return ('fail',"This data product id has no current configuration.")
+            if subarray_product_id in self.subarray_products:
+                return ('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id])))
+            else: return ('fail',"This subarray product id has no current configuration.")
 
         if antennas == "0" or antennas == "":
             try:
-                (rcode, rval) = self.deregister_product(data_product_id)
+                (rcode, rval) = self.deregister_product(subarray_product_id)
                 return (rcode, rval)
             except KeyError:
-                return ('fail',"Deconfiguration of data product %s requested, but no configuration found." % data_product_id)
+                return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
 
-        if data_product_id in self.data_products:
-            dp = self.data_products[data_product_id]
+        if subarray_product_id in self.subarray_products:
+            dp = self.subarray_products[subarray_product_id]
             if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
-                return ('ok',"Data product with this configuration already exists. Pass.")
+                return ('ok',"Subarray product with this configuration already exists. Pass.")
             else:
-                return ('fail',"A data product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(data_product_id))
+                return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
 
          # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and cbf_source and cam_source):
-            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a data product")
+            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a subarray product")
 
         try:
             (cbf_host,cbf_port) = cbf_source.split(":",2)
@@ -1091,16 +1087,11 @@ class SDPControllerServer(DeviceServer):
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
          # determine graph name
-        try:
-            name_parts = data_product_id.split("_")
-             # expect product name to be of form [<array_name>_]<product_name>
-            sane_name = name_parts[-1]
-            graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
-            logger.info("Launching graph {}.".format(graph_name))
-        except IndexError:
-            retmsg = "Data product id {} does not match expected format of [a-z]+_[a-zA-Z0-9]+_*[0-9]* (e.g. rts_c856M4k or rts_c856M4k_2)".format(data_product_id)
-            logger.error(retmsg)
-            return ('fail',retmsg)
+        name_parts = subarray_product_id.split("_")
+         # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
+        sane_name = name_parts[-1]
+        graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
+        logger.info("Launching graph {}.".format(graph_name))
 
         graph = SDPGraph(graph_name, self.resources)
          # create graph object and build physical graph from specified resources
@@ -1114,8 +1105,8 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
             logger.warning("No components will be started - running in interface mode")
-            self.data_products[data_product_id] = SDPDataProductBase(data_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-            self.data_product_graphs[data_product_id] = graph
+            self.subarray_products[subarray_product_id] = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            self.subarray_product_graphs[subarray_product_id] = graph
             return ('ok',"")
 
         if docker is None:
@@ -1161,27 +1152,27 @@ class SDPControllerServer(DeviceServer):
             return ('fail', ret_msg)
 
          # at this point telstate is up, nodes have been launched, katcp connections established
-         # TODO: The data product class will need to be reworked
-        self.data_products[data_product_id] = SDPDataProduct(data_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.data_product_graphs[data_product_id] = graph
+         # TODO: The subarray product class will need to be reworked
+        self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+        self.subarray_product_graphs[subarray_product_id] = graph
 
         return ('ok',"")
 
     @request(Str())
     @return_reply(Str())
-    def request_capture_init(self, req, data_product_id):
-        """Request capture of the specified data product to start.
+    def request_capture_init(self, req, subarray_product_id):
+        """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data
-        as specified by the data product provided. It is necessary to call this
+        as specified by the subarray product provided. It is necessary to call this
         command before issuing a start command to the CBF. Essentially the SDP
         will, once this command has returned 'OK', be in a wait state until
         reception of the stream control start packet.
 
         Inform Arguments
         ----------------
-        data_product_id : string
-            The id of the data product to initialise. This must have already been 
+        subarray_product_id : string
+            The id of the subarray product to initialise. This must have already been
             configured via the data-product-configure command.
 
         Returns
@@ -1189,9 +1180,9 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
             Whether the system is ready to capture or not.
         """
-        if data_product_id not in self.data_products:
-            return ('fail','No existing data product configuration with this id found')
-        sa = self.data_products[data_product_id]
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        sa = self.subarray_products[subarray_product_id]
 
         rcode, rval = sa.set_state(2)
         if rcode == 'fail': return (rcode, rval)
@@ -1200,37 +1191,37 @@ class SDPControllerServer(DeviceServer):
 
     @request(Str(optional=True))
     @return_reply(Str())
-    def request_capture_status(self, req, data_product_id):
-        """Returns the status of the specified data product.
+    def request_capture_status(self, req, subarray_product_id):
+        """Returns the status of the specified subarray product.
 
         Inform Arguments
         ----------------
-        data_product_id : string
-            The id of the data product whose state we wish to return.
+        subarray_product_id : string
+            The id of the subarray product whose state we wish to return.
 
         Returns
         -------
         success : {'ok', 'fail'}
         state : str
         """
-        if not data_product_id:
-            for (data_product_id,data_product) in self.data_products.iteritems():
-                req.inform(data_product_id,data_product.state)
-            return ('ok',"%i" % len(self.data_products))
+        if not subarray_product_id:
+            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
+                req.inform(subarray_product_id,subarray_product.state)
+            return ('ok',"%i" % len(self.subarray_products))
 
-        if data_product_id not in self.data_products:
-            return ('fail','No existing data product configuration with this id found')
-        return ('ok',self.data_products[data_product_id].state)
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        return ('ok',self.subarray_products[subarray_product_id].state)
 
     @request(Str(),Int(optional=True))
     @return_reply(Str())
-    def request_postproc_init(self, req, data_product_id, psb_id):
-        """Returns the status of the specified data product.
+    def request_postproc_init(self, req, subarray_product_id, psb_id):
+        """Returns the status of the specified subarray product.
 
         Inform Arguments
         ----------------
-        data_product_id : string
-            The id of the data product that will provide data to the post processor
+        subarray_product_id : string
+            The id of the subarray product that will provide data to the post processor
         psb_id : integer
             The id of the post processing schedule block to retrieve
             from the observations database that containts the configuration
@@ -1240,9 +1231,9 @@ class SDPControllerServer(DeviceServer):
         -------
         success : {'ok', 'fail'}
         """
-        if data_product_id not in self.data_products:
-            return ('fail','No existing data product configuration with this id found')
-        sa = self.data_products[data_product_id]
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        sa = self.subarray_products[subarray_product_id]
 
         if not psb_id >= 0:
             rcode, rval = sa.get_psb(psb_id)
@@ -1253,22 +1244,22 @@ class SDPControllerServer(DeviceServer):
 
     @request(Str())
     @return_reply(Str())
-    def request_capture_done(self, req, data_product_id):
-        """Halts the currently specified data product
+    def request_capture_done(self, req, subarray_product_id):
+        """Halts the currently specified subarray product
 
         Inform Arguments
         ----------------
-        data_product_id : string
-            The id of the data product whose state we wish to halt.
+        subarray_product_id : string
+            The id of the subarray product whose state we wish to halt.
 
         Returns
         -------
         success : {'ok', 'fail'}
         state : str
         """
-        if data_product_id not in self.data_products:
-            return ('fail','No existing data product configuration with this id found')
-        rcode, rval = self.data_products[data_product_id].set_state(5)
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        rcode, rval = self.subarray_products[subarray_product_id].set_state(5)
         return (rcode, rval)
 
     @request(include_msg=True)
