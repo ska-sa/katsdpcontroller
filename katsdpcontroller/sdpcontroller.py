@@ -1101,6 +1101,7 @@ class SDPControllerServer(DeviceServer):
         config = graph.graph.graph
          # it is very graphy - indeed...
          # parameters such as antennas and channels are encoded in the logical graphs
+        config['antenna_mask'] = antennas
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))

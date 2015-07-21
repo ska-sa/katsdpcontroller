@@ -16,8 +16,8 @@ def build_physical_graph(r):
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
-    attributes = {'antenna_mask':'m062,m063', 'l0_int_time':2, 'cbf_channels': 4096,
-                  'cal_refant':'m062', 'cal_g_solint':10, 'cal_bp_solint':10, 'cal_k_solint':10, 'cal_k_chan_sample':10}
+    attributes = {'l0_int_time':2, 'cbf_channels': 4096,
+                  'cal_refant':'', 'cal_g_solint':10, 'cal_bp_solint':10, 'cal_k_solint':10, 'cal_k_chan_sample':10}
 
     G.graph.update(attributes)
 
@@ -28,7 +28,7 @@ def build_physical_graph(r):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
-    G.add_node('sdp.ingest.1',{'port': r.get_port('sdp_ingest_1_katcp'), 'output_int_time':2, 'antenna_mask': 'm062,m063', 'antennas':4, 'continuum_factor': 32, 'cbf_channels': 4096,\
+    G.add_node('sdp.ingest.1',{'port': r.get_port('sdp_ingest_1_katcp'), 'output_int_time':2, 'antennas':4, 'continuum_factor': 32, 'cbf_channels': 4096,\
          'docker_image':r.get_image_path('katsdpingest_k40'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
          'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
                           "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]},\
@@ -45,7 +45,7 @@ def build_physical_graph(r):
      # filewriter
 
     G.add_node('sdp.cal.1',{'docker_image':r.get_image_path('katcal'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'run_cal.py',\
-        'docker_params': {"network":"host"}, 'cbf_channels': 4096, 'antenna_mask': 'm062,m063'\
+        'docker_params': {"network":"host"}, 'cbf_channels': 4096, \
         })
      # calibration node
 
