@@ -1102,6 +1102,8 @@ class SDPControllerServer(DeviceServer):
          # it is very graphy - indeed...
          # parameters such as antennas and channels are encoded in the logical graphs
         config['antenna_mask'] = antennas
+        config['subarray_product_id'] = subarray_product_id
+	 # used to identify file type
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
