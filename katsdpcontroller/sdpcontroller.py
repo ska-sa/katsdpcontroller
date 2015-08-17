@@ -1101,9 +1101,10 @@ class SDPControllerServer(DeviceServer):
         config = graph.graph.graph
          # it is very graphy - indeed...
          # parameters such as antennas and channels are encoded in the logical graphs
-        config['antenna_mask'] = antennas
         config['subarray_product_id'] = subarray_product_id
 	 # used to identify file type
+        additional_config = {'antenna_mask':antennas}
+         # holds additional config that must reside within the config dict in the telstate 
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
@@ -1125,7 +1126,7 @@ class SDPControllerServer(DeviceServer):
             return ('fail',retmsg)
 
         logger.debug("Launching telstate. Base parameters {}".format(config))
-        graph.launch_telstate(base_params=config)
+        graph.launch_telstate(additional_config=additional_config, base_params=config)
          # launch the telescope state for this graph
 
         logger.debug("Executing graph {}".format(graph_name))
