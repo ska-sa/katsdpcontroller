@@ -1,13 +1,7 @@
 #!/usr/bin/env python
 from setuptools import setup, find_packages
 
-tests_require = [
-]
-
-install_requires = [
-    'scikits.fitting',
-    'katcp',
-]
+# Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
 setup (
     name = "katsdpcontroller",
@@ -20,8 +14,6 @@ setup (
     scripts = [
         "scripts/sdp_master_controller.py",
         ],
-    #install_requires = install_requires,
-    tests_require=tests_require,
     license='MIT',
     zip_safe = False,
 )
