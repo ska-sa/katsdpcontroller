@@ -1106,7 +1106,8 @@ class SDPControllerServer(DeviceServer):
         graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
         logger.info("Launching graph {}.".format(graph_name))
 
-	self.resources.prefix = name_parts[:-1]
+	self.resources.prefix = subarray_product_id
+         # use the full subarray identifier to avoid any namespace collisions
         logger.info("Setting resources prefix to {}".format(self.resources.prefix))
 
 	self.resources.set_multicast_ip('cbf_spead',cbf_host)
