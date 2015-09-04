@@ -70,16 +70,19 @@ class CallbackSensor(Sensor):
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), safe_multicast_cidr='225.100.100.0/24',test=False, interface_mode=False):
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',test=False, interface_mode=False):
         self.test = test
         self.safe_ports = safe_port_range
+        self.sdisp_ports = sdisp_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
         self.private_registry = None
         self.allocated_ports = {}
+        self.allocated_sdisp_ports = {}
         self.allocated_mip = {}
         self.hosts = {}
         self.hosts_by_class = {}
         self.interface_mode = interface_mode
+        self.prefix = None
         if not self.interface_mode:
             self._discover_hosts()
             try:
@@ -165,7 +168,20 @@ class SDPResources(object):
     def get_host_ip(self, host_class):
          # for the specified host class
          # return an available / assigned ip
+        #if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
         return self.allocated_ip.get(host_class, None)
+
+    def get_sdisp_port_pair(self, host_class):
+         # we want to handle signal displays differently
+         # to avoid fully dynamic port assignment
+         # this returns a pair of (html_port, data_port)
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
+	(html_port, data_port) = self.allocated_sdisp_ports.get(host_class, (None,None))
+        if html_port is None:
+            html_port = self.sdisp_ports.pop()
+            data_port = self.sdisp_ports.pop()
+            self.allocated_sdisp_ports[host_class] = (html_port, data_port)
+        return (html_port, data_port)
 
     def _new_mip(self, host_class):
         mip = self.safe_multicast_range.pop()
@@ -174,11 +190,13 @@ class SDPResources(object):
 
     def set_multicast_ip(self, host_class, ip):
          # override system generated mip with specified one
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
         self.allocated_mip[host_class] = ip
 
     def get_multicast_ip(self, host_class):
          # for the specified host class
          # return an available / assigned multicast address
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
         mip = self.allocated_mip.get(host_class, None)
         if mip is None: mip = self._new_mip(host_class)
         return mip
@@ -190,11 +208,13 @@ class SDPResources(object):
 
     def set_port(self, host_class, port):
          # override system generated port with the specified one
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
         self.allocated_ports[host_class] = port
 
     def get_port(self, host_class):
          # for the specified host class
          # return an available / assigned port]
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
         port = self.allocated_ports.get(host_class, None)
         if port is None: port = self._new_port(host_class)
         return port
@@ -1079,19 +1099,23 @@ class SDPControllerServer(DeviceServer):
             logger.error(retmsg)
             return ('fail',retmsg)
 
-        self.resources.set_multicast_ip('cbf_spead',cbf_host)
-        self.resources.set_multicast_ip('cam_spead',cam_host)
-        self.resources.set_port('cbf_spead',cbf_port)
-        self.resources.set_port('cam_spead',cam_port)
-         # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
-         # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
-
          # determine graph name
         name_parts = subarray_product_id.split("_")
          # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
         sane_name = name_parts[-1]
         graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
         logger.info("Launching graph {}.".format(graph_name))
+
+	self.resources.prefix = subarray_product_id
+         # use the full subarray identifier to avoid any namespace collisions
+        logger.info("Setting resources prefix to {}".format(self.resources.prefix))
+
+	self.resources.set_multicast_ip('cbf_spead',cbf_host)
+        self.resources.set_multicast_ip('cam_spead',cam_host)
+        self.resources.set_port('cbf_spead',cbf_port)
+        self.resources.set_port('cam_spead',cam_port)
+         # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
+         # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
         graph = SDPGraph(graph_name, self.resources)
          # create graph object and build physical graph from specified resources

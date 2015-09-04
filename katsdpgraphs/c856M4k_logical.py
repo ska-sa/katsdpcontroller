@@ -49,8 +49,9 @@ def build_physical_graph(r):
         })
      # calibration node
 
-    G.add_node('sdp.timeplot.1',{'docker_image':r.get_image_path('katsdpdisp'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'time_plot.py --rts',\
-        'docker_params': {"network":"host"}})
+    G.add_node('sdp.timeplot.1',{'html_port': r.get_sdisp_port_pair('timeplot')[0], 'data_port': r.get_sdisp_port_pair('timeplot')[1],\
+	 'docker_image':r.get_image_path('katsdpdisp'), 'docker_host_class':'nvidia_gpu', 'docker_cmd':'time_plot.py --rts',\
+         'docker_params': {"network":"host"}})
      # timeplot
 
     # establish node connections
