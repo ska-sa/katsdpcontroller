@@ -16,7 +16,7 @@ def build_physical_graph(r):
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
-    attributes = {'l0_int_time':2, 'cbf_channels': 4096,
+    attributes = {'sdp_l0_int_time':2, 'sdp_cbf_channels': 4096,
                   'cal_refant':'', 'cal_g_solint':10, 'cal_bp_solint':10, 'cal_k_solint':10, 'cal_k_chan_sample':10}
 
     G.graph.update(attributes)
