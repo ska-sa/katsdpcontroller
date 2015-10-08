@@ -276,6 +276,7 @@ class SDPGraph(object):
         gp = importlib.import_module(graph_name)
         self.graph = gp.build_physical_graph(resources)
         self.telstate = None
+	self.telstate_endpoint = ""
         self.nodes = {}
         self._katcp = {}
          # node keyed dict of established katcp connections
@@ -340,8 +341,8 @@ class SDPGraph(object):
         config.update(additional_config)
 
          # connect to telstate store
-        telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
-        self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+        self.telstate_endpoint = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
+        self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
 
         self.telstate.delete('config')
          # TODO: needed for now as redis tends to save config between sessions at the moment
@@ -1216,6 +1217,31 @@ class SDPControllerServer(DeviceServer):
         if rcode == 'fail': return (rcode, rval)
          # attempt to set state to init
         return ('ok','SDP ready')
+
+    @request(Str(optional=True))
+    @return_reply(Str())
+    def request_telstate_endpoint(self, req, subarray_product_id):
+        """Returns the endpoint for the telescope state repository of the 
+	specified subarray product.
+
+        Inform Arguments
+        ----------------
+        subarray_product_id : string
+            The id of the subarray product whose state we wish to return.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        state : str
+        """
+        if not subarray_product_id:
+            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
+                req.inform(subarray_product_id, getattr(subarray_product.graph,'telstate_endpoint',''))
+            return ('ok',"%i" % len(self.subarray_products))
+
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        return ('ok',getattr(self.subarray_products[subarray_product_id].graph,'telstate_endpoint',''))
 
     @request(Str(optional=True))
     @return_reply(Str())
