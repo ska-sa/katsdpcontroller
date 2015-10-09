@@ -1316,6 +1316,28 @@ class SDPControllerServer(DeviceServer):
         rcode, rval = self.subarray_products[subarray_product_id].set_state(5)
         return (rcode, rval)
 
+    @request()
+    @return_reply(Str())
+    def request_sdp_shutdown(self, req):
+        """Shut down the SDP master controller and all controlled nodes.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+            Whether the shutdown sequence of all other nodes succeeded.
+        hosts : str
+	    Comma seperated lists of hosts that have been shutdown (excl mc host)
+        """
+        for (host_name, host) in self.resources.hosts:
+            logger.warning("Shutting down docker instances on remote host {}".format(host_name))
+            host.shutdown()
+             # check to see if host is not SPMC and then shut it down
+            logger.warning("Issuing halt to host {}".format(host_name))
+
+	#os.kill(os.getpid(), signal.SIGTERM)
+        return ("ok", "sdpmc")
+
+
     @request(include_msg=True)
     @return_reply(Int(min=0))
     def request_sdp_status(self, req, reqmsg):
