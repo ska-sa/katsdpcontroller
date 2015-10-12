@@ -27,6 +27,7 @@ except ImportError:
 
 try:
     import katsdptelstate
+    import redis
 except ImportError:
     katsdptelstate = None
      # as above - katsdptelstate not needed in interface only mode
@@ -122,10 +123,10 @@ class SDPResources(object):
             docker_port = 2375
              # no SSL for local simulation
         else:
-            available_hosts = {'sdp-ingest4.kat.ac.za':\
-                             {'ip':'sdp-ingest4.kat.ac.za','host_class':'nvidia_gpu'},
-                           'sdp-ingest5.kat.ac.za':\
-                             {'ip':'sdp-ingest5.kat.ac.za','host_class':'generic'}}
+            available_hosts = {'ingest1':\
+                             {'ip':'ingest1.local','host_class':'nvidia_gpu'},
+                           'mc1':\
+                             {'ip':'mc1.local','host_class':'generic'}}
             self.private_registry = 'sdp-ingest5.kat.ac.za:5000'
             docker_port = 2376
 
@@ -341,7 +342,13 @@ class SDPGraph(object):
 
          # connect to telstate store
         telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
-        self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+        try:
+            self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+        except redis.ConnectionError:
+            time.sleep(0.5)
+             # we may need some time for the redis container to launch
+            self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+             # if it fails again we have a deeper malaise
 
         self.telstate.delete('config')
          # TODO: needed for now as redis tends to save config between sessions at the moment
