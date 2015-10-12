@@ -10,6 +10,7 @@ import shlex
 import importlib
 import json
 import signal
+import socket
 
 import netifaces
 import faulthandler
@@ -1335,13 +1336,26 @@ class SDPControllerServer(DeviceServer):
         hosts : str
 	    Comma seperated lists of hosts that have been shutdown (excl mc host)
         """
-        for (host_name, host) in self.resources.hosts:
-            logger.warning("Shutting down docker instances on remote host {}".format(host_name))
-            host.shutdown()
-             # check to see if host is not SPMC and then shut it down
-            logger.warning("Issuing halt to host {}".format(host_name))
+	logger.info("SDP Shutdown called.")
+        for subarray_product_id in self.subarray_products.keys():
+            rcode, rval = self.deregister_product(subarray_product_id,force=True)
+            logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
 
-	#os.kill(os.getpid(), signal.SIGTERM)
+        self.resources.hosts.pop('localhost.localdomain')
+         # remove this to prevent accidental shutdown of master controller whilst handling remotes
+
+        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd="/sbin/poweroff", network='host')
+         # prepare a docker image to halt remote hosts
+
+        for (host_name, host) in self.resources.hosts.iteritems():
+            if socket.gethostbyname(host.ip) != '127.0.0.1':
+                 # make sure a localhost hasn't snuck in to spoil the party
+                logger.debug("Launching halt image on host {}".format(host_name))
+                host.launch(kibisis)
+
+        logger.warning("Shutting down master controller host...")
+        os.system('sudo /sbin/poweroff')
+         # finally shutdown localhost - relying on upstart to shutdown the master controller
         return ("ok", "sdpmc")
 
 
