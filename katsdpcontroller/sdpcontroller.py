@@ -278,7 +278,7 @@ class SDPGraph(object):
         gp = importlib.import_module(graph_name)
         self.graph = gp.build_physical_graph(resources)
         self.telstate = None
-	self.telstate_endpoint = ""
+        self.telstate_endpoint = ""
         self.nodes = {}
         self._katcp = {}
          # node keyed dict of established katcp connections
@@ -1334,9 +1334,9 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
             Whether the shutdown sequence of all other nodes succeeded.
         hosts : str
-	    Comma seperated lists of hosts that have been shutdown (excl mc host)
+            Comma separated lists of hosts that have been shutdown (excl mc host)
         """
-	logger.info("SDP Shutdown called.")
+        logger.info("SDP Shutdown called.")
         for subarray_product_id in self.subarray_products.keys():
             rcode, rval = self.deregister_product(subarray_product_id,force=True)
             logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
@@ -1347,16 +1347,23 @@ class SDPControllerServer(DeviceServer):
         kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd="/sbin/poweroff", network='host')
          # prepare a docker image to halt remote hosts
 
+        shutdown_hosts = ""
         for (host_name, host) in self.resources.hosts.iteritems():
             if socket.gethostbyname(host.ip) != '127.0.0.1':
                  # make sure a localhost hasn't snuck in to spoil the party
                 logger.debug("Launching halt image on host {}".format(host_name))
-                host.launch(kibisis)
+                container = host.launch(kibisis)
+                if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
+                else: shutdown_hosts += "{},".format(host_name)
 
         logger.warning("Shutting down master controller host...")
-        os.system('sudo /sbin/poweroff')
+        retval = os.system('sudo --non-interactive /sbin/poweroff')
          # finally shutdown localhost - relying on upstart to shutdown the master controller
-        return ("ok", "sdpmc")
+        if retval != 0:
+            retmsg = "Failed to issue /sbin/poweroff on MC host. This is most likely a sudoers permission issue."
+            logger.error(retmsg)
+            return ("fail", retmsg)
+        return ("ok", shutdown_hosts[:shutdown_hosts.rfind(',')])
 
 
     @request(include_msg=True)
