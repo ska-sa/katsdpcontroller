@@ -1354,7 +1354,7 @@ class SDPControllerServer(DeviceServer):
                 logger.debug("Launching halt image on host {}".format(host_name))
                 container = host.launch(kibisis)
                 if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
-                else: shutdown_hosts += "{},".format(host_name)
+                shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
 
         logger.warning("Shutting down master controller host...")
         retval = os.system('sudo --non-interactive /sbin/poweroff')
