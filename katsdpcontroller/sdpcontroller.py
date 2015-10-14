@@ -280,6 +280,7 @@ class SDPGraph(object):
         self.telstate = None
         self.telstate_endpoint = ""
         self.nodes = {}
+        self.node_details = {}
         self._katcp = {}
          # node keyed dict of established katcp connections
 
@@ -310,6 +311,8 @@ class SDPGraph(object):
             ret_msg = "Failed to launch image {} on host {}.".format(data['docker_image'], host.ip)
             logger.error(ret_msg)
             raise docker.errors.DockerException(ret_msg)
+        else:
+            self.node_details[container.names[0][1:]] = host.get_container_details(container.id)
         self.nodes[node] = SDPNode(node, data, host, container.id)
         logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container.id))
         return container.id
@@ -470,6 +473,12 @@ class SDPHost(object):
                 _container = c
                 break
         return _container
+
+    def get_container_details(self, cid):
+        """Return detailed inspect information for the specified container."""
+        if cid in self.container_list:
+            if self._docker_client is not None: return self._docker_client.inspect_container(cid)
+        return None
 
     def update_containers(self):
          # update our container list
@@ -1193,6 +1202,9 @@ class SDPControllerServer(DeviceServer):
         self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
         self.subarray_product_graphs[subarray_product_id] = graph
 
+         # finally we insert detail on all running nodes into telstate
+        if graph.telstate is not None:
+            graph.telstate.add('sdp_node_detail',graph.node_details)
         return ('ok',"")
 
     @request(Str())
