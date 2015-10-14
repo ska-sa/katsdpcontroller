@@ -1244,12 +1244,12 @@ class SDPControllerServer(DeviceServer):
         """
         if not subarray_product_id:
             for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id, getattr(subarray_product.graph,'telstate_endpoint',''))
+                req.inform(subarray_product_id, subarray_product.graph.telstate_endpoint)
             return ('ok',"%i" % len(self.subarray_products))
 
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
-        return ('ok',getattr(self.subarray_products[subarray_product_id].graph,'telstate_endpoint',''))
+        return ('ok',self.subarray_products[subarray_product_id].graph.telstate_endpoint)
 
     @request(Str(optional=True))
     @return_reply(Str())
