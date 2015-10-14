@@ -33,7 +33,9 @@ EXPECTED_REQUEST_LIST = [
     'capture-status',
     'postproc-init',
     'task-launch',
-    'task-terminate'
+    'task-terminate',
+    'telstate-endpoint',
+    'sdp-shutdown'
 ]
 
 class TestSDPController(unittest.TestCase):

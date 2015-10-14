@@ -10,6 +10,7 @@ import shlex
 import importlib
 import json
 import signal
+import socket
 
 import netifaces
 import faulthandler
@@ -277,6 +278,7 @@ class SDPGraph(object):
         gp = importlib.import_module(graph_name)
         self.graph = gp.build_physical_graph(resources)
         self.telstate = None
+        self.telstate_endpoint = ""
         self.nodes = {}
         self._katcp = {}
          # node keyed dict of established katcp connections
@@ -341,13 +343,13 @@ class SDPGraph(object):
         config.update(additional_config)
 
          # connect to telstate store
-        telstate_host = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
+        self.telstate_endpoint = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
         try:
-            self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+            self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         except redis.ConnectionError:
             time.sleep(0.5)
              # we may need some time for the redis container to launch
-            self.telstate = katsdptelstate.TelescopeState(endpoint=telstate_host)
+            self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
              # if it fails again we have a deeper malaise
 
         self.telstate.delete('config')
@@ -1226,6 +1228,31 @@ class SDPControllerServer(DeviceServer):
 
     @request(Str(optional=True))
     @return_reply(Str())
+    def request_telstate_endpoint(self, req, subarray_product_id):
+        """Returns the endpoint for the telescope state repository of the 
+	specified subarray product.
+
+        Inform Arguments
+        ----------------
+        subarray_product_id : string
+            The id of the subarray product whose state we wish to return.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        state : str
+        """
+        if not subarray_product_id:
+            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
+                req.inform(subarray_product_id, subarray_product.graph.telstate_endpoint)
+            return ('ok',"%i" % len(self.subarray_products))
+
+        if subarray_product_id not in self.subarray_products:
+            return ('fail','No existing subarray product configuration with this id found')
+        return ('ok',self.subarray_products[subarray_product_id].graph.telstate_endpoint)
+
+    @request(Str(optional=True))
+    @return_reply(Str())
     def request_capture_status(self, req, subarray_product_id):
         """Returns the status of the specified subarray product.
 
@@ -1296,6 +1323,48 @@ class SDPControllerServer(DeviceServer):
             return ('fail','No existing subarray product configuration with this id found')
         rcode, rval = self.subarray_products[subarray_product_id].set_state(5)
         return (rcode, rval)
+
+    @request()
+    @return_reply(Str())
+    def request_sdp_shutdown(self, req):
+        """Shut down the SDP master controller and all controlled nodes.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+            Whether the shutdown sequence of all other nodes succeeded.
+        hosts : str
+            Comma separated lists of hosts that have been shutdown (excl mc host)
+        """
+        logger.info("SDP Shutdown called.")
+        for subarray_product_id in self.subarray_products.keys():
+            rcode, rval = self.deregister_product(subarray_product_id,force=True)
+            logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+
+        self.resources.hosts.pop('localhost.localdomain')
+         # remove this to prevent accidental shutdown of master controller whilst handling remotes
+
+        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd="/sbin/poweroff", network='host')
+         # prepare a docker image to halt remote hosts
+
+        shutdown_hosts = ""
+        for (host_name, host) in self.resources.hosts.iteritems():
+            if socket.gethostbyname(host.ip) != '127.0.0.1':
+                 # make sure a localhost hasn't snuck in to spoil the party
+                logger.debug("Launching halt image on host {}".format(host_name))
+                container = host.launch(kibisis)
+                if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
+                shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
+
+        logger.warning("Shutting down master controller host...")
+        retval = os.system('sudo --non-interactive /sbin/poweroff')
+         # finally shutdown localhost - relying on upstart to shutdown the master controller
+        if retval != 0:
+            retmsg = "Failed to issue /sbin/poweroff on MC host. This is most likely a sudoers permission issue."
+            logger.error(retmsg)
+            return ("fail", retmsg)
+        return ("ok", shutdown_hosts[:shutdown_hosts.rfind(',')])
+
 
     @request(include_msg=True)
     @return_reply(Int(min=0))
