@@ -24,7 +24,7 @@ def build_physical_graph(r):
      # list of nodes in the graph. Typically this includes a specification for the docker
      # image, and required parameters to be run.
 
-    G.add_node('sdp.telstate',{'db_key':0, 'docker_image':'redis', 'docker_params':\
+    G.add_node('sdp.telstate',{'db_key':0, 'docker_image':r.get_image_path('redis'), 'docker_params':\
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
