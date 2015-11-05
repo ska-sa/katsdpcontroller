@@ -72,8 +72,8 @@ class CallbackSensor(Sensor):
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',test=False, interface_mode=False):
-        self.test = test
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False):
+        self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
@@ -134,7 +134,7 @@ class SDPResources(object):
         available_hosts['localhost.localdomain'] = \
                         {'ip':sdpmc_local_ip,'host_class':'sdpmc'}
 
-        if self.test:
+        if self.local_resources:
             for param in available_hosts.itervalues():
                 param['ip'] = sdpmc_local_ip
                 param['docker_engine_url'] = 'unix:///var/run/docker.sock'
@@ -913,11 +913,11 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
-        self.test = kwargs.get('test', False)
+        self.local_resources = kwargs.get('local_resources', False)
          # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
-        self.resources = SDPResources(test=self.test, interface_mode=self.interface_mode)
+        self.resources = SDPResources(local_resources=self.local_resources, interface_mode=self.interface_mode)
          # create a new resource pool. 
 
         self.subarray_products = {}
