@@ -350,7 +350,8 @@ class SDPGraph(object):
         try:
             self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         except redis.ConnectionError:
-            time.sleep(0.5)
+            logger.warning("redis backend not reachable. Waiting 1s for it to settle and trying again")
+            time.sleep(1.0)
              # we may need some time for the redis container to launch
             self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
              # if it fails again we have a deeper malaise
