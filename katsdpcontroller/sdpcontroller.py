@@ -818,10 +818,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                  # filter out node_type(s) we don't want
                  # TODO: probably needs a regexp
                 logger.info("Issued request {} {} to node {}".format(req, args, node))
-                if args == []:
-                    reply, informs = katcp.blocking_request(Message.request(req))
-                else:
-                    reply, informs = katcp.blocking_request(Message.request(req, args))
+                reply, informs = katcp.blocking_request(Message.request(req, *args))
                 if not reply.reply_ok():
                     retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
                     logger.warning(retmsg)
@@ -853,13 +850,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             self.exec_transitions(2)
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-start to the simulator")
-                time.sleep(2) # only needed for simulator...
-                rcode, rval = self._issue_req('capture-start', args=['k7'], node_type='cbf.sim')
+                rcode, rval = self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim')
+                 # instruct the simulator to rebuild its local config from the values in telstate
+                if rcode == 'ok':
+                    rcode, rval = self._issue_req('configure-product-from-telstate', args=[self.subarray_product_id], node_type='sdp.sim')
+                    if rcode == 'ok':
+                        rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
+                    else:
+                        logger.error("SIMULATE: configure-product-from-telstate {} failed ({})".format(self.subarray_product_id,rval))
+                else:
+                    logger.error("SIMULATE: configure-product-from-telstate failed ({})".format(rval))
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
-                time.sleep(2) # only needed for simulator...
-                rcode, rval = self._issue_req('capture-stop', args=['k7'], node_type='cbf.sim')
+                rcode, rval = self._issue_req('capture-stop', args=[self.subarray_product_id], node_type='sdp.sim')
             self.exec_transitions(5)
              # called in an explicit fashion (above as well) so we can manage
              # execution order correctly when dealing with a simulator
