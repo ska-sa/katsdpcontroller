@@ -115,21 +115,11 @@ class SDPResources(object):
         # TODO: Eventually this will contain the docker host autodiscovery code
         # For AR1 purposes, especially in the lab, we harcode some hosts to use
         # in our resource pool
-        if self.test:
-            available_hosts = {'sdp-ingest4.kat.ac.za':\
-                             {'ip':'127.0.0.1','host_class':'nvidia_gpu'},
-                           'sdp-ingest5.kat.ac.za':\
-                             {'ip':'127.0.0.1','host_class':'generic'}}
-            self.private_registry = None
-            docker_port = 2375
-             # no SSL for local simulation
-        else:
-            available_hosts = {'ingest1':\
-                             {'ip':'ingest1.local','host_class':'nvidia_gpu'},
+        available_hosts = {'ingest1':\
+                               {'ip':'ingest1.local','host_class':'nvidia_gpu'},
                            'mc1':\
-                             {'ip':'mc1.local','host_class':'generic'}}
-            self.private_registry = 'sdp-ingest5.kat.ac.za:5000'
-            docker_port = 2376
+                               {'ip':'mc1.local', 'host_class':'generic'}}
+        self.private_registry = 'sdp-ingest5.kat.ac.za:5000'
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
@@ -144,11 +134,22 @@ class SDPResources(object):
         available_hosts['localhost.localdomain'] = \
                         {'ip':sdpmc_local_ip,'host_class':'sdpmc'}
 
+        if self.test:
+            for param in available_hosts.itervalues():
+                param['ip'] = sdpmc_local_ip
+                param['docker_engine_url'] = 'unix:///var/run/docker.sock'
+                 # no network connection for local simulation
+        else:
+            docker_port = 2376
+            for param in available_hosts.itervalues():
+                param['docker_engine_url'] = 'https://{}:{}'.format(param['ip'], docker_port)
+                 # construct Docker URLs from IP addresses
+
         for host, param in available_hosts.iteritems():
             try:
-                self.hosts[host] = SDPHost(docker_port=docker_port, private_registry=self.private_registry, **param)
+                self.hosts[host] = SDPHost(private_registry=self.private_registry, **param)
             except docker.errors.requests.ConnectionError:
-                logger.error("Host {} not added.".format(host))
+                logger.error("Host {} ({}) not added.".format(host, param['docker_engine_url']))
                 continue
             self.hosts_by_class[param['host_class']] = self.hosts_by_class.get(param['host_class'],[])
             self.hosts_by_class[param['host_class']].append(self.hosts[host])
@@ -431,17 +432,33 @@ class SDPContainer(object):
         return "{}\t\t{}\t{}\t\t\t{}".format(self.names[0][1:], self.status, self.image, self.command)
 
 class SDPHost(object):
-    """A host compute device that is running an accessible docker engine."""
-    def __init__(self, ip='127.0.0.1', docker_port=2375, host_class='no_docker', private_registry=None):
+    """A host compute device that is running an accessible docker engine.
+
+    Parameters
+    ----------
+    ip : str
+        Hostname or IP address for other containers to reach this container.
+    docker_engine_url : str
+        URL for connecting to the docker engine on this host
+    host_class : str
+        Class of machine
+    private_registry : str, optional
+        URL for the registry holding Docker images
+    """
+    def __init__(self, ip='127.0.0.1', docker_engine_url='https://127.0.0.1:2375', host_class='no_docker', private_registry=None):
         logger.debug("New host object on {} with class {}".format(ip,host_class))
         self.ip = ip
+        self.url = docker_engine_url
         self.container_list = {}
         self.private_registry = private_registry
         self._docker_client = None
         if host_class != 'no_docker':
             user_home = os.path.expanduser("~")
-            tls_config = docker.tls.TLSConfig(client_cert=('{}/.docker/cert.pem'.format(user_home), '{}/.docker/key.pem'.format(user_home)), verify=False)
-            self._docker_client = docker.Client(base_url='https://{}:{}'.format(ip,docker_port), tls=tls_config)
+            if docker_engine_url.startswith('https://'):
+                tls_config = docker.tls.TLSConfig(client_cert=('{}/.docker/cert.pem'.format(user_home), '{}/.docker/key.pem'.format(user_home)), verify=False)
+                self._docker_client = docker.Client(base_url=docker_engine_url, tls=tls_config)
+            else:
+                self._docker_client = docker.Client(base_url=docker_engine_url)
              # seems to return an object regardless of connect status
             try:
                 info = self._docker_client.info()
@@ -450,7 +467,7 @@ class SDPHost(object):
                     self._docker_client.login('kat',password='kat',registry='https://{}'.format(self.private_registry))
                      # authenticate to the specified private registry
             except docker.errors.requests.ConnectionError:
-                logger.error("Failed to connect to docker engine on {}:{}".format(ip,docker_port))
+                logger.error("Failed to connect to docker engine on {}".format(docker_engine_url))
                 raise
             for (k,v) in info.iteritems():
                 setattr(self, str(k).lower(), v)
@@ -896,7 +913,7 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
-        self.test = False
+        self.test = kwargs.get('test', False)
          # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
