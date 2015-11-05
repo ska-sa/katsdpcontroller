@@ -69,7 +69,7 @@ def build_physical_graph(r):
     G.add_edge('sdp.telstate','sdp.cal.1',{'telstate': telstate})
      # connections to the telescope state. 
 
-    G.add_edge('cbf.sim.1','sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('cbf_spead'), r.get_port('cbf_spead'))\
+    G.add_edge('sdp.sim.1','sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('cbf_spead'), r.get_port('cbf_spead'))\
                , 'input_rate':10e6})
      # spead data from correlator to ingest node
 
