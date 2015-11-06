@@ -529,8 +529,7 @@ class SDPHost(object):
          # create a container from the specied image, using the build context provided
         try:
             logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
-            if image.image != "redis" and self.private_registry is not None:
-                 # TODO: Skip redis pull for now as it is very slow...
+            if self.private_registry is not None:
                 for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
                     print ".",
                     #logger.debug(json.dumps(json.loads(pull_result), indent=4))
