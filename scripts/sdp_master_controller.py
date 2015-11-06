@@ -41,6 +41,9 @@ if __name__ == "__main__":
     parser.add_option('--local-resources', dest='local_resources', default=False,
                       action='store_true', metavar='LOCALRESOURCES',
                       help='launch all containers on local machine via /var/run/docker.sock (default: %default)')
+    parser.add_option('--registry', dest='private_registry', type="string",
+                      default='sdp-ingest5.kat.ac.za:5000', metavar='HOST:PORT',
+                      help='registry from which to pull images (use empty string to disable) (default: %default)')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
                       action='store_true', metavar='VERBOSE',
                       help='print verbose output (default: %default)')
@@ -70,7 +73,12 @@ if __name__ == "__main__":
     from katsdpcontroller import sdpcontroller
 
     logger.info("Starting SDP Controller...")
-    server = sdpcontroller.SDPControllerServer(opts.host, opts.port, simulate=opts.simulate, interface_mode=opts.interface_mode, local_resources=opts.local_resources)
+    server = sdpcontroller.SDPControllerServer(
+        opts.host, opts.port,
+        simulate=opts.simulate,
+        interface_mode=opts.interface_mode,
+        local_resources=opts.local_resources,
+        private_registry=opts.private_registry or None)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)
