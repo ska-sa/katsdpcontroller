@@ -72,12 +72,12 @@ class CallbackSensor(Sensor):
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False):
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False, private_registry=None):
         self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
-        self.private_registry = None
+        self.private_registry = private_registry
         self.allocated_ports = {}
         self.allocated_sdisp_ports = {}
         self.allocated_mip = {}
@@ -119,7 +119,6 @@ class SDPResources(object):
                                {'ip':'ingest1.local','host_class':'nvidia_gpu'},
                            'mc1':\
                                {'ip':'mc1.local', 'host_class':'generic'}}
-        self.private_registry = 'sdp-ingest5.kat.ac.za:5000'
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
@@ -530,8 +529,7 @@ class SDPHost(object):
          # create a container from the specied image, using the build context provided
         try:
             logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
-            if image.image != "redis":
-                 # TODO: Skip redis pull for now as it is very slow...
+            if self.private_registry is not None:
                 for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
                     print ".",
                     #logger.debug(json.dumps(json.loads(pull_result), indent=4))
@@ -835,10 +833,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                  # filter out node_type(s) we don't want
                  # TODO: probably needs a regexp
                 logger.info("Issued request {} {} to node {}".format(req, args, node))
-                if args == []:
-                    reply, informs = katcp.blocking_request(Message.request(req))
-                else:
-                    reply, informs = katcp.blocking_request(Message.request(req, args))
+                reply, informs = katcp.blocking_request(Message.request(req, *args))
                 if not reply.reply_ok():
                     retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
                     logger.warning(retmsg)
@@ -870,13 +865,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             self.exec_transitions(2)
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-start to the simulator")
-                time.sleep(2) # only needed for simulator...
-                rcode, rval = self._issue_req('capture-start', args=['k7'], node_type='cbf.sim')
+                rcode, rval = self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim')
+                 # instruct the simulator to rebuild its local config from the values in telstate
+                if rcode == 'ok':
+                    rcode, rval = self._issue_req('configure-product-from-telstate', args=[self.subarray_product_id], node_type='sdp.sim')
+                    if rcode == 'ok':
+                        rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
+                    else:
+                        logger.error("SIMULATE: configure-product-from-telstate {} failed ({})".format(self.subarray_product_id,rval))
+                else:
+                    logger.error("SIMULATE: configure-product-from-telstate failed ({})".format(rval))
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
-                time.sleep(2) # only needed for simulator...
-                rcode, rval = self._issue_req('capture-stop', args=['k7'], node_type='cbf.sim')
+                rcode, rval = self._issue_req('capture-stop', args=[self.subarray_product_id], node_type='sdp.sim')
             self.exec_transitions(5)
              # called in an explicit fashion (above as well) so we can manage
              # execution order correctly when dealing with a simulator
@@ -913,11 +915,12 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
-        self.local_resources = kwargs.get('local_resources', False)
-         # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
-        self.resources = SDPResources(local_resources=self.local_resources, interface_mode=self.interface_mode)
+        self.resources = SDPResources(
+            local_resources=kwargs.get('local_resources', False),
+            interface_mode=self.interface_mode,
+            private_registry=kwargs.get('private_registry'))
          # create a new resource pool. 
 
         self.subarray_products = {}
