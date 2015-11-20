@@ -72,9 +72,8 @@ class CallbackSensor(Sensor):
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, image_tag='latest', interface_mode=False):
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False):
         self.local_resources = local_resources
-        self.image_tag = image_tag
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
@@ -110,7 +109,7 @@ class SDPResources(object):
     def get_image_path(self, image):
          # return a fully qualified docker images path from the base
          # docker image name. Uses private registry if currently defined
-        return "{}/{}:{}".format(self.private_registry if self.private_registry is not None else 'sdp',image,self.image_tag)
+        return "{}/{}".format(self.private_registry if self.private_registry is not None else 'sdp',image)
 
     def _discover_hosts(self):
         # TODO: Eventually this will contain the docker host autodiscovery code
@@ -918,7 +917,7 @@ class SDPControllerServer(DeviceServer):
          # TODO: part of implementing unittest mode
 
         logger.debug("Building initial resource pool")
-        self.resources = SDPResources(local_resources=self.local_resources, image_tag=kwargs['tag'], interface_mode=self.interface_mode)
+        self.resources = SDPResources(local_resources=self.local_resources, interface_mode=self.interface_mode)
          # create a new resource pool. 
 
         self.subarray_products = {}
