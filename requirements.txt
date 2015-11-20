@@ -12,6 +12,7 @@ mock
 netifaces
 networkx==1.10
 nose
+numpy
 pbr
 ply
 ProxyTypes
