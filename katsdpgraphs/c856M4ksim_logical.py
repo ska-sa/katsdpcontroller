@@ -37,7 +37,7 @@ def build_physical_graph(r):
      # ingest node for ar1
 
     G.add_node('sdp.filewriter.1',{'port': r.get_port('sdp_filewriter_1_katcp'),'file_base':'/var/kat/data',\
-         'docker_image':r.get_image_path('filewriter'),'docker_host_class':'generic', 'docker_cmd':'file_writer.py',\
+         'docker_image':r.get_image_path('katsdpfilewriter'),'docker_host_class':'generic', 'docker_cmd':'file_writer.py',\
          'docker_params': {"network":"host","volumes":"/var/kat/data",\
           "binds": {"/var/kat/data":{"bind":"/var/kat/data","ro":False}}},\
          'state_transitions':{2:'capture-init',5:'capture-done'}\
