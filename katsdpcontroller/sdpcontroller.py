@@ -194,7 +194,7 @@ class SDPDataProduct(SDPDataProductBase):
              # match the log level of the launched ingest to the master controller
             cmd = ["ingest.py","--loglevel={}".format(eff_log_level), "--antennas={}".format(self.antennas), "-p {}".format(self.ingest_port), \
                    "--cbf-spead-port={}".format(cbf_port),"--cbf-spead-host={}".format(cbf_host),"--cam-spead-port={}".format(cam_port),\
-                   "--cam-spead-host={}".format(cam_host)]
+                   "--cam-spead-host={}".format(cam_host),"--antennas={0}".format(self.antennas)]
             self.ingest = subprocess.Popen(cmd)
             logger.info("Launching new ingest process with configuration: {0}".format(cmd))
             self.ingest_katcp = BlockingClient(self.ingest_host, self.ingest_port)
