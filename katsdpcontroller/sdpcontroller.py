@@ -1082,7 +1082,7 @@ class SDPControllerServer(DeviceServer):
         subarray_product_id : string
             The ID to use for this subarray product, in the form [<subarray_name>_]<data_product_name>.
         antennas : string
-            A space-separated list of antenna names to use in this subarray product.
+            A comma-separated list of antenna names to use in this subarray product.
             These will be matched to the CBF output and used to pull only the specific
             data. If antennas is "0" or "", then this subarray product is de-configured.
             Trailing arguments can be omitted.
