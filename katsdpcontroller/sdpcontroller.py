@@ -1119,6 +1119,10 @@ class SDPControllerServer(DeviceServer):
             except KeyError:
                 return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
 
+        logger.info("Using '{}' as antenna mask".format(antennas))
+        antennas = antennas.replace(" ",",")
+         # temp hack to make sure we have a comma delimited set of antennas
+
         if subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
             if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
