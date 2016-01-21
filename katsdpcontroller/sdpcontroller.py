@@ -1166,10 +1166,12 @@ class SDPControllerServer(DeviceServer):
          # parameters such as antennas and channels are encoded in the logical graphs
         calculated_int_time = 1 / float(dump_rate)
         config['subarray_product_id'] = subarray_product_id
-	 # used to identify file type
-        additional_config = {'antenna_mask':antennas}
-        additional_config = {'output_int_time':calculated_int_time}
-        additional_config = {'sd_int_time':calculated_int_time}
+         # used to identify file type
+        additional_config = {
+            'antenna_mask':antennas,
+            'output_int_time':calculated_int_time,
+            'sd_int_time':calculated_int_time
+        }
          # holds additional config that must reside within the config dict in the telstate 
 
         if self.interface_mode:
