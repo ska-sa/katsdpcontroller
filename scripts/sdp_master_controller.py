@@ -44,6 +44,11 @@ if __name__ == "__main__":
     parser.add_option('--registry', dest='private_registry', type="string",
                       default='sdp-ingest5.kat.ac.za:5000', metavar='HOST:PORT',
                       help='registry from which to pull images (use empty string to disable) (default: %default)')
+    parser.add_option('--image-override', dest='image_override', action='append',
+                      default=[], metavar='NAME:IMAGE',
+                      help='Override an image name lookup (default: none)')
+    parser.add_option('--image-tag', dest='image_tag', type='string',
+                      metavar='TAG', help='Image tag to use for resolving images')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
                       action='store_true', metavar='VERBOSE',
                       help='print verbose output (default: %default)')
@@ -73,12 +78,18 @@ if __name__ == "__main__":
     from katsdpcontroller import sdpcontroller
 
     logger.info("Starting SDP Controller...")
+    image_resolver = sdpcontroller.ImageResolver(opts.private_registry or None, opts.image_tag or None)
+    for override in opts.image_override:
+        fields = override.split(':', 1)
+        if len(fields) < 2:
+            die("--image-override option must have a colon")
+        image_resolver.override(fields[0], fields[1])
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port,
         simulate=opts.simulate,
         interface_mode=opts.interface_mode,
         local_resources=opts.local_resources,
-        private_registry=opts.private_registry or None)
+        image_resolver=image_resolver)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)

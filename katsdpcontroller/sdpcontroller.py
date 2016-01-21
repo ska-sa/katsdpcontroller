@@ -70,14 +70,68 @@ class CallbackSensor(Sensor):
         self._busy_updating = False
         return self._current_reading
 
+class ImageResolver(object):
+    """Class to map an abstract Docker image name to a fully-qualified name.
+    If no private registry is specified, it looks up names in the `sdp/`
+    namespace, otherwise in the private registry. One can also override
+    individual entries.
+
+    Parameters
+    ----------
+    private_registry : str, optional
+        Address (hostname and port) for a private registry
+    tag : str, optional
+        If specified, images will use this tag instead of `latest`. It does
+        not affect overrides, to allow them to specify their own tags.
+    """
+    def __init__(self, private_registry=None, tag=None):
+        if private_registry is None:
+            self._prefix = 'sdp/'
+        else:
+            self._prefix = private_registry + '/'
+        if tag is None:
+            self._suffix = ''
+        else:
+            self._suffix = ':' + tag
+        self._private_registry = private_registry
+        self._overrides = {}
+
+    def override(self, name, path):
+        self._overrides[name] = path
+
+    def login(self, client):
+        """Log in to all relevant private registries. At present, this will only
+        log in to the explicitly specified private registry, and not any found
+        in overrides.
+        """
+        if self._private_registry is not None:
+            logger.debug("Docker login on host to private registry https://{}".format(self._private_registry))
+            client.login('kat',password='kat',registry='https://{}'.format(self._private_registry))
+
+    def pullable(self, image):
+        """Determine whether a fully-qualified image name should be pulled. At
+        present, this is done for images in the explicitly specified private
+        registry, but images in other registries and specified by override are
+        not pulled.
+        """
+        return self._private_registry is not None and image.startswith(self._prefix)
+
+    def __call__(self, name):
+        try:
+            return self._overrides[name]
+        except KeyError:
+            return self._prefix + name + self._suffix
+
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False, private_registry=None):
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False, image_resolver=None):
         self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
         self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
-        self.private_registry = private_registry
+        if image_resolver is None:
+            image_resolver = ImageResolver()
+        self.image_resolver = image_resolver
         self.allocated_ports = {}
         self.allocated_sdisp_ports = {}
         self.allocated_mip = {}
@@ -107,9 +161,7 @@ class SDPResources(object):
         return self.hosts_by_class[host_class][0]
 
     def get_image_path(self, image):
-         # return a fully qualified docker images path from the base
-         # docker image name. Uses private registry if currently defined
-        return "{}/{}".format(self.private_registry if self.private_registry is not None else 'sdp',image)
+        return self.image_resolver(image)
 
     def _discover_hosts(self):
         # TODO: Eventually this will contain the docker host autodiscovery code
@@ -146,7 +198,7 @@ class SDPResources(object):
 
         for host, param in available_hosts.iteritems():
             try:
-                self.hosts[host] = SDPHost(private_registry=self.private_registry, **param)
+                self.hosts[host] = SDPHost(image_resolver=self.image_resolver, **param)
             except docker.errors.requests.ConnectionError:
                 logger.error("Host {} ({}) not added.".format(host, param['docker_engine_url']))
                 continue
@@ -441,15 +493,17 @@ class SDPHost(object):
         URL for connecting to the docker engine on this host
     host_class : str
         Class of machine
-    private_registry : str, optional
-        URL for the registry holding Docker images
+    image_resolver : :class:`ImageResolver`, optional
+        Resolver to locate Docker images
     """
-    def __init__(self, ip='127.0.0.1', docker_engine_url='https://127.0.0.1:2375', host_class='no_docker', private_registry=None):
+    def __init__(self, ip='127.0.0.1', docker_engine_url='https://127.0.0.1:2375', host_class='no_docker', image_resolver=None):
         logger.debug("New host object on {} with class {}".format(ip,host_class))
         self.ip = ip
         self.url = docker_engine_url
         self.container_list = {}
-        self.private_registry = private_registry
+        if image_resolver is None:
+            image_resolver = ImageResolver()
+        self.image_resolver = image_resolver
         self._docker_client = None
         if host_class != 'no_docker':
             user_home = os.path.expanduser("~")
@@ -461,12 +515,10 @@ class SDPHost(object):
              # seems to return an object regardless of connect status
             try:
                 info = self._docker_client.info()
-                if self.private_registry is not None:
-                    logger.debug("Docker login on host to private registry https://{}".format(self.private_registry))
-                    self._docker_client.login('kat',password='kat',registry='https://{}'.format(self.private_registry))
-                     # authenticate to the specified private registry
+                self.image_resolver.login(self._docker_client)
+                 # authenticate to the specified private registry
             except docker.errors.requests.ConnectionError:
-                logger.error("Failed to connect to docker engine on {}".format(docker_engine_url))
+                logger.error("Failed to connect to docker engine on {}".format(docker_engine_url), exc_info=True)
                 raise
             for (k,v) in info.iteritems():
                 setattr(self, str(k).lower(), v)
@@ -529,7 +581,7 @@ class SDPHost(object):
          # create a container from the specied image, using the build context provided
         try:
             logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
-            if self.private_registry is not None:
+            if self.image_resolver.pullable(image.image):
                 for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
                     print ".",
                     #logger.debug(json.dumps(json.loads(pull_result), indent=4))
@@ -920,7 +972,7 @@ class SDPControllerServer(DeviceServer):
         self.resources = SDPResources(
             local_resources=kwargs.get('local_resources', False),
             interface_mode=self.interface_mode,
-            private_registry=kwargs.get('private_registry'))
+            image_resolver=kwargs.get('image_resolver'))
          # create a new resource pool. 
 
         self.subarray_products = {}
