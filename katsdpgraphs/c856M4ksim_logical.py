@@ -45,8 +45,9 @@ def build_physical_graph(r):
      # filewriter
 
     G.add_node('sdp.cal.1',{'docker_image':r.get_image_path('katsdpcal'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'run_cal.py',\
-        'docker_params': {"network":"host"}, 'cbf_channels': 4096, \
-        })
+               'docker_params': {"network":"host","volumes":"/var/kat/data",\
+                 "binds": {"/var/kat/data":{"bind":"/var/kat/data","ro":False}}}, 'cbf_channels': 4096, \
+              })
      # calibration node
 
     G.add_node('sdp.sim.1',{'port': r.get_port('sdp_sim_1_katcp'), 
