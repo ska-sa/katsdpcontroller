@@ -83,8 +83,10 @@ class ImageResolver(object):
     tag : str, optional
         If specified, images will use this tag instead of `latest`. It does
         not affect overrides, to allow them to specify their own tags.
+    pull : bool, optional
+        Whether to pull images from the `private_registry`.
     """
-    def __init__(self, private_registry=None, tag=None):
+    def __init__(self, private_registry=None, tag=None, pull=True):
         if private_registry is None:
             self._prefix = 'sdp/'
         else:
@@ -95,6 +97,7 @@ class ImageResolver(object):
             self._suffix = ':' + tag
         self._private_registry = private_registry
         self._overrides = {}
+        self.pull = pull
 
     def override(self, name, path):
         self._overrides[name] = path
@@ -104,7 +107,7 @@ class ImageResolver(object):
         log in to the explicitly specified private registry, and not any found
         in overrides.
         """
-        if self._private_registry is not None:
+        if self._private_registry is not None and self.pull:
             logger.debug("Docker login on host to private registry https://{}".format(self._private_registry))
             client.login('kat',password='kat',registry='https://{}'.format(self._private_registry))
 
@@ -114,7 +117,7 @@ class ImageResolver(object):
         registry, but images in other registries and specified by override are
         not pulled.
         """
-        return self._private_registry is not None and image.startswith(self._prefix)
+        return self._private_registry is not None and image.startswith(self._prefix) and self.pull
 
     def __call__(self, name):
         try:

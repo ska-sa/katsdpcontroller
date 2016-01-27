@@ -49,6 +49,8 @@ if __name__ == "__main__":
                       help='Override an image name lookup (default: none)')
     parser.add_option('--image-tag', dest='image_tag', type='string',
                       metavar='TAG', help='Image tag to use for resolving images')
+    parser.add_option('--no-pull', action='store_true', default=False,
+                      help='Skip pulling images from the registry')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
                       action='store_true', metavar='VERBOSE',
                       help='print verbose output (default: %default)')
@@ -78,7 +80,10 @@ if __name__ == "__main__":
     from katsdpcontroller import sdpcontroller
 
     logger.info("Starting SDP Controller...")
-    image_resolver = sdpcontroller.ImageResolver(opts.private_registry or None, opts.image_tag or None)
+    image_resolver = sdpcontroller.ImageResolver(
+            private_registry=opts.private_registry or None,
+            tag=opts.image_tag or None,
+            pull=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:
