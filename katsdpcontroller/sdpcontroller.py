@@ -83,8 +83,10 @@ class ImageResolver(object):
     tag : str, optional
         If specified, images will use this tag instead of `latest`. It does
         not affect overrides, to allow them to specify their own tags.
+    pull : bool, optional
+        Whether to pull images from the `private_registry`.
     """
-    def __init__(self, private_registry=None, tag=None):
+    def __init__(self, private_registry=None, tag=None, pull=True):
         if private_registry is None:
             self._prefix = 'sdp/'
         else:
@@ -95,6 +97,7 @@ class ImageResolver(object):
             self._suffix = ':' + tag
         self._private_registry = private_registry
         self._overrides = {}
+        self.pull = pull
 
     def override(self, name, path):
         self._overrides[name] = path
@@ -104,7 +107,7 @@ class ImageResolver(object):
         log in to the explicitly specified private registry, and not any found
         in overrides.
         """
-        if self._private_registry is not None:
+        if self._private_registry is not None and self.pull:
             logger.debug("Docker login on host to private registry https://{}".format(self._private_registry))
             client.login('kat',password='kat',registry='https://{}'.format(self._private_registry))
 
@@ -114,7 +117,7 @@ class ImageResolver(object):
         registry, but images in other registries and specified by override are
         not pulled.
         """
-        return self._private_registry is not None and image.startswith(self._prefix)
+        return self._private_registry is not None and image.startswith(self._prefix) and self.pull
 
     def __call__(self, name):
         try:
@@ -646,80 +649,6 @@ class SDPImage(object):
         return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, Cmd: {}".format(self.image,\
                 self.port_bindings, self.network, self.devices, self.volumes, self.cmd)
 
-class SDPArray(object):
-    """SDP Array wrapper.
-
-    Allows management of tasks / processes within the scope of the SDP, 
-    particularly in the context of a subarray instance.
-    
-    Each Array will have a dedicated redis backed TelescopeModel which
-    will hold static configuration and dynamic values (like sensor data).
-    
-    This is used by all components launched as part of the Array to pull
-    initial configuration (such as ip and port settings).
-    
-    Launch management is handled by launching docker container instances
-    on relevant hardware platforms.
-    
-    Images are looked for in the referenced registry under the repository
-    name 'katsdp'.
-    """
-    def __init__(self, docker_engine_url='127.0.0.1:2375', docker_registry='127.0.0.1:4500', docker_hosts=['192.168.1.164']):
-        self.docker_registry = docker_registry
-        self.docker_engine_url = docker_engine_url
-        self._docker_client = docker.Client(base_url=self.docker_engine_url)
-        self.image_list = {}
-        self.refresh_image_list()
-        self.host_list = {}
-        self.refresh_host_list(docker_hosts)
-        self._containers = {}
-
-    def refresh_host_list(self, docker_hosts):
-        if docker_hosts is None:
-            pass
-            # todo - auto discovery - perhaps nmap or zeroconf
-        else:
-            for host in docker_hosts:
-                _host = SDPHost(host)
-                self.host_list[_host.name] = _host
-
-    def refresh_image_list(self):
-        try:
-            self._image_list = self._docker_client.search('{}/{}'.format(self.docker_registry,'kat'))
-            for image in self._image_list:
-                (null, base_name) = image['name'].split("/")
-                _image = SDPImage('{}/{}'.format(self.docker_registry,base_name),image_class=image['description'])
-                self.image_list[base_name] = _image
-        except docker.errors.APIError, e:
-            logger.warning("Failed to retrieve image list ({})".format(e))
-
-    def hosts(self):
-        print "Name\t\tOS\t\t#CPU\tMemory\n====\t\t==\t\t====\t======"
-        for h in self.host_list.itervalues():
-            print h
-
-    def images(self):
-        print "Name\t\t\tDescription\n=====\t\t\t==========="
-        for (k,v) in self.image_list.iteritems():
-            print "{}\t{}".format(k,v)
-
-    def launch(self, host_name, image_name):
-        try:
-            _host = self.host_list[host_name]
-            _image = self.image_list[image_name]
-        except KeyError:
-            logger.error("Invalid host or image specified")
-            raise KeyError
-        return _host.launch(_image)
-
-    def __repr__(self):
-        retval = ""
-        for host in self.host_list.itervalues():
-            retval += "{}\n====================\n".format(host.name)
-            host.update_containers()
-            for container in host.container_list.itervalues():
-                retval += "{}\n".format(container)
-        return retval
 
 class SDPTask(object):
     """SDP Task wrapper.
