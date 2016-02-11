@@ -1044,7 +1044,7 @@ class SDPControllerServer(DeviceServer):
 
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
-    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, cbf_source, cam_source):
+    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
         """Configure a SDP subarray product instance.
 
         A subarray product instance is comprised of a telescope state, a collection of
@@ -1073,10 +1073,15 @@ class SDPControllerServer(DeviceServer):
             Dump rate of subarray product in Hz
         n_beams : int
             Number of beams in the subarray product (0 = Correlator output, 1+ = Beamformer)
-        cbf_source : string
-            A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
+        stream_sources: string
+            Either:
+              DEPRECATED: A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
+            Or:
+              A comma seperated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
+              These are used directly by the graph to configure the SDP system and thus rely on the stream_name as a key
         cam_source : string
-            A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
+            DEPRECATED (only used when stream_source is in DEPRECATED use):
+              A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
         
         Returns
         -------
@@ -1112,21 +1117,34 @@ class SDPControllerServer(DeviceServer):
                 return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
 
          # all good so far, lets check arguments for validity
-        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and cbf_source and cam_source):
-            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and the CBF and CAM spead stream sources to configure a subarray product")
+        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
+            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
 
-        try:
-            (cbf_host,cbf_port) = cbf_source.split(":",2)
-            (cam_host,cam_port) = cam_source.split(":",2)
-        except ValueError:
-            retmsg = "Failed to parse source stream specifiers ({0} / {1}), should be in the form <ip>[+<count>]:port".format(cbf_source, cam_source)
-            logger.error(retmsg)
-            return ('fail',retmsg)
-
-         # determine graph name
         name_parts = subarray_product_id.split("_")
          # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
         sane_name = name_parts[-1]
+
+        streams = {}
+         # local dict to hold streams associated with the specified data product
+        try:
+            streams['c856M4k_spead'] = stream_sources.split(":",2)
+             # for DEPRECATED usage we can only support c856M4k graphs
+            streams['CAM_spead'] = cam_source.split(":",2)
+            logger.debug("Adding DEPRECATED endpoints for c856M4k_spead and CAM_spead")
+        except ValueError:
+             # check to see if we are using the new stream_sources specifier
+            try:
+                for stream in stream_sources.split(","):
+                    (stream_name, host, port) = stream.split(":",3)
+                     # just to make it explicit what we are expecting
+                    streams["{}_spead".format(stream_name)] = (host, port)
+                    logger.debug("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
+            except ValueError:
+                 # something is definitely wrong with these
+                retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma seperated list of streams in the form <stream_name>:<ip>[+<count>]:<port>"
+                logger.error(retmsg)
+                return ('fail',retmsg)
+
         graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
         logger.info("Launching graph {}.".format(graph_name))
 
@@ -1134,10 +1152,9 @@ class SDPControllerServer(DeviceServer):
          # use the full subarray identifier to avoid any namespace collisions
         logger.info("Setting resources prefix to {}".format(self.resources.prefix))
 
-	self.resources.set_multicast_ip('cbf_spead',cbf_host)
-        self.resources.set_multicast_ip('cam_spead',cam_host)
-        self.resources.set_port('cbf_spead',cbf_port)
-        self.resources.set_port('cam_spead',cam_port)
+        for (stream_name, endpoint) in streams.iteritems():
+            self.resources.set_multicast_ip(stream_name, endpoint[0])
+            self.resources.set_port(stream_name, endpoint[1])
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
