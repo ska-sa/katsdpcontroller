@@ -1079,7 +1079,7 @@ class SDPControllerServer(DeviceServer):
             Or:
               A comma seperated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
               These are used directly by the graph to configure the SDP system and thus rely on the stream_name as a key
-        cam_source : string
+        deprecated_cam_source : string
             DEPRECATED (only used when stream_source is in DEPRECATED use):
               A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
         
@@ -1129,16 +1129,16 @@ class SDPControllerServer(DeviceServer):
         try:
             streams['c856M4k_spead'] = stream_sources.split(":",2)
              # for DEPRECATED usage we can only support c856M4k graphs
-            streams['CAM_spead'] = cam_source.split(":",2)
-            logger.debug("Adding DEPRECATED endpoints for c856M4k_spead and CAM_spead")
-        except ValueError:
+            streams['CAM_spead'] = deprecated_cam_source.split(":",2)
+            logger.info("Adding DEPRECATED endpoints for c856M4k_spead ({}) and CAM_spead ({})".format(streams['c856M4k_spead'],streams['CAM_spead']))
+        except (AttributeError, ValueError):
              # check to see if we are using the new stream_sources specifier
             try:
                 for stream in stream_sources.split(","):
                     (stream_name, host, port) = stream.split(":",3)
                      # just to make it explicit what we are expecting
                     streams["{}_spead".format(stream_name)] = (host, port)
-                    logger.debug("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
+                    logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
             except ValueError:
                  # something is definitely wrong with these
                 retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma seperated list of streams in the form <stream_name>:<ip>[+<count>]:<port>"
