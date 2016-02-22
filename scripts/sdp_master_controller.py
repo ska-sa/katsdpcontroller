@@ -42,7 +42,7 @@ if __name__ == "__main__":
                       action='store_true', metavar='LOCALRESOURCES',
                       help='launch all containers on local machine via /var/run/docker.sock (default: %default)')
     parser.add_option('--registry', dest='private_registry', type="string",
-                      default='sdp-ingest5.kat.ac.za:5000', metavar='HOST:PORT',
+                      default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                       help='registry from which to pull images (use empty string to disable) (default: %default)')
     parser.add_option('--image-override', dest='image_override', action='append',
                       default=[], metavar='NAME:IMAGE',

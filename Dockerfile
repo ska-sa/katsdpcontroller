@@ -1,4 +1,4 @@
-FROM sdp-ingest5.kat.ac.za:5000/docker-base
+FROM sdp-docker-registry.kat.ac.za:5000/docker-base
 
 MAINTAINER Simon Ratcliffe "simonr@ska.ac.za"
 
