@@ -1088,6 +1088,8 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
             If ok, returns the port on which the ingest process for this product is running.
         """
+        logger.info("?data-product-configure called with: {}".format(locals()))
+         # INFO for now, but should be DEBUG post integration
         if not subarray_product_id:
             for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
                 req.inform(subarray_product_id,subarray_product)
