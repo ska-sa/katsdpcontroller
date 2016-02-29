@@ -36,6 +36,13 @@ def build_physical_graph(r):
         })
      # ingest node for ar1
 
+     G.add_node('sdp.bf_ingest.1',{'port': r.get_port('sdp_bf_ingest_1_katcp'), \
+         'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'bf_ingest.py',\
+         'docker_params': {"network":"host", "binds": {"/mnt/ramdisk":{"bind":"/ramdisk","ro":False}}},\
+         'state_transitions':{2:'capture-init',5:'capture-done'}\
+        })
+     # beamformer ingest node for ar1
+
     G.add_node('sdp.filewriter.1',{'port': r.get_port('sdp_filewriter_1_katcp'),'file_base':'/var/kat/data',\
          'docker_image':r.get_image_path('katsdpfilewriter'),'docker_host_class':'generic', 'docker_cmd':'file_writer.py',\
          'docker_params': {"network":"host","volumes":"/var/kat/data",\
@@ -65,6 +72,9 @@ def build_physical_graph(r):
     G.add_edge('cbf.output.1','sdp.ingest.1',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('c856M4k_spead'))\
                , 'input_rate':10e6})
      # spead data from correlator to ingest node
+
+    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('beam_0x_spead'))})
+     # spead data from beamformer to ingest node
 
     G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':':7147'})
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
