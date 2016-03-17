@@ -173,7 +173,9 @@ class SDPResources(object):
         available_hosts = {'ingest1':\
                                {'ip':'ingest1.local','host_class':'nvidia_gpu'},
                            'mc1':\
-                               {'ip':'mc1.local', 'host_class':'generic'}}
+                               {'ip':'mc1.local', 'host_class':'generic'},
+                           'bf_ingest1':\
+                               {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'}}
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
