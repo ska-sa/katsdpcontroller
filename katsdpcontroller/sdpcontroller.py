@@ -590,7 +590,7 @@ class SDPHost(object):
                 for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
                     print ".",
                     #logger.debug(json.dumps(json.loads(pull_result), indent=4))
-            _container = self._docker_client.create_container(image=image.image, command=image.cmd, volumes=image.volumes)
+            _container = self._docker_client.create_container(image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
             return None
@@ -631,7 +631,7 @@ class SDPImage(object):
     This sets up ports, network and device pass through.
     
     """
-    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None):
+    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None):
         self.image = image
         self.port_bindings = port_bindings
         self.network = network
@@ -639,17 +639,11 @@ class SDPImage(object):
         self.volumes = volumes
         self.binds = binds
         self.cmd = cmd
+        self.cpuset = cpuset
 
-        #if image_class == 'sdpmc':
-        #    self.port_bindings = {5000:5000}
-
-        #if image_class == 'nvidia_gpu':
-        #    self.network = 'host'
-        #    self.devices = ['/dev/nvidiactl:/dev/nvidiactl','/dev/nvidia-uvm:/dev/nvidia-uvm',\
-        #                    '/dev/nvidia0:/dev/nvidia0']
     def __repr__(self):
-        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, Cmd: {}".format(self.image,\
-                self.port_bindings, self.network, self.devices, self.volumes, self.cmd)
+        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
+                self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd)
 
 
 class SDPTask(object):
