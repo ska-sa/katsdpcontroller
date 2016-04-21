@@ -72,6 +72,7 @@ if __name__ == "__main__":
         opts.loglevel = getattr(logging, opts.loglevel.upper())
 
     logging.root.setLevel(opts.loglevel)
+    logging.captureWarnings(True)
 
     logger = logging.getLogger('sdpcontroller')
 
