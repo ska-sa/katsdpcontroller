@@ -20,6 +20,9 @@ from katcp.kattypes import request, return_reply, Str, Int, Float
 
 try:
     import docker
+    import requests
+    requests.packages.urllib3.disable_warnings()
+     # disable HTTPS security warnings
 except ImportError:
     docker = None
      # docker is not needed when running in interface only mode.
@@ -37,6 +40,10 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+SENSOR_TYPES = {'address':Sensor.ADDRESS,'boolean':Sensor.BOOLEAN,'discrete':Sensor.DISCRETE,'float':Sensor.FLOAT,'integer':Sensor.INTEGER,'string':Sensor.STRING}
+ # lookup to convert return sensor-list inform types into katcp sensor types
+SENSOR_STATII = {'unknown':Sensor.UNKNOWN,'nominal':Sensor.NOMINAL,'warn':Sensor.WARN,'error':Sensor.ERROR,'failure':Sensor.FAILURE,'unreachable':Sensor.UNREACHABLE,'inactive':Sensor.INACTIVE}
+ # lookup to convert a returned sensor-value status into a sensor compatible form
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -47,14 +54,17 @@ class CallbackSensor(Sensor):
     """KATCP Sensor that uses a callback to obtain the next sensor value."""
     def __init__(self, *args, **kwargs):
         self._read_callback = None
+        self._read_callback_kwargs = {}
         self._busy_updating = False
         super(CallbackSensor, self).__init__(*args, **kwargs)
 
-    def set_read_callback(self, callback=None):
+    def set_read_callback(self, callback, **kwargs):
         self._read_callback = callback
+        self._read_callback_kwargs = kwargs
 
     def read(self):
         """Provide a callback function that is executed when read is called.
+        Callback should provide a (timestamp, status, value) tuple
 
         Returns
         -------
@@ -64,11 +74,11 @@ class CallbackSensor(Sensor):
         """
         if self._read_callback and not self._busy_updating:
             self._busy_updating = True
-            self.set_value(self._read_callback())
+            self.set_value(*self._read_callback(**self._read_callback_kwargs))
         # Having this outside the above if-statement ensures that we cannot get
         # stuck with busy_updating=True if read callback crashes in one thread
         self._busy_updating = False
-        return self._current_reading
+        return self._value_tuple
 
 class ImageResolver(object):
     """Class to map an abstract Docker image name to a fully-qualified name.
@@ -279,14 +289,26 @@ class SDPResources(object):
         return port
 
 class SDPNode(object):
-    """Lightweight container for various node related objects."""
-    def __init__(self, name, data, host, container_id):
+    """Lightweight container for various node related objects.
+
+       Node object is also responsible for managing any available
+       KATCP sensors of the controlled object. Such sensors are exposed
+       at the master controller level using the following syntax:
+         sdp_<subarray_name>.<node_type>.<node_index>.<sensor_name>
+       For example:
+         sdp.array_1.ingest.1.input_rate
+    """
+    def __init__(self, name, data, host, container_id, sdp_controller=None, subarray_name='unknown'):
         self.name = name
         self.host = host
         self.ip = host.ip
         self.container_id = container_id
         self.katcp_connection = None
         self.data = data
+        self.sdp_controller = sdp_controller
+        self.subarray_name = subarray_name
+        self.sensors = {}
+         # list of exposed KATCP sensors
 
     def is_alive(self):
          # is this node alive
@@ -307,6 +329,33 @@ class SDPNode(object):
                 pass # best effort
         self.host.stop_container(self.container_id)
 
+    def _chained_read(self, base_name='', katcp_connection=None):
+         # used to chain a sensor in the master controller
+         # to the actual sensor on the subordinate device
+        if self.katcp_connection:
+            reply, informs = self.katcp_connection.blocking_request(Message.request('sensor-value',base_name),timeout=5)
+            if not reply.reply_ok():
+                return None
+            if len(informs) < 1: return None
+            args = informs[0].arguments
+             # sensor list inform has format: <ts>,<not sure>,<name>,<state>,<value>
+             # all strings
+            logger.debug("Chained read on sensor {}: {}".format(base_name,args))
+            try:
+                s_ts = float(args[0])
+            except ValueError:
+                s_ts = time.time()
+            try:
+                s_state = SENSOR_STATII[args[3]]
+            except KeyError:
+                s_state = Sensor.UNKNOWN
+            s_value = args[4]
+            logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
+            return (s_value, s_state, s_ts)
+        else:
+            return ('',SENSOR.ERROR,time.time())
+        
+    
     def establish_katcp_connection(self):
          # establish katcp connection to this node if appropriate
         if 'port' in self.data:
@@ -316,20 +365,46 @@ class SDPNode(object):
                 self.katcp_connection.start(timeout=20)
                 self.katcp_connection.wait_connected(timeout=20)
                  # some katcp connections, particularly to ingest can take a while to establish
+                reply, informs = self.katcp_connection.blocking_request(Message.request('sensor-list'), timeout=5)
+                 # get available sensors
+                 # each inform as format: <name>,<description>,<units>,<type>[,<params>]
+                for i in informs:
+                    args = i.arguments
+                    s_name = "{}.{}.{}".format(self.subarray_name,self.name,args[0])
+                    s_description = args[1]
+                    s_units = args[2]
+                    s_type = SENSOR_TYPES[args[3]]
+                    params = args[4:]
+                     # all trailing arguments (if any) are params
+                    try:
+                        s = CallbackSensor(s_type, s_name, s_description, s_units)
+                         # leaving out params for now as these are specific to each type of
+                         # sensor and thus will need conversion out of their string form 
+                         # before use. They shouldn't really matter for this application.
+                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
+                        self.sensors[s_name] = s
+                        if self.sdp_controller:
+                            self.sdp_controller.add_sensor(s)
+                        logger.info("Added sensor {} of type {} for node {}".format(s_name, args[3], self.name))
+                         # probably back off to DEBUG once stable
+                    except KeyError:
+                        logger.error("Failed to add sensor {} of type {} for node {}".format(s_name, args[3], self.name))
+                for s in self.sensors.itervalues(): s.read()
+                 # refresh each added sensor so we have up to date values
                 return self.katcp_connection
             except RuntimeError:
                 self.katcp_connection.stop()
                  # no need for these to lurk around
-                retmsg = "Failed to connect to ingest process via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ip, self.data['port'])
+                retmsg = "Failed to connect to node via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ip, self.data['port'])
                 logger.error(retmsg)
-                raise
+                return None #raise - TEMPORARY!!!
         else:
             return None
 
 class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, graph_name, resources, telstate_node='sdp.telstate'):
+    def __init__(self, graph_name, resources, sdp_controller=None, telstate_node='sdp.telstate', subarray_name='unknown'):
         self.telstate_node = telstate_node
         self.resources = resources
         gp = importlib.import_module(graph_name)
@@ -338,6 +413,8 @@ class SDPGraph(object):
         self.telstate_endpoint = ""
         self.nodes = {}
         self.node_details = {}
+        self.sdp_controller = sdp_controller
+        self.subarray_name = subarray_name
         self._katcp = {}
          # node keyed dict of established katcp connections
 
@@ -370,7 +447,7 @@ class SDPGraph(object):
             raise docker.errors.DockerException(ret_msg)
         else:
             self.node_details[container.names[0][1:]] = host.get_container_details(container.id)
-        self.nodes[node] = SDPNode(node, data, host, container.id)
+        self.nodes[node] = SDPNode(node, data, host, container.id, sdp_controller=self.sdp_controller, subarray_name=self.subarray_name)
         logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container.id))
         return container.id
 
@@ -930,9 +1007,9 @@ class SDPControllerServer(DeviceServer):
 
     def _check_ntp_status(self):
         try:
-            return subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0
+            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0, SENSOR.NOMINAL, time.time())
         except OSError:
-            return False
+            return (False, SENSOR.NOMINAL, time.time())
 
     def request_halt(self, req, msg):
         """Halt the device server.
@@ -1120,6 +1197,8 @@ class SDPControllerServer(DeviceServer):
 
         name_parts = subarray_product_id.split("_")
          # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
+        subarray_name = name_parts[:-1] and "_".join(name_parts[:-1]) or "unknown"
+         # make sure we have some subarray name even if not specified
         sane_name = name_parts[-1]
 
         streams = {}
@@ -1156,7 +1235,7 @@ class SDPControllerServer(DeviceServer):
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
-        graph = SDPGraph(graph_name, self.resources)
+        graph = SDPGraph(graph_name, self.resources, sdp_controller=self, subarray_name=subarray_name)
          # create graph object and build physical graph from specified resources
 
         logger.debug(graph.get_json())
