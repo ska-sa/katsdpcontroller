@@ -76,7 +76,6 @@ class CallbackSensor(Sensor):
             self._busy_updating = True
             (_val, _status, _timestamp) = self._read_callback(**self._read_callback_kwargs)
             self.set_value(self.parse_value(_val), _status, _timestamp)
-            #self.set_value(*self._read_callback(**self._read_callback_kwargs))
         # Having this outside the above if-statement ensures that we cannot get
         # stuck with busy_updating=True if read callback crashes in one thread
         self._busy_updating = False
@@ -355,7 +354,11 @@ class SDPNode(object):
             logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
             return (s_value, s_state, s_ts)
         else:
+<<<<<<< HEAD
             return ('',Sensor.ERROR,time.time())
+=======
+            return ('',SENSOR.ERROR,time.time())
+>>>>>>> e34ddfbf9bf396759bcc8944f529f372203a1d07
         
     
     def establish_katcp_connection(self):
@@ -379,6 +382,7 @@ class SDPNode(object):
                     params = args[4:]
                      # all trailing arguments (if any) are params
                     try:
+<<<<<<< HEAD
                         if s_type == Sensor.DISCRETE:
                             s = CallbackSensor(s_type, s_name, s_description, s_units, params=params)
                         else:
@@ -387,16 +391,29 @@ class SDPNode(object):
                              # sensor and thus will need conversion out of their string form 
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
+=======
+                        s = CallbackSensor(s_type, s_name, s_description, s_units)
+                         # leaving out params for now as these are specific to each type of
+                         # sensor and thus will need conversion out of their string form 
+                         # before use. They shouldn't really matter for this application.
+>>>>>>> e34ddfbf9bf396759bcc8944f529f372203a1d07
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
                         self.sensors[s_name] = s
                         if self.sdp_controller:
                             self.sdp_controller.add_sensor(s)
+<<<<<<< HEAD
                         logger.info("Added sensor {} of type {} for node {} (params: {})".format(s_name, args[3], self.name, params))
                          # probably back off to DEBUG once stable
                     except KeyError:
                         logger.error("Failed to add sensor {} of type {} for node {}".format(s_name, args[3], self.name))
                     except IndexError:
                         logger.info("Failed to add sensor {} of type {} for node {} (args: {}) due to internal sensor init failure".format(s_name, args[3], self.name, args))
+=======
+                        logger.info("Added sensor {} of type {} for node {}".format(s_name, args[3], self.name))
+                         # probably back off to DEBUG once stable
+                    except KeyError:
+                        logger.error("Failed to add sensor {} of type {} for node {}".format(s_name, args[3], self.name))
+>>>>>>> e34ddfbf9bf396759bcc8944f529f372203a1d07
                 for s in self.sensors.itervalues(): s.read()
                  # refresh each added sensor so we have up to date values
                 return self.katcp_connection
@@ -1015,9 +1032,15 @@ class SDPControllerServer(DeviceServer):
 
     def _check_ntp_status(self):
         try:
+<<<<<<< HEAD
             return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0, Sensor.NOMINAL, time.time())
         except OSError:
             return (False, Sensor.NOMINAL, time.time())
+=======
+            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0, SENSOR.NOMINAL, time.time())
+        except OSError:
+            return (False, SENSOR.NOMINAL, time.time())
+>>>>>>> e34ddfbf9bf396759bcc8944f529f372203a1d07
 
     def request_halt(self, req, msg):
         """Halt the device server.
