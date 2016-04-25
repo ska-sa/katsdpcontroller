@@ -1002,7 +1002,7 @@ class SDPControllerServer(DeviceServer):
         self._device_status_sensor.set_value('ok')
         self.add_sensor(self._device_status_sensor)
 
-        self._ntp_sensor.set_value(False)
+        self._ntp_sensor.set_value('0')
         self._ntp_sensor.set_read_callback(self._check_ntp_status)
         self.add_sensor(self._ntp_sensor)
 
@@ -1013,9 +1013,9 @@ class SDPControllerServer(DeviceServer):
 
     def _check_ntp_status(self):
         try:
-            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0, Sensor.NOMINAL, time.time())
+            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0 and '1', Sensor.NOMINAL, time.time())
         except OSError:
-            return (False, Sensor.NOMINAL, time.time())
+            return ('0', Sensor.NOMINAL, time.time())
 
     def request_halt(self, req, msg):
         """Halt the device server.
