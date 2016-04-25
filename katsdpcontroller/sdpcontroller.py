@@ -328,6 +328,9 @@ class SDPNode(object):
                 self.katcp_connection.join()
             except RuntimeError:
                 pass # best effort
+        for sensor_name in self.sensors.iterkeys():
+            logger.debug("Removing sensor {}".format(sensor_name))
+            self.sdp_controller.remove_sensor(sensor_name)
         self.host.stop_container(self.container_id)
 
     def _chained_read(self, base_name='', katcp_connection=None):
