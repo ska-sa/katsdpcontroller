@@ -406,7 +406,7 @@ class SDPNode(object):
                  # no need for these to lurk around
                 retmsg = "Failed to connect to node via katcp on host {0} and port {1}. Check to see if networking issues could be to blame.".format(self.ip, self.data['port'])
                 logger.error(retmsg)
-                return None #raise - TEMPORARY!!!
+                return None
         else:
             return None
 
