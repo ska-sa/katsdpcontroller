@@ -40,10 +40,6 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
-SENSOR_TYPES = {'address':Sensor.ADDRESS,'boolean':Sensor.BOOLEAN,'discrete':Sensor.DISCRETE,'float':Sensor.FLOAT,'integer':Sensor.INTEGER,'string':Sensor.STRING}
- # lookup to convert return sensor-list inform types into katcp sensor types
-SENSOR_STATII = {'unknown':Sensor.UNKNOWN,'nominal':Sensor.NOMINAL,'warn':Sensor.WARN,'error':Sensor.ERROR,'failure':Sensor.FAILURE,'unreachable':Sensor.UNREACHABLE,'inactive':Sensor.INACTIVE}
- # lookup to convert a returned sensor-value status into a sensor compatible form
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -350,7 +346,7 @@ class SDPNode(object):
             except ValueError:
                 s_ts = time.time()
             try:
-                s_state = SENSOR_STATII[args[3]]
+                s_state = Sensor.STATUS_NAMES[args[3]]
             except KeyError:
                 s_state = Sensor.UNKNOWN
             s_value = args[4]
@@ -376,7 +372,7 @@ class SDPNode(object):
                     s_name = "{}.{}.{}".format(self.subarray_name,self.name,args[0])
                     s_description = args[1]
                     s_units = args[2]
-                    s_type = SENSOR_TYPES[args[3]]
+                    s_type = Sensor.parse_type(args[3])
                     params = args[4:]
                      # all trailing arguments (if any) are params
                     try:
