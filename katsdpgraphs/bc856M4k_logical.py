@@ -82,10 +82,10 @@ def build_physical_graph(r):
                , 'input_rate':10e6})
      # spead data from correlator to ingest node
 
-    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('beam_0x_spead'))})
+    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead'))})
      # spead data from beamformer to ingest node
 
-    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.2',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('beam_0y_spead'))})
+    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.2',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
      # spead data from beamformer to ingest node
 
     G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':':7147'})
