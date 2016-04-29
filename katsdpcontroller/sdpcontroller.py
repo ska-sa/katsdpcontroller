@@ -1012,7 +1012,7 @@ class SDPControllerServer(DeviceServer):
 
     def _check_ntp_status(self):
         try:
-            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0 and '1', Sensor.NOMINAL, time.time())
+            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0 and '1' or '0', Sensor.NOMINAL, time.time())
         except OSError:
             return ('0', Sensor.NOMINAL, time.time())
 
