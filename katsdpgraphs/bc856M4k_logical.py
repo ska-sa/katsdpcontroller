@@ -78,18 +78,17 @@ def build_physical_graph(r):
     G.add_edge('sdp.telstate','sdp.cal.1',{'telstate': telstate})
      # connections to the telescope state. 
 
-    G.add_edge('cbf.output.1','sdp.ingest.1',{'cbf_spead':'{}:7148'.format(r.get_multicast_ip('c856M4k_spead'))\
-               , 'input_rate':10e6})
+    G.add_edge('cbf.output.1','sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('c856M4k_spead'), r.get_port('c856M4k_spead'))})
      # spead data from correlator to ingest node
+
+    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':'{}:{}'.format(r.get_multicast_ip('CAM_spead'),r.get_port('CAM_spead'))})
+     # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead'))})
      # spead data from beamformer to ingest node
 
     G.add_edge('cbf.bf_output.1','sdp.bf_ingest.2',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
      # spead data from beamformer to ingest node
-
-    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':':7147'})
-     # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
      # ingest to cal node transfers L0 visibility data (no calibration)
