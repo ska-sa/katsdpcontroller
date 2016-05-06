@@ -64,7 +64,7 @@ def build_physical_graph(r):
               })
      # calibration node
 
-    G.add_node('sdp.timeplot.1',{'html_port': r.get_sdisp_port_pair('timeplot')[0],\
+    G.add_node('sdp.timeplot.1',{'spead_port': r.get_port('spead_sdisp'), 'html_port': r.get_sdisp_port_pair('timeplot')[0],\
          'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),\
          'config_base': '/var/kat/config/.katsdpdisp','data_port': r.get_sdisp_port_pair('timeplot')[1],\
          'docker_image':r.get_image_path('katsdpdisp'), 'docker_host_class':'nvidia_gpu', 'docker_cmd':'time_plot.py --rts',\
@@ -92,6 +92,9 @@ def build_physical_graph(r):
 
     G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
      # ingest to cal node transfers L0 visibility data (no calibration)
+
+    G.add_edge('sdp.ingest.1','sdp.timeplot.1',{'sdisp_spead':'127.0.0.1:{}'.format(r.get_port('spead_sdisp'))})
+     # cal to file writer transfers L1 visibility data (cal tables applied)
 
     G.add_edge('sdp.ingest.1','sdp.filewriter.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'),r.get_port('l0_spectral_spead'))})
      # cal to file writer transfers L1 visibility data (cal tables applied)
