@@ -37,14 +37,14 @@ def build_physical_graph(r):
      # ingest node for ar1
 
     G.add_node('sdp.bf_ingest.1',{'port': r.get_port('sdp_bf_ingest_1_katcp'), 'file_base':'/ramdisk', 'cbf_channels': 4096, \
-         'docker_image':r.get_image_path('katsdpingest:bf-ingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 4,6 bf_ingest.py',\
+         'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 4,6 bf_ingest.py',\
          'docker_params': {"cpuset":"4,6", "network":"host", "binds": {"/mnt/ramdisk0":{"bind":"/ramdisk","ro":False}}},\
          'state_transitions':{2:'capture-init',5:'capture-done'}\
         })
      # beamformer ingest node for ar1
 
     G.add_node('sdp.bf_ingest.2',{'port': r.get_port('sdp_bf_ingest_2_katcp'), 'file_base':'/ramdisk', 'cbf_channels': 4096, \
-         'docker_image':r.get_image_path('katsdpingest:bf-ingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 5,7 bf_ingest.py',\
+         'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 5,7 bf_ingest.py',\
          'docker_params': {"cpuset":"5,7", "network":"host", "binds": {"/mnt/ramdisk1":{"bind":"/ramdisk","ro":False}}},\
          'state_transitions':{2:'capture-init',5:'capture-done'}\
         })
