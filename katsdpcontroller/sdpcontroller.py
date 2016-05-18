@@ -531,6 +531,8 @@ class SDPGraph(object):
         for node in self.nodes.itervalues():
             logger.info("Shutting down node {}".format(node.name))
             node.shutdown()
+            self._katcp.pop(node.name, None)
+             # remember to remove cached katcp connection as well, if any
 
     def check_nodes(self):
          # check if all requested nodes are actually running
