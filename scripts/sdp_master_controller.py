@@ -47,7 +47,7 @@ if __name__ == "__main__":
     parser.add_option('--image-override', dest='image_override', action='append',
                       default=[], metavar='NAME:IMAGE',
                       help='Override an image name lookup (default: none)')
-    parser.add_option('--image-tag', dest='image_tag', type='string',
+    parser.add_option('--image-tag', dest='image_tag', type='string', default='latest',
                       metavar='TAG', help='Image tag to use for resolving images')
     parser.add_option('--no-pull', action='store_true', default=False,
                       help='Skip pulling images from the registry')
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     logger.info("Starting SDP Controller...")
     image_resolver = sdpcontroller.ImageResolver(
             private_registry=opts.private_registry or None,
-            tag=opts.image_tag or None,
+            tag=opts.image_tag,
             pull=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)

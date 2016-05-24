@@ -93,15 +93,12 @@ class ImageResolver(object):
     pull : bool, optional
         Whether to pull images from the `private_registry`.
     """
-    def __init__(self, private_registry=None, tag=None, pull=True):
+    def __init__(self, private_registry=None, tag='latest', pull=True):
         if private_registry is None:
             self._prefix = 'sdp/'
         else:
             self._prefix = private_registry + '/'
-        if tag is None:
-            self._suffix = ''
-        else:
-            self._suffix = ':' + tag
+        self._suffix = ':' + tag
         self._private_registry = private_registry
         self._overrides = {}
         self.pull = pull
@@ -130,7 +127,11 @@ class ImageResolver(object):
         try:
             return self._overrides[name]
         except KeyError:
-            return self._prefix + name + self._suffix
+            if ':' in name:
+                # A tag was already specified
+                return self._prefix + name
+            else:
+                return self._prefix + name + self._suffix
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
