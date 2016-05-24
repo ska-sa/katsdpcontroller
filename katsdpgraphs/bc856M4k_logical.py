@@ -36,19 +36,16 @@ def build_physical_graph(r):
         })
      # ingest node for ar1
 
-    G.add_node('sdp.bf_ingest.1',{'port': r.get_port('sdp_bf_ingest_1_katcp'), 'file_base':'/ramdisk', 'cbf_channels': 4096, \
-         'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 4,6 bf_ingest.py',\
-         'docker_params': {"cpuset":"4,6", "network":"host", "binds": {"/mnt/ramdisk0":{"bind":"/ramdisk","ro":False}}},\
+    G.add_node('sdp.bf_ingest.1',{'port': r.get_port('sdp_bf_ingest_1_katcp'), 'cbf_channels': 4096, \
+         'docker_image':r.get_image_path('beamform'),'docker_host_class':'bf_ingest', 'docker_cmd':'ptuse_ingest.py',\
+         'docker_params': {"network":"host", "binds": {"/var/kat/data":{"bind":"/data","ro":False}},
+             "devices":["/dev/nvidiactl:/dev/nvidiactl","/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"],\
+             "privileged":True, "ulimits":[{"Name":"memlock","Soft":33554432,"Hard":-1}],\
+             "ipc":"host"},\
          'state_transitions':{2:'capture-init',5:'capture-done'}\
         })
      # beamformer ingest node for ar1
 
-    G.add_node('sdp.bf_ingest.2',{'port': r.get_port('sdp_bf_ingest_2_katcp'), 'file_base':'/ramdisk', 'cbf_channels': 4096, \
-         'docker_image':r.get_image_path('katsdpingest'),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset -c 5,7 bf_ingest.py',\
-         'docker_params': {"cpuset":"5,7", "network":"host", "binds": {"/mnt/ramdisk1":{"bind":"/ramdisk","ro":False}}},\
-         'state_transitions':{2:'capture-init',5:'capture-done'}\
-        })
-     # beamformer ingest node for ar1
 
     G.add_node('sdp.filewriter.1',{'port': r.get_port('sdp_filewriter_1_katcp'),'file_base':'/var/kat/data',\
          'docker_image':r.get_image_path('katsdpfilewriter'),'docker_host_class':'generic', 'docker_cmd':'file_writer.py',\
@@ -84,10 +81,8 @@ def build_physical_graph(r):
     G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':'{}:{}'.format(r.get_multicast_ip('CAM_spead'),r.get_port('CAM_spead'))})
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
-    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead'))})
-     # spead data from beamformer to ingest node
-
-    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.2',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
+    G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead')),
+                                                    'cbf_speady':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
      # spead data from beamformer to ingest node
 
     G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
