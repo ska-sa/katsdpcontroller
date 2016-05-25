@@ -128,7 +128,8 @@ class ImageResolver(object):
             return self._overrides[name]
         except KeyError:
             if ':' in name:
-                # A tag was already specified
+                # A tag was already specified in the graph
+                logger.warn("Image %s has a predefined tag, ignoring suffix %s", name, self._suffix)
                 return self._prefix + name
             else:
                 return self._prefix + name + self._suffix
