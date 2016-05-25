@@ -884,7 +884,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self._issue_req('capture-done',node_type='ingest')
         self.graph.shutdown()
 
-    def _issue_req(self, req, args=[], node_type='ingest'):
+    def _issue_req(self, req, args=[], node_type='ingest', **kwargs):
          # issue a request against all nodes of a particular type.
          # typically usage is to issue a command such as 'capture-init'
          # to all ingest nodes. A single failure is treated as terminal.
@@ -896,7 +896,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                  # filter out node_type(s) we don't want
                  # TODO: probably needs a regexp
                 logger.info("Issued request {} {} to node {}".format(req, args, node))
-                reply, informs = katcp.blocking_request(Message.request(req, *args))
+                reply, informs = katcp.blocking_request(Message.request(req, *args), **kwargs)
                 if not reply.reply_ok():
                     retmsg = "Failed to issue req {} to node {}. {}".format(req, node, reply.arguments[-1])
                     logger.warning(retmsg)
@@ -941,7 +941,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
-                rcode, rval = self._issue_req('capture-stop', args=[self.subarray_product_id], node_type='sdp.sim')
+                rcode, rval = self._issue_req('capture-stop', args=[self.subarray_product_id], node_type='sdp.sim', timeout=120)
             self.exec_transitions(5)
              # called in an explicit fashion (above as well) so we can manage
              # execution order correctly when dealing with a simulator
