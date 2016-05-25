@@ -23,7 +23,7 @@ def build_physical_graph(r):
      # launch redis node to hold telescope state for this graph
 
     G.add_node('sdp.ingest.1',{'port':2040, 'output_int_time':2, 'antennas':2, 'antenna-mask':'m0062,m0063', 'continuum_factor': 32,\
-        'docker_image':r.get_image_path('katsdpingest_k40'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
+        'docker_image':r.get_image_path('katsdpingest_titanx'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
         'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
                           "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]}
         })
