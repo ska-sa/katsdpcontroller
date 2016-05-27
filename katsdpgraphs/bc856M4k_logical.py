@@ -41,7 +41,7 @@ def build_physical_graph(r):
          'docker_params': {"network":"host", "binds": {"/var/kat/data":{"bind":"/data","ro":False}},
              "devices":["/dev/nvidiactl:/dev/nvidiactl","/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"],\
              "privileged":True, "ulimits":[{"Name":"memlock","Soft":33554432,"Hard":-1}],\
-             "ipc":"host"},\
+             "ipc_mode":"host"},\
          'state_transitions':{2:'capture-init',5:'capture-done'}\
         })
      # beamformer ingest node for ar1
