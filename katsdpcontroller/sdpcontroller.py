@@ -716,7 +716,7 @@ class SDPImage(object):
     This sets up ports, network and device pass through.
     
     """
-    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None\
+    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
                               privileged=None, ulimits=None, ipc_mode=None):
         self.image = image
         self.port_bindings = port_bindings

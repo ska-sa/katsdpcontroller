@@ -37,8 +37,8 @@ def build_physical_graph(r):
      # ingest node for ar1
 
     G.add_node('sdp.bf_ingest.1',{'port': r.get_port('sdp_bf_ingest_1_katcp'), 'cbf_channels': 4096, \
-         'docker_image':r.get_image_path('beamform'),'docker_host_class':'bf_ingest', 'docker_cmd':'ptuse_ingest.py',\
-         'docker_params': {"network":"host", "binds": {"/var/kat/data":{"bind":"/data","ro":False}},
+         'docker_image':r.get_image_path("katsdpingest"),'docker_host_class':'bf_ingest', 'docker_cmd':'taskset 0,2,4,6 ptuse_ingest.py',\
+         'docker_params': {"network":"host", "binds": {"/scratch":{"bind":"/data","ro":False}},
              "devices":["/dev/nvidiactl:/dev/nvidiactl","/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"],\
              "privileged":True, "ulimits":[{"Name":"memlock","Soft":33554432,"Hard":-1}],\
              "ipc_mode":"host"},\
