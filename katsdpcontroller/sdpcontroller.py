@@ -685,9 +685,10 @@ class SDPHost(object):
 
          # launch
         try:
-            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}, Volumes: {}, Cmd: {}".format(_container['Id'], image.port_bindings, image.devices, image.network, image.volumes, image.cmd))
+            logger.debug("Starting container {}. Port: {}, Devices: {}, Network: {}, Volumes: {}, Cmd: {}, Privileged: {}, Ulimits: {}, Ipc_mode: {}".format(_container['Id'], image.port_bindings, image.devices, image.network, image.volumes, image.cmd, image.privileged, image.ulimits, image.ipc_mode))
             self._docker_client.start(_container['Id'], port_bindings=image.port_bindings, devices=image.devices,\
-                                  network_mode=image.network, binds=image.binds)
+                                  network_mode=image.network, binds=image.binds, privileged=image.privileged,\
+                                  ulimits=image.ulimits, ipc_mode=image.ipc_mode)
         except docker.errors.APIError,e:
             logger.error("Failed to launch container ({})".format(e))
             return None
@@ -717,7 +718,8 @@ class SDPImage(object):
     This sets up ports, network and device pass through.
     
     """
-    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None):
+    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
+                              privileged=None, ulimits=None, ipc_mode=None):
         self.image = image
         self.port_bindings = port_bindings
         self.network = network
@@ -726,6 +728,9 @@ class SDPImage(object):
         self.binds = binds
         self.cmd = cmd
         self.cpuset = cpuset
+        self.privileged = privileged
+        self.ulimits = ulimits
+        self.ipc_mode = ipc_mode
 
     def __repr__(self):
         return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
