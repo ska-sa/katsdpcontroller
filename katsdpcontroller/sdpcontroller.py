@@ -439,7 +439,9 @@ class SDPGraph(object):
         if data.has_key('docker_cmd'):
             cmd = "{} --telstate {} --name {}".format(data['docker_cmd'], data['telstate'], node)
          # cmd always includes telstate connection and name of process
-        img = SDPImage(data['docker_image'], name_to_use=node, cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
+        name_to_use = "{}-{}".format(node, self.subarray_name)
+         # user friendly name to be used by docker for any containers launched from this image
+        img = SDPImage(data['docker_image'], name_to_use=name_to_use, cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
          # prepare a docker image and pass through any override parameters specified
         logger.info("Preparing to launch image {} on node class {}".format(img, host_class))
         try:
