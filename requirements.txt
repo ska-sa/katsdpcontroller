@@ -3,10 +3,10 @@ backports.ssl-match-hostname
 certifi
 decorator
 docker-py==1.8.1
-ipaddress==1.0.16
 faulthandler==2.4
 futures
 funcsigs
+ipaddress==1.0.16
 linecache2
 manhole
 mock

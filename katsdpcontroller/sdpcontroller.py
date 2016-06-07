@@ -4,6 +4,7 @@
 
 import os
 import time
+import uuid
 import logging
 import subprocess
 import shlex
@@ -438,7 +439,9 @@ class SDPGraph(object):
         if data.has_key('docker_cmd'):
             cmd = "{} --telstate {} --name {}".format(data['docker_cmd'], data['telstate'], node)
          # cmd always includes telstate connection and name of process
-        img = SDPImage(data['docker_image'], cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
+        name_to_use = "{}-{}".format(node, self.subarray_name)
+         # user friendly name to be used by docker for any containers launched from this image
+        img = SDPImage(data['docker_image'], name_to_use=name_to_use, cmd=cmd, image_class=host_class, **data.get('docker_params',{}))
          # prepare a docker image and pass through any override parameters specified
         logger.info("Preparing to launch image {} on node class {}".format(img, host_class))
         try:
@@ -455,7 +458,7 @@ class SDPGraph(object):
         else:
             self.node_details[container.names[0][1:]] = host.get_container_details(container.id)
         self.nodes[node] = SDPNode(node, data, host, container.id, sdp_controller=self.sdp_controller, subarray_name=self.subarray_name)
-        logger.info("Successfully launched image {} on host {}. Container ID is {}".format(data['docker_image'], host.ip, container.id))
+        logger.info("Successfully launched image {} as {} on host {}.".format(data['docker_image'], node, host.ip))
         return container.id
 
     def get_json(self):
@@ -669,14 +672,25 @@ class SDPHost(object):
         """Launch this image as a container on the host."""
          # we may need to investigate container reuse at this point
 
+        old_image_rename = "{}-{}".format(image.name_to_use, uuid.uuid4().hex)
+        try:
+            self._docker_client.rename(image.name_to_use, old_image_rename)
+        except docker.errors.NotFound:
+            pass
+             # generally benign - probably a new host or someone cleaned up aggressively
+        except docker.errors.APIError:
+            logger.warning("Failed to rename old container {} to {}. Removing to allow startup of new container".format(image.name_to_use, old_image_rename))
+             # seems our unique ID is not so unique, or some other docker calamity has occured
+            self._docker_client.remove_container(image.name_to_use)
+
          # create a container from the specied image, using the build context provided
         try:
             logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
             if self.image_resolver.pullable(image.image):
-                for pull_result in self._docker_client.pull(image.image, insecure_registry=True, stream=True):
-                    print ".",
-                    #logger.debug(json.dumps(json.loads(pull_result), indent=4))
-            _container = self._docker_client.create_container(image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
+                st = time.time()
+                self._docker_client.pull(image.image, insecure_registry=True)
+                logger.info("Image {} pulled in {:.2f}s".format(image.image, time.time()-st))
+            _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
             return None
@@ -718,9 +732,10 @@ class SDPImage(object):
     This sets up ports, network and device pass through.
     
     """
-    def __init__(self, image, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
+    def __init__(self, image, name_to_use=None, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
                               privileged=None, ulimits=None, ipc_mode=None):
         self.image = image
+        self.name_to_use = name_to_use
         self.port_bindings = port_bindings
         self.network = network
         self.devices = devices
@@ -733,8 +748,8 @@ class SDPImage(object):
         self.ipc_mode = ipc_mode
 
     def __repr__(self):
-        return "Image: {}, Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
-                self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd)
+        return "Image: {} ({}), Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
+                self.name_to_use, self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd)
 
 
 class SDPTask(object):
