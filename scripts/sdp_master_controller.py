@@ -49,6 +49,9 @@ if __name__ == "__main__":
                       help='Override an image name lookup (default: none)')
     parser.add_option('--image-tag', dest='image_tag', type='string', default='latest',
                       metavar='TAG', help='Image tag to use for resolving images')
+    parser.add_option('--graph-override', dest='graph_override', action='append',
+                      default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
+                      help='Override the graph to be used for the specified subarray product id (default: none)')
     parser.add_option('--no-pull', action='store_true', default=False,
                       help='Skip pulling images from the registry')
     parser.add_option('-v', '--verbose', dest='verbose', default=False,
@@ -90,12 +93,20 @@ if __name__ == "__main__":
         if len(fields) < 2:
             die("--image-override option must have a colon")
         image_resolver.override(fields[0], fields[1])
+
+    for override in opts.graph_override:
+        if len(override.split(':', 1)) < 2:
+            die("--graph-override option must be in the form <subarray_product_id>:<graph_name>")
+
+    graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
+
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port,
         simulate=opts.simulate,
         interface_mode=opts.interface_mode,
         local_resources=opts.local_resources,
-        image_resolver=image_resolver)
+        image_resolver=image_resolver,
+        graph_resolver=graph_resolver)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)

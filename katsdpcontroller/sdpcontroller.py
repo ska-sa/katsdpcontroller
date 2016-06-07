@@ -78,6 +78,48 @@ class CallbackSensor(Sensor):
         self._busy_updating = False
         return (self._timestamp, self._status, self._value)
 
+class GraphResolver(object):
+    """Provides graph name resolution services for use when presented with
+       a subarray product id.
+
+       A subarray product id has the form <subarray_name>_<data_product_name>
+       and in general the graph name will be the same as the data_product_name.
+
+       This resolver class allows specified subarray product ids to be mapped
+       to a user specified graph.
+
+       Parameters
+       ----------
+       overrides : list, optional
+            A list of override strings in the form <subarray_product_id>:<override_graph_name>
+       simulate : bool, optional
+            Resolver will product graph name suitable for use in simulation when set to true. (default: False)
+       """
+    def __init__(self, overrides=[], simulate=False):
+        self._overrides = {}
+        self.simulate = simulate
+
+        for override in overrides:
+            fields = override.split(':', 1)
+            if len(fields) < 2:
+                logger.warning("Ignoring graph resolver override {} as it does not conform to \
+                                the required <subarray_product_id>:<graph_name>".format(override))
+            self._overrides[fields[0]] = fields[1]
+            logger.info("Registering graph override {} => {}".format(fields[0], fields[1]))
+
+    def __call__(self, subarray_product_id):
+        """Returns a full qualified (package included) graph name from the specified subarray product id.
+           e.g. array_1_c856M4k => katsdpgraphs.c856M4k_logical
+        """
+        try:
+            base_graph_name = self._overrides[subarray_product_id]
+            logger.warning("Graph name specified by subarray_product_id ({}) has been overriden to {}".format(subarray_product_id, base_graph_name))
+             # if an override is set use this instead, but warn the user about this
+        except KeyError:
+            base_graph_name = subarray_product_id.split("_")[-1]
+             # default graph name is to split out the trailing name from the subarray product id specifier
+        return "katsdpgraphs.{}{}_logical".format(base_graph_name, "sim" if self.simulate else "")
+
 class ImageResolver(object):
     """Class to map an abstract Docker image name to a fully-qualified name.
     If no private registry is specified, it looks up names in the `sdp/`
@@ -130,7 +172,7 @@ class ImageResolver(object):
         except KeyError:
             if ':' in name:
                 # A tag was already specified in the graph
-                logger.warn("Image %s has a predefined tag, ignoring suffix %s", name, self._suffix)
+                logger.warning("Image %s has a predefined tag, ignoring suffix %s", name, self._suffix)
                 return self._prefix + name
             else:
                 return self._prefix + name + self._suffix
@@ -999,6 +1041,8 @@ class SDPControllerServer(DeviceServer):
         self.components = {}
          # dict of currently managed SDP components
 
+        self.graph_resolver = kwargs.get('graph_resolver',GraphResolver(simulate=self.simulate))
+
         logger.debug("Building initial resource pool")
         self.resources = SDPResources(
             local_resources=kwargs.get('local_resources', False),
@@ -1251,7 +1295,8 @@ class SDPControllerServer(DeviceServer):
                 logger.error(retmsg)
                 return ('fail',retmsg)
 
-        graph_name = "katsdpgraphs.{}{}_logical".format(sane_name, "sim" if self.simulate else "")
+        graph_name = self.graph_resolver(subarray_product_id)
+
         logger.info("Launching graph {}.".format(graph_name))
 
 	self.resources.prefix = subarray_product_id
