@@ -227,7 +227,10 @@ class SDPResources(object):
                            'mc1':\
                                {'ip':'mc1.local', 'host_class':'generic'},
                            'bf_ingest1':\
-                               {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'}}
+                               {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'},
+                           'ssd_pod1':
+                               {'ip':'ssd_pod1.local', 'host_class':'ssd_pod'}
+        }
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'

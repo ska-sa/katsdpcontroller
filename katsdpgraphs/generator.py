@@ -7,7 +7,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
 
     Parameters
     ----------
-    beamformer_mode : {"none", "hdf5", "ptuse"}
+    beamformer_mode : {"none", "hdf5_ram", "hdf5_ssd", "ptuse"}
         Which nodes (if any) to provide for beamformer capture
     channels : int
         Number of correlator channels
@@ -16,7 +16,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     resources : :class:`katsdpcontroller.SDPResources`
         Resources for the graph
     """
-    if beamformer_mode not in ['none', 'ptuse', 'hdf5']:
+    if beamformer_mode not in ['none', 'ptuse', 'hdf5_ssd', 'hdf5_ram']:
         raise ValueError('Unrecognised beamformer_mode ' + beamformer_mode)
     r = resources
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
@@ -53,6 +53,33 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
                  "privileged":True, "ulimits":[{"Name":"memlock","Soft":33554432,"Hard":-1}],\
                  "ipc_mode":"host"},\
              'state_transitions':{2:'capture-init',5:'capture-done'}\
+            })
+    elif beamformer_mode != 'none':
+        for i in range(2):
+            if beamformer_mode == 'hdf5_ram':
+                cpuset = ['4,6', '5,7'][i]
+                interface = ['p5p1', 'p4p1'][i]
+                file_base = '/mnt/ramdisk{}'.format(i)
+                host_class = 'bf_ingest'
+            else:
+                cpuset = ['0,1', '2,3'][i]
+                interface = 'p7p1'
+                file_base = '/mnt/data{}'.format(i)
+                host_class = 'ssd_pod'
+            G.add_node('sdp.bf_ingest.{}'.format(i+1), {
+                'port': r.get_port('sdp_bf_ingest_{}_katcp'.format(i+1)),
+                'file_base': '/data',
+                'cbf_channels': cbf_channels,
+                'interface': interface,
+                'docker_image': r.get_image_path('katsdpingest'),
+                'docker_host_class': host_class,
+                'docker_cmd': 'taskset -c {} bf_ingest.py'.format(cpuset),
+                'docker_params': {
+                    "cpuset": cpuset,
+                    "network": "host",
+                    "binds": {file_base: {"bind": "/data", "ro": False}}
+                },
+                'state_transitions': {2: 'capture-init', 5: 'capture-done'}
             })
          # beamformer ingest node for ar1
 
@@ -106,7 +133,13 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     if beamformer_mode == 'ptuse':
         G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead')),
                                                         'cbf_speady':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
-         # spead data from beamformer to ingest node
+    elif beamformer_mode != 'none':
+        for i in range(2):
+            stream = 'beam_0{}_spead'.format('xy'[i])
+            G.add_edge('cbf.bf_output.{}'.format(i+1), 'sdp.bf_ingest.{}'.format(i+1), {
+                'cbf_spead': '{}:{}'.format(r.get_multicast_ip(stream), r.get_port(stream))
+            })
+     # spead data from beamformer to ingest node
 
     G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
      # ingest to cal node transfers L0 visibility data (no calibration)
@@ -136,10 +169,13 @@ def graph_parameters(graph_name):
     parameters : dict
         Key-value pairs to pass as parameters to :func:`build_physical_graph`
     """
-    match = re.match('^(c|bc|bec)856M(4|32)k((?:sim)?)$', graph_name)
+    match = re.match('^(?P<mode>c|bc)856M(?P<channels>4|32)k(?P<sim>(?:sim)?)$', graph_name)
     if not match:
-        raise ValueError('Unsupported graph ' + product)
-    beamformer_modes = {'c': 'none', 'bc': 'ptuse', 'bec': 'hdf5'}
-    return dict(beamformer_mode=beamformer_modes[match.group(1)],
-                cbf_channels=int(match.group(2)) * 1024,
-                simulate=bool(match.group(3)))
+        match = re.match('^bec856M(?P<channels>4|32)k(?P<mode>ssd|ram)(?P<sim>(?:sim)?)$', graph_name)
+        if not match:
+            raise ValueError('Unsupported graph ' + graph_name)
+    beamformer_modes = {'c': 'none', 'bc': 'ptuse', 'ssd': 'hdf5_ssd', 'ram': 'hdf5_ram'}
+    beamformer_mode = beamformer_modes[match.group('mode')]
+    return dict(beamformer_mode=beamformer_mode,
+                cbf_channels=int(match.group('channels')) * 1024,
+                simulate=bool(match.group('sim')))
