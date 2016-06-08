@@ -1185,7 +1185,7 @@ class SDPControllerServer(DeviceServer):
         if antennas == "0" or antennas == "":
             try:
                 (rcode, rval) = self.deregister_product(subarray_product_id)
-                self.mass_inform(Message.inform("device-changed"))
+                self.mass_inform(Message.inform("interface-changed"))
                  # we have likely modified our sensor-list by deconfiguring - let CAM know
                 return (rcode, rval)
             except KeyError:
@@ -1321,7 +1321,7 @@ class SDPControllerServer(DeviceServer):
          # finally we insert detail on all running nodes into telstate
         if graph.telstate is not None:
             graph.telstate.add('sdp_node_detail',graph.node_details)
-        self.mass_inform(Message.inform("device-changed"))
+        self.mass_inform(Message.inform("interface-changed"))
          # let CAM know that our interface has changed (sensors have been added)
         return ('ok',"")
 
