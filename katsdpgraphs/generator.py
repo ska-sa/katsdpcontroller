@@ -3,7 +3,7 @@ import networkx as nx
 import re
 
 def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
-    """Generate a logical graph.
+    """Generate a physical graph.
 
     Parameters
     ----------
