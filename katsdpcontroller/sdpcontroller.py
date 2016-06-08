@@ -8,7 +8,6 @@ import uuid
 import logging
 import subprocess
 import shlex
-import importlib
 import json
 import signal
 import socket
@@ -18,6 +17,7 @@ import faulthandler
 
 from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
+import katsdpgraphs.generator
 
 try:
     import docker
@@ -108,8 +108,8 @@ class GraphResolver(object):
             logger.info("Registering graph override {} => {}".format(fields[0], fields[1]))
 
     def __call__(self, subarray_product_id):
-        """Returns a full qualified (package included) graph name from the specified subarray product id.
-           e.g. array_1_c856M4k => katsdpgraphs.c856M4k_logical
+        """Returns a full qualified graph name from the specified subarray product id.
+           e.g. array_1_c856M4k => c856M4k
         """
         try:
             base_graph_name = self._overrides[subarray_product_id]
@@ -118,7 +118,7 @@ class GraphResolver(object):
         except KeyError:
             base_graph_name = subarray_product_id.split("_")[-1]
              # default graph name is to split out the trailing name from the subarray product id specifier
-        return "katsdpgraphs.{}{}_logical".format(base_graph_name, "sim" if self.simulate else "")
+        return "{}{}".format(base_graph_name, "sim" if self.simulate else "")
 
 class ImageResolver(object):
     """Class to map an abstract Docker image name to a fully-qualified name.
@@ -227,7 +227,10 @@ class SDPResources(object):
                            'mc1':\
                                {'ip':'mc1.local', 'host_class':'generic'},
                            'bf_ingest1':\
-                               {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'}}
+                               {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'},
+                           'ssd_pod1':
+                               {'ip':'ssd_pod1.local', 'host_class':'ssd_pod'}
+        }
 
          # add the SDPMC as a non docker host
         sdpmc_local_ip = '127.0.0.1'
@@ -457,8 +460,9 @@ class SDPGraph(object):
     def __init__(self, graph_name, resources, sdp_controller=None, telstate_node='sdp.telstate', subarray_name='unknown'):
         self.telstate_node = telstate_node
         self.resources = resources
-        gp = importlib.import_module(graph_name)
-        self.graph = gp.build_physical_graph(resources)
+        kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
+        kwargs['resources'] = resources
+        self.graph = katsdpgraphs.generator.build_physical_graph(**kwargs)
         self.telstate = None
         self.telstate_endpoint = ""
         self.nodes = {}
