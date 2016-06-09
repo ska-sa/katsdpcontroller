@@ -744,7 +744,7 @@ class SDPHost(object):
             if self.image_resolver.pullable(image.image):
                 st = time.time()
                 pull_return = self._docker_client.pull(image.image, insecure_registry=True)
-                digest_location = a.find('sha256')
+                digest_location = pull_return.find('sha256')
                 image_digest = pull_return[digest_location:pull_return.find('"',digest_location)]
                  # unfortunately the pull return is a stringified list of dicts of each
                  # image pulled. The requested tag (or latest) is the first of these
