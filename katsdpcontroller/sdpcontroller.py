@@ -752,7 +752,7 @@ class SDPHost(object):
             _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
-            return None
+            return (None, None)
 
         if image_digest.startswith('sha256'): image_digest = "@" + image_digest
         pullable_version = "{}{}".format(image.image, image_digest)
@@ -770,7 +770,7 @@ class SDPHost(object):
                                   ulimits=image.ulimits, ipc_mode=image.ipc_mode)
         except docker.errors.APIError,e:
             logger.error("Failed to launch container ({})".format(e))
-            return None
+            return (None, None)
 
          # check to see if we launched correctly
         self.update_containers()
@@ -778,7 +778,7 @@ class SDPHost(object):
             return (self.container_list[_container['Id']], pullable_version)
         except KeyError:
             logger.error("Failed to launch container")
-            return None
+            return (None, None)
 
     def __repr__(self):
         try:
