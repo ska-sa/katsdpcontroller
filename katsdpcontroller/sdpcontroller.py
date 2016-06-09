@@ -402,7 +402,17 @@ class SDPNode(object):
             return (s_value, s_state, s_ts)
         else:
             return ('',Sensor.ERROR,time.time())
-    
+
+    def add_sensor(self, sensor):
+        """Add the supplied Sensor object to the top level device and
+           track it locally.
+        """
+        self.sensors[sensor.name] = sensor
+        if self.sdp_controller:
+            self.sdp_controller.add_sensor(sensor)
+        else:
+            logger.warning("Attempted to add sensor {} to node {}, but the node has no SDP controller available.".format(sensor.name,self.name))
+
     def establish_katcp_connection(self):
          # establish katcp connection to this node if appropriate
         if 'port' in self.data:
@@ -433,9 +443,7 @@ class SDPNode(object):
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
-                        self.sensors[s_name] = s
-                        if self.sdp_controller:
-                            self.sdp_controller.add_sensor(s)
+                        self.add_sensor(s)
                         logger.info("Added sensor {} of type {} for node {} (params: {})".format(s_name, args[3], self.name, params))
                          # probably back off to DEBUG once stable
                     except KeyError:
@@ -495,7 +503,7 @@ class SDPGraph(object):
         except KeyError:
             logger.error("Tried to launch a container on host_class {}, but no hosts of this type are available in the resource pool.".format(host_class))
             return 0
-        container = host.launch(img)
+        (container, pullable_version) = host.launch(img)
          # launch the specified image in a new container
         if container is None:
             ret_msg = "Failed to launch image {} on host {}.".format(data['docker_image'], host.ip)
@@ -503,7 +511,11 @@ class SDPGraph(object):
             raise docker.errors.DockerException(ret_msg)
         else:
             self.node_details[container.names[0][1:]] = host.get_container_details(container.id)
+            s_name = "{}.{}.version".format(self.subarray_name, node)
+            version_sensor = Sensor(Sensor.STRING, s_name, "Pullable image of executing container.", "")
+            version_sensor.set_value(pullable_version)
         self.nodes[node] = SDPNode(node, data, host, container.id, sdp_controller=self.sdp_controller, subarray_name=self.subarray_name)
+        self.nodes[node].add_sensor(version_sensor)
         logger.info("Successfully launched image {} as {} on host {}.".format(data['docker_image'], node, host.ip))
         return container.id
 
@@ -730,18 +742,31 @@ class SDPHost(object):
             self._docker_client.remove_container(image.name_to_use)
 
          # create a container from the specied image, using the build context provided
+        image_digest = ''
         try:
             logger.info("Pulling image {} to host {} - this may take some time...".format(image.image, self.ip))
             if self.image_resolver.pullable(image.image):
                 st = time.time()
-                self._docker_client.pull(image.image, insecure_registry=True)
+                pull_return = self._docker_client.pull(image.image, insecure_registry=True)
+                digest_location = pull_return.find('sha256')
+                image_digest = pull_return[digest_location:pull_return.find('"',digest_location)]
+                 # unfortunately the pull return is a stringified list of dicts of each
+                 # image pulled. The requested tag (or latest) is the first of these
+                 # the specific entry we are looking for has the following form (hash shortened for brevity):
+                 # {"status":"Digest: sha256:ca02ec...cfb906a"}
                 logger.info("Image {} pulled in {:.2f}s".format(image.image, time.time()-st))
             _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
-            return None
+            return (None, None)
 
-        logger.debug("Built container {}".format(_container['Id']))
+        if image_digest.startswith('sha256'): image_digest = "@" + image_digest
+        pullable_version = "{}{}".format(image.image, image_digest)
+         # create the fully qualified pullable version for this image that can
+         # be used to retrieve the exact image at a later date, or at least
+         # the latest version of that if we don't know the digest
+
+        logger.debug("Built container {} from {}".format(_container['Id'], pullable_version))
 
          # launch
         try:
@@ -751,15 +776,15 @@ class SDPHost(object):
                                   ulimits=image.ulimits, ipc_mode=image.ipc_mode)
         except docker.errors.APIError,e:
             logger.error("Failed to launch container ({})".format(e))
-            return None
+            return (None, None)
 
          # check to see if we launched correctly
         self.update_containers()
         try:
-            return self.container_list[_container['Id']]
+            return (self.container_list[_container['Id']], pullable_version)
         except KeyError:
             logger.error("Failed to launch container")
-            return None
+            return (None, None)
 
     def __repr__(self):
         try:
@@ -1551,7 +1576,7 @@ class SDPControllerServer(DeviceServer):
             if socket.gethostbyname(host.ip) != '127.0.0.1':
                  # make sure a localhost hasn't snuck in to spoil the party
                 logger.debug("Launching halt image on host {}".format(host_name))
-                container = host.launch(kibisis)
+                (container, pullable_version) = host.launch(kibisis)
                 if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
                 shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
 
