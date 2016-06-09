@@ -399,7 +399,17 @@ class SDPNode(object):
             return (s_value, s_state, s_ts)
         else:
             return ('',Sensor.ERROR,time.time())
-    
+
+    def add_sensor(self, sensor):
+        """Add the supplied Sensor object to the top level device and
+           track it locally.
+        """
+        self.sensors[sensor.name] = sensor
+        if self.sdp_controller:
+            self.sdp_controller.add_sensor(sensor)
+        else:
+            logger.warning("Attempted to add sensor {} to node {}, but the node has no SDP controller available.".format(sensor.name,self.name))
+
     def establish_katcp_connection(self):
          # establish katcp connection to this node if appropriate
         if 'port' in self.data:
@@ -430,9 +440,7 @@ class SDPNode(object):
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
-                        self.sensors[s_name] = s
-                        if self.sdp_controller:
-                            self.sdp_controller.add_sensor(s)
+                        self.add_sensor(s)
                         logger.info("Added sensor {} of type {} for node {} (params: {})".format(s_name, args[3], self.name, params))
                          # probably back off to DEBUG once stable
                     except KeyError:
@@ -502,8 +510,8 @@ class SDPGraph(object):
             s_name = "{}.{}.version".format(self.subarray_name, node)
             version_sensor = Sensor(Sensor.STRING, s_name, "Pullable image of executing container.", "")
             version_sensor.set_value(pullable_version)
-            self.sdp_controller.add_sensor(version_sensor)
         self.nodes[node] = SDPNode(node, data, host, container.id, sdp_controller=self.sdp_controller, subarray_name=self.subarray_name)
+        self.nodes[node].add_sensor(version_sensor)
         logger.info("Successfully launched image {} as {} on host {}.".format(data['docker_image'], node, host.ip))
         return container.id
 
