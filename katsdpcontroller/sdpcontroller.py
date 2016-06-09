@@ -748,6 +748,8 @@ class SDPHost(object):
                 image_digest = pull_return[digest_location:pull_return.find('"',digest_location)]
                  # unfortunately the pull return is a stringified list of dicts of each
                  # image pulled. The requested tag (or latest) is the first of these
+                 # the specific entry we are looking for has the following form (hash shortened for brevity):
+                 # {"status":"Digest: sha256:ca02ec...cfb906a"}
                 logger.info("Image {} pulled in {:.2f}s".format(image.image, time.time()-st))
             _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
         except docker.errors.APIError, e:
