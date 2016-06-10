@@ -343,7 +343,7 @@ class SDPNode(object):
        For example:
          sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, name, data, host, container_id, sdp_controller=None, subarray_name='unknown'):
+    def __init__(self, name, data, host, container_id, sdp_controller, subarray_name, subarray_product_id):
         self.name = name
         self.host = host
         self.ip = host.ip
@@ -352,6 +352,7 @@ class SDPNode(object):
         self.data = data
         self.sdp_controller = sdp_controller
         self.subarray_name = subarray_name
+        self.subarray_product_id = subarray_product_id
         self.sensors = {}
          # list of exposed KATCP sensors
 
@@ -444,6 +445,13 @@ class SDPNode(object):
                              # NOTE: Not true for discretes, hence the kludge above
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
                         self.add_sensor(s)
+                        if self.name == 'sdp.ingest.1' and args[0] == 'status':
+                            s.name = "data-product-status-{}".format(self.subarray_product_id)
+                            logger.info("Adding fake status sensor {}".format(s.name))
+                            self.add_sensor(s)
+                             # unfortunately it is too hard to change a baselined ICD
+                             # so we need to add a fake sensor to mirror the ingest status
+                             # of a particular graph into a top level sensor
                         logger.info("Added sensor {} of type {} for node {} (params: {})".format(s_name, args[3], self.name, params))
                          # probably back off to DEBUG once stable
                     except KeyError:
@@ -465,7 +473,7 @@ class SDPNode(object):
 class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, graph_name, resources, sdp_controller=None, telstate_node='sdp.telstate', subarray_name='unknown'):
+    def __init__(self, graph_name, resources, subarray_product_id, sdp_controller=None, telstate_node='sdp.telstate'):
         self.telstate_node = telstate_node
         self.resources = resources
         kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
@@ -476,9 +484,13 @@ class SDPGraph(object):
         self.nodes = {}
         self.node_details = {}
         self.sdp_controller = sdp_controller
-        self.subarray_name = subarray_name
         self._katcp = {}
          # node keyed dict of established katcp connections
+        self.subarray_product_id = subarray_product_id
+        name_parts = subarray_product_id.split("_")
+         # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
+        self.subarray_name = name_parts[:-1] and "_".join(name_parts[:-1]) or "unknown"
+         # make sure we have some subarray name even if not specified
 
     def _launch(self, node, data):
         for edge in self.graph.in_edges_iter('sdp.ingest.1',data=True):
@@ -514,7 +526,7 @@ class SDPGraph(object):
             s_name = "{}.{}.version".format(self.subarray_name, node)
             version_sensor = Sensor(Sensor.STRING, s_name, "Pullable image of executing container.", "")
             version_sensor.set_value(pullable_version)
-        self.nodes[node] = SDPNode(node, data, host, container.id, sdp_controller=self.sdp_controller, subarray_name=self.subarray_name)
+        self.nodes[node] = SDPNode(node, data, host, container.id, self.sdp_controller, self.subarray_name, self.subarray_product_id)
         self.nodes[node].add_sensor(version_sensor)
         logger.info("Successfully launched image {} as {} on host {}.".format(data['docker_image'], node, host.ip))
         return container.id
@@ -1299,12 +1311,6 @@ class SDPControllerServer(DeviceServer):
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
 
-        name_parts = subarray_product_id.split("_")
-         # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
-        subarray_name = name_parts[:-1] and "_".join(name_parts[:-1]) or "unknown"
-         # make sure we have some subarray name even if not specified
-        sane_name = name_parts[-1]
-
         streams = {}
          # local dict to hold streams associated with the specified data product
         try:
@@ -1340,7 +1346,7 @@ class SDPControllerServer(DeviceServer):
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
-        graph = SDPGraph(graph_name, self.resources, sdp_controller=self, subarray_name=subarray_name)
+        graph = SDPGraph(graph_name, self.resources, subarray_product_id, sdp_controller=self)
          # create graph object and build physical graph from specified resources
 
         logger.debug(graph.get_json())
