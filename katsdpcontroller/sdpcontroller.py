@@ -1056,7 +1056,7 @@ class SDPControllerServer(DeviceServer):
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
-        self._device_status_sensor = Sensor(Sensor.DISCRETE, "device-status", "Devices status of the Antenna Positioner", "", ["ok", "degraded", "fail"])
+        self._device_status_sensor = Sensor(Sensor.DISCRETE, "device-status", "Devices status of the SDP Master Controller", "", ["ok", "degraded", "fail"])
         self._fmeca_sensors = {}
         self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
          # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
