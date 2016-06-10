@@ -343,16 +343,16 @@ class SDPNode(object):
        For example:
          sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, name, data, host, container_id, graph):
+    def __init__(self, name, data, host, container_id, sdp_controller, subarray_name, subarray_product_id):
         self.name = name
         self.host = host
         self.ip = host.ip
         self.container_id = container_id
         self.katcp_connection = None
         self.data = data
-        self.sdp_controller = graph.sdp_controller
-        self.subarray_name = graph.subarray_name
-        self.subarray_product_id = graph.subarray_product_id
+        self.sdp_controller = sdp_controller
+        self.subarray_name = subarray_name
+        self.subarray_product_id = subarray_product_id
         self.sensors = {}
          # list of exposed KATCP sensors
 
@@ -526,7 +526,7 @@ class SDPGraph(object):
             s_name = "{}.{}.version".format(self.subarray_name, node)
             version_sensor = Sensor(Sensor.STRING, s_name, "Pullable image of executing container.", "")
             version_sensor.set_value(pullable_version)
-        self.nodes[node] = SDPNode(node, data, host, container.id, self)
+        self.nodes[node] = SDPNode(node, data, host, container.id, self.sdp_controller, self.subarray_name, self.subarray_product_id)
         self.nodes[node].add_sensor(version_sensor)
         logger.info("Successfully launched image {} as {} on host {}.".format(data['docker_image'], node, host.ip))
         return container.id
