@@ -972,7 +972,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if self._state == 1 or force:
             if self._state != 1:
                 logger.warning("Forcing capture_done on external request.")
-                self._issue_req('capture-done')
+                try:
+                    self._issue_req('capture-done')
+                except RuntimeError:
+                    pass # we gave it our best shot...
             self._deconfigure()
             return ('ok', 'Subarray product has been deconfigured')
         else:
@@ -984,7 +987,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         logger.info("Deconfiguring subarray product")
          # issue shutdown commands for individual nodes via katcp
          # then terminate katcp connection
-        self._issue_req('capture-done',node_type='ingest')
+        try:
+            self._issue_req('capture-done',node_type='ingest')
+        except RuntimeError, e:
+            logger.error("Failed to issue capture-done during shutdown request. Will continue with graph shutdown. Error was {}".format(e))
         self.graph.shutdown()
 
     def _issue_req(self, req, args=[], node_type='ingest', **kwargs):
