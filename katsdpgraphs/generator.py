@@ -92,7 +92,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         })
      # filewriter
 
-    G.add_node('sdp.cal.1',{'docker_image':r.get_image_path('katsdpcal'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'run_cal.py',\
+    G.add_node('sdp.cal.1',{'docker_image':r.get_image_path('katsdpcal'),'docker_host_class':'calib', 'docker_cmd':'run_cal.py',\
                'docker_params': {"network":"host","volumes":"/var/kat/data",\
                  "binds": {"/var/kat/data":{"bind":"/var/kat/data","ro":False}}}, 'cbf_channels': cbf_channels, \
               })

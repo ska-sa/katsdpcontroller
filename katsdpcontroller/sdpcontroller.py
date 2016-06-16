@@ -226,6 +226,8 @@ class SDPResources(object):
                                {'ip':'ingest1.local','host_class':'nvidia_gpu'},
                            'mc1':\
                                {'ip':'mc1.local', 'host_class':'generic'},
+                           'cal1':\
+                               {'ip':'cal1.local', 'host_class':'calib'},
                            'bf_ingest1':\
                                {'ip':'bf_ingest1.local', 'host_class':'bf_ingest'},
                            'ssd_pod1':
