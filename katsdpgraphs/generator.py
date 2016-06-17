@@ -37,12 +37,24 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
-    G.add_node('sdp.ingest.1',{'port': r.get_port('sdp_ingest_1_katcp'), 'antennas':4, 'continuum_factor': 32, 'sd_continuum_factor': cbf_channels // 256, 'cbf_channels': cbf_channels,\
-         'docker_image':r.get_image_path('katsdpingest_titanx'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'ingest.py',\
-         'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
-                          "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]},\
-         'state_transitions':{2:'capture-init',5:'capture-done'}\
-        })
+    G.add_node('sdp.ingest.1',{
+        'port': r.get_port('sdp_ingest_1_katcp'),
+        'continuum_factor': 32,
+        'sd_continuum_factor': cbf_channels // 256,
+        'cbf_channels': cbf_channels,
+        'l0_continuum_spead_rate': 950e6,    # 1Gbps link
+        'l0_spectral_spead_rate': 950e6,     # 1Gbps link
+        'sd_spead_rate': 2e7,                # local machine, so crank it up a bit
+        'docker_image':r.get_image_path('katsdpingest_titanx'),
+        'docker_host_class':'nvidia_gpu',
+        'docker_cmd':'taskset -c 1,3,5,7 ingest.py',
+        'docker_params': {
+            "network":"host",
+            "devices":["/dev/nvidiactl:/dev/nvidiactl",
+                       "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]
+        },
+        'state_transitions':{2:'capture-init',5:'capture-done'}\
+    })
      # ingest node for ar1
 
     if beamformer_mode == 'ptuse':
@@ -109,11 +121,20 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
 
      # simulation node
 
-    G.add_node('sdp.timeplot.1',{'spead_port': r.get_port('spead_sdisp'), 'html_port': r.get_sdisp_port_pair('timeplot')[0],\
-         'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),\
-         'config_base': '/var/kat/config/.katsdpdisp','data_port': r.get_sdisp_port_pair('timeplot')[1],\
-         'docker_image':r.get_image_path('katsdpdisp'), 'docker_host_class':'nvidia_gpu', 'docker_cmd':'time_plot.py --rts',\
-         'docker_params': {"network":"host", "binds": {"/var/kat/config":{"bind":"/var/kat/config","ro":False}}}})
+    G.add_node('sdp.timeplot.1',{
+        'spead_port': r.get_port('spead_sdisp'),
+        'html_port': r.get_sdisp_port_pair('timeplot')[0],
+        'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),
+        'config_base': '/var/kat/config/.katsdpdisp',
+        'data_port': r.get_sdisp_port_pair('timeplot')[1],
+        'docker_image':r.get_image_path('katsdpdisp'),
+        'docker_host_class':'nvidia_gpu',
+        'docker_cmd':'taskset -c 0,2,4,6 time_plot.py --rts',
+        'docker_params': {
+            "network":"host",
+            "binds": {"/var/kat/config":{"bind":"/var/kat/config","ro":False}}
+        }
+    })
      # timeplot
 
     # establish node connections
