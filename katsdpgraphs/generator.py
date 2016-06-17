@@ -42,9 +42,9 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         'continuum_factor': 32,
         'sd_continuum_factor': cbf_channels // 256,
         'cbf_channels': cbf_channels,
-        'l0_continuum_spead_rate': 950e6,    # 1Gbps link
-        'l0_spectral_spead_rate': 950e6,     # 1Gbps link
-        'sd_spead_rate': 2e9,                # local machine, so crank it up a bit
+        'l0_continuum_spead_rate': 900e6,    # 1Gbps link
+        'l0_spectral_spead_rate': 900e6,     # 1Gbps link
+        'sd_spead_rate': 3e9,                # local machine, so crank it up a bit
         'docker_image':r.get_image_path('katsdpingest_titanx'),
         'docker_host_class':'nvidia_gpu',
         'docker_cmd':'taskset -c 1,3,5,7 ingest.py',
