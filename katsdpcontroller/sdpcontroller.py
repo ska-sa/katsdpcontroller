@@ -1027,7 +1027,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
              # when we have more this will need to be improved
             req = node.get_transition(state)
             if req is not None:
-                self._issue_req(req, node_type=node.name)
+                self._issue_req(req, node_type=node.name, timeout=300)
              # failure not necessarily catastrophic, follow the schwardtian approach of bumble on...
 
     def _set_state(self, state_id):
