@@ -975,7 +975,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if self._state != 1:
                 logger.warning("Forcing capture_done on external request.")
                 try:
-                    self._issue_req('capture-done')
+                    self._issue_req('capture-done', timeout=300)
                 except RuntimeError:
                     pass # we gave it our best shot...
             self._deconfigure()
@@ -990,7 +990,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
          # issue shutdown commands for individual nodes via katcp
          # then terminate katcp connection
         try:
-            self._issue_req('capture-done',node_type='ingest')
+            self._issue_req('capture-done', node_type='ingest', timeout=300)
         except RuntimeError, e:
             logger.error("Failed to issue capture-done during shutdown request. Will continue with graph shutdown. Error was {}".format(e))
         self.graph.shutdown()
