@@ -148,12 +148,12 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     G.add_edge(c_node,'sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip(c_stream), r.get_port(c_stream))})
      # spead data from correlator to ingest node
 
-    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':'{}:{}'.format(r.get_multicast_ip('CAM_spead'),r.get_port('CAM_spead'))})
+    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':r.get_multicast('CAM_spead')})
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     if beamformer_mode == 'ptuse':
-        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':'{}:{}'.format(r.get_multicast_ip('beam_0x_spead'),r.get_port('beam_0x_spead')),
-                                                        'cbf_speady':'{}:{}'.format(r.get_multicast_ip('beam_0y_spead'),r.get_port('beam_0y_spead'))})
+        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('beam_0x_spead'),
+                                                        'cbf_speady':r.get_multicast('beam_0y_spead')})
     elif beamformer_mode != 'none':
         for i in range(2):
             stream = 'beam_0{}_spead'.format('xy'[i])
@@ -162,16 +162,16 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
             })
      # spead data from beamformer to ingest node
 
-    G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'), r.get_port('l0_spectral_spead'))})
+    G.add_edge('sdp.ingest.1','sdp.cal.1',{'l0_spectral_spead':r.get_multicast('l0_spectral_spead')})
      # ingest to cal node transfers L0 visibility data (no calibration)
 
     G.add_edge('sdp.ingest.1','sdp.timeplot.1',{'sdisp_spead':'127.0.0.1:{}'.format(r.get_port('spead_sdisp'))})
      # cal to file writer transfers L1 visibility data (cal tables applied)
 
-    G.add_edge('sdp.ingest.1','sdp.filewriter.1',{'l0_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l0_spectral_spead'),r.get_port('l0_spectral_spead'))})
+    G.add_edge('sdp.ingest.1','sdp.filewriter.1',{'l0_spectral_spead':r.get_multicast('l0_spectral_spead')})
      # cal to file writer transfers L1 visibility data (cal tables applied)
 
-    G.add_edge('sdp.cal.1','null',{'l1_spectral_spead':'{}:{}'.format(r.get_multicast_ip('l1_spectral_spead'),r.get_port('l1_spectral_spead'))})
+    G.add_edge('sdp.cal.1','null',{'l1_spectral_spead':r.get_multicast('l1_spectral_spead')})
      # cal to file writer transfers L1 visibility data (cal tables applied)
 
     return G
