@@ -1101,8 +1101,10 @@ class SDPControllerServer(DeviceServer):
 
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
-        self.subarray_product_graphs = {}
-         # shortcut dict to established graphs
+        self.subarray_product_msg = {}
+         # store calling arguments used to create a specified subarray_product
+         # this has either the current args or those most recently
+         # configured for this subarray_product
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
@@ -1237,6 +1239,37 @@ class SDPControllerServer(DeviceServer):
             rcode, rval = self.deregister_product(subarray_product_id,force=True)
             logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
 
+    @request(Str(), include_msg=True)
+    @return_reply(Str())
+    def request_data_product_reconfigure(self, req, req_msg, subarray_product_id):
+        """Reconfigure the specified SDP subarray product instance.
+
+           The primary use of this command is to restart the SDP components for a particular
+           subarray without having to reconfigure the rest of the system.
+
+           Essentially this runs a deconfigure() followed by a configure() with the same parameters as originally
+           specified via the data_product_configure katcp call.
+
+           Inform Arguments
+           ----------------
+           subarray_product_id : string
+             The ID of the subarray product to reconfigure in the form [<subarray_name>_]<data_product_name>.
+
+        """
+        logger.info("?data-product-reconfigure called on {}".format(subarray_product_id))
+        if not subarray_product_id in self.subarray_products:
+            return ('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
+
+        logger.info("Deconfiguring {}".format(subarray_product_id))
+        deconf_msg = Message.request('data-product-configure','{}'.format(subarray_product_id),'0')
+        self.request_data_product_configure(None, deconf_msg)
+
+        reconf_msg = self.subarray_product_msg[subarray_product_id]
+        logger.info("Calling configure from reconfigure with {}".format(reconf_msg))
+        self.request_data_product_configure(None, reconf_msg)
+
+        return ('ok','')
+
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
     def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
@@ -1283,7 +1316,7 @@ class SDPControllerServer(DeviceServer):
         success : {'ok', 'fail'}
             If ok, returns the port on which the ingest process for this product is running.
         """
-        logger.info("?data-product-configure called with: {}".format(locals()))
+        logger.info("?data-product-configure called with: {}".format(req_msg))
          # INFO for now, but should be DEBUG post integration
         if not subarray_product_id:
             for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
@@ -1376,7 +1409,7 @@ class SDPControllerServer(DeviceServer):
             logger.debug("Telstate configured. Base parameters {}".format(config))
             logger.warning("No components will be started - running in interface mode")
             self.subarray_products[subarray_product_id] = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-            self.subarray_product_graphs[subarray_product_id] = graph
+            self.subarray_product_msg[subarray_product_id] = req_msg
             return ('ok',"")
 
         if docker is None:
@@ -1424,7 +1457,7 @@ class SDPControllerServer(DeviceServer):
          # at this point telstate is up, nodes have been launched, katcp connections established
          # TODO: The subarray product class will need to be reworked
         self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.subarray_product_graphs[subarray_product_id] = graph
+        self.subarray_product_msg[subarray_product_id] = req_msg
 
          # finally we insert detail on all running nodes into telstate
         if graph.telstate is not None:
