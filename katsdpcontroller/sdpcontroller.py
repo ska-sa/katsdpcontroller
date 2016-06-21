@@ -1099,8 +1099,6 @@ class SDPControllerServer(DeviceServer):
 
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
-        self.subarray_product_graphs = {}
-         # shortcut dict to established graphs
         self.subarray_product_msg = {}
          # store calling arguments used to create subarray_products
         self.ingest_ports = {}
@@ -1407,7 +1405,6 @@ class SDPControllerServer(DeviceServer):
             logger.debug("Telstate configured. Base parameters {}".format(config))
             logger.warning("No components will be started - running in interface mode")
             self.subarray_products[subarray_product_id] = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-            self.subarray_product_graphs[subarray_product_id] = graph
             self.subarray_product_msg[subarray_product_id] = req_msg
             return ('ok',"")
 
@@ -1456,7 +1453,6 @@ class SDPControllerServer(DeviceServer):
          # at this point telstate is up, nodes have been launched, katcp connections established
          # TODO: The subarray product class will need to be reworked
         self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.subarray_product_graphs[subarray_product_id] = graph
         self.subarray_product_msg[subarray_product_id] = req_msg
 
          # finally we insert detail on all running nodes into telstate
