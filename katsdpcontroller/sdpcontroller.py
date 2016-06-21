@@ -1100,7 +1100,9 @@ class SDPControllerServer(DeviceServer):
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
         self.subarray_product_msg = {}
-         # store calling arguments used to create subarray_products
+         # store calling arguments used to create a specified subarray_product
+         # this has either the current args or those most recently
+         # configured for this subarray_product
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
