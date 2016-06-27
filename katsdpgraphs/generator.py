@@ -80,6 +80,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
                 file_base = '/mnt/data{}'.format(i)
                 host_class = 'ssd_pod'
                 devices = ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']
+            cpuset = ','.join(map(str, affinity))
             G.add_node('sdp.bf_ingest.{}'.format(i+1), {
                 'port': r.get_port('sdp_bf_ingest_{}_katcp'.format(i+1)),
                 'file_base': '/data',
@@ -94,7 +95,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
                 'docker_params': {
                     "ulimits": [{"Name": "memlock", "Soft": 1024**3, "Hard": 1024**3}],
                     "devices": devices,
-                    "cpuset": ','.join(map(str, affinity)),
+                    "cpuset": cpuset,
                     "network": "host",
                     "binds": {file_base: {"bind": "/data", "ro": False}}
                 },
