@@ -69,24 +69,32 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     elif beamformer_mode != 'none':
         for i in range(2):
             if beamformer_mode == 'hdf5_ram':
-                cpuset = ['4,6', '5,7'][i]
+                affinity = [[4, 6], [5, 7]][i]
                 interface = ['p5p1', 'p4p1'][i]
                 file_base = '/mnt/ramdisk{}'.format(i)
                 host_class = 'bf_ingest'
+                devices = ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0', '/dev/infiniband/uverbs1']
             else:
-                cpuset = ['0,1', '2,3'][i]
+                affinity = [[0, 1], [2, 3]][i]
                 interface = 'p7p1'
                 file_base = '/mnt/data{}'.format(i)
                 host_class = 'ssd_pod'
+                devices = ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']
+            cpuset = ','.join(map(str, affinity))
             G.add_node('sdp.bf_ingest.{}'.format(i+1), {
                 'port': r.get_port('sdp_bf_ingest_{}_katcp'.format(i+1)),
                 'file_base': '/data',
                 'cbf_channels': cbf_channels,
                 'interface': interface,
+                'ibv': True,
+                'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
+                'affinity': affinity,
                 'docker_image': r.get_image_path('katsdpingest'),
                 'docker_host_class': host_class,
                 'docker_cmd': 'taskset -c {} bf_ingest.py'.format(cpuset),
                 'docker_params': {
+                    "ulimits": [{"Name": "memlock", "Soft": 1024**3, "Hard": 1024**3}],
+                    "devices": devices,
                     "cpuset": cpuset,
                     "network": "host",
                     "binds": {file_base: {"bind": "/data", "ro": False}}
