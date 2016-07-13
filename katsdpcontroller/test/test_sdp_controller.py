@@ -5,7 +5,7 @@ import unittest2 as unittest
 from katcp.testutils import BlockingTestClient
 from katcp import Message
 
-from katsdpcontroller.sdpcontroller import SDPControllerServer
+from katsdpcontroller.sdpcontroller import SDPControllerServer, SDPResources
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 
@@ -107,3 +107,32 @@ class TestSDPController(unittest.TestCase):
     def test_help(self):
         self.client.test_help(EXPECTED_REQUEST_LIST)
 
+class TestSDPResources(unittest.TestCase):
+    """Test :class:`katsdpcontroller.sdpcontroller.SDPResources`."""
+    def setUp(self):
+        self.r = SDPResources(interface_mode=True)
+        self.r.prefix = 'array_1_c856M4k'
+
+    def test_multicast_ip(self):
+        # Get assigned IP's from known host classes
+        self.assertEqual('225.100.1.1', self.r.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.4.1', self.r.get_multicast_ip('l1_continuum_spead'))
+        # Get assigned IP from unknown host class
+        self.assertEqual('225.100.0.1', self.r.get_multicast_ip('unknown'))
+        # Check that assignments are remembered
+        self.assertEqual('225.100.1.1', self.r.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.4.1', self.r.get_multicast_ip('l1_continuum_spead'))
+        self.assertEqual('225.100.0.1', self.r.get_multicast_ip('unknown'))
+        # Override an assignment, check that this is remembered
+        self.r.set_multicast_ip('l0_spectral_spead', '239.1.2.3')
+        self.assertEqual('239.1.2.3', self.r.get_multicast_ip('l0_spectral_spead'))
+        # Assign a value not previously seen
+        self.r.set_multicast_ip('CAM_spead', '239.4.5.6')
+        self.assertEqual('239.4.5.6', self.r.get_multicast_ip('CAM_spead'))
+
+        # Now change the previous to a different subarray-product, check that
+        # new values are used.
+        self.r.prefix = 'array_1_bc856M4k'
+        self.assertEqual('225.100.1.2', self.r.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.0.2', self.r.get_multicast_ip('CAM_spead'))
+        self.assertEqual('225.100.0.3', self.r.get_multicast_ip('unknown'))

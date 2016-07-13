@@ -13,6 +13,7 @@ import signal
 import socket
 
 import netifaces
+import ipaddress
 import faulthandler
 
 from katcp import DeviceServer, Sensor, Message, BlockingClient
@@ -177,19 +178,50 @@ class ImageResolver(object):
             else:
                 return self._prefix + name + self._suffix
 
+
+class MulticastIPResources(object):
+    def __init__(self, network):
+        self._network = network
+        self._hosts = network.hosts()
+        self._allocated = {}      # Contains strings, not IPv4Address objects
+
+    def _new_ip(self, host_class):
+        try:
+            ip = str(next(self._hosts))
+            self._allocated[host_class] = ip
+            return ip
+        except StopIteration:
+            raise RuntimeError('Multicast IP addresses exhausted')
+
+    def set_ip(self, host_class, ip):
+        self._allocated[host_class] = ip
+
+    def get_ip(self, host_class):
+        ip = self._allocated.get(host_class)
+        if ip is None:
+            ip = self._new_ip(host_class)
+        return ip
+
+
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.100.0/24',local_resources=False, interface_mode=False, image_resolver=None):
+    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.0.0/16',local_resources=False, interface_mode=False, image_resolver=None):
         self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
-        self.safe_multicast_range = self._ip_range(safe_multicast_cidr)
+        multicast_subnets = ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24)
+        self._multicast_resources = {}
+        self._multicast_resources_fallback = MulticastIPResources(next(multicast_subnets))
+        for name in ['l0_spectral_spead',
+                     'l0_continuum_spead',
+                     'l1_spectral_spead',
+                     'l1_continuum_spead']:
+            self._multicast_resources[name] = MulticastIPResources(next(multicast_subnets))
         if image_resolver is None:
             image_resolver = ImageResolver()
         self.image_resolver = image_resolver
         self.allocated_ports = {}
         self.allocated_sdisp_ports = {}
-        self.allocated_mip = {}
         self.hosts = {}
         self.hosts_by_class = {}
         self.interface_mode = interface_mode
@@ -267,20 +299,6 @@ class SDPResources(object):
             self.hosts_by_class[param['host_class']] = self.hosts_by_class.get(param['host_class'],[])
             self.hosts_by_class[param['host_class']].append(self.hosts[host])
 
-    def _ip_range(self, ip_cidr):
-        (start_ip, cidr) = ip_cidr.split('/')
-        start = list(map(int,start_ip.split('.')))
-        iprange=[]
-        for x in range(2**(32-int(cidr))):
-            for i in range(len(start)-1,-1,-1):
-                if start[i]<255:
-                    start[i]+=1
-                    break
-                else:
-                    start[i]=0
-            iprange.append('.'.join(map(str,start)))
-        return iprange
-
     def get_host_ip(self, host_class):
          # for the specified host class
          # return an available / assigned ip
@@ -299,23 +317,17 @@ class SDPResources(object):
             self.allocated_sdisp_ports[host_class] = (html_port, data_port)
         return (html_port, data_port)
 
-    def _new_mip(self, host_class):
-        mip = self.safe_multicast_range.pop()
-        self.allocated_mip[host_class] = mip
-        return mip
-
     def set_multicast_ip(self, host_class, ip):
-         # override system generated mip with specified one
+        """"Override system-generated multicast IP address with specified one"""
+        mr = self._multicast_resources.get(host_class, self._multicast_resources_fallback)
         if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
-        self.allocated_mip[host_class] = ip
+        mr.set_ip(host_class, ip)
 
     def get_multicast_ip(self, host_class):
-         # for the specified host class
-         # return an available / assigned multicast address
+        """For the specified host class, return an available / assigned multicast address"""
+        mr = self._multicast_resources.get(host_class, self._multicast_resources_fallback)
         if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
-        mip = self.allocated_mip.get(host_class, None)
-        if mip is None: mip = self._new_mip(host_class)
-        return mip
+        return mr.get_ip(host_class)
 
     def _new_port(self, host_class):
         port = self.safe_ports.pop()
@@ -334,6 +346,13 @@ class SDPResources(object):
         port = self.allocated_ports.get(host_class, None)
         if port is None: port = self._new_port(host_class)
         return port
+
+    def get_multicast(self, host_class):
+        """For the specified host class, return a multicast endpoint in the form
+        ``ipaddress:port``"""
+        return '{}:{}'.format(self.get_multicast_ip(host_class),
+                              self.get_port(host_class))
+
 
 class SDPNode(object):
     """Lightweight container for various node related objects.
