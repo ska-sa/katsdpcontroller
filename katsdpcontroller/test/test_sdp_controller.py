@@ -27,6 +27,7 @@ EXPECTED_SENSOR_LIST = [
 
 EXPECTED_REQUEST_LIST = [
     'data-product-configure',
+    'data-product-reconfigure',
     'sdp-status',
     'capture-done',
     'capture-init',
@@ -45,7 +46,7 @@ class TestSDPController(unittest.TestCase):
     this reason unique subarray_ids are used by each test to try and avoid clashes.
     """
     def setUp(self):
-        self.controller = SDPControllerServer('127.0.0.1',5000,simulate=True, interface_mode=True)
+        self.controller = SDPControllerServer('127.0.0.1',5000,simulate=True, interface_mode=True, safe_multicast_cidr="225.100.0.0/16")
         self.controller.start()
         self.client = BlockingTestClient(self,'127.0.0.1',5000)
         self.client.start(timeout=1)
@@ -110,7 +111,7 @@ class TestSDPController(unittest.TestCase):
 class TestSDPResources(unittest.TestCase):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPResources`."""
     def setUp(self):
-        self.r = SDPResources(interface_mode=True)
+        self.r = SDPResources("225.100.0.0/16", interface_mode=True)
         self.r.prefix = 'array_1_c856M4k'
 
     def test_multicast_ip(self):
