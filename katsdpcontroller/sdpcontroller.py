@@ -209,6 +209,7 @@ class SDPResources(object):
         self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
+        logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
         multicast_subnets = ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24)
         self._multicast_resources = {}
         self._multicast_resources_fallback = MulticastIPResources(next(multicast_subnets))
@@ -1115,7 +1116,8 @@ class SDPControllerServer(DeviceServer):
         self.resources = SDPResources(
             local_resources=kwargs.get('local_resources', False),
             interface_mode=self.interface_mode,
-            image_resolver=kwargs.get('image_resolver'))
+            image_resolver=kwargs.get('image_resolver'),
+            safe_multicast_cidr=kwargs.get('safe_multicast_cidr'))
          # create a new resource pool. 
 
         self.subarray_products = {}

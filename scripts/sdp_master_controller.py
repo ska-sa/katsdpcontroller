@@ -49,6 +49,8 @@ if __name__ == "__main__":
                       help='Override an image name lookup (default: none)')
     parser.add_option('--image-tag', dest='image_tag', type='string', default='latest',
                       metavar='TAG', help='Image tag to use for resolving images')
+    parser.add_option('--safe-multicast-cidr', dest='safe_multicast_cidr', type='string', default='225.100.0.0/16',
+                      metavar='TAG', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16')
     parser.add_option('--graph-override', dest='graph_override', action='append',
                       default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
                       help='Override the graph to be used for the specified subarray product id (default: none)')
@@ -106,7 +108,8 @@ if __name__ == "__main__":
         interface_mode=opts.interface_mode,
         local_resources=opts.local_resources,
         image_resolver=image_resolver,
-        graph_resolver=graph_resolver)
+        graph_resolver=graph_resolver,
+        safe_multicast_cidr=opts.safe_multicast_cidr)
 
     restart_queue = Queue.Queue()
     server.set_restart_queue(restart_queue)
