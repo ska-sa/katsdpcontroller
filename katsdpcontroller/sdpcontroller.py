@@ -205,7 +205,7 @@ class MulticastIPResources(object):
 
 class SDPResources(object):
     """Helper class to allocate and track assigned IP and ports from a predefined range."""
-    def __init__(self, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), safe_multicast_cidr='225.100.0.0/16',local_resources=False, interface_mode=False, image_resolver=None):
+    def __init__(self, safe_multicast_cidr, safe_port_range=range(30000,31000), sdisp_port_range=range(8100,7999,-1), local_resources=False, interface_mode=False, image_resolver=None):
         self.local_resources = local_resources
         self.safe_ports = safe_port_range
         self.sdisp_ports = sdisp_port_range
@@ -1114,10 +1114,10 @@ class SDPControllerServer(DeviceServer):
 
         logger.debug("Building initial resource pool")
         self.resources = SDPResources(
+            kwargs.get('safe_multicast_cidr'),
             local_resources=kwargs.get('local_resources', False),
             interface_mode=self.interface_mode,
-            image_resolver=kwargs.get('image_resolver'),
-            safe_multicast_cidr=kwargs.get('safe_multicast_cidr'))
+            image_resolver=kwargs.get('image_resolver'))
          # create a new resource pool. 
 
         self.subarray_products = {}
