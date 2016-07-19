@@ -15,6 +15,7 @@ networkx==1.10
 nose
 numpy
 pbr
+pkginfo
 ply
 ProxyTypes
 redis
