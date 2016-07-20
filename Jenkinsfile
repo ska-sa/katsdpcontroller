@@ -1,3 +1,4 @@
 #!groovy
 
-katsdp.standardBuild(maintainer: 'sratcliffe@ska.ac.za')
+def katsdp = fileLoader.fromGit('jenkins/scripts/katsdp.groovy', 'git@github.com:ska-sa/katsdpinfrastructure', 'jenkins2', 'katpull', '')
+katsdp.standardBuild(maintainer: 'simonr@ska.ac.za')
