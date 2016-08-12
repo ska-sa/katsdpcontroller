@@ -37,6 +37,18 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
+    # cam2spead node
+    G.add_node('sdp.cam2spead.1', {
+        'port': r.get_port('sdp_cam2spead_1_katcp'),
+        'docker_image': r.get_image_path('katsdpingest'),
+        'docker_cmd': 'cam2spead_recv.py',
+        'docker_host_class': 'sdpmc',
+        'docker_params': {
+            'network': 'host'
+        },
+        'state_transitions': {2: 'capture-init', 5: 'capture-done'}
+    })
+
     G.add_node('sdp.ingest.1',{
         'port': r.get_port('sdp_ingest_1_katcp'),
         'continuum_factor': 32,
@@ -45,6 +57,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         'l0_continuum_spead_rate': 800e6,    # 1Gbps link
         'l0_spectral_spead_rate': 800e6,     # 1Gbps link
         'sd_spead_rate': 3e9,                # local machine, so crank it up a bit
+        'cam_spead': ':7146',                # TODO: this is a port we expect to receive no data on. Remove once CAM thread taken out of ingest
         'docker_image':r.get_image_path('katsdpingest_titanx'),
         'docker_host_class':'nvidia_gpu',
         'docker_cmd':'taskset -c 1,3,5,7 ingest.py',
@@ -150,13 +163,14 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     G.add_edge('sdp.telstate','sdp.ingest.1',{'telstate': telstate})
     G.add_edge('sdp.telstate','sdp.filewriter.1',{'telstate': telstate})
     G.add_edge('sdp.telstate','sdp.cal.1',{'telstate': telstate})
+    G.add_edge('sdp.telstate','sdp.cam2spead.1',{'telstate':telstate})
      # connections to the telescope state. 
 
     c_node = 'sdp.sim.1' if simulate else 'cbf.output.1'
     G.add_edge(c_node,'sdp.ingest.1',{'cbf_spead':'{}:{}'.format(r.get_multicast_ip(c_stream), r.get_port(c_stream))})
      # spead data from correlator to ingest node
 
-    G.add_edge('cam.camtospead.1','sdp.ingest.1',{'cam_spead':r.get_multicast('CAM_spead')})
+    G.add_edge('cam.camtospead.1','sdp.cam2spead.1',{'cam_spead':r.get_multicast('CAM_spead')})
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     if beamformer_mode == 'ptuse':
