@@ -42,7 +42,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         'port': r.get_port('sdp_cam2spead_1_katcp'),
         'docker_image': r.get_image_path('katsdpingest'),
         'docker_cmd': 'cam2spead_recv.py',
-        'docker_host_class': 'sdpmc',
+        'docker_host_class': 'nvidia-gpu',
         'docker_params': {
             'network': 'host'
         },
