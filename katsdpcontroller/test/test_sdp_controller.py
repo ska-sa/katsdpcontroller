@@ -46,9 +46,9 @@ class TestSDPController(unittest.TestCase):
     this reason unique subarray_ids are used by each test to try and avoid clashes.
     """
     def setUp(self):
-        self.controller = SDPControllerServer('127.0.0.1',5000,simulate=True, interface_mode=True, safe_multicast_cidr="225.100.0.0/16")
+        self.controller = SDPControllerServer('127.0.0.1',5001,simulate=True, interface_mode=True, safe_multicast_cidr="225.100.0.0/16")
         self.controller.start()
-        self.client = BlockingTestClient(self,'127.0.0.1',5000)
+        self.client = BlockingTestClient(self,'127.0.0.1',5001)
         self.client.start(timeout=1)
         self.client.wait_connected(timeout=1)
 

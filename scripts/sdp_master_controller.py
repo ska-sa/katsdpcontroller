@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser = OptionParser(usage=usage)
     parser.add_option('-a', '--host', dest='host', type="string", default="", metavar='HOST',
                       help='attach to server HOST (default="%default" - localhost)')
-    parser.add_option('-p', '--port', dest='port', type="int", default=5000, metavar='N',
+    parser.add_option('-p', '--port', dest='port', type="int", default=5001, metavar='N',
                       help='katcp listen port (default=%default)')
     parser.add_option('-w', '--working-folder', dest='workpath',
                       default=os.path.join("/", "var", "kat", "sdpcontroller"), metavar='WORKING_PATH',
