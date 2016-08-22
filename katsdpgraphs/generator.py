@@ -70,7 +70,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         for i in range(2):
             if beamformer_mode == 'hdf5_ram':
                 affinity = [[4, 6], [5, 7]][i]
-                interface = ['p5p1', 'p4p1'][i]
+                interface = 'p4p1'
                 file_base = '/mnt/ramdisk{}'.format(i)
                 host_class = 'bf_ingest'
                 devices = ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0', '/dev/infiniband/uverbs1']
