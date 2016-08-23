@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 from __future__ import print_function
-import katsdpgraphs.generator
+import sys
+try:
+    import katsdpgraphs.generator
+except ImportError as e:
+    print("Failed to import katsdpgraphs.generator. Please install katsdpcontroller first.",
+          file=sys.stderr)
+    sys.exit(1)
 
 
 class DummyResources(object):
