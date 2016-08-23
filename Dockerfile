@@ -2,7 +2,7 @@ FROM sdp-docker-registry.kat.ac.za:5000/docker-base
 
 MAINTAINER Simon Ratcliffe "simonr@ska.ac.za"
 
-# Prevent the user from accidentally running without the wrapper script
+# Label the image with a list of images it uses
 ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
