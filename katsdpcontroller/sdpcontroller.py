@@ -145,7 +145,7 @@ class ImageResolver(object):
         else:
             self._prefix = private_registry + '/'
         self._tag_file = tag_file
-        self._suffix = None
+        self._tag = None
         self._private_registry = private_registry
         self._overrides = {}
         self.pull = pull
@@ -153,7 +153,7 @@ class ImageResolver(object):
 
     def reread_tag_file(self):
         if self._tag_file is None:
-            self._suffix = ':latest'
+            self._tag = 'latest'
         else:
             with open(self._tag_file, 'r') as f:
                 tag = f.read().strip()
@@ -164,7 +164,9 @@ class ImageResolver(object):
                 # longer enforces it.
                 if not re.match('^[\w][\w.-]{0,127}$', tag):
                     raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
-                self._suffix = ':' + tag
+                if self._tag is not None and tag != self._tag:
+                    logger.info("Image tag changed: %s -> %s", self._tag, tag)
+                self._tag = tag
 
     def override(self, name, path):
         self._overrides[name] = path
@@ -192,10 +194,10 @@ class ImageResolver(object):
         except KeyError:
             if ':' in name:
                 # A tag was already specified in the graph
-                logger.warning("Image %s has a predefined tag, ignoring suffix %s", name, self._suffix)
+                logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
                 return self._prefix + name
             else:
-                return self._prefix + name + self._suffix
+                return self._prefix + name + ':' + self._tag
 
 
 class MulticastIPResources(object):
