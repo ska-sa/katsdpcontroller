@@ -11,6 +11,7 @@ import shlex
 import json
 import signal
 import socket
+import re
 
 import netifaces
 import ipaddress
@@ -131,21 +132,39 @@ class ImageResolver(object):
     ----------
     private_registry : str, optional
         Address (hostname and port) for a private registry
-    tag : str, optional
-        If specified, images will use this tag instead of `latest`. It does
-        not affect overrides, to allow them to specify their own tags.
+    tag_file : str, optional
+        If specified, the file will be read to determine the image tag to use.
+        It can be re-read by calling :meth:`reread_tag_file`.
+        It does not affect overrides, to allow them to specify their own tags.
     pull : bool, optional
         Whether to pull images from the `private_registry`.
     """
-    def __init__(self, private_registry=None, tag='latest', pull=True):
+    def __init__(self, private_registry=None, tag_file=None, pull=True):
         if private_registry is None:
             self._prefix = 'sdp/'
         else:
             self._prefix = private_registry + '/'
-        self._suffix = ':' + tag
+        self._tag_file = tag_file
+        self._suffix = None
         self._private_registry = private_registry
         self._overrides = {}
         self.pull = pull
+        self.reread_tag_file()
+
+    def reread_tag_file(self):
+        if self._tag_file is None:
+            self._suffix = ':latest'
+        else:
+            with open(self._tag_file, 'r') as f:
+                tag = f.read().strip()
+                # This is a regex that appeared in older versions of Docker
+                # (see https://github.com/docker/docker/pull/8447/files).
+                # It's probably a reasonable constraint so that we don't allow
+                # whitespace, / and other nonsense, even if Docker itself no
+                # longer enforces it.
+                if not re.match('^[\w][\w.-]{0,127}$', tag):
+                    raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
+                self._suffix = ':' + tag
 
     def override(self, name, path):
         self._overrides[name] = path
@@ -498,6 +517,8 @@ class SDPGraph(object):
     def __init__(self, graph_name, resources, subarray_product_id, sdp_controller=None, telstate_node='sdp.telstate'):
         self.telstate_node = telstate_node
         self.resources = resources
+        resources.image_resolver.reread_tag_file()
+         # pick up any updates to the tag file
         kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
         kwargs['resources'] = resources
         self.graph = katsdpgraphs.generator.build_physical_graph(**kwargs)

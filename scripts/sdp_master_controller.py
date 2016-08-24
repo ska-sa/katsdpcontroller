@@ -47,8 +47,8 @@ if __name__ == "__main__":
     parser.add_option('--image-override', dest='image_override', action='append',
                       default=[], metavar='NAME:IMAGE',
                       help='Override an image name lookup (default: none)')
-    parser.add_option('--image-tag', dest='image_tag', type='string', default='latest',
-                      metavar='TAG', help='Image tag to use for resolving images')
+    parser.add_option('--image-tag-file', dest='image_tag_file', type='string',
+                      metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_option('--safe-multicast-cidr', dest='safe_multicast_cidr', type='string', default='225.100.0.0/16',
                       metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %default)')
     parser.add_option('--graph-override', dest='graph_override', action='append',
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     logger.info("Starting SDP Controller...")
     image_resolver = sdpcontroller.ImageResolver(
             private_registry=opts.private_registry or None,
-            tag=opts.image_tag,
+            tag_file=opts.image_tag_file,
             pull=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)
