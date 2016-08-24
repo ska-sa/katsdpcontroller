@@ -165,7 +165,7 @@ class ImageResolver(object):
                 if not re.match('^[\w][\w.-]{0,127}$', tag):
                     raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
                 if self._tag is not None and tag != self._tag:
-                    logger.info("Image tag changed: %s -> %s", self._tag, tag)
+                    logger.warn("Image tag changed: %s -> %s", self._tag, tag)
                 self._tag = tag
 
     def override(self, name, path):
