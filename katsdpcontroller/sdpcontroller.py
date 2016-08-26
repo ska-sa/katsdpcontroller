@@ -244,6 +244,7 @@ class SDPResources(object):
         self.image_resolver = image_resolver
         self.allocated_ports = {}
         self.allocated_sdisp_ports = {}
+        self.urls = {}
         self.hosts = {}
         self.hosts_by_class = {}
         self.interface_mode = interface_mode
@@ -368,6 +369,14 @@ class SDPResources(object):
         port = self.allocated_ports.get(host_class, None)
         if port is None: port = self._new_port(host_class)
         return port
+
+    def get_url(self, host_class):
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
+        return self.urls.get(host_class)
+
+    def set_url(self, host_class, url):
+        if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
+        self.urls[host_class] = url
 
     def get_multicast(self, host_class):
         """For the specified host class, return a multicast endpoint in the form
@@ -1349,7 +1358,7 @@ class SDPControllerServer(DeviceServer):
             Either:
               DEPRECATED: A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
             Or:
-              A comma seperated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
+              A comma-separated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
               These are used directly by the graph to configure the SDP system and thus rely on the stream_name as a key
         deprecated_cam_source : string
             DEPRECATED (only used when stream_source is in DEPRECATED use):
@@ -1397,6 +1406,7 @@ class SDPControllerServer(DeviceServer):
             return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
 
         streams = {}
+        urls = {}
          # local dict to hold streams associated with the specified data product
         try:
             streams['c856M4k_spead'] = stream_sources.split(":",2)
@@ -1407,13 +1417,18 @@ class SDPControllerServer(DeviceServer):
              # check to see if we are using the new stream_sources specifier
             try:
                 for stream in stream_sources.split(","):
-                    (stream_name, host, port) = stream.split(":",3)
-                     # just to make it explicit what we are expecting
-                    streams["{}_spead".format(stream_name)] = (host, port)
-                    logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
+                    (stream_name, value) = stream.split(":", 1)
+                    if re.match(r'^\w+://', value):
+                        urls[stream_name] = value
+                        logger.info("Adding stream {} with URL {}".format(stream_name, value))
+                    else:
+                        (host, port) = value.split(":", 2)
+                         # just to make it explicit what we are expecting
+                        streams["{}_spead".format(stream_name)] = (host, port)
+                        logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
             except ValueError:
                  # something is definitely wrong with these
-                retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma seperated list of streams in the form <stream_name>:<ip>[+<count>]:<port>"
+                retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
                 logger.error(retmsg)
                 return ('fail',retmsg)
 
@@ -1428,6 +1443,8 @@ class SDPControllerServer(DeviceServer):
         for (stream_name, endpoint) in streams.iteritems():
             self.resources.set_multicast_ip(stream_name, endpoint[0])
             self.resources.set_port(stream_name, endpoint[1])
+        for (stream_name, url) in urls.iteritems():
+            self.resources.set_url(stream_name, url)
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
