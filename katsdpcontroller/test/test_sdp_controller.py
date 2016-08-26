@@ -93,7 +93,7 @@ class TestSDPController(unittest.TestCase):
     def test_configure_subarray_product(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"16384","2.1","0","c856M4k:127.0.0.1:9000,CAM:127.0.0.1:9001,CAM_ws:ws://host.domain:port/path")
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4)
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
@@ -137,3 +137,8 @@ class TestSDPResources(unittest.TestCase):
         self.assertEqual('225.100.1.2', self.r.get_multicast_ip('l0_spectral_spead'))
         self.assertEqual('225.100.0.2', self.r.get_multicast_ip('CAM_spead'))
         self.assertEqual('225.100.0.3', self.r.get_multicast_ip('unknown'))
+
+    def test_url(self):
+        self.assertEqual(None, self.r.get_url('CAM_ws'))
+        self.r.set_url('CAM_ws', 'ws://host.domain:port/path')
+        self.assertEqual('ws://host.domain:port/path', self.r.get_url('CAM_ws'))
