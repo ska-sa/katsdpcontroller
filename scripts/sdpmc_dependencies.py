@@ -35,6 +35,9 @@ class DummyResources(object):
     def get_multicast(self, host_class):
         return '127.0.0.1:0'
 
+    def get_url(self, host_class):
+        return 'ws://host.domain:port/path'
+
 
 def find_images():
     resources = DummyResources()
