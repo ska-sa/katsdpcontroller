@@ -128,7 +128,7 @@ class GraphResolver(object):
         """
         matched_group = re.match(r'^\w+\_(\d+)\_[a-zA-Z0-9]+$',subarray_product_id)
          # should match the last underscore delimited group of digits
-        if matched_group: return matched_group.group(1)
+        if matched_group: return int(matched_group.group(1))
         return None
 
 class ImageResolver(object):
