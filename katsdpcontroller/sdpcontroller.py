@@ -122,6 +122,15 @@ class GraphResolver(object):
              # default graph name is to split out the trailing name from the subarray product id specifier
         return "{}{}".format(base_graph_name, "sim" if self.simulate else "")
 
+    def get_subarray_numeric_id(self, subarray_product_id):
+        """Returns the numeric subarray identifier string from the specified subarray product id.
+           e.g. array_1_c856M4k => 1
+        """
+        matched_group = re.match(r'^\w+\_(\d+)\_[a-zA-Z0-9]+$',subarray_product_id)
+         # should match the last underscore delimited group of digits
+        if matched_group: return int(matched_group.group(1))
+        return None
+
 class ImageResolver(object):
     """Class to map an abstract Docker image name to a fully-qualified name.
     If no private registry is specified, it looks up names in the `sdp/`
@@ -1433,6 +1442,10 @@ class SDPControllerServer(DeviceServer):
                 return ('fail',retmsg)
 
         graph_name = self.graph_resolver(subarray_product_id)
+        subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)
+        if not subarray_numeric_id:
+            retmsg = "Failed to parse numeric subarray identifier from specified subarray product string ({})".format(subarray_product_id)
+            return ('fail',retmsg)
 
         logger.info("Launching graph {}.".format(graph_name))
 
@@ -1458,11 +1471,12 @@ class SDPControllerServer(DeviceServer):
          # parameters such as antennas and channels are encoded in the logical graphs
         calculated_int_time = 1 / float(dump_rate)
         config['subarray_product_id'] = subarray_product_id
-         # used to identify file type
         additional_config = {
             'antenna_mask':antennas,
             'output_int_time':calculated_int_time,
-            'sd_int_time':calculated_int_time
+            'sd_int_time':calculated_int_time,
+            'stream_sources':stream_sources,
+            'subarray_numeric_id':subarray_numeric_id
         }
          # holds additional config that must reside within the config dict in the telstate 
 
