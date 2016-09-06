@@ -37,16 +37,15 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         {"port_bindings":{6379:r.get_port('redis')}}, 'docker_host_class':'sdpmc'})
      # launch redis node to hold telescope state for this graph
 
-    # cam2spead node
-    G.add_node('sdp.cam2spead.1', {
-        'port': r.get_port('sdp_cam2spead_1_katcp'),
+    # cam2telstate node
+    G.add_node('sdp.cam2telstate.1', {
+        'url': r.get_url('CAMDATA'),
         'docker_image': r.get_image_path('katsdpingest'),
-        'docker_cmd': 'cam2spead_recv.py',
-        'docker_host_class': 'nvidia_gpu',
+        'docker_cmd': 'cam2telstate.py',
+        'docker_host_class': 'sdpmc',
         'docker_params': {
             'network': 'host'
-        },
-        'state_transitions': {2: 'capture-init', 5: 'capture-done'}
+        }
     })
 
     G.add_node('sdp.ingest.1',{
