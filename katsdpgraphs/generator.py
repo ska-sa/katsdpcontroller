@@ -53,10 +53,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         'continuum_factor': 32,
         'sd_continuum_factor': cbf_channels // 256,
         'cbf_channels': cbf_channels,
-        'l0_continuum_spead_rate': 800e6,    # 1Gbps link
-        'l0_spectral_spead_rate': 800e6,     # 1Gbps link
         'sd_spead_rate': 3e9,                # local machine, so crank it up a bit
-        'cam_spead': ':7146',                # TODO: this is a port we expect to receive no data on. Remove once CAM thread taken out of ingest
         'docker_image':r.get_image_path('katsdpingest_titanx'),
         'docker_host_class':'nvidia_gpu',
         'docker_cmd':'taskset -c 1,3,5,7 ingest.py',
