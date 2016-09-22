@@ -9,6 +9,8 @@ import sys
 import os
 import Queue
 import signal
+import tornado
+import tornado.gen
 from optparse import OptionParser
 import logging
 import logging.handlers
@@ -17,6 +19,12 @@ try:
     import manhole
 except ImportError:
     manhole = None
+
+@tornado.gen.coroutine
+def on_shutdown(ioloop, server):
+    print('Shutting Down')
+    yield server.stop()
+    ioloop.stop()
 
 if __name__ == "__main__":
 
@@ -102,6 +110,7 @@ if __name__ == "__main__":
 
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
 
+    ioloop = tornado.ioloop.IOLoop.current()
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port,
         simulate=opts.simulate,
@@ -111,39 +120,14 @@ if __name__ == "__main__":
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr)
 
-    restart_queue = Queue.Queue()
-    server.set_restart_queue(restart_queue)
-
-    running = True
-    def stop_running(signum, frame):
-        """Stop the global server."""
-        global running
-        running = False
-    signal.signal(signal.SIGQUIT, stop_running)
-    signal.signal(signal.SIGTERM, stop_running)
-
-    server.start()
-    logger.info("Started SDP Controller.")
-
-    if manhole:
-        manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
+    #if manhole:
+    #    manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
          # allow remote debug connections and expose server and opts
-    try:
-        while running:
-            try:
-                device = restart_queue.get(timeout=0.5)
-            except Queue.Empty:
-                device = None
-            if device is not None:
-                logger.info("Stopping...")
-                device.stop()
-                device.join()
-                logger.info("Restarting...")
-                device.start()
-                logger.info("Started.")
-    except KeyboardInterrupt:
-        pass
-     # handle all exit conditions, including keyboard interrupt, katcp halt and sigterm
-    server.handle_exit()
-    server.stop()
-    server.join()
+
+    logger.info("Starting SDP...")
+
+    server.set_ioloop(ioloop)
+    signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
+    signal.signal(signal.SIGTERM, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
+    ioloop.add_callback(server.start)
+    ioloop.start()

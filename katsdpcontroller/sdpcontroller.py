@@ -13,11 +13,14 @@ import signal
 import socket
 import re
 
+import concurrent
+from tornado import gen
+
 import netifaces
 import ipaddress
 import faulthandler
 
-from katcp import DeviceServer, Sensor, Message, BlockingClient
+from katcp import DeviceServer, Sensor, Message, BlockingClient, AsyncReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 
@@ -1150,6 +1153,10 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
+        self._futures = {}
+         # track async requests here to avoid duplication
+        self.data_product_timeout = 600
+         # may be a bad idea, but lets try and have some sanity in the async configure
 
         self.graph_resolver = kwargs.get('graph_resolver',GraphResolver(simulate=self.simulate))
 
@@ -1390,6 +1397,43 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id])))
             else: return ('fail',"This subarray product id has no current configuration.")
 
+         # we have either a configure or deconfigure, which may take time, so we go async from here
+        if req.client_connection in self._futures:
+            return ('fail',"A data product configure command is already running for this connection...")
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+         # we are only going to allow a single conf/deconf at a time
+        conf_future = self._futures[req.client_connection] = executor.submit(self._async_data_product_configure, req, req_msg, \
+                            subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
+
+        req.inform("Starting ?data_product_configure. This may take a few minutes...")
+
+        @gen.coroutine
+        def delayed_cmd():
+            try:
+                yield gen.with_timeout(time.time() + self.data_product_timeout, conf_future, self.ioloop)
+                try:
+                    (retval, retmsg) = conf_future.result()
+                except ValueError:
+                    retval = 'fail'
+                    retmsg = "Unknown error occured - please consult master controller logs"
+                req.reply(retval, retmsg)
+            except gen.TimeoutError:
+                retmsg = "Timeout during ?data_product_configure. Command took longer than {}s".format(self.data_product_timeout)
+                logger.error(retmsg)
+                req.reply("fail", retmsg)
+            except Exception, e:
+                retmsg = "Exception during ?data_product_configure: {}".format(e)
+                logger.error(retmsg)
+                req.reply('fail', retmsg)
+            finally:
+                del self._futures[req.client_connection]
+        self.ioloop.add_callback(delayed_cmd)
+        raise AsyncReply
+
+
+    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+        """Asynchronous portion of data product configure. See docstring for request_data_product_configure above."""
         if antennas == "0" or antennas == "":
             try:
                 (rcode, rval) = self.deregister_product(subarray_product_id)
