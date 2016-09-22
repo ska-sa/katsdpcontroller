@@ -120,8 +120,8 @@ if __name__ == "__main__":
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr)
 
-    #if manhole:
-    #    manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
+    if manhole:
+        manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
          # allow remote debug connections and expose server and opts
 
     logger.info("Starting SDP...")
