@@ -1153,8 +1153,8 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
-        self._futures = {}
-         # track async requests here to avoid duplication
+        self._conf_future = None
+         # track async product configure request to avoid handling more than one at a time
         self.data_product_timeout = 600
          # may be a bad idea, but lets try and have some sanity in the async configure
 
@@ -1398,12 +1398,12 @@ class SDPControllerServer(DeviceServer):
             else: return ('fail',"This subarray product id has no current configuration.")
 
          # we have either a configure or deconfigure, which may take time, so we go async from here
-        if req.client_connection in self._futures:
-            return ('fail',"A data product configure command is already running for this connection...")
+        if self._conf_future:
+            return ('fail',"A data product configure command is currently executing.")
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
          # we are only going to allow a single conf/deconf at a time
-        conf_future = self._futures[req.client_connection] = executor.submit(self._async_data_product_configure, req, req_msg, \
+        self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
                             subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
 
         req.inform("Starting ?data_product_configure. This may take a few minutes...")
@@ -1411,9 +1411,9 @@ class SDPControllerServer(DeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                yield gen.with_timeout(time.time() + self.data_product_timeout, conf_future, self.ioloop)
+                yield gen.with_timeout(time.time() + self.data_product_timeout, self._conf_future, self.ioloop)
                 try:
-                    (retval, retmsg) = conf_future.result()
+                    (retval, retmsg) = self._conf_future.result()
                 except ValueError:
                     retval = 'fail'
                     retmsg = "Unknown error occured - please consult master controller logs"
@@ -1427,7 +1427,7 @@ class SDPControllerServer(DeviceServer):
                 logger.error(retmsg)
                 req.reply('fail', retmsg)
             finally:
-                del self._futures[req.client_connection]
+                self._conf_future = None
         self.ioloop.add_callback(delayed_cmd)
         raise AsyncReply
 
