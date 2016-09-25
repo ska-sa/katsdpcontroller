@@ -22,7 +22,7 @@ except ImportError:
 
 @tornado.gen.coroutine
 def on_shutdown(ioloop, server):
-    print('Shutting Down')
+    server.handle_exit()
     yield server.stop()
     ioloop.stop()
 
