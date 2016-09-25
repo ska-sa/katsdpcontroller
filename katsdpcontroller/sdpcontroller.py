@@ -1411,20 +1411,16 @@ class SDPControllerServer(DeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                yield gen.with_timeout(time.time() + self.data_product_timeout, self._conf_future, self.ioloop)
-                try:
-                    (retval, retmsg) = self._conf_future.result()
-                except ValueError:
-                    retval = 'fail'
-                    retmsg = "Unknown error occured - please consult master controller logs"
+                (retval, retmsg) = yield gen.with_timeout(self.ioloop.time() + self.data_product_timeout, self._conf_future, self.ioloop)
                 req.reply(retval, retmsg)
             except gen.TimeoutError:
+                self._conf_future.cancel()
                 retmsg = "Timeout during ?data_product_configure. Command took longer than {}s".format(self.data_product_timeout)
                 logger.error(retmsg)
                 req.reply("fail", retmsg)
             except Exception, e:
                 retmsg = "Exception during ?data_product_configure: {}".format(e)
-                logger.error(retmsg)
+                logger.error(retmsg, exc_info=True)
                 req.reply('fail', retmsg)
             finally:
                 self._conf_future = None
