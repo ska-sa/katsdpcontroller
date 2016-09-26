@@ -968,6 +968,8 @@ class SDPSubarrayProductBase(object):
         self.dump_rate = dump_rate
         self.n_beams = n_beams
         self._state = 0
+        self._async_busy = False
+         # protection used to avoid external state changes during async activity on this subarray
         self.state = SA_STATES[self._state]
         self.set_state(1)
         self.psb_id = 0
@@ -1329,6 +1331,9 @@ class SDPControllerServer(DeviceServer):
         if not subarray_product_id in self.subarray_products:
             return ('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
 
+        if self.subarray_products[subarray_product_id]._async_busy:
+            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
+
         logger.info("Deconfiguring {}".format(subarray_product_id))
         deconf_msg = Message.request('data-product-configure','{}'.format(subarray_product_id),'0')
         self.request_data_product_configure(None, deconf_msg)
@@ -1401,12 +1406,23 @@ class SDPControllerServer(DeviceServer):
         if self._conf_future:
             return ('fail',"A data product configure command is currently executing.")
 
+         # a configure is essentially thread safe since the array object is only exposed
+         # as a last step. deconf needs some protection since the object does exist, thus
+         # we first mark the product into a deconfiguring state before going async
+        if antennas == "0" or antennas == "":
+            try:
+                dp_handle = self.subarray_products[subarray_product_id]
+                dp_handle._async_busy = True
+                req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
+            except KeyError:
+                return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
+        else:
+            req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
          # we are only going to allow a single conf/deconf at a time
         self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
                             subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
-
-        req.inform("Starting ?data_product_configure. This may take a few minutes...")
 
         @gen.coroutine
         def delayed_cmd():
@@ -1423,6 +1439,12 @@ class SDPControllerServer(DeviceServer):
                 logger.error(retmsg, exc_info=True)
                 req.reply('fail', retmsg)
             finally:
+                try:
+                    dp_handle = self.subarray_products[subarray_product_id]
+                    if dp_handle._async_busy: dp_handle._async_busy = False
+                     # we must have failed to deconfigure, so lets clean up
+                except KeyError:
+                    pass 
                 self._conf_future = None
         self.ioloop.add_callback(delayed_cmd)
         raise AsyncReply
@@ -1431,13 +1453,10 @@ class SDPControllerServer(DeviceServer):
     def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
         """Asynchronous portion of data product configure. See docstring for request_data_product_configure above."""
         if antennas == "0" or antennas == "":
-            try:
-                (rcode, rval) = self.deregister_product(subarray_product_id)
-                self.mass_inform(Message.inform("interface-changed"))
-                 # we have likely modified our sensor-list by deconfiguring - let CAM know
-                return (rcode, rval)
-            except KeyError:
-                return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
+            (rcode, rval) = self.deregister_product(subarray_product_id)
+            self.mass_inform(Message.inform("interface-changed"))
+             # we have likely modified our sensor-list by deconfiguring - let CAM know
+            return (rcode, rval)
 
         logger.info("Using '{}' as antenna mask".format(antennas))
         antennas = antennas.replace(" ",",")
@@ -1569,14 +1588,15 @@ class SDPControllerServer(DeviceServer):
             logger.error(ret_msg)
             return ('fail', ret_msg)
 
-         # at this point telstate is up, nodes have been launched, katcp connections established
-         # TODO: The subarray product class will need to be reworked
-        self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.subarray_product_msg[subarray_product_id] = req_msg
-
          # finally we insert detail on all running nodes into telstate
         if graph.telstate is not None:
             graph.telstate.add('sdp_node_detail',graph.node_details)
+
+         # at this point telstate is up, nodes have been launched, katcp connections established
+         # we can now safely expose this product for use in other katcp commands like ?capture-init
+        self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+        self.subarray_product_msg[subarray_product_id] = req_msg
+
         self.mass_inform(Message.inform("interface-changed"))
          # let CAM know that our interface has changed (sensors have been added)
         return ('ok',"")
@@ -1605,6 +1625,9 @@ class SDPControllerServer(DeviceServer):
         """
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
+        if self.subarray_products[subarray_product_id]._async_busy:
+            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
+
         sa = self.subarray_products[subarray_product_id]
 
         rcode, rval = sa.set_state(2)
@@ -1707,6 +1730,8 @@ class SDPControllerServer(DeviceServer):
         """
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
+        if self.subarray_products[subarray_product_id]._async_busy:
+            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
         rcode, rval = self.subarray_products[subarray_product_id].set_state(5)
         return (rcode, rval)
 
