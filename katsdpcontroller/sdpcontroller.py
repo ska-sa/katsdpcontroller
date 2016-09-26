@@ -1300,7 +1300,6 @@ class SDPControllerServer(DeviceServer):
         dp_handle = self.subarray_products[subarray_product_id]
         rcode, rval = dp_handle.deconfigure(force=force)
         if rcode == 'fail': return (rcode, rval)
-        self.subarray_products.pop(subarray_product_id)
         return (rcode, rval)
 
     def handle_exit(self):
@@ -1308,6 +1307,7 @@ class SDPControllerServer(DeviceServer):
         logger.warning("SDP Master Controller interrupted.")
         for subarray_product_id in self.subarray_products.keys():
             rcode, rval = self.deregister_product(subarray_product_id,force=True)
+            if rcode != 'fail': self.subarray_products.pop(subarray_product_id)
             logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
 
     @request(Str(), include_msg=True)
@@ -1427,7 +1427,17 @@ class SDPControllerServer(DeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                (retval, retmsg) = yield gen.with_timeout(self.ioloop.time() + self.data_product_timeout, self._conf_future, self.ioloop)
+                (retval, retmsg, product) = yield gen.with_timeout(self.ioloop.time() + self.data_product_timeout, self._conf_future, self.ioloop)
+                if retval != 'fail':
+                    if (antennas == "0" or antennas == ""):
+                        self.subarray_products.pop(subarray_product_id)
+                        logger.info("Removing subarry product {} reference.".format(subarray_product_id))
+                    if product:
+                         # we can now safely expose this product for use in other katcp commands like ?capture-init
+                        self.subarray_products[subarray_product_id] = product
+                        self.subarray_product_msg[subarray_product_id] = req_msg
+                    self.mass_inform(Message.inform("interface-changed"))
+                     # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
             except gen.TimeoutError:
                 self._conf_future.cancel()
@@ -1454,9 +1464,7 @@ class SDPControllerServer(DeviceServer):
         """Asynchronous portion of data product configure. See docstring for request_data_product_configure above."""
         if antennas == "0" or antennas == "":
             (rcode, rval) = self.deregister_product(subarray_product_id)
-            self.mass_inform(Message.inform("interface-changed"))
-             # we have likely modified our sensor-list by deconfiguring - let CAM know
-            return (rcode, rval)
+            return (rcode, rval, None)
 
         logger.info("Using '{}' as antenna mask".format(antennas))
         antennas = antennas.replace(" ",",")
@@ -1465,13 +1473,13 @@ class SDPControllerServer(DeviceServer):
         if subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
             if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
-                return ('ok',"Subarray product with this configuration already exists. Pass.")
+                return ('ok',"Subarray product with this configuration already exists. Pass.", None)
             else:
-                return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
+                return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id), None)
 
          # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
+            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product", None)
 
         streams = {}
         urls = {}
@@ -1498,13 +1506,13 @@ class SDPControllerServer(DeviceServer):
                  # something is definitely wrong with these
                 retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
                 logger.error(retmsg)
-                return ('fail',retmsg)
+                return ('fail',retmsg,None)
 
         graph_name = self.graph_resolver(subarray_product_id)
         subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)
         if not subarray_numeric_id:
             retmsg = "Failed to parse numeric subarray identifier from specified subarray product string ({})".format(subarray_product_id)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         logger.info("Launching graph {}.".format(graph_name))
 
@@ -1542,21 +1550,20 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
             logger.warning("No components will be started - running in interface mode")
-            self.subarray_products[subarray_product_id] = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-            self.subarray_product_msg[subarray_product_id] = req_msg
-            return ('ok',"")
+            product = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            return ('ok',"", product)
 
         if docker is None:
              # from here onwards we require the docker module to be installed.
             retmsg = "You must have the docker python library installed to use the master controller in non interface only mode."
             logger.error(retmsg)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         if katsdptelstate is None:
              # from here onwards we require the katsdptelstate module to be installed.
             retmsg = "You must have the katsdptelstate library installed to use the master controller in non interface only mode."
             logger.error(retmsg)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         logger.debug("Launching telstate. Base parameters {}".format(config))
         graph.launch_telstate(additional_config=additional_config, base_params=config)
@@ -1568,7 +1575,7 @@ class SDPControllerServer(DeviceServer):
              # launch containers for those nodes that require them
         except docker.errors.DockerException, e:
             graph.shutdown()
-            return ('fail',e)
+            return ('fail',e,None)
 
         alive = graph.check_nodes()
          # is everything we asked for alive
@@ -1576,7 +1583,7 @@ class SDPControllerServer(DeviceServer):
             ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
             graph.shutdown()
             logger.error(ret_msg)
-            return ('fail', ret_msg)
+            return ('fail', ret_msg,None)
 
         logger.debug("Establishing katcp connections to appropriate nodes.")
         try:
@@ -1586,7 +1593,7 @@ class SDPControllerServer(DeviceServer):
             ret_msg = "Failed to establish katcp connections as needed. Check error log for details."
             graph.shutdown()
             logger.error(ret_msg)
-            return ('fail', ret_msg)
+            return ('fail', ret_msg,None)
 
          # finally we insert detail on all running nodes into telstate
         if graph.telstate is not None:
@@ -1594,12 +1601,12 @@ class SDPControllerServer(DeviceServer):
 
          # at this point telstate is up, nodes have been launched, katcp connections established
          # we can now safely expose this product for use in other katcp commands like ?capture-init
-        self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.subarray_product_msg[subarray_product_id] = req_msg
+         # adding a product is also safe with regard to commands like ?capture-status
+        product = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
 
         self.mass_inform(Message.inform("interface-changed"))
          # let CAM know that our interface has changed (sensors have been added)
-        return ('ok',"")
+        return ('ok',"",product)
 
     @request(Str())
     @return_reply(Str())
