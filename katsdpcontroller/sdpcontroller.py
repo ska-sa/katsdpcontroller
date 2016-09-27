@@ -1157,8 +1157,6 @@ class SDPControllerServer(DeviceServer):
          # dict of currently managed SDP components
         self._conf_future = None
          # track async product configure request to avoid handling more than one at a time
-        self.data_product_timeout = 600
-         # may be a bad idea, but lets try and have some sanity in the async configure
 
         self.graph_resolver = kwargs.get('graph_resolver',GraphResolver(simulate=self.simulate))
 
@@ -1427,11 +1425,11 @@ class SDPControllerServer(DeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                (retval, retmsg, product) = yield gen.with_timeout(self.ioloop.time() + self.data_product_timeout, self._conf_future, self.ioloop)
+                (retval, retmsg, product) = yield self._conf_future
                 if retval != 'fail':
                     if (antennas == "0" or antennas == ""):
                         self.subarray_products.pop(subarray_product_id)
-                        logger.info("Removing subarry product {} reference.".format(subarray_product_id))
+                        logger.info("Removing subarray product {} reference.".format(subarray_product_id))
                     if product:
                          # we can now safely expose this product for use in other katcp commands like ?capture-init
                         self.subarray_products[subarray_product_id] = product
@@ -1439,11 +1437,6 @@ class SDPControllerServer(DeviceServer):
                     self.mass_inform(Message.inform("interface-changed"))
                      # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
-            except gen.TimeoutError:
-                self._conf_future.cancel()
-                retmsg = "Timeout during ?data_product_configure. Command took longer than {}s".format(self.data_product_timeout)
-                logger.error(retmsg)
-                req.reply("fail", retmsg)
             except Exception, e:
                 retmsg = "Exception during ?data_product_configure: {}".format(e)
                 logger.error(retmsg, exc_info=True)
@@ -1451,7 +1444,7 @@ class SDPControllerServer(DeviceServer):
             finally:
                 try:
                     dp_handle = self.subarray_products[subarray_product_id]
-                    if dp_handle._async_busy: dp_handle._async_busy = False
+                    dp_handle._async_busy = False
                      # we must have failed to deconfigure, so lets clean up
                 except KeyError:
                     pass 
