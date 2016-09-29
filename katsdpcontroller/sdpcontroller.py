@@ -1343,29 +1343,35 @@ class SDPControllerServer(DeviceServer):
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
          # we are only going to allow a single conf/deconf at a time
-        self._conf_future = executor.submit(self._async_data_product_configure, None, req_msg, subarray_product_id, "0", None, None, None, None, None)
+        self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, "0", None, None, None, None, None)
          # start with a deconfigure
 
         @gen.coroutine
         def delayed_cmd():
             try:
-                logger.info("Attempting deconfigure...")
+                logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
                 (retval, retmsg, product) = yield self._conf_future
-                if retval != 'fail':
+                if retval != 'ok':
+                    retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
+                else:
                     self.subarray_products.pop(subarray_product_id)
+                    self.subarray_product_config[subarray_product_id]
+                     # we already have a copy and if config now fails we don't want this lurking around anyway
                     logger.info("Removing subarray product {} reference.".format(subarray_product_id))
                     req.inform(retmsg)
-                else:
-                    req.reply('fail', "Unable to reconfigure due to inability to deconfigure existing product: {}".format(retmsg))
 
-                logger.info("Attempting reconfigure...")
-                self._conf_future = executor.submit(self._async_data_product_configure, None, req_msg, subarray_product_id, *config_args)
-                (retval, retmsg, product) = yield self._conf_future
-                if retval != 'fail' and product: 
-                    self.subarray_products[subarray_product_id] = product
-                    self.subarray_product_config[subarray_product_id] = config_args
-                    self.mass_inform(Message.inform("interface-changed"))
-                     # let CAM know that our interface has changed
+                    logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+                    self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, config_args)
+                    (retval, retmsg, product) = yield self._conf_future
+                    if retval != 'fail' and product:
+                        self.subarray_products[subarray_product_id] = product
+                        self.subarray_product_config[subarray_product_id] = config_args
+                        self.mass_inform(Message.inform("interface-changed"))
+                         # let CAM know that our interface has changed
+                    else:
+                        retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
+                        self.subarray_product_config.pop(subarray_product_id)
+                         # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
                 req.reply(retval, retmsg)
             except Exception, e:
                 retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
