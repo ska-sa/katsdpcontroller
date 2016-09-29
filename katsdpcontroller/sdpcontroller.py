@@ -1373,7 +1373,7 @@ class SDPControllerServer(DeviceServer):
                         self.subarray_product_config.pop(subarray_product_id)
                          # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
                 req.reply(retval, retmsg)
-            except Exception, e:
+            except Exception as e:
                 retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
                 logger.error(retmsg, exc_info=True)
                 req.reply('fail', retmsg)
@@ -1487,7 +1487,7 @@ class SDPControllerServer(DeviceServer):
                     self.mass_inform(Message.inform("interface-changed"))
                      # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
-            except Exception, e:
+            except Exception as e:
                 retmsg = "Exception during ?data_product_configure: {}".format(e)
                 logger.error(retmsg, exc_info=True)
                 req.reply('fail', retmsg)
