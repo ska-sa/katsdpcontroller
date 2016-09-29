@@ -1361,7 +1361,7 @@ class SDPControllerServer(DeviceServer):
                     req.inform(retmsg)
 
                     logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
-                    self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, config_args)
+                    self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, *config_args)
                     (retval, retmsg, product) = yield self._conf_future
                     if retval != 'fail' and product:
                         self.subarray_products[subarray_product_id] = product
