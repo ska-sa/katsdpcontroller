@@ -1642,8 +1642,6 @@ class SDPControllerServer(DeviceServer):
          # adding a product is also safe with regard to commands like ?capture-status
         product = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
 
-        self.mass_inform(Message.inform("interface-changed"))
-         # let CAM know that our interface has changed (sensors have been added)
         return ('ok',"",product)
 
     @request(Str())
