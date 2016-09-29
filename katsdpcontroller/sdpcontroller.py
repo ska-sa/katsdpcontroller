@@ -1170,7 +1170,7 @@ class SDPControllerServer(DeviceServer):
 
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
-        self.subarray_product_msg = {}
+        self.subarray_product_config = {}
          # store calling arguments used to create a specified subarray_product
          # this has either the current args or those most recently
          # configured for this subarray_product
@@ -1329,18 +1329,54 @@ class SDPControllerServer(DeviceServer):
         if not subarray_product_id in self.subarray_products:
             return ('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
 
-        if self.subarray_products[subarray_product_id]._async_busy:
-            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
+        if self._conf_future:
+            return ('fail',"A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure.")
 
-        logger.info("Deconfiguring {}".format(subarray_product_id))
-        deconf_msg = Message.request('data-product-configure','{}'.format(subarray_product_id),'0')
-        self.request_data_product_configure(None, deconf_msg)
+        try:
+            config_args = self.subarray_product_config[subarray_product_id]
+        except KeyError:
+            return ('fail',"No pre-existing config found for subarray {}. Unable to reconfigure.".format(subarray_product_id))
 
-        reconf_msg = self.subarray_product_msg[subarray_product_id]
-        logger.info("Calling configure from reconfigure with {}".format(reconf_msg))
-        self.request_data_product_configure(None, reconf_msg)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+         # we are only going to allow a single conf/deconf at a time
+        self._conf_future = executor.submit(self._async_data_product_configure, None, req_msg, subarray_product_id, "0", None, None, None, None, None)
+         # start with a deconfigure
 
-        return ('ok','')
+        @gen.coroutine
+        def delayed_cmd():
+            try:
+                logger.info("Attempting deconfigure...")
+                (retval, retmsg, product) = yield self._conf_future
+                if retval != 'fail':
+                    self.subarray_products.pop(subarray_product_id)
+                    logger.info("Removing subarray product {} reference.".format(subarray_product_id))
+                    req.inform(retmsg)
+                else:
+                    req.reply('fail', "Unable to reconfigure due to inability to deconfigure existing product: {}".format(retmsg))
+
+                logger.info("Attempting reconfigure...")
+                self._conf_future = executor.submit(self._async_data_product_configure, None, req_msg, subarray_product_id, *config_args)
+                (retval, retmsg, product) = yield self._conf_future
+                if retval != 'fail' and product: 
+                    self.subarray_products[subarray_product_id] = product
+                    self.subarray_product_config[subarray_product_id] = config_args
+                    self.mass_inform(Message.inform("interface-changed"))
+                     # let CAM know that our interface has changed
+                req.reply(retval, retmsg)
+            except Exception, e:
+                retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
+                logger.error(retmsg, exc_info=True)
+                req.reply('fail', retmsg)
+            finally:
+                try:
+                    dp_handle = self.subarray_products[subarray_product_id]
+                    dp_handle._async_busy = False
+                     # we must have failed to deconfigure, so lets clean up
+                except KeyError:
+                    pass
+                self._conf_future = None
+        self.ioloop.add_callback(delayed_cmd)
+        raise AsyncReply
 
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
@@ -1422,6 +1458,9 @@ class SDPControllerServer(DeviceServer):
         self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
                             subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
 
+        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
+         # store our calling context for later use in the reconfigure command
+
         @gen.coroutine
         def delayed_cmd():
             try:
@@ -1429,11 +1468,12 @@ class SDPControllerServer(DeviceServer):
                 if retval != 'fail':
                     if (antennas == "0" or antennas == ""):
                         self.subarray_products.pop(subarray_product_id)
+                        self.subarray_product_config.pop(subarray_product_id)
                         logger.info("Removing subarray product {} reference.".format(subarray_product_id))
                     if product:
                          # we can now safely expose this product for use in other katcp commands like ?capture-init
                         self.subarray_products[subarray_product_id] = product
-                        self.subarray_product_msg[subarray_product_id] = req_msg
+                        self.subarray_product_config[subarray_product_id] = config_args
                     self.mass_inform(Message.inform("interface-changed"))
                      # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
