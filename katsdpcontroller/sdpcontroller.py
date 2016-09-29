@@ -659,14 +659,18 @@ class SDPGraph(object):
             last[key_parts[-1]] = v
         return d
 
-    def execute_graph(self):
+    def execute_graph(self, req):
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
+        node_count = self.graph.number_of_nodes()
+        launch_count = 0
         for (node, data) in self.graph.nodes_iter(data=True):
             if node == self.telstate_node: continue
              # make sure we don't launch the telstate node again
             if 'docker_image' in data:
                 self._launch(node, data)
+            if launch_count % (node_count // 2) == 0: req.inform("Launched {} of {} nodes.".format(launch_count, node_count))
+            launch_count += 1
 
     def shutdown(self):
         for node in self.nodes.itervalues():
@@ -1579,6 +1583,7 @@ class SDPControllerServer(DeviceServer):
             'subarray_numeric_id':subarray_numeric_id
         }
          # holds additional config that must reside within the config dict in the telstate 
+        req.inform("Graph {} construction complete.".format(graph_name))
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
@@ -1601,15 +1606,15 @@ class SDPControllerServer(DeviceServer):
         logger.debug("Launching telstate. Base parameters {}".format(config))
         graph.launch_telstate(additional_config=additional_config, base_params=config)
          # launch the telescope state for this graph
-
+        req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
         logger.debug("Executing graph {}".format(graph_name))
         try:
-            graph.execute_graph()
+            graph.execute_graph(req)
              # launch containers for those nodes that require them
         except docker.errors.DockerException, e:
             graph.shutdown()
             return ('fail',e,None)
-
+        req.inform("All nodes launched")
         alive = graph.check_nodes()
          # is everything we asked for alive
         if not alive:
@@ -1617,7 +1622,7 @@ class SDPControllerServer(DeviceServer):
             graph.shutdown()
             logger.error(ret_msg)
             return ('fail', ret_msg,None)
-
+        req.inform("Attempting to establish KATCP connections")
         logger.debug("Establishing katcp connections to appropriate nodes.")
         try:
             graph.establish_katcp_connections()
