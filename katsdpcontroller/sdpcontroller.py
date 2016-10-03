@@ -1354,8 +1354,8 @@ class SDPControllerServer(DeviceServer):
                 if retval != 'ok':
                     retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
                 else:
-                    self.subarray_products.pop(subarray_product_id)
-                    self.subarray_product_config[subarray_product_id]
+                    del self.subarray_products[subarray_product_id]
+                    del self.subarray_product_config[subarray_product_id]
                      # we already have a copy and if config now fails we don't want this lurking around anyway
                     logger.info("Removing subarray product {} reference.".format(subarray_product_id))
                     req.inform(retmsg)
@@ -1366,12 +1366,12 @@ class SDPControllerServer(DeviceServer):
                     if retval != 'fail' and product:
                         self.subarray_products[subarray_product_id] = product
                         self.subarray_product_config[subarray_product_id] = config_args
-                        self.mass_inform(Message.inform("interface-changed"))
-                         # let CAM know that our interface has changed
                     else:
                         retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
                         self.subarray_product_config.pop(subarray_product_id)
                          # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
+                    self.mass_inform(Message.inform("interface-changed"))
+                         # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
             except Exception as e:
                 retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
