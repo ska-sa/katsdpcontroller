@@ -830,7 +830,7 @@ class SDPHost(object):
                  # the specific entry we are looking for has the following form (hash shortened for brevity):
                  # {"status":"Digest: sha256:ca02ec...cfb906a"}
                 logger.info("Image {} pulled in {:.2f}s".format(image.image, time.time()-st))
-            _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
+            _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset, user=image.user)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
             return (None, None)
@@ -879,7 +879,7 @@ class SDPImage(object):
     
     """
     def __init__(self, image, name_to_use=None, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
-                              privileged=None, ulimits=None, ipc_mode=None):
+                              privileged=None, ulimits=None, ipc_mode=None, user=None):
         self.image = image
         self.name_to_use = name_to_use
         self.port_bindings = port_bindings
@@ -892,10 +892,11 @@ class SDPImage(object):
         self.privileged = privileged
         self.ulimits = ulimits
         self.ipc_mode = ipc_mode
+        self.user = user
 
     def __repr__(self):
-        return "Image: {} ({}), Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
-                self.name_to_use, self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd)
+        return "Image: {} ({}), Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}, User: {}".format(self.image,\
+                self.name_to_use, self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd, self.user)
 
 
 class SDPTask(object):
@@ -1690,7 +1691,7 @@ class SDPControllerServer(DeviceServer):
         self.resources.hosts.pop('localhost.localdomain')
          # remove this to prevent accidental shutdown of master controller whilst handling remotes
 
-        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd="/sbin/poweroff", network='host')
+        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd='/sbin/poweroff', network='host', user='root')
          # prepare a docker image to halt remote hosts
 
         shutdown_hosts = ""
