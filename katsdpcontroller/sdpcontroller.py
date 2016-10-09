@@ -811,6 +811,9 @@ class SDPHost(object):
         except docker.errors.NotFound:
             pass
              # generally benign - probably a new host or someone cleaned up aggressively
+        except docker.errors.NullResource:
+            pass
+             # on occasion the docker-base container used for kibisis may not exist
         except docker.errors.APIError:
             logger.warning("Failed to rename old container {} to {}. Removing to allow startup of new container".format(image.name_to_use, old_image_rename))
              # seems our unique ID is not so unique, or some other docker calamity has occured
@@ -1695,22 +1698,29 @@ class SDPControllerServer(DeviceServer):
          # prepare a docker image to halt remote hosts
 
         shutdown_hosts = ""
+        mc_host = None
         for (host_name, host) in self.resources.hosts.iteritems():
             if socket.gethostbyname(host.ip) != '127.0.0.1':
                  # make sure a localhost hasn't snuck in to spoil the party
                 logger.debug("Launching halt image on host {}".format(host_name))
-                (container, pullable_version) = host.launch(kibisis)
+                container = None
+                try:
+                    (container, pullable_version) = host.launch(kibisis)
+                except Exception as e:
+                    pass # we tried our best
                 if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
                 shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
+            else:
+                mc_host = host
 
-        logger.warning("Shutting down master controller host...")
-        retval = os.system('sudo --non-interactive /sbin/poweroff')
-         # finally shutdown localhost - relying on upstart to shutdown the master controller
-        if retval != 0:
-            retmsg = "Failed to issue /sbin/poweroff on MC host. This is most likely a sudoers permission issue."
-            logger.error(retmsg)
-            return ("fail", retmsg)
-        return ("ok", shutdown_hosts[:shutdown_hosts.rfind(',')])
+         # and now we finish ourselves off
+        try:
+            mc_host.launch(kibisis)
+            shutdown_hosts += "locahost"
+        except Exception as e:
+            shutdown_hosts += "localhost(failed)"
+             # since we are expecting the host to be powered down externally we just keep going
+        return ("ok", shutdown_hosts)
 
 
     @request(include_msg=True)
