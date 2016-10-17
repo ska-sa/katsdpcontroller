@@ -93,7 +93,6 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
             G.add_node('sdp.bf_ingest.{}'.format(i+1), {
                 'port': r.get_port('sdp_bf_ingest_{}_katcp'.format(i+1)),
                 'file_base': '/data',
-                'cbf_channels': cbf_channels,
                 'interface': interface,
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
