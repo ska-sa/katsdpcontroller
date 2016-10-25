@@ -1691,9 +1691,6 @@ class SDPControllerServer(DeviceServer):
             rcode, rval = self.deregister_product(subarray_product_id,force=True)
             logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
 
-        self.resources.hosts.pop('localhost.localdomain')
-         # remove this to prevent accidental shutdown of master controller whilst handling remotes
-
         kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd='/sbin/poweroff', network='host', user='root')
          # prepare a docker image to halt remote hosts
 
@@ -1707,7 +1704,8 @@ class SDPControllerServer(DeviceServer):
                 try:
                     (container, pullable_version) = host.launch(kibisis)
                 except Exception as e:
-                    pass # we tried our best
+                    logger.error("Exception whilst launching shutdown container on host {}: {}".format(host_name, e))
+                     # we tried our best
                 if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
                 shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
             else:
@@ -1715,13 +1713,12 @@ class SDPControllerServer(DeviceServer):
 
          # and now we finish ourselves off
         try:
-            mc_host.launch(kibisis)
-            shutdown_hosts += "locahost"
+            (container, pullable_version) = mc_host.launch(kibisis)
         except Exception as e:
-            shutdown_hosts += "localhost(failed)"
-             # since we are expecting the host to be powered down externally we just keep going
+            logger.error("Exception whilst launching shutdown container on master controller host: {}".format(e))
+            container = None
+        shutdown_hosts += "{}{},".format("localhost","" if container else "(failed)")
         return ("ok", shutdown_hosts)
-
 
     @request(include_msg=True)
     @return_reply(Int(min=0))
