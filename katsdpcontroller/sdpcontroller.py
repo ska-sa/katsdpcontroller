@@ -1697,7 +1697,7 @@ class SDPControllerServer(DeviceServer):
         shutdown_hosts = ""
         mc_host = None
         for (host_name, host) in self.resources.hosts.iteritems():
-            if socket.gethostbyname(host.ip) != '127.0.0.1':
+            if socket.gethostbyname(host.ip) != '127.0.0.1' and host_name != 'localhost.localdomain':
                  # make sure a localhost hasn't snuck in to spoil the party
                 logger.debug("Launching halt image on host {}".format(host_name))
                 container = None
@@ -1717,7 +1717,7 @@ class SDPControllerServer(DeviceServer):
         except Exception as e:
             logger.error("Exception whilst launching shutdown container on master controller host: {}".format(e))
             container = None
-        shutdown_hosts += "{}{},".format("localhost","" if container else "(failed)")
+        shutdown_hosts += "{}{}".format("localhost","" if container else "(failed)")
         return ("ok", shutdown_hosts)
 
     @request(include_msg=True)
