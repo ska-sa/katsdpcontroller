@@ -43,6 +43,7 @@ def find_images():
     resources = DummyResources()
     # Add some repositories that do not form part of the graph
     resources.images.add('katsdpcontroller')
+    resources.images.add('docker-base')
     for beamformer_mode in ["none", "hdf5_ram", "hdf5_ssd", "ptuse"]:
         for channels in [4096, 32768]:
             for simulate in [False, True]:
