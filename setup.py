@@ -14,6 +14,7 @@ setup (
     scripts = [
         "scripts/sdp_master_controller.py",
         ],
+    setup_requires = ['katversion'],
     install_requires = [
         'mesos.interface', 'mesos.native',
         'trollius',
@@ -23,5 +24,6 @@ setup (
         'ipaddress',
         'six'
     ],
+    use_katversion = True,
     license='MIT'
 )
