@@ -14,6 +14,14 @@ setup (
     scripts = [
         "scripts/sdp_master_controller.py",
         ],
-    license='MIT',
-    zip_safe = False,
+    install_requires = [
+        'mesos.interface', 'mesos.native',
+        'trollius',
+        'decorator',
+        'jsonschema',
+        'networkx',
+        'ipaddress',
+        'six'
+    ],
+    license='MIT'
 )

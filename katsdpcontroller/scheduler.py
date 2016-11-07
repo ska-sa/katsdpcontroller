@@ -1,12 +1,54 @@
 from __future__ import print_function, division, absolute_import
 import networkx
 import ipaddress
+import logging
 import json
+import jsonschema
 import itertools
+import six
 from collections import namedtuple, deque
+from decorator import decorator
+import mesos.interface
+from mesos.interface import mesos_pb2
+import mesos.scheduler
+import trollius
+from trollius import From, Return
 
 
-Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address'])
+SCALAR_RESOURCES = ['cpus', 'gpus', 'mem']
+RANGE_RESOURCES = ['ports', 'cores']
+TERMINAL_STATES = frozenset([
+    mesos_pb2.TASK_FINISHED,
+    mesos_pb2.TASK_FAILED,
+    mesos_pb2.TASK_KILLED,
+    mesos_pb2.TASK_LOST,
+    mesos_pb2.TASK_ERROR])
+INTERFACE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'name': {
+            'type': 'string',
+            'minLength': 1
+        },
+        'network': {
+            'type': 'string',
+            'minLength': 1
+        },
+        'ipv4_address': {
+            'type': 'string',
+            'formt': 'ipv4'
+        },
+        'numa_node': {
+            'type': 'integer',
+            'minimum': 0
+        }
+    },
+    'required': ['name', 'network', 'ipv4_address']
+}
+logger = logging.getLogger(__name__)
+
+
+Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node'])
 """Abstraction of a network interface on a machine
 
 Attributes
@@ -17,74 +59,9 @@ network : str
     Logical name for the network to which the interface is attached
 ipv4_address : :class:`ipaddress.IPv4Address`
     IPv4 local address of the interface
+numa_node : int
+    Index of the NUMA socket to which the NIC is connected
 """
-
-
-class Node(object):
-    """A node in a :class:`LogicalGraph`. It indicates how to run a task
-    and what resources it requires, but does not correspond to any specific
-    running task.
-
-    Several of the attributes are processed by :meth:`str.format` to
-    substitute dynamic values. The following named values are provided:
-
-    - `ports` : array of port numbers
-    - `cores` : array of reserved core IDs
-    - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
-
-    Attributes
-    ----------
-    name : str
-        Service name
-    cpus : float
-        Mesos CPU shares, excluding `cores`. At least one (and usually only one)
-        of :attr:`cpus` and :attr:`cores` must be set.
-    gpus : float
-        GPU resources required
-    cores : int
-        Reserved CPU cores. If this is zero, then `cpus` must be non-zero, and
-        the task will not be pinned. If it is non-zero, then the task will be
-        pinned to the assigned cores, and no other tasks will be pinned to
-        those cores. In addition, the cores will all be taken from the same
-        NUMA socket, and network interfaces in :attr:`networks` will also come
-        from the same socket.
-    mem : float
-        Mesos memory reservation (megabytes)
-    ports : int
-        Network service ports
-    networks : list
-        Abstract names of networks for which network interfaces are required.
-        At present duplicating a name in the list is not supported, but in
-        future it may allow requesting multiple interfaces on the same
-        network.
-    image : str
-        Base name of the Docker image (without registry or tag)
-    docker_options : list
-        Extra command-line options to pass to Docker
-    command : list of str
-        Command to run inside the image (formatted)
-    config : dictionary
-        Configuration options passed via telstate (string values are formatted)
-    """
-    def __init__(self, name):
-        self.name = name
-        self.cpus = 0.0
-        self.gpus = 0.0
-        self.cores = 0
-        self.mem = 0
-        self.ports = 0
-        self.networks = []
-        self.labels = set()
-        self.image = None
-        self.command = []
-        self.docker_options = []
-
-    def valid_agent(self, attributes):
-        """Checks whether the attributes of an agent are suitable for running
-        this node. Subclasses may override this to enforce constraints e.g.,
-        requiring a special type of hardware."""
-        # TODO: enforce x86-64, if we ever introduce ARM or other hardware
-        return True
 
 
 class RangeResource(object):
@@ -99,7 +76,7 @@ class RangeResource(object):
     def __len__(self):
         return self._len
 
-    def add_range(start, stop):
+    def add_range(self, start, stop):
         if stop > start:
             self._ranges.append((start, stop))
             self._len += stop - start
@@ -135,24 +112,173 @@ class RangeResource(object):
         self._len -= 1
         return ans
 
+    def __str__(self):
+        def format_range(rng):
+            start, stop = rng
+            if stop - start == 1:
+                return '{}'.format(start)
+            else:
+                return '{}-{}'.format(start, stop - 1)
+        return ','.join(format_range(rng) for rng in self._ranges)
+
+
+class InsufficientResourcesError(RuntimeError):
+    pass
+
+
+class Node(object):
+    """A node in a :class:`LogicalGraph`. It indicates how to run a task
+    and what resources it requires, but does not correspond to any specific
+    running task.
+
+    Several of the attributes are processed by :meth:`str.format` to
+    substitute dynamic values. The following named values are provided:
+
+    - `ports` : array of port numbers
+    - `cores` : array of reserved core IDs
+    - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
+
+    Attributes
+    ----------
+    name : str
+        Service name
+    cpus : float
+        Mesos CPU shares.
+    gpus : float
+        GPU resources required
+    cores : int
+        Reserved CPU cores. If this is zero, then the task will not be pinned.
+        If it is non-zero, then the task will be pinned to the assigned cores,
+        and no other tasks will be pinned to those cores. In addition, the
+        cores will all be taken from the same NUMA socket, and network
+        interfaces in :attr:`networks` will also come from the same socket.
+    mem : float
+        Mesos memory reservation (megabytes)
+    ports : int
+        Network service ports
+    networks : list
+        Abstract names of networks for which network interfaces are required.
+        At present duplicating a name in the list is not supported, but in
+        future it may allow requesting multiple interfaces on the same
+        network.
+    image : str
+        Base name of the Docker image (without registry or tag)
+    container : `mesos_pb2.ContainerInfo`
+        Modify this to override properties of the container. The `image` and
+        `force_pull_image` fields are ignored.
+    command : list of str
+        Command to run inside the image (formatted)
+    config : dictionary
+        Configuration options passed via telstate (string values are formatted)
+    """
+    def __init__(self, name):
+        self.name = name
+        for r in SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+        for r in RANGE_RESOURCES:
+            setattr(self, r, 0)
+        self.networks = []
+        self.image = None
+        self.command = []
+        self.container = mesos_pb2.ContainerInfo()
+        self.container.type = mesos_pb2.ContainerInfo.DOCKER
+
+    def valid_agent(self, attributes):
+        """Checks whether the attributes of an agent are suitable for running
+        this node. Subclasses may override this to enforce constraints e.g.,
+        requiring a special type of hardware."""
+        # TODO: enforce x86-64, if we ever introduce ARM or other hardware
+        return True
+
+    def customise_taskinfo(self, taskinfo):
+        """Modifies taskinfo immediately prior to launching the task. This can
+        be overloaded for special cases that can't be handled by the existing
+        fields.
+        """
+        pass
+
+
+class Task(object):
+    """Running task (or one that is being prepared to run)."""
+    def __init__(self, node, agent):
+        self.node = node
+        self.slave_id = agent.slave_id
+        self.interfaces = {}
+        for network in self.node.networks:
+            for interface in agent.interfaces:
+                if interface.network == network:
+                    self.interfaces[network] = interface
+                    break
+        self.task_id = None
+        self.dead_future = None     #: Future signalled when the task dies
+        for r in RANGE_RESOURCES:
+            setattr(self, r, [])
+
+    def command(self):
+        args = {}     # dictionary for substitutions in command
+        for r in RANGE_RESOURCES:
+            args[r] = getattr(self, r)
+        args['interfaces'] = self.interfaces
+        return [x.format(**args) for x in self.node.command]
+
+    def taskinfo(self):
+        """Generates a Mesos TaskInfo message suitable for launching this task.
+        The returned TaskInfo lacks a task ID.
+        """
+        taskinfo = mesos_pb2.TaskInfo()
+        taskinfo.name = self.node.name
+        command = self.command()
+        if self.cores:
+            command = ['taskset', '-c', ','.join(str(core) for core in self.cores)] + command
+        if command:
+            taskinfo.command.value = command[0]
+            taskinfo.command.arguments = command[1:]
+        taskinfo.command.shell = False
+        taskinfo.container.CopyFrom(self.node.container)
+        taskinfo.container.docker.image = self.node.image   # TODO use ImageResolver
+        taskinfo.container.docker.force_pull_image = True
+        taskinfo.task_id.value = self.task_id
+        taskinfo.slave_id.value = self.slave_id
+        for r in SCALAR_RESOURCES:
+            value = getattr(self.node, r)
+            if value > 0:
+                resource = taskinfo.resources.add()
+                resource.name = r
+                resource.type = mesos_pb2.Value.SCALAR
+                resource.scalar.value = value
+        for r in RANGE_RESOURCES:
+            value = getattr(self, r)
+            if value:
+                resource = taskinfo.resources.add()
+                resource.name = r
+                resource.type = mesos_pb2.Value.RANGES
+                for item in value:
+                    rng = resource.ranges.range.add()
+                    rng.begin = item
+                    rng.end = item
+        # assign ports to port mappings if no host port is set
+        ports = iter(self.ports)
+        for mapping in taskinfo.container.docker.port_mappings:
+            if not mapping.host_port:
+                mapping.host_port = next(ports)
+        self.node.customise_taskinfo(taskinfo)
+        return taskinfo
+
 
 class Agent(object):
     """Collects multiple offers for a single Mesos agent and allows nodes to
     be added, turning them into (unlaunched) tasks.
     """
-    SCALAR_RESOURCES = ['cpus', 'gpus', 'mem']
-    RANGE_RESOURCES = ['ports', 'cores']
-
     def __init__(self, slave_id):
         self.slave_id = slave_id
         self.offers = []
         self.tasks = []
         # These resources all represent resources not yet allocated to tasks
-        for r in self.SCALAR_RESOURCES:
+        for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
-        for r in self.RANGE_RESOURCES:
+        for r in RANGE_RESOURCES:
             setattr(self, r, RangeResource())
-        self.interfaces = set()
+        self.interfaces = []
         self.attributes = None
 
     def _inc_attr(self, key, delta):
@@ -162,12 +288,12 @@ class Agent(object):
         getattr(self, key).add_resource(resource)
 
     def add_offer(self, offer):
-        """Add a store an offer received from Mesos, updating the free resources"""
+        """Add an offer received from Mesos, updating the free resources"""
         self.offers.append(offer)
         for resource in offer.resources:
-            if resource.name in self.SCALAR_RESOURCES:
+            if resource.name in SCALAR_RESOURCES:
                 self._inc_attr(resource.name, resource.scalar.value)
-            elif resource.name in self.RANGE_RESOURCES:
+            elif resource.name in RANGE_RESOURCES:
                 self._add_range_attr(resource.name, resource)
         if self.attributes is None:
             self.attributes = offer.attributes
@@ -176,12 +302,19 @@ class Agent(object):
                         attribute.type == mesos_pb2.Value.SCALAR:
                     try:
                         value = json.loads(attribute.text.value)
-                        interface = Interface(value['name'], value['network'],
-                                ipaddress.IPv4Address(value['ipv4_address']))
+                        jsonschema.validate(value, INTERFACE_SCHEMA)
+                        interface = Interface(
+                            name=value['name'],
+                            value=value['network'],
+                            ipv4_address=ipaddress.IPv4Address(value['ipv4_address']),
+                            numa_node=value.get('numa_node'))
                     except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
-                        logger.warn('Could not parse {} ({})'.format(attribute.name, attribute.text.value))
+                        logger.warn('Could not parse {} ({})'.format(
+                            attribute.name, attribute.text.value))
+                    except jsonschema.ValidationError as e:
+                        logger.warn('Validation error parsing {}: {}'.format(value, e))
                     else:
-                        self.networks.append(interface)
+                        self.interfaces.append(interface)
 
     def add_node(self, node):
         """Add a node to the list of assigned nodes, if possible.
@@ -193,39 +326,39 @@ class Agent(object):
         """
         if not self.offers:
             raise InsufficientResourcesError('No offers have been received for this agent')
-        if not node.valid_node(self.attributes):
+        if not node.valid_agent(self.attributes):
             raise InsufficientResourcesError('Node does not match this agent')
         # TODO: add NUMA awareness
-        for r in self.SCALAR_RESOURCES:
+        for r in SCALAR_RESOURCES:
             need = getattr(node, r)
             have = getattr(self, r)
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
-        for r in self.RANGE_RESOURCES:
+        for r in RANGE_RESOURCES:
             need = getattr(node, r)
             have = len(getattr(self, r))
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
         for network in node.networks:
-            if not any(interface.network == network for interface in interfaces):
+            if not any(interface.network == network for interface in self.interfaces):
                 raise InsufficientResourcesError('Network {} not present'.format(network))
 
         # Have now verified that the node fits. Create a task for it and assign resources
-        task = Task(node)
-        task.slave_id = self.slave_id
-        for r in self.SCALAR_RESOURCES:
-            setattr(task, r, getattr(node, r))
+        task = Task(node, self)
+        for r in SCALAR_RESOURCES:
             self._inc_attr(r, -getattr(node, r))
-        for r in self.RANGE_RESOURCES:
-            value = getattr(self, r).popleft()
-            getattr(task, r).append(value)
+        for r in RANGE_RESOURCES:
+            for i in range(getattr(node, r)):
+                value = getattr(self, r).popleft()
+                getattr(task, r).append(value)
+        self.tasks.append(task)
 
 
 class LogicalGraph(networkx.MultiDiGraph):
     """Collection of :class:`Node`s"""
 
-    def instantiate(self, offers):
-        """Create a physical graph from the given offers, if possible
+    def instantiate(self, offers, physical_name):
+        """Create a physical graph from the given offers, if possible.
 
         Returns
         -------
@@ -236,10 +369,193 @@ class LogicalGraph(networkx.MultiDiGraph):
         InsufficientResourcesError
             if `offers` does not contain sufficient resources to launch the graph
         """
-        # Group offers by slave
-        by_slave = {}
+        # Group offers by agent
+        agents = {}
         for offer in offers:
-            by_slave.setdefault(offer.slave_id.value, []).append(offer)
+            agent = agents.get(offer.slave_id.value)
+            if agent is None:
+                agent = agents.setdefault(offer.slave_id.value, Agent(offer.slave_id.value))
+            agent.add_offer(offer)
+        # Sort agents by free memory. This makes it less likely that a
+        # low-memory process will hog all the other resources on a high-memory
+        # box. Should eventually look into smarter algorithms e.g. Dominant
+        # Resource Fairness
+        # (http://mesos.apache.org/documentation/latest/allocation-module/)
+        agents = list(six.itervalues(agents))
+        agents.sort(key=lambda agent: agent.mem)
+        for node in self:
+            found = False
+            for agent in agents:
+                try:
+                    agent.add_node(node)
+                    found = True
+                    break
+                except InsufficientResourcesError as e:
+                    logger.debug('Cannot add %s to %s: %s',
+                                 node.name, agent.slave_id, e)
+                    pass
+            if not found:
+                raise InsufficientResourcesError(
+                    'Insufficient resources to run {}'.format(node.name))
+        return PhysicalGraph(physical_name, agents)
 
 
-__all__ = ['Node', 'LogicalGraph', 'InsufficientResourcesError']
+class PhysicalGraph(networkx.MultiDiGraph):
+    """Collection of :class:`Task`s"""
+    def __init__(self, name, agents):
+        super(PhysicalGraph, self).__init__()
+        self.name = name
+        self.agents = agents
+        for agent in agents:
+            for task in agent.tasks:
+                self.add_node(task)
+
+
+@decorator
+def run_in_event_loop(func, *args, **kw):
+    args[0]._loop.call_soon_threadsafe(func, *args, **kw)
+
+
+class Scheduler(mesos.interface.Scheduler):
+    def __init__(self, loop):
+        self._next_task_id = 0
+        self._loop = loop
+        self._drivers = None
+        self._offers = {}     # offer ID forms the key
+        self._pending_logical = deque()
+        self._running = {}    # physical graphs, indexed by name
+        self._closing = False
+
+    def _make_task_id(self):
+        ret = str(self._next_task_id).zfill(8)
+        self._next_task_id += 1
+        return ret
+
+    def _try_launch(self):
+        # TODO: if there are multiple pending graphs, we could try to pack
+        # them all into the available offers, rather than having to wait
+        # for the unused resources to be offered to us again.
+        if self._pending_logical and self._offers:
+            try:
+                (logical, physical_name, future) = self._pending_logical[0]
+                physical = logical.instantiate(self._offers.values(), physical_name)
+            except InsufficientResourcesError:
+                logger.debug('Could not launch %s due to insufficient resources', physical_name)
+                return
+            else:
+                # Assign IDs to the tasks
+                for node in physical.nodes():
+                    node.task_id = self._make_task_id()
+                # Launch the tasks
+                # TODO: does this need to use run_in_executor? Is it
+                # thread-safe to do so?
+                for agent in physical.agents:
+                    offer_ids = [offer.id for offer in agent.offers]
+                    taskinfos = [task.taskinfo() for task in agent.tasks]
+                    print(taskinfos)
+                    self._driver.launchTasks(offer_ids, taskinfos)
+                    for task in agent.tasks:
+                        task.dead_future = trollius.Future(loop=self._loop)
+                    logger.info('Launched %d tasks on %s', len(agent.tasks), agent.slave_id)
+                self._offers = {}   # launchTasks declines any unused resources
+                self._running[physical_name] = physical
+                # TODO: should we wait for statuses to come back first?
+                self._pending_logical.popleft()
+                future.set_result(physical)
+                if not self._pending_logical:
+                    self._driver.suppressOffers()
+
+    def set_driver(self, driver):
+        self._driver = driver
+
+    def registered(self, driver, framework_id, master_info):
+        pass
+
+    @run_in_event_loop
+    def resourceOffers(self, driver, offers):
+        for offer in offers:
+            self._offers[offer.id.value] = offer
+        self._try_launch()
+
+    @run_in_event_loop
+    def offerRescinded(self, offer_id):
+        try:
+            del self._offers[offer_id]
+        except KeyError:
+            pass
+
+    @run_in_event_loop
+    def statusUpdate(self, driver, status):
+        logging.debug('Update: task %s in state %s (%s)',
+            status.task_id.value, mesos_pb2.TaskState.Name(status.state),
+            status.message)
+        # TODO: use a lookup to more easily find tasks from IDs
+        matched_task = None
+        for physical in self._running.values():
+            for agent in physical.agents:
+                for task in agent.tasks:
+                    if task.task_id == status.task_id.value:
+                        matched_task = task
+        if matched_task is None:
+            return
+        if status.state in TERMINAL_STATES:
+            matched_task.dead_future.set_result(status.state)
+
+    @trollius.coroutine
+    def launch(self, logical, physical_name):
+        if self._closing:
+            raise RuntimeError('Cannot launch {} while shutting down'.format(physical_name))
+        if physical_name in self._running:
+            raise ValueError('Graph {} is already running'.format(physical_name))
+        for pending in self._pending_logical:
+            if physical_name == pending[1]:
+                raise ValueError('Graph {} is already pending'.format(physical_name))
+        if not self._pending_logical:
+            self._driver.reviveOffers()
+        # TODO: use requestResources to ask the allocator for resources
+        future = trollius.Future(loop=self._loop)
+        pending = (logical, physical_name, future)
+        self._pending_logical.append(pending)
+        self._try_launch()
+        try:
+            physical = yield From(future)
+            raise Return(physical)
+        finally:
+            # In particular, if the user cancels the launch, we need to
+            # do this.
+            if pending in self._pending_logical:
+                self._pending_logical.remove(pending)
+
+    @trollius.coroutine
+    def stop(self, name):
+        try:
+            physical = self._running[name]
+        except KeyError:
+            raise KeyError('Graph {} is not running'.format(name))
+        futures = []
+        for task in physical.nodes():
+            # TODO: according to the Mesos docs, killing a task is not reliable,
+            # and may need to be attempted again.
+            task_id = mesos_pb2.TaskID()
+            task_id.value = task.task_id
+            self._driver.killTask(task_id)
+            futures.append(task.dead_future)
+        yield From(trollius.gather(*futures, loop=self._loop))
+        del self._running[name]
+
+    @trollius.coroutine
+    def close(self):
+        self._closing = True
+        # TODO: do we need to explicitly decline outstanding offers?
+        for (logical, physical_name, future) in self._pending_logical:
+            future.cancel()
+        self._pending_logical = []
+        names = list(six.iterkeys(self._running))
+        for name in names:
+            yield From(self.stop(name))
+        self._driver.stop()
+        status = yield From(self._loop.run_in_executor(None, self._driver.join))
+        raise Return(status)
+
+
+__all__ = ['Node', 'Task', 'Interface', 'LogicalGraph', 'InsufficientResourcesError']
