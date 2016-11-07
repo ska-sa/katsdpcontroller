@@ -500,6 +500,7 @@ class Scheduler(mesos.interface.Scheduler):
             return
         if status.state in TERMINAL_STATES:
             matched_task.dead_future.set_result(status.state)
+        self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
     def launch(self, logical, physical_name):
@@ -527,7 +528,7 @@ class Scheduler(mesos.interface.Scheduler):
                 self._pending_logical.remove(pending)
 
     @trollius.coroutine
-    def stop(self, name):
+    def kill(self, name):
         try:
             physical = self._running[name]
         except KeyError:
@@ -541,7 +542,11 @@ class Scheduler(mesos.interface.Scheduler):
             self._driver.killTask(task_id)
             futures.append(task.dead_future)
         yield From(trollius.gather(*futures, loop=self._loop))
-        del self._running[name]
+        try:
+            del self._running[name]
+        except KeyError:
+            # Can happen if another caller also killed the graph when we yielded
+            pass
 
     @trollius.coroutine
     def close(self):

@@ -22,7 +22,9 @@ setup (
         'jsonschema',
         'networkx',
         'ipaddress',
-        'six'
+        'six',
+        'katcp',
+        'tornado'
     ],
     use_katversion = True,
     license='MIT'
