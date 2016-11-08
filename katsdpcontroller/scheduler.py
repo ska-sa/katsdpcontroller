@@ -122,6 +122,75 @@ class RangeResource(object):
         return ','.join(format_range(rng) for rng in self._ranges)
 
 
+class ImageResolver(object):
+    """Class to map an abstract Docker image name to a fully-qualified name.
+    If no private registry is specified, it looks up names in the `sdp/`
+    namespace, otherwise in the private registry. One can also override
+    individual entries.
+
+    Parameters
+    ----------
+    private_registry : str, optional
+        Address (hostname and port) for a private registry
+    tag_file : str, optional
+        If specified, the file will be read to determine the image tag to use.
+        It can be re-read by calling :meth:`reread_tag_file`.
+        It does not affect overrides, to allow them to specify their own tags.
+    pull : bool, optional
+        Whether to pull images from the `private_registry`.
+    """
+    def __init__(self, private_registry=None, tag_file=None, pull=True):
+        if private_registry is None:
+            self._prefix = 'sdp/'
+        else:
+            self._prefix = private_registry + '/'
+        self._tag_file = tag_file
+        self._tag = None
+        self._private_registry = private_registry
+        self._overrides = {}
+        self.pull = pull
+        self.reread_tag_file()
+
+    def reread_tag_file(self):
+        if self._tag_file is None:
+            self._tag = 'latest'
+        else:
+            with open(self._tag_file, 'r') as f:
+                tag = f.read().strip()
+                # This is a regex that appeared in older versions of Docker
+                # (see https://github.com/docker/docker/pull/8447/files).
+                # It's probably a reasonable constraint so that we don't allow
+                # whitespace, / and other nonsense, even if Docker itself no
+                # longer enforces it.
+                if not re.match('^[\w][\w.-]{0,127}$', tag):
+                    raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
+                if self._tag is not None and tag != self._tag:
+                    logger.warn("Image tag changed: %s -> %s", self._tag, tag)
+                self._tag = tag
+
+    def override(self, name, path):
+        self._overrides[name] = path
+
+    def pullable(self, image):
+        """Determine whether a fully-qualified image name should be pulled. At
+        present, this is done for images in the explicitly specified private
+        registry, but images in other registries and specified by override are
+        not pulled.
+        """
+        return self._private_registry is not None and image.startswith(self._prefix) and self.pull
+
+    def __call__(self, name):
+        try:
+            return self._overrides[name]
+        except KeyError:
+            if ':' in name:
+                # A tag was already specified in the graph
+                logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
+                return self._prefix + name
+            else:
+                return self._prefix + name + ':' + self._tag
+
+
 class InsufficientResourcesError(RuntimeError):
     pass
 
@@ -134,8 +203,8 @@ class Node(object):
     Several of the attributes are processed by :meth:`str.format` to
     substitute dynamic values. The following named values are provided:
 
-    - `ports` : array of port numbers
-    - `cores` : array of reserved core IDs
+    - `ports` : dictionary of port numbers
+    - `cores` : dictionary of reserved core IDs
     - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
 
     Attributes
@@ -146,16 +215,20 @@ class Node(object):
         Mesos CPU shares.
     gpus : float
         GPU resources required
-    cores : int
-        Reserved CPU cores. If this is zero, then the task will not be pinned.
-        If it is non-zero, then the task will be pinned to the assigned cores,
+    cores : list of str
+        Reserved CPU cores. If this is empty, then the task will not be pinned.
+        If it is non-empty, then the task will be pinned to the assigned cores,
         and no other tasks will be pinned to those cores. In addition, the
         cores will all be taken from the same NUMA socket, and network
         interfaces in :attr:`networks` will also come from the same socket.
+        The strings in the list become keys in :attr:`Task.cores`. You can use
+        ``None`` if you don't need to use the core numbers in the command to
+        pin individual threads.
     mem : float
         Mesos memory reservation (megabytes)
-    ports : int
-        Network service ports
+    ports : list of str
+        Network service ports. Each element in the list is a logical name for
+        the port.
     networks : list
         Abstract names of networks for which network interfaces are required.
         At present duplicating a name in the list is not supported, but in
@@ -168,15 +241,13 @@ class Node(object):
         `force_pull_image` fields are ignored.
     command : list of str
         Command to run inside the image (formatted)
-    config : dictionary
-        Configuration options passed via telstate (string values are formatted)
     """
     def __init__(self, name):
         self.name = name
         for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
-            setattr(self, r, 0)
+            setattr(self, r, [])
         self.networks = []
         self.image = None
         self.command = []
@@ -190,7 +261,7 @@ class Node(object):
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
         return True
 
-    def customise_taskinfo(self, taskinfo):
+    def customise_taskinfo(self, task, taskinfo):
         """Modifies taskinfo immediately prior to launching the task. This can
         be overloaded for special cases that can't be handled by the existing
         fields.
@@ -212,7 +283,8 @@ class Task(object):
         self.task_id = None
         self.dead_future = None     #: Future signalled when the task dies
         for r in RANGE_RESOURCES:
-            setattr(self, r, [])
+            setattr(self, r, {})
+            setattr(self, r + '_list', [])
 
     def command(self):
         args = {}     # dictionary for substitutions in command
@@ -221,22 +293,23 @@ class Task(object):
         args['interfaces'] = self.interfaces
         return [x.format(**args) for x in self.node.command]
 
-    def taskinfo(self):
+    def taskinfo(self, image_resolver):
         """Generates a Mesos TaskInfo message suitable for launching this task.
         The returned TaskInfo lacks a task ID.
         """
         taskinfo = mesos_pb2.TaskInfo()
         taskinfo.name = self.node.name
         command = self.command()
-        if self.cores:
-            command = ['taskset', '-c', ','.join(str(core) for core in self.cores)] + command
+        if self.cores_list:
+            command = ['taskset', '-c', ','.join(str(core) for core in self.cores_list)] + command
         if command:
             taskinfo.command.value = command[0]
-            taskinfo.command.arguments = command[1:]
+            taskinfo.command.arguments.extend(command[1:])
         taskinfo.command.shell = False
         taskinfo.container.CopyFrom(self.node.container)
-        taskinfo.container.docker.image = self.node.image   # TODO use ImageResolver
-        taskinfo.container.docker.force_pull_image = True
+        image_path = image_resolver(self.node.image)
+        taskinfo.container.docker.image = image_path
+        taskinfo.container.docker.force_pull_image = image_resolver.pullable(image_path)
         taskinfo.task_id.value = self.task_id
         taskinfo.slave_id.value = self.slave_id
         for r in SCALAR_RESOURCES:
@@ -247,7 +320,7 @@ class Task(object):
                 resource.type = mesos_pb2.Value.SCALAR
                 resource.scalar.value = value
         for r in RANGE_RESOURCES:
-            value = getattr(self, r)
+            value = getattr(self, r + '_list')
             if value:
                 resource = taskinfo.resources.add()
                 resource.name = r
@@ -256,18 +329,17 @@ class Task(object):
                     rng = resource.ranges.range.add()
                     rng.begin = item
                     rng.end = item
-        # assign ports to port mappings if no host port is set
-        ports = iter(self.ports)
-        for mapping in taskinfo.container.docker.port_mappings:
-            if not mapping.host_port:
-                mapping.host_port = next(ports)
-        self.node.customise_taskinfo(taskinfo)
+        self.node.customise_taskinfo(self, taskinfo)
         return taskinfo
 
 
 class Agent(object):
     """Collects multiple offers for a single Mesos agent and allows nodes to
     be added, turning them into (unlaunched) tasks.
+
+    TODO: think up a better name for this. It's a set of offers and tasks that
+    are all associated with one agent, but the system as a whole may have
+    multiple Agent objects corresponding to the same Mesos agent.
     """
     def __init__(self, slave_id):
         self.slave_id = slave_id
@@ -335,7 +407,7 @@ class Agent(object):
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
         for r in RANGE_RESOURCES:
-            need = getattr(node, r)
+            need = len(getattr(node, r))
             have = len(getattr(self, r))
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
@@ -348,9 +420,11 @@ class Agent(object):
         for r in SCALAR_RESOURCES:
             self._inc_attr(r, -getattr(node, r))
         for r in RANGE_RESOURCES:
-            for i in range(getattr(node, r)):
+            for name in getattr(node, r):
                 value = getattr(self, r).popleft()
-                getattr(task, r).append(value)
+                getattr(task, r + '_list').append(value)
+                if name is not None:
+                    getattr(task, r)[name] = value
         self.tasks.append(task)
 
 
@@ -376,13 +450,14 @@ class LogicalGraph(networkx.MultiDiGraph):
             if agent is None:
                 agent = agents.setdefault(offer.slave_id.value, Agent(offer.slave_id.value))
             agent.add_offer(offer)
-        # Sort agents by free memory. This makes it less likely that a
+        # Sort agents by GPUs then free memory. This makes it less likely that a
         # low-memory process will hog all the other resources on a high-memory
-        # box. Should eventually look into smarter algorithms e.g. Dominant
-        # Resource Fairness
+        # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
+        # there is no other choice. Should eventually look into smarter
+        # algorithms e.g. Dominant Resource Fairness
         # (http://mesos.apache.org/documentation/latest/allocation-module/)
         agents = list(six.itervalues(agents))
-        agents.sort(key=lambda agent: agent.mem)
+        agents.sort(key=lambda agent: (agent.gpus, agent.mem))
         for node in self:
             found = False
             for agent in agents:
@@ -417,7 +492,7 @@ def run_in_event_loop(func, *args, **kw):
 
 
 class Scheduler(mesos.interface.Scheduler):
-    def __init__(self, loop):
+    def __init__(self, image_resolver, loop):
         self._next_task_id = 0
         self._loop = loop
         self._drivers = None
@@ -425,6 +500,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._pending_logical = deque()
         self._running = {}    # physical graphs, indexed by name
         self._closing = False
+        self._image_resolver = image_resolver
 
     def _make_task_id(self):
         ret = str(self._next_task_id).zfill(8)
@@ -451,7 +527,7 @@ class Scheduler(mesos.interface.Scheduler):
                 # thread-safe to do so?
                 for agent in physical.agents:
                     offer_ids = [offer.id for offer in agent.offers]
-                    taskinfos = [task.taskinfo() for task in agent.tasks]
+                    taskinfos = [task.taskinfo(self._image_resolver) for task in agent.tasks]
                     print(taskinfos)
                     self._driver.launchTasks(offer_ids, taskinfos)
                     for task in agent.tasks:
@@ -494,7 +570,7 @@ class Scheduler(mesos.interface.Scheduler):
         for physical in self._running.values():
             for agent in physical.agents:
                 for task in agent.tasks:
-                    if task.task_id == status.task_id.value:
+                    if task.task_id == status.task_id.value and not task.dead_future.done():
                         matched_task = task
         if matched_task is None:
             return
@@ -537,9 +613,10 @@ class Scheduler(mesos.interface.Scheduler):
         for task in physical.nodes():
             # TODO: according to the Mesos docs, killing a task is not reliable,
             # and may need to be attempted again.
-            task_id = mesos_pb2.TaskID()
-            task_id.value = task.task_id
-            self._driver.killTask(task_id)
+            if not task.dead_future.done():
+                task_id = mesos_pb2.TaskID()
+                task_id.value = task.task_id
+                self._driver.killTask(task_id)
             futures.append(task.dead_future)
         yield From(trollius.gather(*futures, loop=self._loop))
         try:
@@ -557,7 +634,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._pending_logical = []
         names = list(six.iterkeys(self._running))
         for name in names:
-            yield From(self.stop(name))
+            yield From(self.kill(name))
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
