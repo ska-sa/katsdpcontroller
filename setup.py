@@ -24,7 +24,8 @@ setup (
         'ipaddress',
         'six',
         'katcp',
-        'tornado'
+        'tornado',
+        'katsdptelstate'
     ],
     use_katversion = True,
     license='MIT'

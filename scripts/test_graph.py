@@ -20,15 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 class TelstateTask(PhysicalTask):
-    def taskinfo(self, *args, **kwargs):
-        taskinfo = super(TelstateTask, self).taskinfo(*args, **kwargs)
+    def finalise(self, physical_graph):
+        super(TelstateTask, self).finalise(physical_graph)
         # Add a port mapping
-        taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
-        portmap = taskinfo.container.docker.port_mappings.add()
+        self.taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
+        portmap = self.taskinfo.container.docker.port_mappings.add()
         portmap.host_port = self.ports['redis']
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
-        return taskinfo
 
 
 def make_graph():
@@ -48,8 +47,9 @@ def make_graph():
     cam2telstate.cpus = 0.5
     cam2telstate.mem = 256
     cam2telstate.image = 'katsdpingest'
-    cam2telstate.command = ['cam2telstate.py']
-    #g.add_node(cam2telstate)
+    cam2telstate.command = ['cam2telstate.py', '--telstate', '{endpoints[sdp.telstate_redis]}']
+    g.add_node(cam2telstate)
+    g.add_edge(cam2telstate, telstate, port='redis')
 
     # filewriter node
     filewriter = LogicalTask('sdp.filewriter.1')
@@ -78,14 +78,15 @@ class Server(katcp.DeviceServer):
     VERSION_INFO = ('dummy', 0, 1)
     BUILD_INFO = ('katsdpcontroller',) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
 
-    def __init__(self, framework, master, image_resolver, loop, *args, **kwargs):
+    def __init__(self, framework, master, resolver, loop, *args, **kwargs):
         super(Server, self).__init__(*args, **kwargs)
         self._loop = loop
-        self._scheduler = Scheduler(image_resolver, loop)
+        self._scheduler = Scheduler(loop)
         self._driver = mesos.scheduler.MesosSchedulerDriver(
             self._scheduler, framework, master, False)
         self._scheduler.set_driver(self._driver)
         self._driver.start()
+        self._resolver = resolver
         self._physical = {}      #: Physical graphs indexed by name
 
     def setup_sensors(self):
@@ -105,7 +106,7 @@ class Server(katcp.DeviceServer):
         """
         try:
             logical = make_graph()
-            physical = yield From(trollius.wait_for(self._scheduler.launch(logical, {}),
+            physical = yield From(trollius.wait_for(self._scheduler.launch(logical, self._resolver),
                                                     timeout, loop=self._loop))
             self._physical[name] = physical
         except trollius.TimeoutError:
@@ -165,13 +166,14 @@ def main():
     framework.checkpoint = True
     framework.principal = 'sdp-sample-framework'
 
-    image_resolver = ImageResolver(
-        'sdp-docker-registry.kat.ac.za:5000')
+    image_resolver = ImageResolver('sdp-docker-registry.kat.ac.za:5000')
+    task_id_allocator = TaskIDAllocator()
+    resolver = Resolver(image_resolver, task_id_allocator)
 
     loop = trollius.get_event_loop()
     ioloop = AsyncIOMainLoop()
     ioloop.install()
-    server = Server(framework, args.master, image_resolver, loop, args.host, args.port)
+    server = Server(framework, args.master, resolver, loop, args.host, args.port)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
     ioloop.add_callback(server.start)
