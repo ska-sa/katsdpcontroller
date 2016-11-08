@@ -105,7 +105,7 @@ class Server(katcp.DeviceServer):
         """
         try:
             logical = make_graph()
-            physical = yield From(trollius.wait_for(self._scheduler.launch(logical),
+            physical = yield From(trollius.wait_for(self._scheduler.launch(logical, {}),
                                                     timeout, loop=self._loop))
             self._physical[name] = physical
         except trollius.TimeoutError:

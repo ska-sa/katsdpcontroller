@@ -243,7 +243,9 @@ class LogicalTask(object):
     command : list of str
         Command to run inside the image (formatted)
     physical_factory : callable
-        Class to use for the physical task (must return :class:`PhysicalTask` or subclass)
+        Class to use for the physical task (must return :class:`PhysicalTask`
+        or subclass). It is passed the logical task, agent, and the `config`
+        argument passed when setting up the physical graph.
     """
     def __init__(self, name):
         self.name = name
@@ -269,8 +271,19 @@ class LogicalTask(object):
 class PhysicalTask(object):
     """Running task (or one that is being prepared to run). Unlike
     a :class:`LogicalTask`, it has a specific agent, ports, etc assigned.
+
+    Parameters
+    ----------
+    logical_task : :class:`LogicalTask`
+        Logical task forming the template for this physical task
+    agent : :class:`Agent`
+        Agent to which this physical task will be assigned. The resources
+        are not assigned from the agent during construction.
+    config : dict
+        Arbitrary extra information passed when creating the physical task.
+        This is not used in this class, but can be used by subclasses.
     """
-    def __init__(self, logical_task, agent):
+    def __init__(self, logical_task, agent, config):
         self.logical_task = logical_task
         self.slave_id = agent.slave_id
         self.interfaces = {}
@@ -386,7 +399,7 @@ class Agent(object):
                     else:
                         self.interfaces.append(interface)
 
-    def add_task(self, logical_task):
+    def add_task(self, logical_task, config):
         """Add a task to the list of assigned nodes, if possible, creating
         a physical task from the logical task.
 
@@ -416,7 +429,7 @@ class Agent(object):
 
         # Have now verified that the task fits. Create a physical task for it
         # and assign resources.
-        physical_task = logical_task.physical_factory(logical_task, self)
+        physical_task = logical_task.physical_factory(logical_task, self, config)
         for r in SCALAR_RESOURCES:
             self._inc_attr(r, -getattr(logical_task, r))
         for r in RANGE_RESOURCES:
@@ -445,13 +458,15 @@ class PhysicalGraph(networkx.MultiDiGraph):
         Logical graph to instantiate
     offers : list
         List of Mesos resource offers to use
+    config : dict
+        Passed to `physical_factory` functions
 
     Raises
     ------
     InsufficientResourcesError
         if `offers` does not contain sufficient resources for the graph
     """
-    def __init__(self, logical_graph, offers):
+    def __init__(self, logical_graph, offers, config):
         super(PhysicalGraph, self).__init__()
         # Group offers by agent
         agents = {}
@@ -469,21 +484,22 @@ class PhysicalGraph(networkx.MultiDiGraph):
         agents = list(six.itervalues(agents))
         agents.sort(key=lambda agent: (agent.gpus, agent.mem))
         for node in logical_graph:
-            if not isinstance(node, LogicalTask):
-                pass
-            found = False
-            for agent in agents:
-                try:
-                    agent.add_task(node)
-                    found = True
-                    break
-                except InsufficientResourcesError as e:
-                    logger.debug('Cannot add %s to %s: %s',
-                                 node.name, agent.slave_id, e)
-                    pass
-            if not found:
-                raise InsufficientResourcesError(
-                    'Insufficient resources to run {}'.format(node.name))
+            if isinstance(node, LogicalTask):
+                found = False
+                for agent in agents:
+                    try:
+                        agent.add_task(node, config)
+                        found = True
+                        break
+                    except InsufficientResourcesError as e:
+                        logger.debug('Cannot add %s to %s: %s',
+                                     node.name, agent.slave_id, e)
+                        pass
+                if not found:
+                    raise InsufficientResourcesError(
+                        'Insufficient resources to run {}'.format(node.name))
+            else:
+                physical_node = node.physical_factory(node, config)
         self.agents = agents
         for agent in agents:
             for task in agent.tasks:
@@ -517,8 +533,8 @@ class Scheduler(mesos.interface.Scheduler):
         # for the unused resources to be offered to us again.
         if self._pending_logical and self._offers:
             try:
-                (logical, future) = self._pending_logical[0]
-                physical = PhysicalGraph(logical, self._offers.values())
+                (logical, config, future) = self._pending_logical[0]
+                physical = PhysicalGraph(logical, self._offers.values(), config)
             except InsufficientResourcesError:
                 logger.debug('Could not launch %s due to insufficient resources', physical_name)
                 return
@@ -577,14 +593,14 @@ class Scheduler(mesos.interface.Scheduler):
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
-    def launch(self, logical):
+    def launch(self, logical, config):
         if self._closing:
             raise RuntimeError('Cannot launch graphs while shutting down')
         if not self._pending_logical:
             self._driver.reviveOffers()
         # TODO: use requestResources to ask the allocator for resources?
         future = trollius.Future(loop=self._loop)
-        pending = (logical, future)
+        pending = (logical, config, future)
         self._pending_logical.append(pending)
         self._try_launch()
         try:
@@ -620,7 +636,7 @@ class Scheduler(mesos.interface.Scheduler):
     def close(self):
         self._closing = True
         # TODO: do we need to explicitly decline outstanding offers?
-        for (logical, future) in self._pending_logical:
+        for (logical, config, future) in self._pending_logical:
             future.cancel()
         self._pending_logical = []
         while self._running:
