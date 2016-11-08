@@ -6,6 +6,7 @@ import json
 import jsonschema
 import itertools
 import six
+import re
 from collections import namedtuple, deque
 from decorator import decorator
 import mesos.interface
@@ -195,7 +196,7 @@ class InsufficientResourcesError(RuntimeError):
     pass
 
 
-class Node(object):
+class LogicalTask(object):
     """A node in a :class:`LogicalGraph`. It indicates how to run a task
     and what resources it requires, but does not correspond to any specific
     running task.
@@ -241,6 +242,8 @@ class Node(object):
         `force_pull_image` fields are ignored.
     command : list of str
         Command to run inside the image (formatted)
+    physical_factory : callable
+        Class to use for the physical task (must return :class:`PhysicalTask` or subclass)
     """
     def __init__(self, name):
         self.name = name
@@ -253,29 +256,25 @@ class Node(object):
         self.command = []
         self.container = mesos_pb2.ContainerInfo()
         self.container.type = mesos_pb2.ContainerInfo.DOCKER
+        self.physical_factory = PhysicalTask
 
     def valid_agent(self, attributes):
         """Checks whether the attributes of an agent are suitable for running
-        this node. Subclasses may override this to enforce constraints e.g.,
+        this task. Subclasses may override this to enforce constraints e.g.,
         requiring a special type of hardware."""
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
         return True
 
-    def customise_taskinfo(self, task, taskinfo):
-        """Modifies taskinfo immediately prior to launching the task. This can
-        be overloaded for special cases that can't be handled by the existing
-        fields.
-        """
-        pass
 
-
-class Task(object):
-    """Running task (or one that is being prepared to run)."""
-    def __init__(self, node, agent):
-        self.node = node
+class PhysicalTask(object):
+    """Running task (or one that is being prepared to run). Unlike
+    a :class:`LogicalTask`, it has a specific agent, ports, etc assigned.
+    """
+    def __init__(self, logical_task, agent):
+        self.logical_task = logical_task
         self.slave_id = agent.slave_id
         self.interfaces = {}
-        for network in self.node.networks:
+        for network in self.logical_task.networks:
             for interface in agent.interfaces:
                 if interface.network == network:
                     self.interfaces[network] = interface
@@ -291,14 +290,14 @@ class Task(object):
         for r in RANGE_RESOURCES:
             args[r] = getattr(self, r)
         args['interfaces'] = self.interfaces
-        return [x.format(**args) for x in self.node.command]
+        return [x.format(**args) for x in self.logical_task.command]
 
     def taskinfo(self, image_resolver):
         """Generates a Mesos TaskInfo message suitable for launching this task.
         The returned TaskInfo lacks a task ID.
         """
         taskinfo = mesos_pb2.TaskInfo()
-        taskinfo.name = self.node.name
+        taskinfo.name = self.logical_task.name
         command = self.command()
         if self.cores_list:
             command = ['taskset', '-c', ','.join(str(core) for core in self.cores_list)] + command
@@ -306,14 +305,14 @@ class Task(object):
             taskinfo.command.value = command[0]
             taskinfo.command.arguments.extend(command[1:])
         taskinfo.command.shell = False
-        taskinfo.container.CopyFrom(self.node.container)
-        image_path = image_resolver(self.node.image)
+        taskinfo.container.CopyFrom(self.logical_task.container)
+        image_path = image_resolver(self.logical_task.image)
         taskinfo.container.docker.image = image_path
         taskinfo.container.docker.force_pull_image = image_resolver.pullable(image_path)
         taskinfo.task_id.value = self.task_id
         taskinfo.slave_id.value = self.slave_id
         for r in SCALAR_RESOURCES:
-            value = getattr(self.node, r)
+            value = getattr(self.logical_task, r)
             if value > 0:
                 resource = taskinfo.resources.add()
                 resource.name = r
@@ -329,13 +328,12 @@ class Task(object):
                     rng = resource.ranges.range.add()
                     rng.begin = item
                     rng.end = item
-        self.node.customise_taskinfo(self, taskinfo)
         return taskinfo
 
 
 class Agent(object):
-    """Collects multiple offers for a single Mesos agent and allows nodes to
-    be added, turning them into (unlaunched) tasks.
+    """Collects multiple offers for a single Mesos agent and allows tasks to
+    be added.
 
     TODO: think up a better name for this. It's a set of offers and tasks that
     are all associated with one agent, but the system as a whole may have
@@ -344,7 +342,7 @@ class Agent(object):
     def __init__(self, slave_id):
         self.slave_id = slave_id
         self.offers = []
-        self.tasks = []
+        self.tasks = []      #: physical tasks
         # These resources all represent resources not yet allocated to tasks
         for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
@@ -388,61 +386,77 @@ class Agent(object):
                     else:
                         self.interfaces.append(interface)
 
-    def add_node(self, node):
-        """Add a node to the list of assigned nodes, if possible.
+    def add_task(self, logical_task):
+        """Add a task to the list of assigned nodes, if possible, creating
+        a physical task from the logical task.
 
         Raises
         ------
         InsufficientResourcesError
-            if there are not enough resources to add the node
+            if there are not enough resources to add the task
         """
         if not self.offers:
             raise InsufficientResourcesError('No offers have been received for this agent')
-        if not node.valid_agent(self.attributes):
-            raise InsufficientResourcesError('Node does not match this agent')
+        if not logical_task.valid_agent(self.attributes):
+            raise InsufficientResourcesError(' does not match this agent')
         # TODO: add NUMA awareness
         for r in SCALAR_RESOURCES:
-            need = getattr(node, r)
+            need = getattr(logical_task, r)
             have = getattr(self, r)
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
         for r in RANGE_RESOURCES:
-            need = len(getattr(node, r))
+            need = len(getattr(logical_task, r))
             have = len(getattr(self, r))
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
-        for network in node.networks:
+        for network in logical_task.networks:
             if not any(interface.network == network for interface in self.interfaces):
                 raise InsufficientResourcesError('Network {} not present'.format(network))
 
-        # Have now verified that the node fits. Create a task for it and assign resources
-        task = Task(node, self)
+        # Have now verified that the task fits. Create a physical task for it
+        # and assign resources.
+        physical_task = logical_task.physical_factory(logical_task, self)
         for r in SCALAR_RESOURCES:
-            self._inc_attr(r, -getattr(node, r))
+            self._inc_attr(r, -getattr(logical_task, r))
         for r in RANGE_RESOURCES:
-            for name in getattr(node, r):
+            for name in getattr(logical_task, r):
                 value = getattr(self, r).popleft()
-                getattr(task, r + '_list').append(value)
+                getattr(physical_task, r + '_list').append(value)
                 if name is not None:
-                    getattr(task, r)[name] = value
-        self.tasks.append(task)
+                    getattr(physical_task, r)[name] = value
+        self.tasks.append(physical_task)
 
 
 class LogicalGraph(networkx.MultiDiGraph):
     """Collection of :class:`Node`s"""
+    pass
 
-    def instantiate(self, offers, physical_name):
-        """Create a physical graph from the given offers, if possible.
 
-        Returns
-        -------
-        PhysicalGraph
+class PhysicalGraph(networkx.MultiDiGraph):
+    """Collection of :class:`PhysicalTask`s.
 
-        Raises
-        ------
-        InsufficientResourcesError
-            if `offers` does not contain sufficient resources to launch the graph
-        """
+    The constructor does not actually launch the tasks; it merely prepares
+    them.
+
+    Parameters
+    ----------
+    name : str
+        Name associated with this graph
+    logical_graph : :class:`LogicalGraph`
+        Logical graph to instantiate
+    offers : list
+        List of Mesos resource offers to use
+
+    Raises
+    ------
+    InsufficientResourcesError
+        if `offers` does not contain sufficient resources for the graph
+    """
+    def __init__(self, name, logical_graph, offers):
+        super(PhysicalGraph, self).__init__()
+        self.name = name
+
         # Group offers by agent
         agents = {}
         for offer in offers:
@@ -458,11 +472,13 @@ class LogicalGraph(networkx.MultiDiGraph):
         # (http://mesos.apache.org/documentation/latest/allocation-module/)
         agents = list(six.itervalues(agents))
         agents.sort(key=lambda agent: (agent.gpus, agent.mem))
-        for node in self:
+        for node in logical_graph:
+            if not isinstance(node, LogicalTask):
+                pass
             found = False
             for agent in agents:
                 try:
-                    agent.add_node(node)
+                    agent.add_task(node)
                     found = True
                     break
                 except InsufficientResourcesError as e:
@@ -472,14 +488,6 @@ class LogicalGraph(networkx.MultiDiGraph):
             if not found:
                 raise InsufficientResourcesError(
                     'Insufficient resources to run {}'.format(node.name))
-        return PhysicalGraph(physical_name, agents)
-
-
-class PhysicalGraph(networkx.MultiDiGraph):
-    """Collection of :class:`Task`s"""
-    def __init__(self, name, agents):
-        super(PhysicalGraph, self).__init__()
-        self.name = name
         self.agents = agents
         for agent in agents:
             for task in agent.tasks:
@@ -514,21 +522,20 @@ class Scheduler(mesos.interface.Scheduler):
         if self._pending_logical and self._offers:
             try:
                 (logical, physical_name, future) = self._pending_logical[0]
-                physical = logical.instantiate(self._offers.values(), physical_name)
+                physical = PhysicalGraph(physical_name, logical, self._offers.values())
             except InsufficientResourcesError:
                 logger.debug('Could not launch %s due to insufficient resources', physical_name)
                 return
             else:
                 # Assign IDs to the tasks
-                for node in physical.nodes():
-                    node.task_id = self._make_task_id()
+                for task in physical.nodes():
+                    task.task_id = self._make_task_id()
                 # Launch the tasks
                 # TODO: does this need to use run_in_executor? Is it
                 # thread-safe to do so?
                 for agent in physical.agents:
                     offer_ids = [offer.id for offer in agent.offers]
                     taskinfos = [task.taskinfo(self._image_resolver) for task in agent.tasks]
-                    print(taskinfos)
                     self._driver.launchTasks(offer_ids, taskinfos)
                     for task in agent.tasks:
                         task.dead_future = trollius.Future(loop=self._loop)
@@ -566,16 +573,11 @@ class Scheduler(mesos.interface.Scheduler):
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
         # TODO: use a lookup to more easily find tasks from IDs
-        matched_task = None
         for physical in self._running.values():
-            for agent in physical.agents:
-                for task in agent.tasks:
-                    if task.task_id == status.task_id.value and not task.dead_future.done():
-                        matched_task = task
-        if matched_task is None:
-            return
-        if status.state in TERMINAL_STATES:
-            matched_task.dead_future.set_result(status.state)
+            for task in physical.nodes():
+                if task.task_id == status.task_id.value and not task.dead_future.done():
+                    if status.state in TERMINAL_STATES:
+                        task.dead_future.set_result(status.state)
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
@@ -640,4 +642,8 @@ class Scheduler(mesos.interface.Scheduler):
         raise Return(status)
 
 
-__all__ = ['Node', 'Task', 'Interface', 'LogicalGraph', 'InsufficientResourcesError']
+__all__ = [
+    'LogicalTask', 'PhysicalTask',
+    'Interface', 'InsufficientResourcesError',
+    'LogicalGraph', 'PhysicalGraph',
+    'Scheduler', 'ImageResolver']

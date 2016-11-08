@@ -9,7 +9,8 @@ from mesos.interface import mesos_pb2
 import mesos.scheduler
 import katcp
 from katcp.kattypes import request, return_reply, Str, Float
-import katsdpcontroller.scheduler
+import katsdpcontroller
+from katsdpcontroller.scheduler import *
 import tornado.gen
 from tornado.platform.asyncio import AsyncIOMainLoop
 
@@ -17,29 +18,32 @@ from tornado.platform.asyncio import AsyncIOMainLoop
 logger = logging.getLogger(__name__)
 
 
-class TelstateNode(katsdpcontroller.scheduler.Node):
-    def customise_taskinfo(self, task, taskinfo):
+class TelstateTask(PhysicalTask):
+    def taskinfo(self, *args, **kwargs):
+        taskinfo = super(TelstateTask, self).taskinfo(*args, **kwargs)
         # Add a port mapping
         taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
         portmap = taskinfo.container.docker.port_mappings.add()
-        portmap.host_port = task.ports['redis']
+        portmap.host_port = self.ports['redis']
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
+        return taskinfo
 
 
 def make_graph():
-    g = katsdpcontroller.scheduler.LogicalGraph()
+    g = LogicalGraph()
 
     # telstate node
-    telstate = TelstateNode('sdp.telstate')
+    telstate = LogicalTask('sdp.telstate')
     telstate.cpus = 0.1
     telstate.mem = 1024
     telstate.image = 'redis'
     telstate.ports = ['redis']
+    telstate.physical_factory = TelstateTask
     g.add_node(telstate)
 
     # cam2telstate node
-    cam2telstate = katsdpcontroller.scheduler.Node('sdp.cam2telstate.1')
+    cam2telstate = LogicalTask('sdp.cam2telstate.1')
     cam2telstate.cpus = 0.5
     cam2telstate.mem = 256
     cam2telstate.image = 'katsdpingest'
@@ -47,7 +51,7 @@ def make_graph():
     #g.add_node(cam2telstate)
 
     # filewriter node
-    filewriter = katsdpcontroller.scheduler.Node('sdp.filewriter.1')
+    filewriter = LogicalTask('sdp.filewriter.1')
     filewriter.cpus = 2
     filewriter.mem = 2048   # TODO: Too small for real system
     filewriter.image = 'katsdpfilewriter'
@@ -69,7 +73,7 @@ class Server(katcp.DeviceServer):
     def __init__(self, framework, master, image_resolver, loop, *args, **kwargs):
         super(Server, self).__init__(*args, **kwargs)
         self._loop = loop
-        self._scheduler = katsdpcontroller.scheduler.Scheduler(image_resolver, loop)
+        self._scheduler = Scheduler(image_resolver, loop)
         self._driver = mesos.scheduler.MesosSchedulerDriver(
             self._scheduler, framework, master, False)
         self._scheduler.set_driver(self._driver)
@@ -150,7 +154,7 @@ def main():
     framework.checkpoint = True
     framework.principal = 'sdp-sample-framework'
 
-    image_resolver = katsdpcontroller.scheduler.ImageResolver(
+    image_resolver = ImageResolver(
         'sdp-docker-registry.kat.ac.za:5000')
 
     loop = trollius.get_event_loop()
