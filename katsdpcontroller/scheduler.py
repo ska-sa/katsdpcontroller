@@ -441,8 +441,6 @@ class PhysicalGraph(networkx.MultiDiGraph):
 
     Parameters
     ----------
-    name : str
-        Name associated with this graph
     logical_graph : :class:`LogicalGraph`
         Logical graph to instantiate
     offers : list
@@ -453,10 +451,8 @@ class PhysicalGraph(networkx.MultiDiGraph):
     InsufficientResourcesError
         if `offers` does not contain sufficient resources for the graph
     """
-    def __init__(self, name, logical_graph, offers):
+    def __init__(self, logical_graph, offers):
         super(PhysicalGraph, self).__init__()
-        self.name = name
-
         # Group offers by agent
         agents = {}
         for offer in offers:
@@ -504,9 +500,9 @@ class Scheduler(mesos.interface.Scheduler):
         self._next_task_id = 0
         self._loop = loop
         self._drivers = None
-        self._offers = {}     # offer ID forms the key
-        self._pending_logical = deque()
-        self._running = {}    # physical graphs, indexed by name
+        self._offers = {}     #: offers keyed by offer ID
+        self._pending_logical = deque()     #: logical graphs for which we do not yet have resources
+        self._running = set() #: physical graphs that have been launched
         self._closing = False
         self._image_resolver = image_resolver
 
@@ -521,8 +517,8 @@ class Scheduler(mesos.interface.Scheduler):
         # for the unused resources to be offered to us again.
         if self._pending_logical and self._offers:
             try:
-                (logical, physical_name, future) = self._pending_logical[0]
-                physical = PhysicalGraph(physical_name, logical, self._offers.values())
+                (logical, future) = self._pending_logical[0]
+                physical = PhysicalGraph(logical, self._offers.values())
             except InsufficientResourcesError:
                 logger.debug('Could not launch %s due to insufficient resources', physical_name)
                 return
@@ -541,7 +537,7 @@ class Scheduler(mesos.interface.Scheduler):
                         task.dead_future = trollius.Future(loop=self._loop)
                     logger.info('Launched %d tasks on %s', len(agent.tasks), agent.slave_id)
                 self._offers = {}   # launchTasks declines any unused resources
-                self._running[physical_name] = physical
+                self._running.add(physical)
                 # TODO: should we wait for statuses to come back first?
                 self._pending_logical.popleft()
                 future.set_result(physical)
@@ -573,7 +569,7 @@ class Scheduler(mesos.interface.Scheduler):
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
         # TODO: use a lookup to more easily find tasks from IDs
-        for physical in self._running.values():
+        for physical in self._running:
             for task in physical.nodes():
                 if task.task_id == status.task_id.value and not task.dead_future.done():
                     if status.state in TERMINAL_STATES:
@@ -581,19 +577,14 @@ class Scheduler(mesos.interface.Scheduler):
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
-    def launch(self, logical, physical_name):
+    def launch(self, logical):
         if self._closing:
-            raise RuntimeError('Cannot launch {} while shutting down'.format(physical_name))
-        if physical_name in self._running:
-            raise ValueError('Graph {} is already running'.format(physical_name))
-        for pending in self._pending_logical:
-            if physical_name == pending[1]:
-                raise ValueError('Graph {} is already pending'.format(physical_name))
+            raise RuntimeError('Cannot launch graphs while shutting down')
         if not self._pending_logical:
             self._driver.reviveOffers()
-        # TODO: use requestResources to ask the allocator for resources
+        # TODO: use requestResources to ask the allocator for resources?
         future = trollius.Future(loop=self._loop)
-        pending = (logical, physical_name, future)
+        pending = (logical, future)
         self._pending_logical.append(pending)
         self._try_launch()
         try:
@@ -606,11 +597,9 @@ class Scheduler(mesos.interface.Scheduler):
                 self._pending_logical.remove(pending)
 
     @trollius.coroutine
-    def kill(self, name):
-        try:
-            physical = self._running[name]
-        except KeyError:
-            raise KeyError('Graph {} is not running'.format(name))
+    def kill(self, physical):
+        if physical not in self._running:
+            raise ValueError('Graph is not running')
         futures = []
         for task in physical.nodes():
             # TODO: according to the Mesos docs, killing a task is not reliable,
@@ -622,7 +611,7 @@ class Scheduler(mesos.interface.Scheduler):
             futures.append(task.dead_future)
         yield From(trollius.gather(*futures, loop=self._loop))
         try:
-            del self._running[name]
+            self._running.remove(physical)
         except KeyError:
             # Can happen if another caller also killed the graph when we yielded
             pass
@@ -631,12 +620,11 @@ class Scheduler(mesos.interface.Scheduler):
     def close(self):
         self._closing = True
         # TODO: do we need to explicitly decline outstanding offers?
-        for (logical, physical_name, future) in self._pending_logical:
+        for (logical, future) in self._pending_logical:
             future.cancel()
         self._pending_logical = []
-        names = list(six.iterkeys(self._running))
-        for name in names:
-            yield From(self.kill(name))
+        while self._running:
+            yield From(self.kill(next(iter(self._running))))
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)

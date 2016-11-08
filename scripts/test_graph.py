@@ -8,6 +8,7 @@ from trollius import From, Return
 from mesos.interface import mesos_pb2
 import mesos.scheduler
 import katcp
+from decorator import decorator
 from katcp.kattypes import request, return_reply, Str, Float
 import katsdpcontroller
 from katsdpcontroller.scheduler import *
@@ -66,6 +67,13 @@ def make_graph():
     return g
 
 
+@decorator
+def async_request(func, *args, **kwargs):
+    func = trollius.coroutine(func)
+    trollius.async(func(*args, **kwargs))
+    raise katcp.AsyncReply()
+
+
 class Server(katcp.DeviceServer):
     VERSION_INFO = ('dummy', 0, 1)
     BUILD_INFO = ('katsdpcontroller',) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
@@ -78,25 +86,13 @@ class Server(katcp.DeviceServer):
             self._scheduler, framework, master, False)
         self._scheduler.set_driver(self._driver)
         self._driver.start()
+        self._physical = {}      #: Physical graphs indexed by name
 
     def setup_sensors(self):
         pass
 
-    @trollius.coroutine
-    def _launch(self, req, name, timeout):
-        try:
-            logical = make_graph()
-            yield From(trollius.wait_for(self._scheduler.launch(logical, name),
-                                         timeout, loop=self._loop))
-        except trollius.TimeoutError:
-            req.reply('fail', 'timed out waiting for resources')
-        except Exception as e:
-            logger.debug('launch failed', exc_info=True)
-            req.reply('fail', str(e))
-        else:
-            req.reply('ok')
-
     @request(Str(), Float(optional=True))
+    @async_request
     def request_launch(self, req, name, timeout=30.0):
         """Launch a graph.
 
@@ -107,20 +103,21 @@ class Server(katcp.DeviceServer):
         timeout : float, optional
             Time to wait for the resources to become available
         """
-        trollius.async(self._launch(req, name, timeout))
-        raise katcp.AsyncReply()
-
-    @trollius.coroutine
-    def _kill(self, req, name):
         try:
-            yield From(self._scheduler.kill(name))
+            logical = make_graph()
+            physical = yield From(trollius.wait_for(self._scheduler.launch(logical),
+                                                    timeout, loop=self._loop))
+            self._physical[name] = physical
+        except trollius.TimeoutError:
+            req.reply('fail', 'timed out waiting for resources')
         except Exception as e:
-            logger.debug('kill failed', exc_info=True)
+            logger.debug('launch failed', exc_info=True)
             req.reply('fail', str(e))
         else:
             req.reply('ok')
 
     @request(Str())
+    @async_request
     def request_kill(self, req, name):
         """Destroy a running graph.
 
@@ -129,8 +126,22 @@ class Server(katcp.DeviceServer):
         name : str
             Name of the physical graph
         """
-        trollius.async(self._kill(req, name))
-        raise katcp.AsyncReply()
+        try:
+            physical = self._physical[name]
+        except KeyError:
+            req.reply('fail', 'no such graph ' + name)
+        else:
+            try:
+                yield From(self._scheduler.kill(physical))
+            except Exception as e:
+                logger.debug('kill failed', exc_info=True)
+                req.reply('fail', str(e))
+            else:
+                try:
+                    del self._physical[name]
+                except KeyError:
+                    pass  # Protects against simultaneous deletions
+                req.reply('ok')
 
     @trollius.coroutine
     def async_stop(self):
