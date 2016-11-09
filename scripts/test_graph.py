@@ -4,16 +4,19 @@ import logging
 import argparse
 import trollius
 import signal
+import six
 from trollius import From, Return
 from mesos.interface import mesos_pb2
 import mesos.scheduler
 import katcp
 from decorator import decorator
 from katcp.kattypes import request, return_reply, Str, Float
-import katsdpcontroller
-from katsdpcontroller.scheduler import *
+import katsdptelstate
+from katsdptelstate.endpoint import Endpoint
 import tornado.gen
 from tornado.platform.asyncio import AsyncIOMainLoop
+import katsdpcontroller
+from katsdpcontroller.scheduler import *
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +28,7 @@ class TelstateTask(PhysicalTask):
         # Add a port mapping
         self.taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
         portmap = self.taskinfo.container.docker.port_mappings.add()
-        portmap.host_port = self.ports['redis']
+        portmap.host_port = self.ports['telstate']
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
 
@@ -38,7 +41,7 @@ def make_graph():
     telstate.cpus = 0.1
     telstate.mem = 1024
     telstate.image = 'redis'
-    telstate.ports = ['redis']
+    telstate.ports = ['telstate']
     telstate.physical_factory = TelstateTask
     g.add_node(telstate)
 
@@ -47,23 +50,26 @@ def make_graph():
     cam2telstate.cpus = 0.5
     cam2telstate.mem = 256
     cam2telstate.image = 'katsdpingest'
-    cam2telstate.command = ['cam2telstate.py', '--telstate', '{endpoints[sdp.telstate_redis]}']
+    cam2telstate.command = ['cam2telstate.py']
     g.add_node(cam2telstate)
-    g.add_edge(cam2telstate, telstate, port='redis', order='strong')
 
     # filewriter node
     filewriter = LogicalTask('sdp.filewriter.1')
     filewriter.cpus = 2
     filewriter.mem = 2048   # TODO: Too small for real system
     filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py', '--telstate', '{endpoints[sdp.telstate_redis]}', '--file-base', '/var/kat/data']
-    filewriter.ports = ['katcp']
+    filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data']
+    filewriter.ports = ['port']
     data_vol = filewriter.container.volumes.add()
     data_vol.mode = mesos_pb2.Volume.RW
     data_vol.container_path = '/var/kat/data'
     data_vol.host_path = '/tmp'
     g.add_node(filewriter)
-    g.add_edge(filewriter, telstate, port='redis', order='strong')
+
+    for node in g.nodes_iter():
+        if node is not telstate:
+            node.command.extend(['--telstate', '{endpoints[sdp.telstate_telstate]}', '--name', node.name])
+            g.add_edge(node, telstate, port='telstate', order='strong')
 
     return g
 
@@ -93,6 +99,49 @@ class Server(katcp.DeviceServer):
     def setup_sensors(self):
         pass
 
+    def _to_hierarchical_dict(self, config):
+         # take a flat dict of key:values where some of the keys
+         # may have form x.y.z and turn these into a nested hierarchy
+         # of dicts.
+        d = {}
+        for k,v in config.iteritems():
+            last = d
+            key_parts = k.split(".")
+            for ks in key_parts[:-1]:
+                last[ks] = last.get(ks,{})
+                last = last[ks]
+            last[key_parts[-1]] = v
+        return d
+
+    @trollius.coroutine
+    def _launch(self):
+        logical = make_graph()
+        physical = PhysicalGraph(logical, self._loop)
+        telstate_node = next(node for node in physical.nodes() if node.name == 'sdp.telstate')
+        boot = [node for node in physical.nodes_iter() if not isinstance(node, PhysicalTask)]
+        boot.append(telstate_node)
+        yield From(self._scheduler.launch(physical, self._resolver, boot))
+
+        telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['redis'])
+        telstate = katsdptelstate.TelescopeState(telstate_endpoint)
+        config = logical.graph.get('config', {})  # TODO: transcribe it to the physical node
+        for node in physical.nodes_iter():
+            if node in boot or not isinstance(node, PhysicalTask):
+                continue
+            nconfig = getattr(node.logical_node, 'config', {})
+            for name, port in six.iteritems(node.ports):
+                nconfig[name] = port
+            for src, trg, attr in physical.out_edges_iter(node, data=True):
+                nconfig.update(attr.get('config', {}))
+                if 'port' in attr and trg.state != TaskState.NOT_READY:
+                    port = attr['port']
+                    nconfig[port] = trg.host + ':' + str(trg.ports[port])
+            config[node.name] = nconfig
+        config = self._to_hierarchical_dict(config)
+        telstate.add('config', config, immutable=True)
+        yield From(self._scheduler.launch(physical, self._resolver))
+        raise Return(physical)
+
     @request(Str(), Float(optional=True))
     @async_request
     def request_launch(self, req, name, timeout=30.0):
@@ -106,10 +155,7 @@ class Server(katcp.DeviceServer):
             Time to wait for the resources to become available
         """
         try:
-            logical = make_graph()
-            physical = PhysicalGraph(logical, self._loop)
-            yield From(trollius.wait_for(self._scheduler.launch(physical, self._resolver),
-                                         timeout, loop=self._loop))
+            physical = yield From(trollius.wait_for(self._launch(), timeout, loop=self._loop))
             self._physical[name] = physical
         except trollius.TimeoutError:
             req.reply('fail', 'timed out waiting for resources')
