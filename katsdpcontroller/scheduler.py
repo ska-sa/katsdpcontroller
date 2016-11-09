@@ -428,7 +428,7 @@ class TaskState(Enum):
     NOT_READY = 0            #: We have not yet been asked to start
     STARTING = 1             #: We have been asked to start it, but it is not yet running
     RUNNING = 2              #: Task is fully ready
-    STOPPING = 3             #: We have been asked to kill it, but it is not dead yet
+    KILLING = 3              #: We have been asked to kill it, but it is not dead yet
     DEAD = 4                 #: Have received terminal status message
 
 
@@ -457,6 +457,17 @@ class PhysicalNode(object):
 
     def resolve(self, resolver, graph):
         pass
+
+    def set_state(self, state):
+        self.state = state
+        if state == TaskState.DEAD:
+            self.dead_event.set()
+            self.running_event.set()
+        elif state in [TaskState.RUNNING, TaskState.KILLING]:
+            self.running_event.set()
+
+    def kill(self, driver):
+        raise NotImplementedError()
 
 
 class PhysicalTask(PhysicalNode):
@@ -580,6 +591,11 @@ class PhysicalTask(PhysicalNode):
         args['host'] = self.host
         return args
 
+    def kill(self, driver):
+        if self.state != TaskState.NOT_READY and self.state != TaskState.DEAD:
+            driver.killTask(self.taskinfo.task_id)
+        self.state = TaskState.KILLING
+
 
 class LogicalGraph(networkx.MultiDiGraph):
     """Collection of :class:`LogicalNode`s.
@@ -642,7 +658,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._drivers = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         self._pending = deque()     #: graphs for which we do not yet have resources
-        self._running = set()       #: graphs that have been launched
+        self._running = {}          #: tasks that have been launched, indexed by task ID
         self._closing = False
 
     def _start_stop_offers(self):
@@ -706,6 +722,10 @@ class Scheduler(mesos.interface.Scheduler):
                 self._offers = {}
                 self._pending.popleft()
                 self._start_stop_offers()
+                for node in nodes:
+                    node.set_state(TaskState.STARTING)
+                for (node, _) in allocations:
+                    self._running[node.taskinfo.task_id.value] = node
 
     def set_driver(self, driver):
         self._driver = driver
@@ -736,20 +756,14 @@ class Scheduler(mesos.interface.Scheduler):
         logging.debug('Update: task %s in state %s (%s)',
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
-        # TODO: use a lookup to more easily find tasks from IDs
-        # TODO: update task status
-        task = None
-        for graph in self._running:
-            for node in graph.nodes_iter():
-                if isinstance(node, PhysicalTask) and node.taskinfo is not None:
-                    if node.taskinfo.task_id.value == status.task_id.value:
-                        task = node
+        task = self._running.get(status.task_id.value)
         if task:
             if status.state in TERMINAL_STATES:
-                task.running_event.set()
-                task.dead_event.set()
-            if status.state == mesos_pb2.TASK_RUNNING:
-                task.running_event.set()
+                task.set_state(TaskState.DEAD)
+                del self._running[status.task_id.value]
+            elif status.state == mesos_pb2.TASK_RUNNING:
+                # TODO: need to wait for port checks first
+                task.set_state(TaskState.RUNNING)
             task.status = status
         self._driver.acknowledgeStatusUpdate(status)
 
@@ -792,8 +806,6 @@ class Scheduler(mesos.interface.Scheduler):
             running |= group
 
         # TODO: if we are cancelled, should we kill off the partial graph?
-        # TODO: _running should contain tasks, not graphs
-        self._running.add(graph)
         for group in groups:
             pending = (graph, group, resolver)
             # TODO: use requestResources to ask the allocator for resources?
@@ -811,41 +823,40 @@ class Scheduler(mesos.interface.Scheduler):
                     self._pending.remove(pending)
 
     @trollius.coroutine
-    def kill(self, graph):
-        if graph not in self._running:
-            raise ValueError('Graph is not running')
+    def kill(self, graph, nodes=None):
         futures = []
-        for task in graph.nodes():
+        # TODO: order the shutdown using the strong dependencies
+        if nodes is None:
+            nodes = graph.nodes()
+        for node in nodes:
             # TODO: according to the Mesos docs, killing a task is not reliable,
             # and may need to be attempted again.
-            # TODO: handle non-task nodes
-            if not task.dead_event.is_set():
-                self._driver.killTask(task.taskinfo.task_id)
-            futures.append(task.dead_event.wait())
+            if node.state == TaskState.DEAD:
+                continue
+            node.kill(self._driver)
+            futures.append(node.dead_event.wait())
         yield From(trollius.gather(*futures, loop=self._loop))
-        try:
-            self._running.remove(graph)
-        except KeyError:
-            # Can happen if another caller also killed the graph when we yielded
-            pass
 
     @trollius.coroutine
     def close(self):
         self._closing = True
         # TODO: do we need to explicitly decline outstanding offers?
-        for (graph, resolver, future) in self._pending:
-            future.cancel()
         self._pending = []
-        while self._running:
-            yield From(self.kill(next(iter(self._running))))
+        futures = []
+        # TODO: shut down in the proper order
+        for task in six.itervalues(self._running):
+            task.kill(self._driver)
+            futures.append(task.dead_event.wait())
+        if futures:
+            yield From(trollius.gather(*futures, loop=self._loop))
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
 
 
 __all__ = [
-    'LogicalTask', 'PhysicalTask',
-    'Interface', 'InsufficientResourcesError',
+    'LogicalTask', 'PhysicalTask', 'TaskState',
+    'Interface', 'InsufficientResourcesError', 'ResourceAllocation',
     'LogicalGraph', 'PhysicalGraph',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Scheduler']
