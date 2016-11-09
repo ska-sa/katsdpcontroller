@@ -265,7 +265,7 @@ class LogicalNode(object):
 
 
 class LogicalTask(LogicalNode):
-    """A node in a :class:`LogicalGraph`. It indicates how to run a task
+    """A node in a :class:`LogicalGraph` that indicates how to run a task
     and what resources it requires, but does not correspond to any specific
     running task.
 
@@ -425,8 +425,8 @@ class Agent(object):
 
 
 class TaskState(Enum):
-    NOT_READY = 0            #: We have not yet been asked to start
-    STARTING = 1             #: We have been asked to start it, but it is not yet running
+    NOT_READY = 0            #: We have not yet started it
+    STARTING = 1             #: We have asked Mesos to start it, but it is not yet running
     RUNNING = 2              #: Task is fully ready
     KILLING = 3              #: We have been asked to kill it, but it is not dead yet
     DEAD = 4                 #: Have received terminal status message
