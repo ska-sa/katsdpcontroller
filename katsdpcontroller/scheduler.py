@@ -426,14 +426,10 @@ class Agent(object):
 
 class TaskState(Enum):
     NOT_READY = 0            #: We have not yet been asked to start
-    START_BLOCKED = 1        #: Waiting for dependencies to start
-    WAITING = 2              #: Ready to launch once resources are available
-    STAGING = 3              #: Launch issued, waiting for task status message
-    STARTING = 4             #: Task has started, waiting for ports to be open
-    RUNNING = 5              #: Task is fully ready
-    STOP_BLOCKED = 6         #: Ask to stop, but waiting for dependencies to die
-    STOPPING = 7             #: Kill has been issued, waiting for status message
-    DEAD = 8                 #: Have received terminal status message
+    STARTING = 1             #: We have been asked to start it, but it is not yet running
+    RUNNING = 2              #: Task is fully ready
+    STOPPING = 3             #: We have been asked to kill it, but it is not dead yet
+    DEAD = 4                 #: Have received terminal status message
 
 
 class PhysicalNode(object):
@@ -450,10 +446,14 @@ class PhysicalNode(object):
         self.logical_node = logical_node
         #: Current state
         self.state = TaskState.NOT_READY
-        #: Future signalled when task is either fully running or has died
-        self.running_future = trollius.Future(loop=loop)
-        #: Future signalled when the task dies
-        self.dead_future = trollius.Future(loop=loop)
+        #: Event signalled when task is either fully running or has died
+        self.running_event = trollius.Event(loop=loop)
+        #: Event signalled when the task dies
+        self.dead_event = trollius.Event(loop=loop)
+
+    @property
+    def name(self):
+        return self.logical_node.name
 
     def resolve(self, resolver, graph):
         pass
@@ -477,6 +477,7 @@ class PhysicalTask(PhysicalNode):
         self.endpoints = {}
         self.taskinfo = None
         self.allocation = None
+        self.status = None
         for r in RANGE_RESOURCES:
             setattr(self, r, {})   # Map name to resource, if name was given
 
@@ -527,11 +528,11 @@ class PhysicalTask(PhysicalNode):
         """
 
         for src, trg, port in graph.out_edges_iter([self], data='port'):
-            endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
+            endpoint_name = '{}_{}'.format(trg.name, port)
             self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
         taskinfo = mesos_pb2.TaskInfo()
-        taskinfo.name = self.logical_node.name
+        taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args()
         command = [x.format(**args) for x in self.logical_node.command]
@@ -659,7 +660,7 @@ class Scheduler(mesos.interface.Scheduler):
         # TODO: handle strong ordering
         if self._pending and self._offers:
             try:
-                (graph, resolver, future) = self._pending[0]
+                (graph, nodes, resolver) = self._pending[0]
                 agents = [Agent(list(six.itervalues(offers))) for offers in six.itervalues(self._offers)]
                 # Sort agents by GPUs then free memory. This makes it less likely that a
                 # low-memory process will hog all the other resources on a high-memory
@@ -669,7 +670,7 @@ class Scheduler(mesos.interface.Scheduler):
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
                 agents.sort(key=lambda agent: (agent.gpus, agent.mem))
                 allocations = []
-                for node in graph.nodes_iter():
+                for node in nodes:
                     logical_task = node.logical_node
                     allocation = None
                     if isinstance(logical_task, LogicalTask):
@@ -689,7 +690,7 @@ class Scheduler(mesos.interface.Scheduler):
                 # Two-phase resolving
                 for (node, allocation) in allocations:
                     node.allocate(allocation)
-                for node in graph.nodes_iter():
+                for node in nodes:
                     node.resolve(resolver, graph)
                 # Launch the tasks
                 taskinfos = {agent: [] for agent in agents}
@@ -703,9 +704,7 @@ class Scheduler(mesos.interface.Scheduler):
                     self._driver.launchTasks(offer_ids, taskinfos[agent])
                     logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.slave_id)
                 self._offers = {}
-                self._running.add(graph)
                 self._pending.popleft()
-                future.set_result(None)
                 self._start_stop_offers()
 
     def set_driver(self, driver):
@@ -739,31 +738,77 @@ class Scheduler(mesos.interface.Scheduler):
             status.message)
         # TODO: use a lookup to more easily find tasks from IDs
         # TODO: update task status
-        for physical in self._running:
-            for task in physical.nodes():
-                if task.taskinfo.task_id.value == status.task_id.value and not task.dead_future.done():
-                    if status.state in TERMINAL_STATES:
-                        task.dead_future.set_result(status.state)
+        task = None
+        for graph in self._running:
+            for node in graph.nodes_iter():
+                if isinstance(node, PhysicalTask) and node.taskinfo is not None:
+                    if node.taskinfo.task_id.value == status.task_id.value:
+                        task = node
+        if task:
+            if status.state in TERMINAL_STATES:
+                task.running_event.set()
+                task.dead_event.set()
+            if status.state == mesos_pb2.TASK_RUNNING:
+                task.running_event.set()
+            task.status = status
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
-    def launch(self, graph, resolver):
+    def launch(self, graph, resolver, nodes=None):
         if self._closing:
-            raise RuntimeError('Cannot launch graphs while shutting down')
-        # TODO: use requestResources to ask the allocator for resources?
-        future = trollius.Future(loop=self._loop)
-        pending = (graph, resolver, future)
-        self._pending.append(pending)
-        self._start_stop_offers()
-        self._try_launch()
-        try:
-            physical = yield From(future)
-            raise Return(physical)
-        finally:
-            # In particular, if the user cancels the launch, we need to
-            # do this.
-            if pending in self._pending:
-                self._pending.remove(pending)
+            raise RuntimeError('Cannot launch tasks while shutting down')
+        if nodes is None:
+            nodes = graph.nodes()
+        # Create a startup schedule. The nodes are partitioned into groups that can
+        # be started at the same time.
+        running = set()
+        for node in graph.nodes_iter():
+            if node.state != TaskState.NOT_READY or node.running_event.is_set():
+                running.add(node)
+        # Check that we don't depend on some non-running task outside the set
+        remaining = set()
+        for node in nodes:
+            if node.state == TaskState.NOT_READY:
+                remaining.add(node)
+        for src, trg in graph.out_edges_iter(remaining):
+            if trg not in remaining and trg not in running:
+                raise ValueError('{} depends on {} but it is neither running not scheduled'.format(
+                    src.name, trg.name))
+        groups = []
+        while remaining:
+            blocked = set()  # nodes that have a (possibly direct) strong dependency on a non-running task
+            for src, trg, order in graph.out_edges_iter(remaining, data='order'):
+                if order == 'strong' and trg not in running:
+                    blocked.add(src)
+                    for ancestor in networkx.ancestors(graph, src):
+                        blocked.add(ancestor)
+            group = remaining - blocked
+            if not group:
+                print('Remaining', [x.name for x in remaining])
+                print('Blocked', [x.name for x in blocked])
+                raise ValueError('cyclic dependency in graph')
+            groups.append(list(group))
+            remaining = blocked
+            running |= group
+
+        # TODO: if we are cancelled, should we kill off the partial graph?
+        # TODO: _running should contain tasks, not graphs
+        self._running.add(graph)
+        for group in groups:
+            pending = (graph, group, resolver)
+            # TODO: use requestResources to ask the allocator for resources?
+            # TODO: check if any dependencies have died, and if so, bail out?
+            self._pending.append(pending)
+            self._start_stop_offers()
+            self._try_launch()
+            futures = []
+            for node in group:
+                futures.append(node.running_event.wait())
+            try:
+                yield From(trollius.gather(*futures, loop=self._loop))
+            except trollius.CancelledError:
+                if pending in self._pending:
+                    self._pending.remove(pending)
 
     @trollius.coroutine
     def kill(self, graph):
@@ -773,9 +818,10 @@ class Scheduler(mesos.interface.Scheduler):
         for task in graph.nodes():
             # TODO: according to the Mesos docs, killing a task is not reliable,
             # and may need to be attempted again.
-            if not task.dead_future.done():
+            # TODO: handle non-task nodes
+            if not task.dead_event.is_set():
                 self._driver.killTask(task.taskinfo.task_id)
-            futures.append(task.dead_future)
+            futures.append(task.dead_event.wait())
         yield From(trollius.gather(*futures, loop=self._loop))
         try:
             self._running.remove(graph)

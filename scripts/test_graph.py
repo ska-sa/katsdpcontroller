@@ -49,7 +49,7 @@ def make_graph():
     cam2telstate.image = 'katsdpingest'
     cam2telstate.command = ['cam2telstate.py', '--telstate', '{endpoints[sdp.telstate_redis]}']
     g.add_node(cam2telstate)
-    g.add_edge(cam2telstate, telstate, port='redis')
+    g.add_edge(cam2telstate, telstate, port='redis', order='strong')
 
     # filewriter node
     filewriter = LogicalTask('sdp.filewriter.1')
@@ -63,7 +63,7 @@ def make_graph():
     data_vol.container_path = '/var/kat/data'
     data_vol.host_path = '/tmp'
     g.add_node(filewriter)
-    g.add_edge(filewriter, telstate, port='redis')
+    g.add_edge(filewriter, telstate, port='redis', order='strong')
 
     return g
 
