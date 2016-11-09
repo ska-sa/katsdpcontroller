@@ -21,6 +21,7 @@ setup (
         'decorator',
         'jsonschema',
         'networkx',
+        'enum34',
         'ipaddress',
         'six',
         'katcp',

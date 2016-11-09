@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class TelstateTask(PhysicalTask):
-    def finalise(self, physical_graph):
-        super(TelstateTask, self).finalise(physical_graph)
+    def resolve(self, resolver, graph):
+        super(TelstateTask, self).resolve(resolver, graph)
         # Add a port mapping
         self.taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
         portmap = self.taskinfo.container.docker.port_mappings.add()
@@ -56,13 +56,14 @@ def make_graph():
     filewriter.cpus = 2
     filewriter.mem = 2048   # TODO: Too small for real system
     filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py']
+    filewriter.command = ['file_writer.py', '--telstate', '{endpoints[sdp.telstate_redis]}', '--file-base', '/var/kat/data']
     filewriter.ports = ['katcp']
     data_vol = filewriter.container.volumes.add()
     data_vol.mode = mesos_pb2.Volume.RW
     data_vol.container_path = '/var/kat/data'
-    data_vol.host_path = '/var/kat/data'
-    #g.add_node(filewriter)
+    data_vol.host_path = '/tmp'
+    g.add_node(filewriter)
+    g.add_edge(filewriter, telstate, port='redis')
 
     return g
 
@@ -106,8 +107,9 @@ class Server(katcp.DeviceServer):
         """
         try:
             logical = make_graph()
-            physical = yield From(trollius.wait_for(self._scheduler.launch(logical, self._resolver),
-                                                    timeout, loop=self._loop))
+            physical = PhysicalGraph(logical, self._loop)
+            yield From(trollius.wait_for(self._scheduler.launch(physical, self._resolver),
+                                         timeout, loop=self._loop))
             self._physical[name] = physical
         except trollius.TimeoutError:
             req.reply('fail', 'timed out waiting for resources')
@@ -165,6 +167,7 @@ def main():
     framework.name = 'SDP sample framework'
     framework.checkpoint = True
     framework.principal = 'sdp-sample-framework'
+    framework.role = 'sdp-sample-framework'
 
     image_resolver = ImageResolver('sdp-docker-registry.kat.ac.za:5000')
     task_id_allocator = TaskIDAllocator()
