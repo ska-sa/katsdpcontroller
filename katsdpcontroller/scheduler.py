@@ -20,7 +20,7 @@ from trollius import From, Return
 
 SCALAR_RESOURCES = ['cpus', 'gpus', 'mem']
 RANGE_RESOURCES = ['ports', 'cores']
-TERMINAL_STATES = frozenset([
+TERMINAL_STATUSES = frozenset([
     mesos_pb2.TASK_FINISHED,
     mesos_pb2.TASK_FAILED,
     mesos_pb2.TASK_KILLED,
@@ -452,9 +452,8 @@ class TaskState(OrderedEnum):
     STARTING = 1             #: We have been asked to start, but have not yet asked Mesos
     STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
     RUNNING = 3              #: Task is fully ready and ports are open
-    KILLING = 4              #: We have been asked to kill it, but have not yet asked Mesos
-    KILLED = 5               #: We have asked Mesos to kill it, but do not yet have confirmation
-    DEAD = 6                 #: Have received terminal status message
+    KILLED = 4               #: We have asked Mesos to kill it, but do not yet have confirmation
+    DEAD = 5                 #: Have received terminal status message
 
 
 class PhysicalNode(object):
@@ -494,10 +493,18 @@ class PhysicalNode(object):
         self.state = state
         if state == TaskState.DEAD:
             self.dead_event.set()
-        if state >= TaskState.RUNNING:
+            self.running_event.set()
+        if state == TaskState.RUNNING:
             self.running_event.set()
 
     def kill(self, driver):
+        """Start killing off the node. This is guaranteed to be called only if
+        the task made it to at least :const:`TaskState.STARTED` and it is not
+        in :const:`TaskState.DEAD`.
+
+        This function should not manipulate the task state; the caller will
+        set the state to :const:`TaskState.KILLED`.
+        """
         raise NotImplementedError()
 
 
@@ -623,9 +630,9 @@ class PhysicalTask(PhysicalNode):
         return args
 
     def kill(self, driver):
-        if self.state >= TaskState.STARTED and self.state < TaskState.DEAD:
-            driver.killTask(self.taskinfo.task_id)
-        self.set_state(TaskState.KILLED)
+        # TODO: according to the Mesos docs, killing a task is not reliable,
+        # and may need to be attempted again.
+        driver.killTask(self.taskinfo.task_id)
 
 
 class LogicalGraph(networkx.MultiDiGraph):
@@ -794,7 +801,7 @@ class Scheduler(mesos.interface.Scheduler):
             status.message)
         task = self._running.get(status.task_id.value)
         if task:
-            if status.state in TERMINAL_STATES:
+            if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
                 del self._running[status.task_id.value]
             elif status.state == mesos_pb2.TASK_RUNNING:
@@ -805,6 +812,48 @@ class Scheduler(mesos.interface.Scheduler):
 
     @trollius.coroutine
     def launch(self, graph, resolver, nodes=None):
+        """Launch a physical graph, or a subset of nodes from a graph. This is
+        a coroutine that returns only once the nodes are running.
+
+        It is legal to pass nodes that have already been passed to
+        :meth:`launch`. They will not be re-launched, but this call will wait
+        until they are running.
+
+        It is safe to run this coroutine as a trollius task and cancel it.
+        However, some of the nodes may have been started already. If the
+        launch is cancelled, it is recommended to kill the nodes to reach a
+        known state.
+
+        Running two launches with the same graph concurrently is possible but
+        not recommended. In particular, cancelling the first launch can cause
+        the second to stall indefinitely if it was waiting for nodes from the
+        first launch to be running.
+
+        .. note::
+
+            When waiting for a node to be running, it is also considered to be
+            running if it dies (either due to failing to start, or due to
+            :meth:`kill`.
+
+        Parameters
+        ----------
+        graph : :class:`PhysicalGraph`
+            Graph to launch
+        resolver : :class:`Resolver`
+            Resolver to allocate resources like task IDs
+        nodes : list, optional
+            If specified, lists a subset of the nodes to launch. Otherwise,
+            all nodes in the graph are launched.
+
+        Raises
+        ------
+        RuntimeError
+            If :meth:`close` has been called.
+        ValueError
+            If any nodes in `nodes` is in state :const:`TaskState.NOT_READY`
+            and has a strong dependency on a node that is not in `nodes` and
+            is also in state :const:`TaskState.NOT_READY`.
+        """
         if self._closing:
             raise RuntimeError('Cannot launch tasks while shutting down')
         if nodes is None:
@@ -835,7 +884,6 @@ class Scheduler(mesos.interface.Scheduler):
                 node.state = TaskState.STARTING
             remaining = blocked
 
-        # TODO: if we are cancelled, should we kill off the partial graph?
         for group in groups:
             pending = (graph, group, resolver)
             # TODO: use requestResources to ask the allocator for resources?
@@ -857,17 +905,42 @@ class Scheduler(mesos.interface.Scheduler):
 
     @trollius.coroutine
     def kill(self, graph, nodes=None):
+        """Kill a graph or set of nodes from a graph. It is safe to kill nodes
+        from any state. Strong dependencies (see :class:`LogicalGraph`) will
+        be honoured, leaving nodes alive until all their dependencies are
+        killed (provided the dependencies are included in `nodes`).
+
+        Parameters
+        ----------
+        graph : :class:`PhysicalGraph`
+            Graph to kill
+        nodes : list, optional
+            If specified, the nodes to kill. The default is to kill all nodes
+            in the graph.
+        """
+        @trollius.coroutine
+        def kill_one(node, graph):
+            if node.state <= TaskState.STARTING:
+                node.set_state(TaskState.DEAD)
+            elif node.state < TaskState.KILLED:
+                for src, trg, data in graph.in_edges_iter([node], data=True):
+                    if data.get('order') == 'strong':
+                        yield From(src.dead_event.wait())
+                # Re-check state because it might have changed while waiting
+                if node.state < TaskState.KILLED:
+                    logger.debug('Killing %s', node.name)
+                    node.kill(self._driver)
+                    node.set_state(TaskState.KILLED)
+            yield From(node.dead_event.wait())
+
         futures = []
         # TODO: order the shutdown using the strong dependencies
-        if nodes is None:
-            nodes = graph.nodes()
-        for node in nodes:
-            # TODO: according to the Mesos docs, killing a task is not reliable,
-            # and may need to be attempted again.
-            if node.state == TaskState.DEAD:
-                continue
-            node.kill(self._driver)
-            futures.append(node.dead_event.wait())
+        if nodes is not None:
+            kill_graph = graph.subgraph(nodes)
+        else:
+            kill_graph = graph
+        for node in kill_graph.nodes_iter():
+            futures.append(trollius.async(kill_one(node, kill_graph), loop=self._loop))
         yield From(trollius.gather(*futures, loop=self._loop))
 
     @trollius.coroutine
