@@ -764,8 +764,7 @@ def instantiate(logical_graph, loop):
     """
 
     # Create physical nodes
-    mapping = {logical: logical.physical_factory(logical, loop)
-               for logical in logical_graph.nodes_iter()}
+    mapping = {logical: logical.physical_factory(logical, loop) for logical in logical_graph}
     return networkx.relabel_nodes(logical_graph, mapping)
 
 
@@ -1025,7 +1024,7 @@ class Scheduler(mesos.interface.Scheduler):
             kill_graph = graph.subgraph(nodes)
         else:
             kill_graph = graph
-        for node in kill_graph.nodes_iter():
+        for node in kill_graph:
             futures.append(trollius.async(kill_one(node, kill_graph), loop=self._loop))
         yield From(trollius.gather(*futures, loop=self._loop))
 

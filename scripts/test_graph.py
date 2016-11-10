@@ -84,7 +84,7 @@ def make_graph():
     g.add_node(filewriter)
     g.add_edge(filewriter, l0_spectral, port='SPEAD')
 
-    for node in g.nodes_iter():
+    for node in g:
         if node is not telstate and isinstance(node, LogicalTask):
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
@@ -137,15 +137,15 @@ class Server(katcp.DeviceServer):
     def _launch(self):
         logical = make_graph()
         physical = instantiate(logical, self._loop)
-        telstate_node = next(node for node in physical.nodes_iter() if node.name == 'sdp.telstate')
-        boot = [node for node in physical.nodes_iter() if not isinstance(node, PhysicalTask)]
+        telstate_node = next(node for node in physical if node.name == 'sdp.telstate')
+        boot = [node for node in physical if not isinstance(node, PhysicalTask)]
         boot.append(telstate_node)
         yield From(self._scheduler.launch(physical, self._resolver, boot))
 
         telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['telstate'])
         telstate = katsdptelstate.TelescopeState(telstate_endpoint)
         config = physical.graph.get('config', {})
-        for node, data in physical.nodes_iter(data=True):
+        for node, data in physical.nodes(data=True):
             if node in boot or not isinstance(node, PhysicalTask):
                 continue
             nconfig = data.get('config', {})
@@ -219,7 +219,7 @@ class Server(katcp.DeviceServer):
         except KeyError:
             return ('fail', 'no such graph ' + name)
         else:
-            for node in physical.nodes_iter():
+            for node in physical:
                 req.inform('status', node.name, node.state)
             return ('ok',)
 
