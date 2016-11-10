@@ -841,7 +841,6 @@ class Scheduler(mesos.interface.Scheduler):
                     offer_ids = [offer.id for offer in agent.offers]
                     # TODO: does this need to use run_in_executor? Is it
                     # thread-safe to do so?
-                    # TODO: update the status of tasks
                     self._driver.launchTasks(offer_ids, taskinfos[agent])
                     logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.slave_id)
                 self._offers = {}
@@ -1019,7 +1018,6 @@ class Scheduler(mesos.interface.Scheduler):
             yield From(node.dead_event.wait())
 
         futures = []
-        # TODO: order the shutdown using the strong dependencies
         if nodes is not None:
             kill_graph = graph.subgraph(nodes)
         else:
@@ -1034,7 +1032,7 @@ class Scheduler(mesos.interface.Scheduler):
         # TODO: do we need to explicitly decline outstanding offers?
         self._pending = []
         futures = []
-        # TODO: shut down in the proper order
+        # TODO: shut down in the proper order?
         for task in six.itervalues(self._active):
             task.kill(self._driver)
             futures.append(task.dead_event.wait())
