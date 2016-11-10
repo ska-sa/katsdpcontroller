@@ -6,6 +6,7 @@ import trollius
 import signal
 import six
 import sys
+import networkx
 from trollius import From, Return
 from mesos.interface import mesos_pb2
 import mesos.scheduler
@@ -18,8 +19,9 @@ from tornado.platform.asyncio import AsyncIOMainLoop
 import katsdpcontroller
 from katsdpcontroller.scheduler import (
     LogicalExternal, PhysicalExternal,
-    LogicalTask, PhysicalTask, LogicalGraph, PhysicalGraph,
-    TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator)
+    LogicalTask, PhysicalTask,
+    TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator,
+    instantiate)
 
 
 logger = logging.getLogger(__name__)
@@ -44,12 +46,12 @@ class Multicast(PhysicalExternal):
 
 
 def make_graph():
-    g = LogicalGraph()
+    g = networkx.MultiDiGraph(config={'test_toplevel': 'hello'})
 
     # Multicast group example
     l0_spectral = LogicalExternal('l0_spectral')
     l0_spectral.physical_factory = Multicast
-    g.add_node(l0_spectral)
+    g.add_node(l0_spectral, config={'test_node': 'world'})
 
     # telstate node
     telstate = LogicalTask('sdp.telstate')
@@ -87,7 +89,7 @@ def make_graph():
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
-            g.add_edge(node, telstate, port='telstate', order='strong')
+            g.add_edge(node, telstate, port='telstate', order='strong', config={'test_edge': 'batman'})
 
     return g
 
@@ -134,19 +136,19 @@ class Server(katcp.DeviceServer):
     @trollius.coroutine
     def _launch(self):
         logical = make_graph()
-        physical = PhysicalGraph(logical, self._loop)
-        telstate_node = next(node for node in physical.nodes() if node.name == 'sdp.telstate')
+        physical = instantiate(logical, self._loop)
+        telstate_node = next(node for node in physical.nodes_iter() if node.name == 'sdp.telstate')
         boot = [node for node in physical.nodes_iter() if not isinstance(node, PhysicalTask)]
         boot.append(telstate_node)
         yield From(self._scheduler.launch(physical, self._resolver, boot))
 
         telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['telstate'])
         telstate = katsdptelstate.TelescopeState(telstate_endpoint)
-        config = logical.graph.get('config', {})  # TODO: transcribe it to the physical node
-        for node in physical.nodes_iter():
+        config = physical.graph.get('config', {})
+        for node, data in physical.nodes_iter(data=True):
             if node in boot or not isinstance(node, PhysicalTask):
                 continue
-            nconfig = getattr(node.logical_node, 'config', {})
+            nconfig = data.get('config', {})
             for src, trg, attr in physical.out_edges_iter(node, data=True):
                 nconfig.update(attr.get('config', {}))
                 if 'port' in attr and trg.state >= TaskState.STARTED:

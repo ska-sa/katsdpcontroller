@@ -1,3 +1,20 @@
+"""
+A logical graph is a :class:`networkx.MultiDiGraph` containing
+:class:`LogicalNode`s.
+
+If node A provides a service on a port and node B connects to it, add an
+edge from B to A, and set the `port` attribute of the edge to the logical
+name of the port. The endpoint of this port on A will be provided to B
+in the `endpoints` dictionary, under the name `A_port`.
+
+If there is an edge from A to B, then it is assumed that B must be started
+before or at the same time as A (because A needs to know where B will be
+executing, and that is only known when starting B). If B needs to be ready
+strictly before A is started, then set the property ``order=strong``. This
+will also ensure that B is killed after A.
+"""
+
+
 from __future__ import print_function, division, absolute_import
 import networkx
 import ipaddress
@@ -305,7 +322,7 @@ class InsufficientResourcesError(RuntimeError):
 
 
 class LogicalNode(object):
-    """A node in a :class:`LogicalGraph`. This is a base class. For nodes that
+    """A node in a logical graph. This is a base class. For nodes that
     execute code and use Mesos resources, see :class:`LogicalTask`.
 
     Attributes
@@ -331,7 +348,7 @@ class LogicalExternal(LogicalNode):
 
 
 class LogicalTask(LogicalNode):
-    """A node in a :class:`LogicalGraph` that indicates how to run a task
+    """A node in a logical graph that indicates how to run a task
     and what resources it requires, but does not correspond to any specific
     running task.
 
@@ -735,54 +752,21 @@ class PhysicalTask(PhysicalNode):
                 self.set_state(TaskState.READY)
 
 
-class LogicalGraph(networkx.MultiDiGraph):
-    """Collection of :class:`LogicalNode`s.
-
-    If node A provides a service on a port and node B connects to it, add an
-    edge from B to A, and set the `port` attribute of the edge to the logical
-    name of the port. The endpoint of this port on A will be provided to B
-    in the `endpoints` dictionary, under the name `A_port`.
-
-    If there is an edge from A to B, then it is assumed that B must be started
-    before or at the same time as A (because A needs to know where B will be
-    executing, and that is only known when starting B). If B needs to be ready
-    strictly before A is started, then set the property ``order=strong``. This
-    will also ensure that B is killed after A.
-    """
-    pass
-
-
-class PhysicalGraph(networkx.MultiDiGraph):
-    """Collection of :class:`PhysicalNode`s.
-
-    The constructor does not actually launch the tasks; it merely creates
-    them.
+def instantiate(logical_graph, loop):
+    """Create a physical graph from a logical one.
 
     Parameters
     ----------
-    logical_graph : :class:`LogicalGraph`
+    logical_graph : :class:`networkx.MultiDiGraph`
         Logical graph to instantiate
     loop : :class:`trollius.BaseEventLoop`
         Event loop used to create futures
-
-    Raises
-    ------
-    InsufficientResourcesError
-        if `offers` does not contain sufficient resources for the graph
     """
 
-    def __init__(self, logical_graph, loop):
-        super(PhysicalGraph, self).__init__()
-        self.loop = loop
-        # Transcribe nodes
-        trans = {}
-        for logical in logical_graph.nodes_iter():
-            physical = logical.physical_factory(logical, loop)
-            self.add_node(physical)
-            trans[logical] = physical
-        # Transcribe edges
-        for u, v, attr in logical_graph.edges_iter(data=True):
-            self.add_edge(trans[u], trans[v], attr_dict=attr)
+    # Create physical nodes
+    mapping = {logical: logical.physical_factory(logical, loop)
+               for logical in logical_graph.nodes_iter()}
+    return networkx.relabel_nodes(logical_graph, mapping)
 
 
 @decorator
@@ -939,8 +923,8 @@ class Scheduler(mesos.interface.Scheduler):
 
         Parameters
         ----------
-        graph : :class:`PhysicalGraph`
-            Graph to launch
+        graph : :class:`networkx.MultiDiGraph`
+            Physical graph to launch
         resolver : :class:`Resolver`
             Resolver to allocate resources like task IDs
         nodes : list, optional
@@ -1008,14 +992,14 @@ class Scheduler(mesos.interface.Scheduler):
     @trollius.coroutine
     def kill(self, graph, nodes=None):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
-        from any state. Strong dependencies (see :class:`LogicalGraph`) will
-        be honoured, leaving nodes alive until all their dependencies are
-        killed (provided the dependencies are included in `nodes`).
+        from any state. Strong dependencies will be honoured, leaving nodes
+        alive until all their dependencies are killed (provided the
+        dependencies are included in `nodes`).
 
         Parameters
         ----------
-        graph : :class:`PhysicalGraph`
-            Graph to kill
+        graph : :class:`networkx.MultiDiGraph`
+            Physical graph to kill
         nodes : list, optional
             If specified, the nodes to kill. The default is to kill all nodes
             in the graph.
@@ -1067,6 +1051,5 @@ __all__ = [
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
     'Interface', 'InsufficientResourcesError', 'ResourceAllocation',
-    'LogicalGraph', 'PhysicalGraph',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
-    'Scheduler']
+    'Scheduler', 'instantiate']
