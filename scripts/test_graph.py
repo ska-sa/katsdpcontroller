@@ -5,6 +5,7 @@ import argparse
 import trollius
 import signal
 import six
+import sys
 from trollius import From, Return
 from mesos.interface import mesos_pb2
 import mesos.scheduler
@@ -13,10 +14,11 @@ from decorator import decorator
 from katcp.kattypes import request, return_reply, Str, Float
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
-import tornado.gen
 from tornado.platform.asyncio import AsyncIOMainLoop
 import katsdpcontroller
-from katsdpcontroller.scheduler import *
+from katsdpcontroller.scheduler import (
+    LogicalTask, PhysicalTask, LogicalGraph, PhysicalGraph, TaskState,
+    Scheduler, Resolver, ImageResolver, TaskIDAllocator)
 
 
 logger = logging.getLogger(__name__)
@@ -68,7 +70,9 @@ def make_graph():
 
     for node in g.nodes_iter():
         if node is not telstate:
-            node.command.extend(['--telstate', '{endpoints[sdp.telstate_telstate]}', '--name', node.name])
+            node.command.extend([
+                '--telstate', '{endpoints[sdp.telstate_telstate]}',
+                '--name', node.name])
             g.add_edge(node, telstate, port='telstate', order='strong')
 
     return g
@@ -100,15 +104,15 @@ class Server(katcp.DeviceServer):
         pass
 
     def _to_hierarchical_dict(self, config):
-         # take a flat dict of key:values where some of the keys
-         # may have form x.y.z and turn these into a nested hierarchy
-         # of dicts.
+        """Take a flat dict of key:values where some of the keys
+        may have form x.y.z and turn these into a nested hierarchy
+        of dicts."""
         d = {}
-        for k,v in config.iteritems():
+        for k, v in six.iteritems(config):
             last = d
             key_parts = k.split(".")
             for ks in key_parts[:-1]:
-                last[ks] = last.get(ks,{})
+                last[ks] = last.get(ks, {})
                 last = last[ks]
             last[key_parts[-1]] = v
         return d
@@ -122,7 +126,7 @@ class Server(katcp.DeviceServer):
         boot.append(telstate_node)
         yield From(self._scheduler.launch(physical, self._resolver, boot))
 
-        telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['redis'])
+        telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['telstate'])
         telstate = katsdptelstate.TelescopeState(telstate_endpoint)
         config = logical.graph.get('config', {})  # TODO: transcribe it to the physical node
         for node in physical.nodes_iter():
@@ -133,7 +137,7 @@ class Server(katcp.DeviceServer):
                 nconfig[name] = port
             for src, trg, attr in physical.out_edges_iter(node, data=True):
                 nconfig.update(attr.get('config', {}))
-                if 'port' in attr and trg.state != TaskState.NOT_READY:
+                if 'port' in attr and trg.state >= TaskState.STARTED:
                     port = attr['port']
                     nconfig[port] = trg.host + ':' + str(trg.ports[port])
             config[node.name] = nconfig
@@ -191,6 +195,19 @@ class Server(katcp.DeviceServer):
                 except KeyError:
                     pass  # Protects against simultaneous deletions
                 req.reply('ok')
+
+    @request(Str())
+    @return_reply()
+    def request_graph_status(self, req, name):
+        """Print the status of tasks in a graph."""
+        try:
+            physical = self._physical[name]
+        except KeyError:
+            return ('fail', 'no such graph ' + name)
+        else:
+            for node in physical.nodes_iter():
+                req.inform('status', node.name, node.state)
+            return ('ok',)
 
     @trollius.coroutine
     def async_stop(self):

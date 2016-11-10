@@ -67,6 +67,29 @@ numa_node : int
 """
 
 
+class OrderedEnum(Enum):
+    """Ordered enumeration from Python 3.x Enum documentation"""
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value >= other.value
+        return NotImplemented
+
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        return NotImplemented
+
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value <= other.value
+        return NotImplemented
+
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
+
+
 class RangeResource(object):
     """More convenient wrapper over Mesos' presentation of a range resource
     (list of contiguous ranges). It provides Pythonic idioms to allow it
@@ -424,12 +447,14 @@ class Agent(object):
         return alloc
 
 
-class TaskState(Enum):
+class TaskState(OrderedEnum):
     NOT_READY = 0            #: We have not yet started it
-    STARTING = 1             #: We have asked Mesos to start it, but it is not yet running
-    RUNNING = 2              #: Task is fully ready
-    KILLING = 3              #: We have been asked to kill it, but it is not dead yet
-    DEAD = 4                 #: Have received terminal status message
+    STARTING = 1             #: We have been asked to start, but have not yet asked Mesos
+    STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
+    RUNNING = 3              #: Task is fully ready and ports are open
+    KILLING = 4              #: We have been asked to kill it, but have not yet asked Mesos
+    KILLED = 5               #: We have asked Mesos to kill it, but do not yet have confirmation
+    DEAD = 6                 #: Have received terminal status message
 
 
 class PhysicalNode(object):
@@ -459,11 +484,17 @@ class PhysicalNode(object):
         pass
 
     def set_state(self, state):
+        if state < self.state:
+            # STARTING -> NOT_READY is permitted, for the case where a
+            # launch is cancelled before the tasks are actually launched.
+            if state != TaskState.NOT_READY or self.state != TaskState.STARTING:
+                logging.warn('Ignoring state change that went backwards (%s -> %s) on task %s',
+                             self.state, state, self.name)
+                return
         self.state = state
         if state == TaskState.DEAD:
             self.dead_event.set()
-            self.running_event.set()
-        elif state in [TaskState.RUNNING, TaskState.KILLING]:
+        if state >= TaskState.RUNNING:
             self.running_event.set()
 
     def kill(self, driver):
@@ -558,7 +589,7 @@ class PhysicalTask(PhysicalNode):
         image_path = resolver.image_resolver(self.logical_node.image)
         taskinfo.container.docker.image = image_path
         taskinfo.container.docker.force_pull_image = \
-                resolver.image_resolver.pullable(image_path)
+            resolver.image_resolver.pullable(image_path)
         taskinfo.slave_id.value = self.slave_id
         for r in SCALAR_RESOURCES:
             value = getattr(self.logical_node, r)
@@ -592,9 +623,9 @@ class PhysicalTask(PhysicalNode):
         return args
 
     def kill(self, driver):
-        if self.state != TaskState.NOT_READY and self.state != TaskState.DEAD:
+        if self.state >= TaskState.STARTED and self.state < TaskState.DEAD:
             driver.killTask(self.taskinfo.task_id)
-        self.state = TaskState.KILLING
+        self.set_state(TaskState.KILLED)
 
 
 class LogicalGraph(networkx.MultiDiGraph):
@@ -658,7 +689,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._drivers = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         self._pending = deque()     #: graphs for which we do not yet have resources
-        self._running = {}          #: tasks that have been launched, indexed by task ID
+        self._running = {}          #: tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False
 
     def _start_stop_offers(self):
@@ -673,10 +704,13 @@ class Scheduler(mesos.interface.Scheduler):
             self._offers = {}
 
     def _try_launch(self):
-        # TODO: handle strong ordering
         if self._pending and self._offers:
             try:
                 (graph, nodes, resolver) = self._pending[0]
+                # Due to concurrency, another coroutine may have altered
+                # the state of the tasks since they were put onto the
+                # pending list (e.g. by killing them). Filter those out.
+                nodes = [node for node in nodes if node.state == TaskState.STARTING]
                 agents = [Agent(list(six.itervalues(offers))) for offers in six.itervalues(self._offers)]
                 # Sort agents by GPUs then free memory. This makes it less likely that a
                 # low-memory process will hog all the other resources on a high-memory
@@ -698,10 +732,11 @@ class Scheduler(mesos.interface.Scheduler):
                                 logger.debug('Cannot add %s to %s: %s',
                                              logical_task.name, agent.slave_id, e)
                         if allocation is None:
-                            raise InsufficientResourcesError('No agent found for {}'.format(logical_task.name))
+                            raise InsufficientResourcesError(
+                                'No agent found for {}'.format(logical_task.name))
                         allocations.append((node, allocation))
             except InsufficientResourcesError:
-                logger.debug('Could not launch %s due to insufficient resources', physical_name)
+                logger.debug('Could not launch graph due to insufficient resources')
             else:
                 # Two-phase resolving
                 for (node, allocation) in allocations:
@@ -723,7 +758,7 @@ class Scheduler(mesos.interface.Scheduler):
                 self._pending.popleft()
                 self._start_stop_offers()
                 for node in nodes:
-                    node.set_state(TaskState.STARTING)
+                    node.set_state(TaskState.STARTED)
                 for (node, _) in allocations:
                     self._running[node.taskinfo.task_id.value] = node
 
@@ -753,7 +788,8 @@ class Scheduler(mesos.interface.Scheduler):
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
-        logging.debug('Update: task %s in state %s (%s)',
+        logging.debug(
+            'Update: task %s in state %s (%s)',
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
         task = self._running.get(status.task_id.value)
@@ -775,35 +811,29 @@ class Scheduler(mesos.interface.Scheduler):
             nodes = graph.nodes()
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
-        running = set()
-        for node in graph.nodes_iter():
-            if node.state != TaskState.NOT_READY or node.running_event.is_set():
-                running.add(node)
-        # Check that we don't depend on some non-running task outside the set
-        remaining = set()
-        for node in nodes:
-            if node.state == TaskState.NOT_READY:
-                remaining.add(node)
+
+        # Check that we don't depend on some non-running task outside the set.
+        remaining = set(node for node in nodes if node.state == TaskState.NOT_READY)
         for src, trg in graph.out_edges_iter(remaining):
-            if trg not in remaining and trg not in running:
+            if trg not in remaining and trg.state == TaskState.NOT_READY:
                 raise ValueError('{} depends on {} but it is neither running not scheduled'.format(
                     src.name, trg.name))
         groups = []
         while remaining:
-            blocked = set()  # nodes that have a (possibly direct) strong dependency on a non-running task
+            # nodes that have a (possibly indirect) strong dependency on a non-running task
+            blocked = set()
             for src, trg, order in graph.out_edges_iter(remaining, data='order'):
-                if order == 'strong' and trg not in running:
+                if order == 'strong' and trg.state == TaskState.NOT_READY:
                     blocked.add(src)
                     for ancestor in networkx.ancestors(graph, src):
                         blocked.add(ancestor)
             group = remaining - blocked
             if not group:
-                print('Remaining', [x.name for x in remaining])
-                print('Blocked', [x.name for x in blocked])
-                raise ValueError('cyclic dependency in graph')
+                raise ValueError('strong cyclic dependency in graph')
             groups.append(list(group))
+            for node in groups[-1]:
+                node.state = TaskState.STARTING
             remaining = blocked
-            running |= group
 
         # TODO: if we are cancelled, should we kill off the partial graph?
         for group in groups:
@@ -820,6 +850,9 @@ class Scheduler(mesos.interface.Scheduler):
                 yield From(trollius.gather(*futures, loop=self._loop))
             except trollius.CancelledError:
                 if pending in self._pending:
+                    for node in group:
+                        if node.state == TaskState.STARTING:
+                            node.set_state(TaskState.NOT_READY)
                     self._pending.remove(pending)
 
     @trollius.coroutine
