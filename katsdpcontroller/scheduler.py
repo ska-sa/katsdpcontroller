@@ -321,6 +321,15 @@ class LogicalNode(object):
         self.physical_factory = PhysicalNode
 
 
+class LogicalExternal(LogicalNode):
+    """An external service. It is assumed to be ready as soon as it starts.
+
+    The host and port must be set manually on the physical node."""
+    def __init__(self, name):
+        super(LogicalExternal, self).__init__(name)
+        self.physical_factory = PhysicalExternal
+
+
 class LogicalTask(LogicalNode):
     """A node in a :class:`LogicalGraph` that indicates how to run a task
     and what resources it requires, but does not correspond to any specific
@@ -546,6 +555,28 @@ class PhysicalNode(object):
         set the state to :const:`TaskState.KILLED`.
         """
         raise NotImplementedError()
+
+
+class PhysicalExternal(PhysicalNode):
+    """External service with a hostname and ports. The service moves
+    automatically from :const:`TaskState.STARTED` to
+    :const:`TaskState.READY`, and from :const:`TaskState.KILLED` to
+    :const:`TaskState.DEAD`.
+    """
+    def __init__(self, logical_node, loop):
+        super(PhysicalExternal, self).__init__(logical_node, loop)
+        self.host = None
+        self.ports = {}
+
+    def set_state(self, state):
+        if state >= TaskState.STARTED and state < TaskState.READY:
+            state = TaskState.READY
+        elif state == TaskState.KILLED:
+            state = TaskState.DEAD
+        super(PhysicalExternal, self).set_state(state)
+
+    def kill(self, driver):
+        pass
 
 
 class PhysicalTask(PhysicalNode):
@@ -1032,6 +1063,8 @@ class Scheduler(mesos.interface.Scheduler):
 
 
 __all__ = [
+    'LogicalNode', 'PhysicalNode',
+    'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
     'Interface', 'InsufficientResourcesError', 'ResourceAllocation',
     'LogicalGraph', 'PhysicalGraph',

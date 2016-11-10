@@ -17,8 +17,9 @@ from katsdptelstate.endpoint import Endpoint
 from tornado.platform.asyncio import AsyncIOMainLoop
 import katsdpcontroller
 from katsdpcontroller.scheduler import (
-    LogicalTask, PhysicalTask, LogicalGraph, PhysicalGraph, TaskState,
-    Scheduler, Resolver, ImageResolver, TaskIDAllocator)
+    LogicalExternal, PhysicalExternal,
+    LogicalTask, PhysicalTask, LogicalGraph, PhysicalGraph,
+    TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator)
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +36,20 @@ class TelstateTask(PhysicalTask):
         portmap.protocol = 'tcp'
 
 
+class Multicast(PhysicalExternal):
+    def resolve(self, resolver, graph):
+        super(Multicast, self).resolve(resolver, graph)
+        self.host = '226.1.2.3'
+        self.ports = {'SPEAD': 7148}
+
+
 def make_graph():
     g = LogicalGraph()
+
+    # Multicast group example
+    l0_spectral = LogicalExternal('l0_spectral')
+    l0_spectral.physical_factory = Multicast
+    g.add_node(l0_spectral)
 
     # telstate node
     telstate = LogicalTask('sdp.telstate')
@@ -67,9 +80,10 @@ def make_graph():
     data_vol.container_path = '/var/kat/data'
     data_vol.host_path = '/tmp'
     g.add_node(filewriter)
+    g.add_edge(filewriter, l0_spectral, port='SPEAD')
 
     for node in g.nodes_iter():
-        if node is not telstate:
+        if node is not telstate and isinstance(node, LogicalTask):
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
