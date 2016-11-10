@@ -7,6 +7,8 @@ import jsonschema
 import itertools
 import six
 import re
+import socket
+import contextlib
 from enum import Enum
 from katsdptelstate.endpoint import Endpoint
 from collections import namedtuple, deque
@@ -88,6 +90,38 @@ class OrderedEnum(Enum):
         if self.__class__ is other.__class__:
             return self.value < other.value
         return NotImplemented
+
+
+@trollius.coroutine
+def poll_ports(host, ports, loop):
+    """Waits until a set of TCP ports are accepting connections on a host."""
+    try:
+        addrs = yield From(loop.getaddrinfo(
+            host=host, port=None,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+            flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
+        if not addrs:
+            raise ValueError('no address found for {}'.format(host))
+        (family, type_, proto, canonname, sockaddr) = addrs[0]
+        for port in ports:
+            while True:
+                sock = socket.socket(family=family, type=type_, proto=proto)
+                sock.settimeout(5)
+                with contextlib.closing(sock):
+                    try:
+                        yield From(loop.sock_connect(sock, (sockaddr[0], port)))
+                    except OSError as e:
+                        logging.debug('Port %d on %s not ready: %s', port, host, e)
+                        yield From(trollius.sleep(1, loop=loop))
+                        pass
+                    else:
+                        break
+            logging.debug('Port %d on %s ready', port, host)
+    except trollius.CancelledError:
+        pass
+    except Exception as e:
+        logging.warn('Unexpected exception waiting for %s', host, exc_info=True)
 
 
 class RangeResource(object):
@@ -321,6 +355,9 @@ class LogicalTask(LogicalNode):
     ports : list of str
         Network service ports. Each element in the list is a logical name for
         the port.
+    wait_ports : list of str
+        Subset of `ports` which must be open before the task is considered
+        ready. If set to `None`, defaults to `ports`.
     networks : list
         Abstract names of networks for which network interfaces are required.
         At present duplicating a name in the list is not supported, but in
@@ -340,6 +377,7 @@ class LogicalTask(LogicalNode):
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
+        self.wait_ports = None
         self.networks = []
         self.image = None
         self.command = []
@@ -451,9 +489,10 @@ class TaskState(OrderedEnum):
     NOT_READY = 0            #: We have not yet started it
     STARTING = 1             #: We have been asked to start, but have not yet asked Mesos
     STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
-    RUNNING = 3              #: Task is fully ready and ports are open
-    KILLED = 4               #: We have asked Mesos to kill it, but do not yet have confirmation
-    DEAD = 5                 #: Have received terminal status message
+    RUNNING = 3              #: Process is running, but we're waiting for ports to open
+    READY = 4                #: Node is completely ready
+    KILLED = 5               #: We have asked Mesos to kill it, but do not yet have confirmation
+    DEAD = 6                 #: Have received terminal status message
 
 
 class PhysicalNode(object):
@@ -470,10 +509,11 @@ class PhysicalNode(object):
         self.logical_node = logical_node
         #: Current state
         self.state = TaskState.NOT_READY
-        #: Event signalled when task is either fully running or has died
-        self.running_event = trollius.Event(loop=loop)
+        #: Event signalled when task is either fully ready or has died
+        self.ready_event = trollius.Event(loop=loop)
         #: Event signalled when the task dies
         self.dead_event = trollius.Event(loop=loop)
+        self.loop = loop
 
     @property
     def name(self):
@@ -493,9 +533,9 @@ class PhysicalNode(object):
         self.state = state
         if state == TaskState.DEAD:
             self.dead_event.set()
-            self.running_event.set()
-        if state == TaskState.RUNNING:
-            self.running_event.set()
+            self.ready_event.set()
+        if state == TaskState.READY:
+            self.ready_event.set()
 
     def kill(self, driver):
         """Start killing off the node. This is guaranteed to be called only if
@@ -529,6 +569,7 @@ class PhysicalTask(PhysicalNode):
         self.status = None
         for r in RANGE_RESOURCES:
             setattr(self, r, {})   # Map name to resource, if name was given
+        self._poller = None
 
     @property
     def agent(self):
@@ -639,7 +680,28 @@ class PhysicalTask(PhysicalNode):
     def kill(self, driver):
         # TODO: according to the Mesos docs, killing a task is not reliable,
         # and may need to be attempted again.
+        if self._poller:
+            self._poller.cancel()
+            self._poller = None
         driver.killTask(self.taskinfo.task_id)
+
+    def set_state(self, state):
+        def callback(future):
+            self._poller = None
+            if not future.cancelled():
+                self.set_state(TaskState.READY)
+
+        super(PhysicalTask, self).set_state(state)
+        if state == TaskState.RUNNING and self._poller is None:
+            if self.logical_node.wait_ports is not None:
+                wait_ports = [self.ports[port] for port in wait_ports]
+            else:
+                wait_ports = six.viewvalues(self.ports)
+            if wait_ports:
+                self._poller = trollius.async(poll_ports(self.host, wait_ports, self.loop))
+                self._poller.add_done_callback(callback)
+            else:
+                self.set_state(TaskState.READY)
 
 
 class LogicalGraph(networkx.MultiDiGraph):
@@ -652,7 +714,7 @@ class LogicalGraph(networkx.MultiDiGraph):
 
     If there is an edge from A to B, then it is assumed that B must be started
     before or at the same time as A (because A needs to know where B will be
-    running, and that is only known when starting B). If B needs to be running
+    executing, and that is only known when starting B). If B needs to be ready
     strictly before A is started, then set the property ``order=strong``. This
     will also ensure that B is killed after A.
     """
@@ -703,7 +765,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._drivers = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         self._pending = deque()     #: graphs for which we do not yet have resources
-        self._running = {}          #: tasks that have been launched (STARTED to KILLED), indexed by task ID
+        self._active = {}           #: tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False
 
     def _start_stop_offers(self):
@@ -774,7 +836,7 @@ class Scheduler(mesos.interface.Scheduler):
                 for node in nodes:
                     node.set_state(TaskState.STARTED)
                 for (node, _) in allocations:
-                    self._running[node.taskinfo.task_id.value] = node
+                    self._active[node.taskinfo.task_id.value] = node
 
     def set_driver(self, driver):
         self._driver = driver
@@ -806,25 +868,27 @@ class Scheduler(mesos.interface.Scheduler):
             'Update: task %s in state %s (%s)',
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
-        task = self._running.get(status.task_id.value)
+        task = self._active.get(status.task_id.value)
         if task:
             if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
-                del self._running[status.task_id.value]
+                del self._active[status.task_id.value]
             elif status.state == mesos_pb2.TASK_RUNNING:
-                # TODO: need to wait for port checks first
-                task.set_state(TaskState.RUNNING)
+                if task.status < TaskState.RUNNING:
+                    task.set_state(TaskState.RUNNING)
+                    # The task itself is responsible for advancing to
+                    # READY
             task.status = status
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
     def launch(self, graph, resolver, nodes=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
-        a coroutine that returns only once the nodes are running.
+        a coroutine that returns only once the nodes are ready.
 
         It is legal to pass nodes that have already been passed to
         :meth:`launch`. They will not be re-launched, but this call will wait
-        until they are running.
+        until they are ready.
 
         It is safe to run this coroutine as a trollius task and cancel it.
         However, some of the nodes may have been started already. If the
@@ -834,12 +898,12 @@ class Scheduler(mesos.interface.Scheduler):
         Running two launches with the same graph concurrently is possible but
         not recommended. In particular, cancelling the first launch can cause
         the second to stall indefinitely if it was waiting for nodes from the
-        first launch to be running.
+        first launch to be ready.
 
         .. note::
 
-            When waiting for a node to be running, it is also considered to be
-            running if it dies (either due to failing to start, or due to
+            When waiting for a node to be ready, it is also considered to be
+            ready if it dies (either due to failing to start, or due to
             :meth:`kill`.
 
         Parameters
@@ -868,15 +932,15 @@ class Scheduler(mesos.interface.Scheduler):
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
-        # Check that we don't depend on some non-running task outside the set.
+        # Check that we don't depend on some non-ready task outside the set.
         remaining = set(node for node in nodes if node.state == TaskState.NOT_READY)
         for src, trg in graph.out_edges_iter(remaining):
             if trg not in remaining and trg.state == TaskState.NOT_READY:
-                raise ValueError('{} depends on {} but it is neither running not scheduled'.format(
+                raise ValueError('{} depends on {} but it is neither ready not scheduled'.format(
                     src.name, trg.name))
         groups = []
         while remaining:
-            # nodes that have a (possibly indirect) strong dependency on a non-running task
+            # nodes that have a (possibly indirect) strong dependency on a non-ready task
             blocked = set()
             for src, trg, order in graph.out_edges_iter(remaining, data='order'):
                 if order == 'strong' and trg.state == TaskState.NOT_READY:
@@ -900,7 +964,7 @@ class Scheduler(mesos.interface.Scheduler):
             self._try_launch()
             futures = []
             for node in group:
-                futures.append(node.running_event.wait())
+                futures.append(node.ready_event.wait())
             try:
                 yield From(trollius.gather(*futures, loop=self._loop))
             except trollius.CancelledError:
@@ -957,7 +1021,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._pending = []
         futures = []
         # TODO: shut down in the proper order
-        for task in six.itervalues(self._running):
+        for task in six.itervalues(self._active):
             task.kill(self._driver)
             futures.append(task.dead_event.wait())
         if futures:

@@ -60,7 +60,7 @@ def make_graph():
     filewriter.cpus = 2
     filewriter.mem = 2048   # TODO: Too small for real system
     filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data']
+    filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data', '--port', '{ports[port]}']
     filewriter.ports = ['port']
     data_vol = filewriter.container.volumes.add()
     data_vol.mode = mesos_pb2.Volume.RW
@@ -133,8 +133,6 @@ class Server(katcp.DeviceServer):
             if node in boot or not isinstance(node, PhysicalTask):
                 continue
             nconfig = getattr(node.logical_node, 'config', {})
-            for name, port in six.iteritems(node.ports):
-                nconfig[name] = port
             for src, trg, attr in physical.out_edges_iter(node, data=True):
                 nconfig.update(attr.get('config', {}))
                 if 'port' in attr and trg.state >= TaskState.STARTED:
