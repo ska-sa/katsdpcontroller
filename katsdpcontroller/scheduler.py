@@ -615,6 +615,13 @@ class PhysicalTask(PhysicalNode):
                     rng = resource.ranges.range.add()
                     rng.begin = item
                     rng.end = item
+        taskinfo.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
+        taskinfo.discovery.name = self.name
+        for port_name, port_number in six.iteritems(self.ports):
+            port = taskinfo.discovery.ports.ports.add()
+            port.number = port_number
+            port.name = port_name
+            port.protocol = 'tcp'    # TODO: need a way to indicate this
         self.taskinfo = taskinfo
 
     def subst_args(self):

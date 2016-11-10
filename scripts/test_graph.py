@@ -227,7 +227,7 @@ def main():
 
     framework = mesos_pb2.FrameworkInfo()
     framework.user = ''      # Let Mesos work it out
-    framework.name = 'SDP sample framework'
+    framework.name = 'katsdpcontroller'
     framework.checkpoint = True
     framework.principal = 'sdp-sample-framework'
     framework.role = 'sdp-sample-framework'
