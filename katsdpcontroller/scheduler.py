@@ -788,7 +788,7 @@ class Scheduler(mesos.interface.Scheduler):
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         self._pending = deque()     #: graphs for which we do not yet have resources
-        self._active = {}           #: tasks that have been launched (STARTED to KILLED), indexed by task ID
+        self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False       #: set to ``True`` when :meth:`close` is called
 
     def _clear_offers(self):
@@ -855,7 +855,7 @@ class Scheduler(mesos.interface.Scheduler):
                 for node in nodes:
                     node.set_state(TaskState.STARTED)
                 for (node, _) in allocations:
-                    self._active[node.taskinfo.task_id.value] = node
+                    self._active[node.taskinfo.task_id.value] = (node, graph)
 
     def set_driver(self, driver):
         self._driver = driver
@@ -889,7 +889,7 @@ class Scheduler(mesos.interface.Scheduler):
             'Update: task %s in state %s (%s)',
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
-        task = self._active.get(status.task_id.value)
+        task = self._active.get(status.task_id.value)[0]
         if task:
             if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
@@ -1044,12 +1044,12 @@ class Scheduler(mesos.interface.Scheduler):
         # TODO: do we need to explicitly decline outstanding offers?
         self._pending = []
         futures = []
-        # TODO: shut down in the proper order?
-        for task in six.itervalues(self._active):
-            task.kill(self._driver)
-            futures.append(task.dead_event.wait())
-        if futures:
-            yield From(trollius.gather(*futures, loop=self._loop))
+        # Find the graphs that are still running
+        graphs = set()
+        for (task, graph) in six.itervalues(self._active):
+            graphs.add(graph)
+        for graph in graphs:
+            yield From(self.kill(graph))
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
