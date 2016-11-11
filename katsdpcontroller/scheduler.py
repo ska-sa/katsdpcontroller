@@ -124,7 +124,7 @@ def poll_ports(host, ports, loop):
         for port in ports:
             while True:
                 sock = socket.socket(family=family, type=type_, proto=proto)
-                sock.settimeout(5)
+                sock.setblocking(False)
                 with contextlib.closing(sock):
                     try:
                         yield From(loop.sock_connect(sock, (sockaddr[0], port)))
@@ -742,7 +742,7 @@ class PhysicalTask(PhysicalNode):
         super(PhysicalTask, self).set_state(state)
         if state == TaskState.RUNNING and self._poller is None:
             if self.logical_node.wait_ports is not None:
-                wait_ports = [self.ports[port] for port in wait_ports]
+                wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
             else:
                 wait_ports = six.viewvalues(self.ports)
             if wait_ports:
@@ -774,27 +774,32 @@ def run_in_event_loop(func, *args, **kw):
 
 
 class Scheduler(mesos.interface.Scheduler):
+    """Top-level scheduler implementing the Mesos Scheduler API.
+
+    The following invariants are maintained at each yield point:
+    - if :attr:`_pending` is empty, then so is :attr:`_offers`
+    - if :attr:`_pending` is empty, then offers are suppressed, otherwise they
+      are active (this is not true in the initial state, but becomes true as
+      soon as an offer is received).
+    - each dictionary within :attr:`_offers` is non-empty
+    """
     def __init__(self, loop):
         self._loop = loop
-        self._drivers = None
+        self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         self._pending = deque()     #: graphs for which we do not yet have resources
         self._active = {}           #: tasks that have been launched (STARTED to KILLED), indexed by task ID
-        self._closing = False
+        self._closing = False       #: set to ``True`` when :meth:`close` is called
 
-    def _start_stop_offers(self):
-        if self._pending:
-            self._driver.reviveOffers()
-        else:
-            self._driver.suppressOffers()
-        # If we have offers but nothing is pending, decline them
-        if not self._pending and self._offers:
-            for offers in six.itervalues(self._offers):
-                self._driver.acceptOffers([offer.id.value for offer in offers], [])
-            self._offers = {}
+    def _clear_offers(self):
+        for offers in six.itervalues(self._offers):
+            self._driver.acceptOffers([offer.id for offer in six.itervalues(offers)], [])
+        self._offers = {}
+        self._driver.suppressOffers()
 
     def _try_launch(self):
-        if self._pending and self._offers:
+        if self._offers:
+            assert self._pending
             try:
                 (graph, nodes, resolver) = self._pending[0]
                 # Due to concurrency, another coroutine may have altered
@@ -845,7 +850,8 @@ class Scheduler(mesos.interface.Scheduler):
                     logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.slave_id)
                 self._offers = {}
                 self._pending.popleft()
-                self._start_stop_offers()
+                if not self._pending:
+                    self._clear_offers()
                 for node in nodes:
                     node.set_state(TaskState.STARTED)
                 for (node, _) in allocations:
@@ -861,7 +867,10 @@ class Scheduler(mesos.interface.Scheduler):
     def resourceOffers(self, driver, offers):
         for offer in offers:
             self._offers.setdefault(offer.slave_id.value, {})[offer.id.value] = offer
-        self._try_launch()
+        if self._pending:
+            self._try_launch()
+        else:
+            self._clear_offers()
 
     @run_in_event_loop
     def offerRescinded(self, offer_id):
@@ -873,7 +882,6 @@ class Scheduler(mesos.interface.Scheduler):
                 break
             except KeyError:
                 pass
-        self._start_stop_offers()
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
@@ -887,7 +895,7 @@ class Scheduler(mesos.interface.Scheduler):
                 task.set_state(TaskState.DEAD)
                 del self._active[status.task_id.value]
             elif status.state == mesos_pb2.TASK_RUNNING:
-                if task.status < TaskState.RUNNING:
+                if task.state < TaskState.RUNNING:
                     task.set_state(TaskState.RUNNING)
                     # The task itself is responsible for advancing to
                     # READY
@@ -972,8 +980,9 @@ class Scheduler(mesos.interface.Scheduler):
             pending = (graph, group, resolver)
             # TODO: use requestResources to ask the allocator for resources?
             # TODO: check if any dependencies have died, and if so, bail out?
+            if not self._pending:
+                self._driver.reviveOffers()
             self._pending.append(pending)
-            self._start_stop_offers()
             self._try_launch()
             futures = []
             for node in group:
@@ -986,6 +995,9 @@ class Scheduler(mesos.interface.Scheduler):
                         if node.state == TaskState.STARTING:
                             node.set_state(TaskState.NOT_READY)
                     self._pending.remove(pending)
+                    if not self._pending:
+                        self._clear_offers()
+                raise
 
     @trollius.coroutine
     def kill(self, graph, nodes=None):

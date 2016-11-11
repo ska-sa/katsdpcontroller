@@ -134,9 +134,7 @@ class Server(katcp.DeviceServer):
         return d
 
     @trollius.coroutine
-    def _launch(self):
-        logical = make_graph()
-        physical = instantiate(logical, self._loop)
+    def _launch(self, physical):
         telstate_node = next(node for node in physical if node.name == 'sdp.telstate')
         boot = [node for node in physical if not isinstance(node, PhysicalTask)]
         boot.append(telstate_node)
@@ -162,7 +160,7 @@ class Server(katcp.DeviceServer):
 
     @request(Str(), Float(optional=True))
     @async_request
-    def request_launch(self, req, name, timeout=30.0):
+    def request_launch(self, req, name, timeout=None):
         """Launch a graph.
 
         Parameters
@@ -173,10 +171,15 @@ class Server(katcp.DeviceServer):
             Time to wait for the resources to become available
         """
         try:
-            physical = yield From(trollius.wait_for(self._launch(), timeout, loop=self._loop))
+            logical = make_graph()
+            physical = instantiate(logical, self._loop)
+            if timeout is None:
+                timeout = 30.0
+            yield From(trollius.wait_for(self._launch(physical), timeout, loop=self._loop))
             self._physical[name] = physical
         except trollius.TimeoutError:
             req.reply('fail', 'timed out waiting for resources')
+            yield From(self._scheduler.kill(physical))
         except Exception as e:
             logger.debug('launch failed', exc_info=True)
             req.reply('fail', str(e))
