@@ -533,6 +533,7 @@ class PhysicalNode(object):
     """
     def __init__(self, logical_node, loop):
         self.logical_node = logical_node
+        self.name = logical_node.name
         #: Current state
         self.state = TaskState.NOT_READY
         #: Event signalled when task is either fully ready or has died
@@ -540,10 +541,6 @@ class PhysicalNode(object):
         #: Event signalled when the task dies
         self.dead_event = trollius.Event(loop=loop)
         self.loop = loop
-
-    @property
-    def name(self):
-        return self.logical_node.name
 
     def resolve(self, resolver, graph):
         pass
@@ -666,7 +663,7 @@ class PhysicalTask(PhysicalNode):
         """
 
         for src, trg, port in graph.out_edges_iter([self], data='port'):
-            endpoint_name = '{}_{}'.format(trg.name, port)
+            endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
             self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
         taskinfo = mesos_pb2.TaskInfo()
@@ -762,9 +759,9 @@ def instantiate(logical_graph, loop):
     loop : :class:`trollius.BaseEventLoop`
         Event loop used to create futures
     """
-
     # Create physical nodes
-    mapping = {logical: logical.physical_factory(logical, loop) for logical in logical_graph}
+    mapping = {logical: logical.physical_factory(logical, loop)
+               for logical in logical_graph}
     return networkx.relabel_nodes(logical_graph, mapping)
 
 
@@ -816,26 +813,27 @@ class Scheduler(mesos.interface.Scheduler):
                 agents.sort(key=lambda agent: (agent.gpus, agent.mem))
                 allocations = []
                 for node in nodes:
-                    logical_task = node.logical_node
                     allocation = None
-                    if isinstance(logical_task, LogicalTask):
+                    if isinstance(node, PhysicalTask):
                         for agent in agents:
                             try:
-                                allocation = agent.allocate(logical_task)
+                                allocation = agent.allocate(node.logical_node)
                                 break
                             except InsufficientResourcesError as e:
                                 logger.debug('Cannot add %s to %s: %s',
-                                             logical_task.name, agent.slave_id, e)
+                                             node.name, agent.slave_id, e)
                         if allocation is None:
                             raise InsufficientResourcesError(
-                                'No agent found for {}'.format(logical_task.name))
+                                'No agent found for {}'.format(node.name))
                         allocations.append((node, allocation))
             except InsufficientResourcesError:
                 logger.debug('Could not launch graph due to insufficient resources')
             else:
                 # Two-phase resolving
+                logger.debug('Allocating resources to tasks')
                 for (node, allocation) in allocations:
                     node.allocate(allocation)
+                logger.debug('Performing resolution')
                 for node in nodes:
                     node.resolve(resolver, graph)
                 # Launch the tasks

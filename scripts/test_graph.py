@@ -94,6 +94,13 @@ def make_graph():
     return g
 
 
+def get_node(graph, logical_name):
+    for node in graph:
+        if node.logical_node.name == logical_name:
+            return node
+    raise KeyError('no node with logical name {}'.format(logical_name))
+
+
 @decorator
 def async_request(func, *args, **kwargs):
     func = trollius.coroutine(func)
@@ -135,7 +142,7 @@ class Server(katcp.DeviceServer):
 
     @trollius.coroutine
     def _launch(self, physical):
-        telstate_node = next(node for node in physical if node.name == 'sdp.telstate')
+        telstate_node = get_node(physical, 'sdp.telstate')
         boot = [node for node in physical if not isinstance(node, PhysicalTask)]
         boot.append(telstate_node)
         yield From(self._scheduler.launch(physical, self._resolver, boot))
@@ -173,6 +180,8 @@ class Server(katcp.DeviceServer):
         try:
             logical = make_graph()
             physical = instantiate(logical, self._loop)
+            for node in physical:
+                node.name += '-' + name
             if timeout is None:
                 timeout = 30.0
             yield From(trollius.wait_for(self._launch(physical), timeout, loop=self._loop))
