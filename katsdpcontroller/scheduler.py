@@ -1,17 +1,75 @@
 """
-A logical graph is a :class:`networkx.MultiDiGraph` containing
-:class:`LogicalNode`s.
+Mesos-based scheduler for launching collections of inter-dependent tasks. It
+uses trollius for asynchronous execution. It is **not** thread-safe.
 
-If node A provides a service on a port and node B connects to it, add an
-edge from B to A, and set the `port` attribute of the edge to the logical
-name of the port. The endpoint of this port on A will be provided to B
-in the `endpoints` dictionary, under the name `A_port`.
+Graphs
+------
+The scheduler primary operates on *graphs*. There are two types of graphs:
+logical and physical. A logical graph defines *how* to run things, but is not
+assigned with any actually running tasks. In many cases, a logical graph can
+be described statically, and should not contain any hostnames, addresses, port
+numbers etc. The graph itself is simply a :class:`networkx.MultiDiGraph`, and
+the nodes are instances of :class:`LogicalNode` (or subclasses).
 
-If there is an edge from A to B, then it is assumed that B must be started
-before or at the same time as A (because A needs to know where B will be
-executing, and that is only known when starting B). If B needs to be ready
-strictly before A is started, then set the property ``order=strong``. This
-will also ensure that B is killed after A.
+A physical graph corresponds to a specific execution. The nodes in a physical
+graph have a lifecycle where they start, run and are killed; they cannot come
+back from the dead. To re-run all the processes, a new graph must be created.
+A physical graph is generally created from a logical graph by
+:func:`instantiate`, but it is also possible to build up a physical graph
+manually (by creating :class:`PhysicalNode`s from :class:`LogicalNode`s and
+assembling them into a graph). It is even possible to add to a physical graph
+later (although some care is needed, as this is not async-safe relative to all
+operations).
+
+Nodes
+-----
+The base class for logical nodes is :class:`LogicalNode`, but it is an
+abstract base class. Typically one will use :class:`LogicalTask` for tasks
+that are executed as Docker images. For services managed outside the graph,
+use :class:`LogicalExternal`. This can also be used for multicast endpoints.
+
+Resolution
+----------
+Due to limitations of Mesos, the full information about a task (such as which
+machine it is running on and which ports it is using) are not available until
+immediately before the task is launched. The process of filling in this
+information is called *resolution* and is performed by
+:meth:`PhysicalNode.resolve`. If the user needs to access or modify this
+information before the task is actually launched, it should make a subclass
+and override this method.
+
+If only the command needs to be adapted to the dynamic configuration, it might
+not be necessary to write any extra code. The command specified in the logical
+task is passed through :meth:`str.format` together with a dictionary of
+dynamic information. See :attr:`LogicalTask.command` for details.
+
+To aid in resolution, a :class:`Resolver` is provided that is able to allocate
+task IDs, image paths, etc. It can be augmented or subclassed to provide extra
+tools for subclasses of :class:`PhysicalNode` to use during resolution.
+
+Edges
+-----
+Edges are used for several distinct but overlapping purposes.
+
+1. If task A needs to connect to a service provided by task B, then add a
+   graph edge from A to B, and set the `port` edge attribute to the name of
+   the port on B. The endpoint on B is provided to A as part of resolution.
+
+2. If there is an edge from A to B, then B must be launched before or at the
+   same time as A. This is necessary for the resolution of port numbers above
+   to work, but applies even if no `port` attribute is set on the edge. It is
+   thus guaranteed that B's resources are assigned before A is resolved (but
+   not necessary before B is resolved).
+
+3. If the `order` edge attribute is set to `strong` on an edge from A to B,
+   then B must be *ready* (running and listening on its ports) before A is
+   launched, and B will be killed only after A is dead. This should be used if
+   A will connect to B immediately on startup (and will fail if B is not yet
+   running), rather than in response to some later trigger. At present, no
+   other values are defined or should be used for the `order` attribute.
+
+It is permitted for the graph to have cycles, as long as no cycle contains a
+strong edge.
 """
 
 
@@ -71,7 +129,11 @@ logger = logging.getLogger(__name__)
 
 
 Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node'])
-"""Abstraction of a network interface on a machine
+"""Abstraction of a network interface on a machine.
+
+An interface is defined by setting a Mesos attribute of the form
+:samp:`interface_{name}`, whose value is a JSON string that adheres to the
+schema in :const:`INTERFACE_SCHEMA`.
 
 Attributes
 ----------
@@ -111,7 +173,13 @@ class OrderedEnum(Enum):
 
 @trollius.coroutine
 def poll_ports(host, ports, loop):
-    """Waits until a set of TCP ports are accepting connections on a host."""
+    """Waits until a set of TCP ports are accepting connections on a host.
+
+    It repeatedly tries to connect to each port until a connection is
+    successful.
+
+    It is safe to cancel this coroutine to give up waiting.
+    """
     try:
         addrs = yield From(loop.getaddrinfo(
             host=host, port=None,
@@ -154,11 +222,13 @@ class RangeResource(object):
         return self._len
 
     def add_range(self, start, stop):
+        """Append the half-open range `[start, stop)`."""
         if stop > start:
             self._ranges.append((start, stop))
             self._len += stop - start
 
     def add_resource(self, resource):
+        """Append a :class:`mesos_pb2.Resource`."""
         for r in resource.ranges.range:
             self.add_range(r.begin, r.end + 1)   # Mesos has inclusive ranges
 
@@ -280,7 +350,11 @@ class ImageResolver(object):
 
 
 class TaskIDAllocator(object):
-    """Allocates unique task IDs."""
+    """Allocates unique task IDs, with a custom prefix on the name.
+
+    Because IDs must be globally unique (within the framework), the
+    ``__new__`` method is overridden to return a per-prefix singleton.
+    """
 
     # There may only be a single allocator for each prefix, to avoid
     # collisions.
@@ -310,7 +384,7 @@ class Resolver(object):
     """General-purpose base class to connect extra resources to a graph. The
     base implementation contains an :class:`ImageResolver` and a
     :class:`TaskIDAllocator`.  However, other resources can be connected to
-    tasks by subclassing both this class and :class:`PhysicalTask`.
+    tasks by subclassing both this class and :class:`PhysicalNode`.
     """
     def __init__(self, image_resolver, task_id_allocator):
         self.image_resolver = image_resolver
@@ -318,6 +392,9 @@ class Resolver(object):
 
 
 class InsufficientResourcesError(RuntimeError):
+    """Internal error used when there are currently insufficient resources for
+    an operation. Users should not see this error.
+    """
     pass
 
 
@@ -355,18 +432,14 @@ class LogicalTask(LogicalNode):
     The command is processed by :meth:`str.format` to substitute dynamic
     values. The following named values are provided:
 
-    - `ports` : dictionary of port numbers
-    - `cores` : dictionary of reserved core IDs
-    - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
-    - `endpoints` : dictionary of remote endpoints. Keys are of the form
-      :samp:`{service}_{port}`, and values are :class:`Endpoint` objects
-
     Attributes
     ----------
     cpus : float
         Mesos CPU shares.
     gpus : float
         GPU resources required
+    mem : float
+        Mesos memory reservation (megabytes)
     cores : list of str
         Reserved CPU cores. If this is empty, then the task will not be pinned.
         If it is non-empty, then the task will be pinned to the assigned cores,
@@ -376,8 +449,6 @@ class LogicalTask(LogicalNode):
         The strings in the list become keys in :attr:`Task.cores`. You can use
         ``None`` if you don't need to use the core numbers in the command to
         pin individual threads.
-    mem : float
-        Mesos memory reservation (megabytes)
     ports : list of str
         Network service ports. Each element in the list is a logical name for
         the port.
@@ -386,16 +457,21 @@ class LogicalTask(LogicalNode):
         ready. If set to `None`, defaults to `ports`.
     networks : list
         Abstract names of networks for which network interfaces are required.
-        At present duplicating a name in the list is not supported, but in
-        future it may allow requesting multiple interfaces on the same
-        network.
     image : str
-        Base name of the Docker image (without registry or tag)
+        Base name of the Docker image (without registry or tag).
     container : `mesos_pb2.ContainerInfo`
         Modify this to override properties of the container. The `image` and
-        `force_pull_image` fields are ignored.
+        `force_pull_image` fields are set by the :class:`ImageResolver`,
+        overriding anything set here.
     command : list of str
-        Command to run inside the image (formatted)
+        Command to run inside the image. Each element is passed through
+        :meth:`str.format` to generate a command for the physical node. The
+        following keys are available for substitution.
+        - `ports` : dictionary of port numbers
+        - `cores` : dictionary of reserved core IDs
+        - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
+        - `endpoints` : dictionary of remote endpoints. Keys are of the form
+          :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
     """
     def __init__(self, name):
         super(LogicalTask, self).__init__(name)
@@ -468,7 +544,7 @@ class Agent(object):
         getattr(self, key).add_resource(resource)
 
     def allocate(self, logical_task):
-        """Allocate the resources for a logical task, is possible.
+        """Allocate the resources for a logical task, if possible.
 
         Returns
         -------
@@ -512,6 +588,11 @@ class Agent(object):
 
 
 class TaskState(OrderedEnum):
+    """States in a task's lifecycle. In almost all cases, tasks only ever move
+    forward through the states, not backwards. An exception is that a launch
+    may be cancelled while still waiting for resources for the task, in which
+    case it moves from :const:`STARTING` to :const:`NOT_READY`.
+    """
     NOT_READY = 0            #: We have not yet started it
     STARTING = 1             #: We have been asked to start, but have not yet asked Mesos
     STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
@@ -530,22 +611,53 @@ class PhysicalNode(object):
         The logical node from which this physical node is constructed
     loop : :class:`trollius.BaseEventLoop`
         The event loop used for constructing futures etc
+
+    Attributes
+    ----------
+    logical_node : :class:`LogicalNode`
+        The logical node passed to the constructor
+    loop : :class:`trollius.BaseEventLoop`
+        The event loop used for constructing futures etc
+    state : :class:`TaskState`
+        The current state of the task (see :class:`TaskState`). Do not
+        modify this directly; use :meth:`set_state` instead.
+    ready_event : :class:`trollius.Event`
+        An event that becomes set once the task reaches either
+        :class:`~TaskState.READY` or :class:`~TaskState.DEAD`. It is never
+        unset.
+    dead_event : :class:`trollius.Event`
+        An event that becomes set once the task reaches
+        :class:`~TaskState.DEAD`.
     """
     def __init__(self, logical_node, loop):
         self.logical_node = logical_node
         self.name = logical_node.name
-        #: Current state
         self.state = TaskState.NOT_READY
-        #: Event signalled when task is either fully ready or has died
         self.ready_event = trollius.Event(loop=loop)
-        #: Event signalled when the task dies
         self.dead_event = trollius.Event(loop=loop)
         self.loop = loop
 
     def resolve(self, resolver, graph):
+        """Make final preparations immediately before starting.
+
+        Parameters
+        ----------
+        resolver : :class:`Resolver`
+            Resolver for images etc.
+        graph : :class:`networkx.MultiDiGraph`
+            Physical graph containing the task
+        """
         pass
 
     def set_state(self, state):
+        """Update :attr:`state`.
+
+        This checks for invalid transitions, and sets the events when
+        appropriate.
+
+        Subclasses may override this to take special actions on particular
+        transitions, but should chain to the base class.
+        """
         if state < self.state:
             # STARTING -> NOT_READY is permitted, for the case where a
             # launch is cancelled before the tasks are actually launched.
@@ -576,6 +688,13 @@ class PhysicalExternal(PhysicalNode):
     automatically from :const:`TaskState.STARTED` to
     :const:`TaskState.READY`, and from :const:`TaskState.KILLED` to
     :const:`TaskState.DEAD`.
+
+    Attributes
+    ----------
+    host : str
+        Host on which this node is operating (if any).
+    ports : dict
+        Dictionary mapping logical port names to port numbers.
     """
     def __init__(self, logical_node, loop):
         super(PhysicalExternal, self).__init__(logical_node, loop)
@@ -596,7 +715,10 @@ class PhysicalExternal(PhysicalNode):
 class PhysicalTask(PhysicalNode):
     """Running task (or one that is being prepared to run). Unlike
     a :class:`LogicalTask`, it has a specific agent, ports, etc assigned
-    (during it's life cycle, not at construction).
+    (during its life cycle, not at construction).
+
+    Most of the attributes of this class only contain meaningful information
+    after either :meth:`allocate` or :meth:`resolve` has been called.
 
     Parameters
     ----------
@@ -604,6 +726,34 @@ class PhysicalTask(PhysicalNode):
         Logical task forming the template for this physical task
     loop : :class:`trollius.BaseEventLoop`
         The event loop used for constructing futures etc
+
+    Attributes
+    ----------
+    interfaces : dict
+        Map from logical interface names requested by
+        :class:`LogicalTask.interfaces` to :class:`Interface`s.
+    taskinfo : :class:`mesos_pb2.TaskInfo`
+        Task info for Mesos to run the task
+    allocation : class:`ResourceAllocation`
+        Resources allocated to this task.
+    status : class:`mesos_pb2.TaskStatus`
+        Last Mesos status allocated to this task. This should agree with with
+        :attr:`state`, but if we receive notifications out-of-order from Mesos
+        then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
+        is guaranteed to be in sync.
+    ports : dict
+        Maps port names given in the logical task to port numbers.
+    cores : dict
+        Maps core names given in the logical task to core numbers.
+    agent : :class:`Agent`
+        Information about the agent on which this task is running.
+    host : str
+        Host on which this task is running
+    slave_id : str
+        Slave ID of the agent on which this task is running
+    _poller : :class:`trollius.Task`
+        Task which asynchronously waits for the task's ports to open up. It is
+        started on reaching :class:`~TaskState.RUNNING`.
     """
     def __init__(self, logical_task, loop):
         super(PhysicalTask, self).__init__(logical_task, loop)
@@ -613,24 +763,33 @@ class PhysicalTask(PhysicalNode):
         self.allocation = None
         self.status = None
         for r in RANGE_RESOURCES:
-            setattr(self, r, {})   # Map name to resource, if name was given
+            setattr(self, r, {})
         self._poller = None
 
     @property
     def agent(self):
-        return self.allocation.agent
+        if self.allocation:
+            return self.allocation.agent
+        else:
+            return None
 
     @property
     def host(self):
-        return self.allocation.agent.host
+        if self.allocation:
+            return self.allocation.agent.host
+        else:
+            return None
 
     @property
     def slave_id(self):
-        return self.allocation.agent.slave_id
+        if self.allocation:
+            return self.allocation.agent.slave_id
+        else:
+            return None
 
     def allocate(self, allocation):
         """Assign resources. This is called just before moving to
-        :const:`TaskState.STAGING`, and before :meth:`resolve`.
+        :const:`TaskState.STARTED`, and before :meth:`resolve`.
 
         Parameters
         ----------
@@ -661,10 +820,11 @@ class PhysicalTask(PhysicalNode):
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
         """
-
-        for src, trg, port in graph.out_edges_iter([self], data='port'):
-            endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
-            self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
+        for src, trg, attr in graph.out_edges_iter([self], data=True):
+            if 'port' in attr:
+                port = attr['port']
+                endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
+                self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
         taskinfo = mesos_pb2.TaskInfo()
         taskinfo.name = self.name
@@ -725,15 +885,19 @@ class PhysicalTask(PhysicalNode):
     def kill(self, driver):
         # TODO: according to the Mesos docs, killing a task is not reliable,
         # and may need to be attempted again.
-        if self._poller:
-            self._poller.cancel()
-            self._poller = None
+        # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
 
     def set_state(self, state):
         def callback(future):
+            # This callback is called when the poller is either finished or
+            # cancelled. If it is finished, we would normally not have
+            # advanced beyond READY, because set_state will cancel the
+            # poller if we do. However, there is a race condition if
+            # set_state is called between the poller completing and the
+            # call to this callback.
             self._poller = None
-            if not future.cancelled():
+            if not future.cancelled() and self.state < TaskState.READY:
                 self.set_state(TaskState.READY)
 
         super(PhysicalTask, self).set_state(state)
@@ -747,10 +911,16 @@ class PhysicalTask(PhysicalNode):
                 self._poller.add_done_callback(callback)
             else:
                 self.set_state(TaskState.READY)
+        elif state > TaskState.READY and self._poller is not None:
+            self._poller.cancel()
+            self._poller = None
 
 
 def instantiate(logical_graph, loop):
-    """Create a physical graph from a logical one.
+    """Create a physical graph from a logical one. Each physical node is
+    created by calling :attr:`LogicalNode.physical_factory` on the
+    corresponding logical node. Edges, and graph, node and edge attributes are
+    transferred as-is.
 
     Parameters
     ----------
@@ -773,6 +943,10 @@ def run_in_event_loop(func, *args, **kw):
 class Scheduler(mesos.interface.Scheduler):
     """Top-level scheduler implementing the Mesos Scheduler API.
 
+    Mesos calls the callbacks provided in this class from another thread. To
+    ensure thread safety, they are all posted to the event loop via a
+    decorator.
+
     The following invariants are maintained at each yield point:
     - if :attr:`_pending` is empty, then so is :attr:`_offers`
     - if :attr:`_pending` is empty, then offers are suppressed, otherwise they
@@ -784,17 +958,21 @@ class Scheduler(mesos.interface.Scheduler):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
-        self._pending = deque()     #: graphs for which we do not yet have resources
+        self._pending = deque()     #: node groups for which we do not yet have resources
         self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False       #: set to ``True`` when :meth:`close` is called
 
     def _clear_offers(self):
+        """Declines all current offers and suppresses future offers. This is
+        called when there are no more pending task groups.
+        """
         for offers in six.itervalues(self._offers):
             self._driver.acceptOffers([offer.id for offer in six.itervalues(offers)], [])
         self._offers = {}
         self._driver.suppressOffers()
 
     def _try_launch(self):
+        """Check whether it is possible to launch the next task group."""
         if self._offers:
             assert self._pending
             try:
@@ -803,7 +981,8 @@ class Scheduler(mesos.interface.Scheduler):
                 # the state of the tasks since they were put onto the
                 # pending list (e.g. by killing them). Filter those out.
                 nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                agents = [Agent(list(six.itervalues(offers))) for offers in six.itervalues(self._offers)]
+                agents = [Agent(list(six.itervalues(offers)))
+                          for offers in six.itervalues(self._offers)]
                 # Sort agents by GPUs then free memory. This makes it less likely that a
                 # low-memory process will hog all the other resources on a high-memory
                 # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
@@ -822,7 +1001,7 @@ class Scheduler(mesos.interface.Scheduler):
                             except InsufficientResourcesError as e:
                                 logger.debug('Cannot add %s to %s: %s',
                                              node.name, agent.slave_id, e)
-                        if allocation is None:
+                        else:
                             raise InsufficientResourcesError(
                                 'No agent found for {}'.format(node.name))
                         allocations.append((node, allocation))
@@ -1057,6 +1236,6 @@ __all__ = [
     'LogicalNode', 'PhysicalNode',
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
-    'Interface', 'InsufficientResourcesError', 'ResourceAllocation',
+    'Interface', 'ResourceAllocation',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Scheduler', 'instantiate']
