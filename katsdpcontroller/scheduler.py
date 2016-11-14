@@ -179,34 +179,45 @@ def poll_ports(host, ports, loop):
     successful.
 
     It is safe to cancel this coroutine to give up waiting.
+
+    Parameters
+    ----------
+    host : str
+        Hostname or IP address
+    ports : list
+        Port numbers to connect to
+    loop : :class:`trollius.BaseEventLoop`
+        The event loop used for socket operations
+
+    Raises
+    ------
+    socket.gaierror
+        for any error in resolving `host`
+    OSError
+        on any socket operation errors other than the connect
     """
-    try:
-        addrs = yield From(loop.getaddrinfo(
-            host=host, port=None,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
-            flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
-        if not addrs:
-            raise ValueError('no address found for {}'.format(host))
-        (family, type_, proto, canonname, sockaddr) = addrs[0]
-        for port in ports:
-            while True:
-                sock = socket.socket(family=family, type=type_, proto=proto)
+    addrs = yield From(loop.getaddrinfo(
+        host=host, port=None,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+        flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
+    # getaddrinfo always returns at least 1 (it is an error if there are no
+    # matches), so we do not need to check for the empty case
+    (family, type_, proto, canonname, sockaddr) = addrs[0]
+    for port in ports:
+        while True:
+            sock = socket.socket(family=family, type=type_, proto=proto)
+            with contextlib.closing(sock):
                 sock.setblocking(False)
-                with contextlib.closing(sock):
-                    try:
-                        yield From(loop.sock_connect(sock, (sockaddr[0], port)))
-                    except OSError as e:
-                        logging.debug('Port %d on %s not ready: %s', port, host, e)
-                        yield From(trollius.sleep(1, loop=loop))
-                        pass
-                    else:
-                        break
-            logging.debug('Port %d on %s ready', port, host)
-    except trollius.CancelledError:
-        pass
-    except Exception as e:
-        logging.warn('Unexpected exception waiting for %s', host, exc_info=True)
+                try:
+                    yield From(loop.sock_connect(sock, (sockaddr[0], port)))
+                except OSError as e:
+                    logging.debug('Port %d on %s not ready: %s', port, host, e)
+                    yield From(trollius.sleep(1, loop=loop))
+                    pass
+                else:
+                    break
+        logging.debug('Port %d on %s ready', port, host)
 
 
 class RangeResource(object):
@@ -897,8 +908,14 @@ class PhysicalTask(PhysicalNode):
             # set_state is called between the poller completing and the
             # call to this callback.
             self._poller = None
-            if not future.cancelled() and self.state < TaskState.READY:
-                self.set_state(TaskState.READY)
+            try:
+                future.result()  # throw the exception, if any
+                if self.state < TaskState.READY:
+                    self.set_state(TaskState.READY)
+            except trollius.CancelledError:
+                pass
+            except Exception:
+                logging.error('exception while polling for open ports', exc_info=True)
 
         super(PhysicalTask, self).set_state(state)
         if state == TaskState.RUNNING and self._poller is None:
