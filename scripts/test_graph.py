@@ -53,7 +53,6 @@ class SDPTask(PhysicalTask):
         subst = self.subst_args()
         for key, value in six.iteritems(config):
             config[key] = value.format(**subst)
-        print(self.endpoints)
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 
