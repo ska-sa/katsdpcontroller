@@ -38,9 +38,29 @@ class TelstateTask(PhysicalTask):
         portmap.protocol = 'tcp'
 
 
+class SDPTask(PhysicalTask):
+    """Task that stores configuration in telstate"""
+    def resolve(self, resolver, graph):
+        super(SDPTask, self).resolve(resolver, graph)
+        config = graph.node[self].get('config', {})
+        for src, trg, attr in graph.out_edges_iter(self, data=True):
+            config.update(attr.get('config', {}))
+            if 'port' in attr and trg.state >= TaskState.STARTED:
+                port = attr['port']
+                config[port] = trg.host + ':' + str(trg.ports[port])
+        for src, trg, attr in graph.in_edges_iter(self, data=True):
+            config.update(attr.get('config', {}))
+        subst = self.subst_args()
+        for key, value in six.iteritems(config):
+            config[key] = value.format(**subst)
+        print(self.endpoints)
+        resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
+
+
 class Multicast(PhysicalExternal):
     def resolve(self, resolver, graph):
         super(Multicast, self).resolve(resolver, graph)
+        # TODO: use the resolver
         self.host = '226.1.2.3'
         self.ports = {'SPEAD': 7148}
 
@@ -75,7 +95,7 @@ def make_graph():
     filewriter.cpus = 2
     filewriter.mem = 2048   # TODO: Too small for real system
     filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data', '--port', '{ports[port]}']
+    filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data']
     filewriter.ports = ['port']
     data_vol = filewriter.container.volumes.add()
     data_vol.mode = mesos_pb2.Volume.RW
@@ -89,7 +109,9 @@ def make_graph():
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
-            g.add_edge(node, telstate, port='telstate', order='strong', config={'test_edge': 'batman'})
+            node.physical_factory = SDPTask
+            g.add_edge(node, telstate, port='telstate', order='strong',
+                       config={'test_edge': 'batman'})
 
     return g
 
@@ -150,18 +172,8 @@ class Server(katcp.DeviceServer):
         telstate_endpoint = Endpoint(telstate_node.host, telstate_node.ports['telstate'])
         telstate = katsdptelstate.TelescopeState(telstate_endpoint)
         config = physical.graph.get('config', {})
-        for node, data in physical.nodes(data=True):
-            if node in boot or not isinstance(node, PhysicalTask):
-                continue
-            nconfig = data.get('config', {})
-            for src, trg, attr in physical.out_edges_iter(node, data=True):
-                nconfig.update(attr.get('config', {}))
-                if 'port' in attr and trg.state >= TaskState.STARTED:
-                    port = attr['port']
-                    nconfig[port] = trg.host + ':' + str(trg.ports[port])
-            config[node.name] = nconfig
-        config = self._to_hierarchical_dict(config)
         telstate.add('config', config, immutable=True)
+        self._resolver.telstate = telstate
         yield From(self._scheduler.launch(physical, self._resolver))
         raise Return(physical)
 
