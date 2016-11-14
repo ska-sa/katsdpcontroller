@@ -4,7 +4,7 @@ uses trollius for asynchronous execution. It is **not** thread-safe.
 
 Graphs
 ------
-The scheduler primary operates on *graphs*. There are two types of graphs:
+The scheduler primarily operates on *graphs*. There are two types of graphs:
 logical and physical. A logical graph defines *how* to run things, but is not
 assigned with any actually running tasks. In many cases, a logical graph can
 be described statically, and should not contain any hostnames, addresses, port
@@ -116,7 +116,7 @@ INTERFACE_SCHEMA = {
         },
         'ipv4_address': {
             'type': 'string',
-            'formt': 'ipv4'
+            'format': 'ipv4'
         },
         'numa_node': {
             'type': 'integer',
@@ -526,12 +526,13 @@ class Agent(object):
                     jsonschema.validate(value, INTERFACE_SCHEMA)
                     interface = Interface(
                         name=value['name'],
-                        value=value['network'],
+                        network=value['network'],
                         ipv4_address=ipaddress.IPv4Address(value['ipv4_address']),
                         numa_node=value.get('numa_node'))
                 except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
                     logger.warn('Could not parse {} ({})'.format(
                         attribute.name, attribute.text.value))
+                    logger.debug('Exception', exc_info=True)
                 except jsonschema.ValidationError as e:
                     logger.warn('Validation error parsing {}: {}'.format(value, e))
                 else:
@@ -566,8 +567,6 @@ class Agent(object):
         InsufficientResourcesError
             if there are not enough resources to add the task
         """
-        if not self.offers:
-            raise InsufficientResourcesError('No offers have been received for this agent')
         if not logical_task.valid_agent(self.attributes):
             raise InsufficientResourcesError('Task does not match this agent')
         # TODO: add NUMA awareness
