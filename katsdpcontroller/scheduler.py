@@ -1247,16 +1247,28 @@ class Scheduler(mesos.interface.Scheduler):
 
     @trollius.coroutine
     def close(self):
-        self._closing = True
+        """Shut down the scheduler. This is a coroutine that kills any graphs
+        with running tasks or pending launches, and joins the driver thread. It
+        is an error to make any further calls to the scheduler after calling
+        this function.
+
+        .. note::
+
+            A graph with no running tasks but other types of nodes still
+            running will not be shut down. This is subject to change in the
+            future.
+        """
         # TODO: do we need to explicitly decline outstanding offers?
-        self._pending = []
-        futures = []
+        self._closing = True    # Prevents concurrent launches
         # Find the graphs that are still running
         graphs = set()
         for (task, graph) in six.itervalues(self._active):
             graphs.add(graph)
+        for (graph, nodes, resolver) in self._pending:
+            graphs.add(graph)
         for graph in graphs:
             yield From(self.kill(graph))
+        self._pending = []
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
