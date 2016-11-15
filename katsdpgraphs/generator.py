@@ -22,6 +22,13 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
+    stream = "{}:'visibility'".format(c_stream)
+     # string containing a mapping from stream_name to stream_type.
+     # This is temporary for AR1/1.5 and should be replaced by a
+     # per stream sensor indicating type directly from the CBF
+    if beamformer_mode not 'none':
+        stream_types += ",beam_0x:beamformer,beam_0y:beamformer"
+
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
@@ -40,6 +47,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     # cam2telstate node
     G.add_node('sdp.cam2telstate.1', {
         'url': r.get_url('CAMDATA'),
+        'streams': streams,
         'docker_image': r.get_image_path('katsdpingest'),
         'docker_cmd': 'cam2telstate.py',
         'docker_host_class': 'sdpmc',
