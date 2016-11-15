@@ -435,7 +435,7 @@ class TestScheduler(object):
         self.logical_graph = networkx.MultiDiGraph()
         self.logical_graph.add_nodes_from([node0, node1, node2])
         self.logical_graph.add_edge(node1, node0, port='port', order='strong')
-        self.logical_graph.add_edge(node1, node2, port='foo')
+        self.logical_graph.add_edge(node1, node2, port='foo', order='strong')
         self.loop = trollius.new_event_loop()
         try:
             self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
@@ -745,27 +745,81 @@ class TestScheduler(object):
         """Test killing a node while in state KILLED"""
         yield From(self._test_kill_in_state(TaskState.KILLED))
 
+    @trollius.coroutine
+    def _test_die_in_state(self, state):
+        """Test a node dying on its own while it is in the given state"""
+        launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
+        status = self._status_update('test-00000000', mesos_pb2.TASK_FINISHED)
+        yield From(defer(loop=self.loop))
+        assert_is(status, self.nodes[0].status)
+        assert_equal(TaskState.DEAD, self.nodes[0].state)
+        assert_true(self.nodes[0].ready_event.is_set())
+        assert_true(self.nodes[0].dead_event.is_set())
+        yield From(launch)
+
     @run_with_self_event_loop
     def test_die_while_started(self):
         """Test a process dying on its own while in state STARTED"""
-        pass   # TODO
+        yield From(self._test_die_in_state(TaskState.STARTED))
 
     @run_with_self_event_loop
     def test_die_while_running(self):
         """Test a process dying on its own while in state RUNNING"""
-        pass   # TODO
+        yield From(self._test_die_in_state(TaskState.RUNNING))
 
     @run_with_self_event_loop
     def test_die_while_ready(self):
         """Test a process dying on its own while in state READY"""
-        pass   # TODO
+        yield From(self._test_die_in_state(TaskState.READY))
 
     @run_with_self_event_loop
     def test_kill_order(self):
         """Kill must respect dependency ordering"""
-        pass   # TODO
+        # Bring up the whole graph
+        launch, kill = yield From(self._transition_node0(TaskState.READY))
+        offer = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        self.sched.resourceOffers(self.driver, [offer])
+        yield From(defer(loop=self.loop))
+        self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
+        yield From(defer(loop=self.loop))
+        assert_true(launch.done())  # Ensures the next line won't hang the test
+        yield From(launch)
+        self.driver.reset_mock()
+        # Now kill it. node1 must be dead before node0, node2 get killed
+        kill = trollius.async(self.sched.kill(self.physical_graph), loop=self.loop)
+        yield From(defer(loop=self.loop))
+        assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
+                     self.driver.mock_calls)
+        assert_equal(TaskState.READY, self.nodes[0].state)
+        assert_equal(TaskState.KILLED, self.nodes[1].state)
+        assert_equal(TaskState.READY, self.nodes[2].state)
+        self.driver.reset_mock()
+        # node1 now dies, and node0 and node2 should be killed
+        status = self._status_update('test-00000001', mesos_pb2.TASK_KILLED)
+        yield From(defer(loop=self.loop))
+        assert_equal(AnyOrderList([
+            mock.call.killTask(self.nodes[0].taskinfo.task_id),
+            mock.call.acknowledgeStatusUpdate(status)]),
+            self.driver.mock_calls)
+        assert_equal(TaskState.KILLED, self.nodes[0].state)
+        assert_equal(TaskState.DEAD, self.nodes[1].state)
+        assert_equal(TaskState.DEAD, self.nodes[2].state)
+        assert_false(kill.done())
+        # node0 now dies, to finish the cleanup
+        self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+        yield From(defer(loop=self.loop))
+        assert_equal(TaskState.DEAD, self.nodes[0].state)
+        assert_equal(TaskState.DEAD, self.nodes[1].state)
+        assert_equal(TaskState.DEAD, self.nodes[2].state)
+        assert_true(kill.done())
+        yield From(kill)
 
     @run_with_self_event_loop
     def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
+        pass   # TODO
+
+    @run_with_self_event_loop
+    def test_status_unknown_task_id(self):
+        """statusUpdate must correctly handle an unknown task ID"""
         pass   # TODO
