@@ -366,9 +366,6 @@ class TaskIDAllocator(object):
     Because IDs must be globally unique (within the framework), the
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
-
-    # There may only be a single allocator for each prefix, to avoid
-    # collisions.
     _by_prefix = {}
 
     def __init__(self, prefix=''):
@@ -406,6 +403,16 @@ class InsufficientResourcesError(RuntimeError):
     """Internal error used when there are currently insufficient resources for
     an operation. Users should not see this error.
     """
+    pass
+
+
+class CycleError(ValueError):
+    """Raised for a graph that contains a cycle with a strong ordering dependency"""
+    pass
+
+
+class DependencyError(ValueError):
+    """Raised if a launch is impossible due to an unsatisfied dependency"""
     pass
 
 
@@ -921,7 +928,7 @@ class PhysicalTask(PhysicalNode):
             if self.logical_node.wait_ports is not None:
                 wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
             else:
-                wait_ports = six.viewvalues(self.ports)
+                wait_ports = list(six.itervalues(self.ports))
             if wait_ports:
                 self._poller = trollius.async(poll_ports(self.host, wait_ports, self.loop))
                 self._poller.add_done_callback(callback)
@@ -1132,15 +1139,17 @@ class Scheduler(mesos.interface.Scheduler):
 
         Raises
         ------
-        RuntimeError
+        trollius.InvalidStateError
             If :meth:`close` has been called.
-        ValueError
+        CycleError
+            If it is impossible to launch the nodes due to a cyclic dependency.
+        DependencyError
             If any nodes in `nodes` is in state :const:`TaskState.NOT_READY`
             and has a strong dependency on a node that is not in `nodes` and
             is also in state :const:`TaskState.NOT_READY`.
         """
         if self._closing:
-            raise RuntimeError('Cannot launch tasks while shutting down')
+            raise trollius.InvalidStateError('Cannot launch tasks while shutting down')
         if nodes is None:
             nodes = graph.nodes()
         # Create a startup schedule. The nodes are partitioned into groups that can
@@ -1150,7 +1159,7 @@ class Scheduler(mesos.interface.Scheduler):
         remaining = set(node for node in nodes if node.state == TaskState.NOT_READY)
         for src, trg in graph.out_edges_iter(remaining):
             if trg not in remaining and trg.state == TaskState.NOT_READY:
-                raise ValueError('{} depends on {} but it is neither ready not scheduled'.format(
+                raise DependencyError('{} depends on {} but it is neither ready not scheduled'.format(
                     src.name, trg.name))
         groups = []
         while remaining:
@@ -1163,7 +1172,7 @@ class Scheduler(mesos.interface.Scheduler):
                         blocked.add(ancestor)
             group = remaining - blocked
             if not group:
-                raise ValueError('strong cyclic dependency in graph')
+                raise CycleError('strong cyclic dependency in graph')
             groups.append(list(group))
             for node in groups[-1]:
                 node.state = TaskState.STARTING
