@@ -678,6 +678,19 @@ class TestScheduler(object):
         raise Return((launch, kill))
 
     @trollius.coroutine
+    def _ready_graph(self):
+        """Gets the whole graph to READY state"""
+        launch, kill = yield From(self._transition_node0(TaskState.READY))
+        offer = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        self.sched.resourceOffers(self.driver, [offer])
+        yield From(defer(loop=self.loop))
+        self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
+        yield From(defer(loop=self.loop))
+        assert_true(launch.done())  # Ensures the next line won't hang the test
+        yield From(launch)
+        self.driver.reset_mock()
+
+    @trollius.coroutine
     def _test_launch_cancel(self, target_state):
         launch, kill = yield From(self._transition_node0(target_state))
         assert_equal(TaskState.STARTING, self.nodes[1].state)
@@ -775,16 +788,7 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_kill_order(self):
         """Kill must respect dependency ordering"""
-        # Bring up the whole graph
-        launch, kill = yield From(self._transition_node0(TaskState.READY))
-        offer = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
-        self.sched.resourceOffers(self.driver, [offer])
-        yield From(defer(loop=self.loop))
-        self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
-        yield From(defer(loop=self.loop))
-        assert_true(launch.done())  # Ensures the next line won't hang the test
-        yield From(launch)
-        self.driver.reset_mock()
+        yield From(self._ready_graph())
         # Now kill it. node1 must be dead before node0, node2 get killed
         kill = trollius.async(self.sched.kill(self.physical_graph), loop=self.loop)
         yield From(defer(loop=self.loop))
@@ -817,9 +821,36 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
-        pass   # TODO
+        yield From(self._ready_graph())
+        # Start launching a second graph, but do not give it resources
+        physical_graph2 = scheduler.instantiate(self.logical_graph, self.loop)
+        launch = trollius.async(self.sched.launch(physical_graph2, self.resolver), loop=self.loop)
+        yield From(defer(loop=self.loop))
+        close = trollius.async(self.sched.close(), loop=self.loop)
+        yield From(defer(loop=self.loop))
+        status1 = self._status_update('test-00000001', mesos_pb2.TASK_KILLED)
+        yield From(defer(loop=self.loop))
+        status0 = self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+        yield From(defer(loop=self.loop))
+        assert_true(close.done())
+        yield From(close)
+        for node in self.physical_graph:
+            assert_equal(TaskState.DEAD, node.state)
+        for node in physical_graph2:
+            assert_equal(TaskState.DEAD, node.state)
+        assert_equal([
+            mock.call.reviveOffers(),
+            mock.call.killTask(self.nodes[1].taskinfo.task_id),
+            mock.call.acknowledgeStatusUpdate(status1),
+            mock.call.killTask(self.nodes[0].taskinfo.task_id),
+            mock.call.acknowledgeStatusUpdate(status0),
+            mock.call.stop(),
+            mock.call.join()
+            ], self.driver.mock_calls)
+        assert_true(launch.done())
+        yield From(launch)
 
     @run_with_self_event_loop
     def test_status_unknown_task_id(self):
         """statusUpdate must correctly handle an unknown task ID"""
-        pass   # TODO
+        self._status_update('test-01234567', mesos_pb2.TASK_LOST)
