@@ -1161,7 +1161,7 @@ class Scheduler(mesos.interface.Scheduler):
             if trg not in remaining and trg.state == TaskState.NOT_READY:
                 raise DependencyError('{} depends on {} but it is neither ready not scheduled'.format(
                     src.name, trg.name))
-        groups = []
+        groups = deque()
         while remaining:
             # nodes that have a (possibly indirect) strong dependency on a non-ready task
             blocked = set()
@@ -1178,8 +1178,8 @@ class Scheduler(mesos.interface.Scheduler):
                 node.state = TaskState.STARTING
             remaining = blocked
 
-        for group in groups:
-            pending = (graph, group, resolver)
+        while groups:
+            pending = (graph, groups[0], resolver)
             # TODO: use requestResources to ask the allocator for resources?
             # TODO: check if any dependencies have died, and if so, bail out?
             if not self._pending:
@@ -1187,19 +1187,21 @@ class Scheduler(mesos.interface.Scheduler):
             self._pending.append(pending)
             self._try_launch()
             futures = []
-            for node in group:
+            for node in groups[0]:
                 futures.append(node.ready_event.wait())
             try:
                 yield From(trollius.gather(*futures, loop=self._loop))
             except trollius.CancelledError:
                 if pending in self._pending:
-                    for node in group:
-                        if node.state == TaskState.STARTING:
-                            node.set_state(TaskState.NOT_READY)
                     self._pending.remove(pending)
                     if not self._pending:
                         self._clear_offers()
+                while groups:
+                    for node in groups.popleft():
+                        if node.state == TaskState.STARTING:
+                            node.set_state(TaskState.NOT_READY)
                 raise
+            groups.popleft()
 
     @trollius.coroutine
     def kill(self, graph, nodes=None):
