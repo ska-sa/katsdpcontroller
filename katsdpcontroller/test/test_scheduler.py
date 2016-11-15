@@ -409,11 +409,37 @@ class TestScheduler(object):
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator)
+        node0 = scheduler.LogicalTask('node0')
+        node0.cpus = 1.0
+        node0.command = ['hello', '--port={ports[port]}']
+        node0.ports = ['port']
+        node0.image = 'image0'
+        node1 = scheduler.LogicalTask('node1')
+        node1.cpus = 0.5
+        node1.command = ['test', '--host={host}', '--remote={endpoints[node0_port]}',
+                         '--another={endpoints[node2_foo]}']
+        node1.image = 'image1'
+        node2 = scheduler.LogicalExternal('node2')
+        self.logical_graph = networkx.MultiDiGraph()
+        self.logical_graph.add_nodes_from([node0, node1, node2])
+        self.logical_graph.add_edge(node1, node0, port='port', order='strong')
+        self.logical_graph.add_edge(node1, node2, port='foo')
         self.loop = trollius.new_event_loop()
-        self.sched = scheduler.Scheduler(self.loop)
-        self.driver = mock.create_autospec(mesos.scheduler.MesosSchedulerDriver,
-                                           spec_set=True, instance=True)
-        self.sched.set_driver(self.driver)
+        try:
+            self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
+            self.nodes = []
+            for i in range(3):
+                self.nodes.append(next(node for node in self.physical_graph
+                                       if node.name == 'node{}'.format(i)))
+            self.nodes[2].host = 'remotehost'
+            self.nodes[2].ports['foo'] = 10000
+            self.sched = scheduler.Scheduler(self.loop)
+            self.driver = mock.create_autospec(mesos.scheduler.MesosSchedulerDriver,
+                                               spec_set=True, instance=True)
+            self.sched.set_driver(self.driver)
+        except Exception:
+            self.loop.close()
+            raise
 
     def teardown(self):
         self.loop.close()
@@ -476,22 +502,6 @@ class TestScheduler(object):
         # - NUMA awareness
         # - network interfaces
         # - custom wait_ports
-        logical_graph = networkx.MultiDiGraph()
-        node0 = scheduler.LogicalTask('node0')
-        node0.cpus = 1.0
-        node0.command = ['hello', '--port={ports[port]}']
-        node0.ports = ['port']
-        node0.image = 'image0'
-        node1 = scheduler.LogicalTask('node1')
-        node1.cpus = 0.5
-        node1.command = ['test', '--host={host}', '--remote={endpoints[node0_port]}',
-                         '--another={endpoints[node2_foo]}']
-        node1.image = 'image1'
-        node2 = scheduler.LogicalExternal('node2')
-        logical_graph.add_nodes_from([node0, node1, node2])
-        logical_graph.add_edge(node1, node0, port='port', order='strong')
-        logical_graph.add_edge(node1, node2, port='foo')
-        # The launch groups should be [node0, node2], [node1]
         offer0 = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
         offer1 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         expected_taskinfo0 = mesos_pb2.TaskInfo()
@@ -529,17 +539,11 @@ class TestScheduler(object):
         expected_taskinfo1.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
         expected_taskinfo1.discovery.name = 'node1'
 
-        physical_graph = scheduler.instantiate(logical_graph, self.loop)
-        pnode0 = next(node for node in physical_graph if node.logical_node is node0)
-        pnode1 = next(node for node in physical_graph if node.logical_node is node1)
-        pnode2 = next(node for node in physical_graph if node.logical_node is node2)
-        pnode2.host = 'remotehost'
-        pnode2.ports['foo'] = 10000
-        launch = trollius.async(self.sched.launch(physical_graph, self.resolver), loop=self.loop)
+        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver), loop=self.loop)
         yield From(defer(loop=self.loop))
         # The tasks must be in state STARTING, but not yet RUNNING because
         # there are no offers.
-        for node in physical_graph:
+        for node in self.nodes:
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
@@ -556,14 +560,14 @@ class TestScheduler(object):
         # up.
         self.sched.resourceOffers(self.driver, [offer0])
         yield From(defer(loop=self.loop))
-        assert_equal(expected_taskinfo0, pnode0.taskinfo)
-        assert_equal('slavehost0', pnode0.host)
-        assert_equal('slaveid0', pnode0.slave_id)
-        assert_equal({'port': 30000}, pnode0.ports)
-        assert_equal({}, pnode0.cores)
-        assert_is_none(pnode0.status)
-        assert_equal(TaskState.STARTED, pnode0.state)
-        assert_equal(TaskState.READY, pnode2.state)
+        assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
+        assert_equal('slavehost0', self.nodes[0].host)
+        assert_equal('slaveid0', self.nodes[0].slave_id)
+        assert_equal({'port': 30000}, self.nodes[0].ports)
+        assert_equal({}, self.nodes[0].cores)
+        assert_is_none(self.nodes[0].status)
+        assert_equal(TaskState.STARTED, self.nodes[0].state)
+        assert_equal(TaskState.READY, self.nodes[2].state)
         assert_equal(AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], []),
@@ -580,8 +584,8 @@ class TestScheduler(object):
             status.state = mesos_pb2.TASK_RUNNING
             self.sched.statusUpdate(self.driver, status)
             yield From(defer(loop=self.loop))
-            assert_equal(TaskState.RUNNING, pnode0.state)
-            assert_equal(status, pnode0.status)
+            assert_equal(TaskState.RUNNING, self.nodes[0].state)
+            assert_equal(status, self.nodes[0].status)
             assert_equal([mock.call.acknowledgeStatusUpdate(status)],
                          self.driver.mock_calls)
             self.driver.reset_mock()
@@ -590,15 +594,15 @@ class TestScheduler(object):
         # should be revived to get resources for node 1.
         poll_future.set_result(None)
         yield From(defer(loop=self.loop))
-        assert_equal(TaskState.READY, pnode0.state)
+        assert_equal(TaskState.READY, self.nodes[0].state)
         assert_equal([mock.call.reviveOffers()], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer suitable for node 1.
         self.sched.resourceOffers(self.driver, [offer1])
         yield From(defer(loop=self.loop))
-        assert_equal(TaskState.STARTED, pnode1.state)
-        assert_equal(expected_taskinfo1, pnode1.taskinfo)
-        assert_equal('slaveid1', pnode1.slave_id)
+        assert_equal(TaskState.STARTED, self.nodes[1].state)
+        assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
+        assert_equal('slaveid1', self.nodes[1].slave_id)
         assert_equal([
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers()], self.driver.mock_calls)
@@ -610,18 +614,58 @@ class TestScheduler(object):
         status.state = mesos_pb2.TASK_RUNNING
         self.sched.statusUpdate(self.driver, status)
         yield From(defer(loop=self.loop))
-        assert_equal(TaskState.READY, pnode1.state)
-        assert_equal(status, pnode1.status)
+        assert_equal(TaskState.READY, self.nodes[1].state)
+        assert_equal(status, self.nodes[1].status)
         assert_equal([mock.call.acknowledgeStatusUpdate(status)],
                      self.driver.mock_calls)
         self.driver.reset_mock()
         assert_true(launch.done())
         yield From(launch)
 
+    @trollius.coroutine
+    def _test_launch_cancel(self, target_state):
+        # Get node0 to target_state (either RUNNING or READY). That's already
+        # tested in test_launch_serial, so we don't check all the mock calls
+        offer = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
+        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver), loop=self.loop)
+        yield From(defer(loop=self.loop))
+        self.sched.resourceOffers(self.driver, [offer])
+        yield From(defer(loop=self.loop))
+        with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
+            poll_future = trollius.Future(self.loop)
+            if target_state == TaskState.READY:
+                poll_future.set_result(None)   # Mark as immediately ready
+            poll_ports.return_value = poll_future
+            status = mesos_pb2.TaskStatus()
+            status.task_id.value = 'test-00000000'
+            status.state = mesos_pb2.TASK_RUNNING
+            self.sched.statusUpdate(self.driver, status)
+            yield From(defer(loop=self.loop))
+        self.driver.reset_mock()
+        assert_equal(TaskState.STARTING, self.nodes[1].state)
+        # Now cancel and check that node1 goes back to NOT_READY while
+        # the others retain their state.
+        launch.cancel()
+        yield From(defer(loop=self.loop))
+        assert_equal(target_state, self.nodes[0].state)
+        assert_equal(TaskState.NOT_READY, self.nodes[1].state)
+        assert_equal(TaskState.READY, self.nodes[2].state)
+        if target_state == TaskState.READY:
+            assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+        else:
+            assert_equal([], self.driver.mock_calls)
+        # Kill the graph, just to clean up any lingering async tasks
+        self.sched.kill(self.physical_graph)
+
     @run_with_self_event_loop
-    def test_launch_cancel(self):
-        """Test cancelling a launch after partial success"""
-        pass   # TODO
+    def test_launch_cancel_wait_task(self):
+        """Test cancelling a launch while waiting for a task to become READY"""
+        yield From(self._test_launch_cancel(TaskState.RUNNING))
+
+    @run_with_self_event_loop
+    def test_launch_cancel_wait_resource(self):
+        """Test cancelling a launch while waiting for resources"""
+        yield From(self._test_launch_cancel(TaskState.READY))
 
     @run_with_self_event_loop
     def test_kill_while_starting(self):
