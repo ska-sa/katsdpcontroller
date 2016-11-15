@@ -1089,8 +1089,11 @@ class Scheduler(mesos.interface.Scheduler):
             'Update: task %s in state %s (%s)',
             status.task_id.value, mesos_pb2.TaskState.Name(status.state),
             status.message)
-        task = self._active.get(status.task_id.value)[0]
-        if task:
+        try:
+            task = self._active[status.task_id.value][0]
+        except KeyError:
+            pass
+        else:
             if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
                 del self._active[status.task_id.value]
