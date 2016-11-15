@@ -14,7 +14,7 @@ import functools
 import socket
 import trollius
 import networkx
-from trollius import From
+from trollius import From, Return
 try:
     import unittest2 as unittest
 except ImportError:
@@ -247,6 +247,13 @@ def _make_offer(framework_id, slave_id, host, resources, attrs=()):
     return offer
 
 
+def _make_status(task_id, state):
+    status = mesos_pb2.TaskStatus()
+    status.task_id.value = task_id
+    status.state = state
+    return status
+
+
 class TestAgent(unittest.TestCase):
     """Tests for :class:`katsdpcontroller.scheduler.Agent`.
 
@@ -398,6 +405,11 @@ class TestScheduler(object):
     def _make_offer(self, resources, slave_num=0, attrs=()):
         return _make_offer(self.framework_id, 'slaveid{}'.format(slave_num),
                            'slavehost{}'.format(slave_num), resources, attrs)
+
+    def _status_update(self, task_id, state):
+        status = _make_status(task_id, state)
+        self.sched.statusUpdate(self.driver, status)
+        return status
 
     def setup(self):
         self.framework_id = 'frameworkid'
@@ -579,10 +591,7 @@ class TestScheduler(object):
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = trollius.Future(self.loop)
             poll_ports.return_value = poll_future
-            status = mesos_pb2.TaskStatus()
-            status.task_id.value = 'test-00000000'
-            status.state = mesos_pb2.TASK_RUNNING
-            self.sched.statusUpdate(self.driver, status)
+            status = self._status_update('test-00000000', mesos_pb2.TASK_RUNNING)
             yield From(defer(loop=self.loop))
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
             assert_equal(status, self.nodes[0].status)
@@ -609,10 +618,7 @@ class TestScheduler(object):
         self.driver.reset_mock()
         # Finally, tell the scheduler that node 1 is running. There are no
         # ports, so it will go straight to READY.
-        status = mesos_pb2.TaskStatus()
-        status.task_id.value = 'test-00000001'
-        status.state = mesos_pb2.TASK_RUNNING
-        self.sched.statusUpdate(self.driver, status)
+        status = self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_equal(status, self.nodes[1].status)
@@ -623,26 +629,59 @@ class TestScheduler(object):
         yield From(launch)
 
     @trollius.coroutine
-    def _test_launch_cancel(self, target_state):
-        # Get node0 to target_state (either RUNNING or READY). That's already
-        # tested in test_launch_serial, so we don't check all the mock calls
+    def _transition_node0(self, target_state, nodes=None):
+        """Launch the graph and proceed until node0 is in `target_state`.
+
+        This is intended to be used in test setup. It is assumed that this
+        functionality is more fully tested test_launch_serial, so minimal
+        assertions are made.
+
+        Returns
+        -------
+        launch, kill : :class:`trollius.Task`
+            Asynchronous tasks for launching and killing the graph. If
+            `target_state` is not :const:`TaskState.KILLED` or
+            :const:`TaskState.DEAD`, then `kill` is ``None``
+        """
+        assert target_state > TaskState.NOT_READY
         offer = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
-        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver), loop=self.loop)
+        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
+                                loop=self.loop)
+        kill = None
         yield From(defer(loop=self.loop))
-        self.sched.resourceOffers(self.driver, [offer])
-        yield From(defer(loop=self.loop))
-        with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = trollius.Future(self.loop)
-            if target_state == TaskState.READY:
-                poll_future.set_result(None)   # Mark as immediately ready
-            poll_ports.return_value = poll_future
-            status = mesos_pb2.TaskStatus()
-            status.task_id.value = 'test-00000000'
-            status.state = mesos_pb2.TASK_RUNNING
-            self.sched.statusUpdate(self.driver, status)
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        if target_state > TaskState.STARTING:
+            self.sched.resourceOffers(self.driver, [offer])
             yield From(defer(loop=self.loop))
+            assert_equal(TaskState.STARTED, self.nodes[0].state)
+            if target_state > TaskState.STARTED:
+                with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
+                    poll_future = trollius.Future(self.loop)
+                    poll_ports.return_value = poll_future
+                    self._status_update('test-00000000', mesos_pb2.TASK_RUNNING)
+                    yield From(defer(loop=self.loop))
+                assert_equal(TaskState.RUNNING, self.nodes[0].state)
+                if target_state > TaskState.RUNNING:
+                    poll_future.set_result(None)   # Mark ports as ready
+                    yield From(defer(loop=self.loop))
+                    assert_equal(TaskState.READY, self.nodes[0].state)
+                    if target_state > TaskState.READY:
+                        kill = trollius.async(self.sched.kill(
+                            self.physical_graph, nodes), loop=self.loop)
+                        yield From(defer(loop=self.loop))
+                        assert_equal(TaskState.KILLED, self.nodes[0].state)
+                        if target_state > TaskState.KILLED:
+                            self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+                        yield From(defer(loop=self.loop))
         self.driver.reset_mock()
+        assert_equal(target_state, self.nodes[0].state)
+        raise Return((launch, kill))
+
+    @trollius.coroutine
+    def _test_launch_cancel(self, target_state):
+        launch, kill = yield From(self._transition_node0(target_state))
         assert_equal(TaskState.STARTING, self.nodes[1].state)
+        assert_false(launch.done())
         # Now cancel and check that node1 goes back to NOT_READY while
         # the others retain their state.
         launch.cancel()
@@ -654,8 +693,6 @@ class TestScheduler(object):
             assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
         else:
             assert_equal([], self.driver.mock_calls)
-        # Kill the graph, just to clean up any lingering async tasks
-        self.sched.kill(self.physical_graph)
 
     @run_with_self_event_loop
     def test_launch_cancel_wait_task(self):
@@ -667,30 +704,46 @@ class TestScheduler(object):
         """Test cancelling a launch while waiting for resources"""
         yield From(self._test_launch_cancel(TaskState.READY))
 
+    @trollius.coroutine
+    def _test_kill_in_state(self, state):
+        """Test killing a node while it is in the given state"""
+        launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
+        kill = trollius.async(self.sched.kill(self.physical_graph, [self.nodes[0]]),
+                              loop=self.loop)
+        yield From(defer(loop=self.loop))
+        if state > TaskState.STARTING:
+            assert_equal(TaskState.KILLED, self.nodes[0].state)
+            status = self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+            yield From(defer(loop=self.loop))
+            assert_is(status, self.nodes[0].status)
+        assert_equal(TaskState.DEAD, self.nodes[0].state)
+        yield From(launch)
+        yield From(kill)
+
     @run_with_self_event_loop
     def test_kill_while_starting(self):
-        """Test killing a process while in state STARTING"""
-        pass   # TODO
+        """Test killing a node while in state STARTING"""
+        yield From(self._test_kill_in_state(TaskState.STARTING))
 
     @run_with_self_event_loop
     def test_kill_while_started(self):
-        """Test killing a process while in state STARTED"""
-        pass   # TODO
+        """Test killing a node while in state STARTED"""
+        yield From(self._test_kill_in_state(TaskState.STARTING))
 
     @run_with_self_event_loop
     def test_kill_while_running(self):
-        """Test killing a process while in state RUNNING"""
-        pass   # TODO
+        """Test killing a node while in state RUNNING"""
+        yield From(self._test_kill_in_state(TaskState.RUNNING))
 
     @run_with_self_event_loop
     def test_kill_while_ready(self):
-        """Test killing a process while in state READY"""
-        pass   # TODO
+        """Test killing a node while in state READY"""
+        yield From(self._test_kill_in_state(TaskState.READY))
 
     @run_with_self_event_loop
-    def test_kill_while_killing(self):
-        """Test killing a process while in state KILLING"""
-        pass   # TODO
+    def test_kill_while_killed(self):
+        """Test killing a node while in state KILLED"""
+        yield From(self._test_kill_in_state(TaskState.KILLED))
 
     @run_with_self_event_loop
     def test_die_while_started(self):
