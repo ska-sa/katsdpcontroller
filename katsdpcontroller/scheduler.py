@@ -74,19 +74,19 @@ strong edge.
 
 
 from __future__ import print_function, division, absolute_import
-import networkx
-import ipaddress
 import logging
 import json
-import jsonschema
 import itertools
-import six
 import re
 import socket
 import contextlib
-from enum import Enum
-from katsdptelstate.endpoint import Endpoint
 from collections import namedtuple, deque
+from enum import Enum
+import ipaddress
+import six
+import networkx
+import jsonschema
+from katsdptelstate.endpoint import Endpoint
 from decorator import decorator
 import mesos.interface
 from mesos.interface import mesos_pb2
@@ -214,7 +214,6 @@ def poll_ports(host, ports, loop):
                 except OSError as e:
                     logging.debug('Port %d on %s not ready: %s', port, host, e)
                     yield From(trollius.sleep(1, loop=loop))
-                    pass
                 else:
                     break
         logging.debug('Port %d on %s ready', port, host)
@@ -331,7 +330,7 @@ class ImageResolver(object):
                 # It's probably a reasonable constraint so that we don't allow
                 # whitespace, / and other nonsense, even if Docker itself no
                 # longer enforces it.
-                if not re.match('^[\w][\w.-]{0,127}$', tag):
+                if not re.match(r'^[\w][\w.-]{0,127}$', tag):
                     raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
                 if self._tag is not None and tag != self._tag:
                     logger.warn("Image tag changed: %s -> %s", self._tag, tag)
@@ -537,11 +536,11 @@ class Agent(object):
                         ipv4_address=ipaddress.IPv4Address(value['ipv4_address']),
                         numa_node=value.get('numa_node'))
                 except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
-                    logger.warn('Could not parse {} ({})'.format(
-                        attribute.name, attribute.text.value))
+                    logger.warn('Could not parse %s (%s)',
+                                attribute.name, attribute.text.value)
                     logger.debug('Exception', exc_info=True)
                 except jsonschema.ValidationError as e:
-                    logger.warn('Validation error parsing {}: {}'.format(value, e))
+                    logger.warn('Validation error parsing %s: %s', value, e)
                 else:
                     self.interfaces.append(interface)
         # These resources all represent resources not yet allocated
