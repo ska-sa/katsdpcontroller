@@ -1195,6 +1195,11 @@ class Scheduler(mesos.interface.Scheduler):
             try:
                 yield From(trollius.gather(*futures, loop=self._loop))
             except trollius.CancelledError:
+                # It's important that pending is unambiguous relative to other
+                # concurrent launches. This is the case because groups[0]
+                # contains only nodes that we set to TaskState.STARTING, and
+                # thus the elements of self._pending have disjoint sets of
+                # nodes.
                 if pending in self._pending:
                     self._pending.remove(pending)
                     if not self._pending:
