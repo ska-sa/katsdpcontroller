@@ -514,6 +514,7 @@ class TestScheduler(object):
             self.driver = mock.create_autospec(mesos.scheduler.MesosSchedulerDriver,
                                                spec_set=True, instance=True)
             self.sched.set_driver(self.driver)
+            self.sched.registered(self.driver, 'framework', mock.sentinel.master_info)
         except Exception:
             self.loop.close()
             raise
@@ -786,6 +787,31 @@ class TestScheduler(object):
     def test_launch_cancel_wait_resource(self):
         """Test cancelling a launch while waiting for resources"""
         yield From(self._test_launch_cancel(TaskState.READY))
+
+    @run_with_self_event_loop
+    def test_offer_rescinded(self):
+        """Test offerRescinded"""
+        launch, kill = yield From(self._transition_node0(TaskState.STARTING, [self.nodes[0]]))
+        # Provide an offer that is insufficient
+        offer0 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        self.sched.resourceOffers(self.driver, [offer0])
+        yield From(defer(loop=self.loop))
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        # Rescind the offer
+        self.sched.offerRescinded(self.driver, offer0.id)
+        # Make a new offer, which is also insufficient, but which with the
+        # original one would have been sufficient.
+        offer1 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        self.sched.resourceOffers(self.driver, [offer1])
+        yield From(defer(loop=self.loop))
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        # Rescind an unknown offer. This can happen if an offer was accepted at
+        # the same time as it was rescinded.
+        offer2 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        self.sched.offerRescinded(self.driver, offer2.id)
+        yield From(defer(loop=self.loop))
+        assert_equal([], self.driver.mock_calls)
+        launch.cancel()
 
     @trollius.coroutine
     def _test_kill_in_state(self, state):

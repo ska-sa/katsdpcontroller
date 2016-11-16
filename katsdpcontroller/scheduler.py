@@ -1071,10 +1071,10 @@ class Scheduler(mesos.interface.Scheduler):
             self._clear_offers()
 
     @run_in_event_loop
-    def offerRescinded(self, offer_id):
+    def offerRescinded(self, driver, offer_id):
         for slave_id, offers in six.iteritems(self._offers):
             try:
-                del offers[offer_id]
+                del offers[offer_id.value]
                 if not offers:
                     del self._offers[slave_id]
                 break
