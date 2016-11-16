@@ -236,6 +236,14 @@ def _make_resources(resources):
     return out
 
 
+def _make_text_attr(name, value):
+    attr = mesos_pb2.Attribute()
+    attr.name = name
+    attr.type = mesos_pb2.Value.SCALAR
+    attr.text.value = value
+    return attr
+
+
 def _make_offer(framework_id, slave_id, host, resources, attrs=()):
     offer = mesos_pb2.Offer()
     offer.id.value = uuid.uuid4().hex
@@ -259,14 +267,6 @@ class TestAgent(unittest.TestCase):
 
     This imports from :class:`unittest.TestCase` so that we can use
     ``assertLogs``, which has not been ported to :mod:`nose.tools` yet."""
-    @classmethod
-    def _make_text_attr(cls, name, value):
-        attr = mesos_pb2.Attribute()
-        attr.name = name
-        attr.type = mesos_pb2.Value.SCALAR
-        attr.text.value = value
-        return attr
-
     def _make_offer(self, resources, attrs=()):
         return _make_offer(self.framework_id, self.slave_id, self.host, resources, attrs)
 
@@ -274,16 +274,15 @@ class TestAgent(unittest.TestCase):
         self.slave_id = 'slaveid'
         self.host = 'slavehostname'
         self.framework_id = 'framework'
-        self.if_attr = self._make_text_attr(
+        self.if_attr = _make_text_attr(
             'interface_eth0',
             '{"name": "eth0", "network": "net0", "ipv4_address": "192.168.254.254"}')
-        self.if_attr_bad_json = self._make_text_attr(
+        self.if_attr_bad_json = _make_text_attr(
             'interface_bad_json',
             '{not valid json')
-        self.if_attr_bad_schema = self._make_text_attr(
+        self.if_attr_bad_schema = _make_text_attr(
             'interface_bad_schema',
             '{"name": "eth1"}')
-
 
     def test_construct(self):
         """Construct an agent from some offers"""
@@ -310,6 +309,11 @@ class TestAgent(unittest.TestCase):
                                           ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
                                           numa_node=None)],
                      agent.interfaces)
+
+    def test_no_offers(self):
+        """ValueError is raised if zero offers are passed"""
+        with assert_raises(ValueError):
+            scheduler.Agent([])
 
     def test_bad_json(self):
         """A warning must be printed if an interface description is not valid JSON"""
@@ -375,6 +379,66 @@ class TestAgent(unittest.TestCase):
         assert_equal(72.0, agent.mem)
         assert_equal(0.0, agent.gpus)
         assert_equal([7], list(agent.cores))
+
+
+class TestPhysicalTask(object):
+    """Tests for :class:`katsdpcontroller.scheduler.PhysicalTask`"""
+
+    def setUp(self):
+        self.logical_task = scheduler.LogicalTask('task')
+        self.logical_task.cpus = 4.0
+        self.logical_task.mem = 256.0
+        self.logical_task.ports = ['port1', 'port2']
+        self.logical_task.cores = ['core1', 'core2', 'core3']
+        self.logical_task.networks = ['net0', 'net1']
+        attributes = [
+            _make_text_attr(
+                'interface_eth0',
+                '{"name": "eth0", "network": "net0", "ipv4_address": "192.168.1.1"}'),
+            _make_text_attr(
+                'interface_eth1',
+                '{"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}'),
+            _make_text_attr(
+                'interface_eth2',
+                '{"name": "eth2", "network": "net1", "ipv4_address": "192.168.3.1"}')
+        ]
+        offers = [_make_offer('framework', 'slaveid', 'slavehost',
+                              {'cpus': 8.0, 'mem': 256.0,
+                               'ports': [(30000, 31000)], 'cores': [(1, 8)]},
+                              attributes)]
+        agent = scheduler.Agent(offers)
+        self.allocation = scheduler.ResourceAllocation(agent)
+        self.allocation.cpus = self.logical_task.cpus
+        self.allocation.mem = self.logical_task.mem
+        self.allocation.ports = [30000, 30001]
+        self.allocation.cores = [1, 2, 3]
+
+    def test_properties_init(self):
+        """Resolved properties are ``None`` on construction"""
+        physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
+        assert_is_none(physical_task.agent)
+        assert_is_none(physical_task.host)
+        assert_is_none(physical_task.slave_id)
+        assert_is_none(physical_task.taskinfo)
+        assert_is_none(physical_task.allocation)
+        assert_equal({}, physical_task.interfaces)
+        assert_equal({}, physical_task.endpoints)
+        assert_equal({}, physical_task.ports)
+        assert_equal({}, physical_task.cores)
+
+    def test_allocate(self):
+        physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
+        physical_task.allocate(self.allocation)
+        assert_is(self.allocation.agent, physical_task.agent)
+        assert_equal('slavehost', physical_task.host)
+        assert_equal('slaveid', physical_task.slave_id)
+        assert_is(self.allocation, physical_task.allocation)
+        eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None)
+        eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None)
+        assert_equal({'net0': eth0, 'net1': eth1}, physical_task.interfaces)
+        assert_equal({}, physical_task.endpoints)
+        assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
+        assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
 
 
 class AnyOrderList(list):
@@ -504,7 +568,11 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_launch_closing(self):
         """Launch raises trollius.InvalidStateError if close has been called"""
-        pass   # TODO
+        yield From(self.sched.close())
+        with assert_raises(trollius.InvalidStateError):
+            # Timeout is just to ensure the test won't hang
+            yield From(trollius.wait_for(self.sched.launch(self.physical_graph, self.resolver),
+                                         timeout=1, loop=self.loop))
 
     @run_with_self_event_loop
     def test_launch_serial(self):

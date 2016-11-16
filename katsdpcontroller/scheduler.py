@@ -697,7 +697,7 @@ class PhysicalNode(object):
         This function should not manipulate the task state; the caller will
         set the state to :const:`TaskState.KILLED`.
         """
-        raise NotImplementedError()
+        pass
 
 
 class PhysicalExternal(PhysicalNode):
@@ -724,9 +724,6 @@ class PhysicalExternal(PhysicalNode):
         elif state == TaskState.KILLED:
             state = TaskState.DEAD
         super(PhysicalExternal, self).set_state(state)
-
-    def kill(self, driver):
-        pass
 
 
 class PhysicalTask(PhysicalNode):
@@ -904,6 +901,7 @@ class PhysicalTask(PhysicalNode):
         # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
+        super(PhysicalTask, self).kill(driver)
 
     def set_state(self, state):
         def callback(future):
