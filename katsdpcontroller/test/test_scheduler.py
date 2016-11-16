@@ -10,7 +10,6 @@ import ipaddress
 import logging
 import six
 import contextlib
-import functools
 import socket
 import trollius
 import networkx
@@ -26,6 +25,7 @@ def run_with_event_loop(func):
     it creates an event loop and runs the function on it.
     """
     func = trollius.coroutine(func)
+
     @six.wraps(func)
     def wrapper(*args, **kwargs):
         loop = trollius.new_event_loop()
@@ -40,6 +40,7 @@ def run_with_self_event_loop(func):
     it uses one provided by the containing object.
     """
     func = trollius.coroutine(func)
+
     @six.wraps(func)
     def wrapper(self, *args, **kwargs):
         self.loop.run_until_complete(func(self, *args, **kwargs))
@@ -289,7 +290,7 @@ class TestAgent(unittest.TestCase):
         attrs = [self.if_attr]
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
-                         'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
+                              'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
             self._make_offer({'cpus': 0.5, 'mem': 123.5, 'gpus': 1.0,
                               'cores': [(8, 9)]}, attrs)
         ]
@@ -619,7 +620,8 @@ class TestScheduler(object):
         expected_taskinfo1.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
         expected_taskinfo1.discovery.name = 'node1'
 
-        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver), loop=self.loop)
+        launch = trollius.async(self.sched.launch(
+            self.physical_graph, self.resolver), loop=self.loop)
         yield From(defer(loop=self.loop))
         # The tasks must be in state STARTING, but not yet RUNNING because
         # there are no offers.
