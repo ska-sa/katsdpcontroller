@@ -26,6 +26,8 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # string containing a mapping from stream_name to stream_type.
      # This is temporary for AR1/1.5 and should be replaced by a
      # per stream sensor indicating type directly from the CBF
+     # The .lower() is needed because CBF uses lower case in stream
+     # specific sensor names, but reports stream names to CAM in mixed case.
     if beamformer_mode not 'none':
         streams += ",beam_0x:beamformer,beam_0y:beamformer"
      # we also include a reference to the fengine stream so
