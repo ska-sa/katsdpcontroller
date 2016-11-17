@@ -28,7 +28,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # per stream sensor indicating type directly from the CBF
      # The .lower() is needed because CBF uses lower case in stream
      # specific sensor names, but reports stream names to CAM in mixed case.
-    if beamformer_mode not 'none':
+    if beamformer_mode != 'none':
         streams += ",beam_0x:beamformer,beam_0y:beamformer"
      # we also include a reference to the fengine stream so
      # we can get n_samples_between_spectra
