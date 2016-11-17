@@ -90,7 +90,6 @@ from katsdptelstate.endpoint import Endpoint
 from decorator import decorator
 import mesos.interface
 from mesos.interface import mesos_pb2
-import mesos.scheduler
 import trollius
 from trollius import From, Return
 
