@@ -22,7 +22,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
-    streams = "{}:visibility".format(c_stream)
+    streams = "{}:visibility".format(c_stream.lower())
      # string containing a mapping from stream_name to stream_type.
      # This is temporary for AR1/1.5 and should be replaced by a
      # per stream sensor indicating type directly from the CBF
