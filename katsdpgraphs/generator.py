@@ -152,6 +152,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     G.add_node('sdp.timeplot.1',{
         'spead_port': r.get_port('spead_sdisp'),
         'html_port': r.get_sdisp_port_pair('timeplot')[0],
+        'cbf_channels': cbf_channels,
         'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),
         'config_base': '/var/kat/config/.katsdpdisp',
         'data_port': r.get_sdisp_port_pair('timeplot')[1],
