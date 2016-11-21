@@ -91,7 +91,7 @@ from katsdptelstate.endpoint import Endpoint
 from decorator import decorator
 import trollius
 from trollius import From, Return
-import addict
+from addict import Dict
 import pymesos
 
 
@@ -500,7 +500,7 @@ class LogicalTask(LogicalNode):
         self.networks = []
         self.image = None
         self.command = []
-        self.container = addict.Dict()
+        self.container = Dict()
         self.container.type = 'DOCKER'
         self.physical_factory = PhysicalTask
 
@@ -839,7 +839,7 @@ class PhysicalTask(PhysicalNode):
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
-        taskinfo = addict.Dict()
+        taskinfo = Dict()
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args()
@@ -861,7 +861,7 @@ class PhysicalTask(PhysicalNode):
         for r in SCALAR_RESOURCES:
             value = getattr(self.logical_node, r)
             if value > 0:
-                resource = addict.Dict()
+                resource = Dict()
                 resource.name = r
                 resource.type = 'SCALAR'
                 resource.scalar.value = value
@@ -869,12 +869,12 @@ class PhysicalTask(PhysicalNode):
         for r in RANGE_RESOURCES:
             value = getattr(self.allocation, r)
             if value:
-                resource = addict.Dict()
+                resource = Dict()
                 resource.name = r
                 resource.type = 'RANGES'
                 resource.ranges.range = []
                 for item in value:
-                    resource.ranges.range.append(addict.Dict(begin=item, end=item))
+                    resource.ranges.range.append(Dict(begin=item, end=item))
                 taskinfo.resources.append(resource)
         taskinfo.discovery.visibility = 'EXTERNAL'
         taskinfo.discovery.name = self.name
@@ -882,9 +882,9 @@ class PhysicalTask(PhysicalNode):
         for port_name, port_number in six.iteritems(self.ports):
             # TODO: need a way to indicate non-TCP
             taskinfo.discovery.ports.ports.append(
-                addict.Dict(number=port_number,
-                            name=port_name,
-                            protocol='tcp'))
+                Dict(number=port_number,
+                     name=port_name,
+                     protocol='tcp'))
         self.taskinfo = taskinfo
 
     def subst_args(self):
