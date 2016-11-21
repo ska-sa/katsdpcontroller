@@ -16,7 +16,8 @@ setup (
         ],
     setup_requires = ['katversion'],
     install_requires = [
-        'mesos.interface', 'mesos.native',
+        'pymesos>=0.2.0',
+        'addict',
         'trollius',
         'decorator',
         'jsonschema',

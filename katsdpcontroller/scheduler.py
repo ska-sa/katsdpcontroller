@@ -80,6 +80,7 @@ import itertools
 import re
 import socket
 import contextlib
+import copy
 from collections import namedtuple, deque
 from enum import Enum
 import ipaddress
@@ -88,20 +89,20 @@ import networkx
 import jsonschema
 from katsdptelstate.endpoint import Endpoint
 from decorator import decorator
-import mesos.interface
-from mesos.interface import mesos_pb2
 import trollius
 from trollius import From, Return
+import addict
+import pymesos
 
 
 SCALAR_RESOURCES = ['cpus', 'gpus', 'mem']
 RANGE_RESOURCES = ['ports', 'cores']
 TERMINAL_STATUSES = frozenset([
-    mesos_pb2.TASK_FINISHED,
-    mesos_pb2.TASK_FAILED,
-    mesos_pb2.TASK_KILLED,
-    mesos_pb2.TASK_LOST,
-    mesos_pb2.TASK_ERROR])
+    'TASK_FINISHED',
+    'TASK_FAILED',
+    'TASK_KILLED',
+    'TASK_LOST',
+    'TASK_ERROR'])
 INTERFACE_SCHEMA = {
     'type': 'object',
     'properties': {
@@ -499,8 +500,8 @@ class LogicalTask(LogicalNode):
         self.networks = []
         self.image = None
         self.command = []
-        self.container = mesos_pb2.ContainerInfo()
-        self.container.type = mesos_pb2.ContainerInfo.DOCKER
+        self.container = addict.Dict()
+        self.container.type = 'DOCKER'
         self.physical_factory = PhysicalTask
 
     def valid_agent(self, attributes):
@@ -519,13 +520,13 @@ class Agent(object):
         if not offers:
             raise ValueError('At least one offer must be specified')
         self.offers = offers
-        self.slave_id = offers[0].slave_id.value
+        self.agent_id = offers[0].agent_id.value
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
         for attribute in offers[0].attributes:
             if attribute.name.startswith('interface_') and \
-                    attribute.type == mesos_pb2.Value.SCALAR:
+                    attribute.type == 'SCALAR':
                 try:
                     value = json.loads(attribute.text.value)
                     jsonschema.validate(value, INTERFACE_SCHEMA)
@@ -761,7 +762,7 @@ class PhysicalTask(PhysicalNode):
         Information about the agent on which this task is running.
     host : str
         Host on which this task is running
-    slave_id : str
+    agent_id : str
         Slave ID of the agent on which this task is running
     _poller : :class:`trollius.Task`
         Task which asynchronously waits for the task's ports to open up. It is
@@ -793,9 +794,9 @@ class PhysicalTask(PhysicalNode):
             return None
 
     @property
-    def slave_id(self):
+    def agent_id(self):
         if self.allocation:
-            return self.allocation.agent.slave_id
+            return self.allocation.agent.agent_id
         else:
             return None
 
@@ -838,7 +839,7 @@ class PhysicalTask(PhysicalNode):
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
-        taskinfo = mesos_pb2.TaskInfo()
+        taskinfo = addict.Dict()
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args()
@@ -848,38 +849,42 @@ class PhysicalTask(PhysicalNode):
             command = ['taskset', '-c', ','.join(str(core) for core in self.allocation.cores)] + command
         if command:
             taskinfo.command.value = command[0]
-            taskinfo.command.arguments.extend(command[1:])
+            taskinfo.command.arguments = command[1:]
         taskinfo.command.shell = False
-        taskinfo.container.CopyFrom(self.logical_node.container)
+        taskinfo.container = copy.deepcopy(self.logical_node.container)
         image_path = resolver.image_resolver(self.logical_node.image)
         taskinfo.container.docker.image = image_path
         taskinfo.container.docker.force_pull_image = \
             resolver.image_resolver.pullable(image_path)
-        taskinfo.slave_id.value = self.slave_id
+        taskinfo.agent_id.value = self.agent_id
+        taskinfo.resources = []
         for r in SCALAR_RESOURCES:
             value = getattr(self.logical_node, r)
             if value > 0:
-                resource = taskinfo.resources.add()
+                resource = addict.Dict()
                 resource.name = r
-                resource.type = mesos_pb2.Value.SCALAR
+                resource.type = 'SCALAR'
                 resource.scalar.value = value
+                taskinfo.resources.append(resource)
         for r in RANGE_RESOURCES:
             value = getattr(self.allocation, r)
             if value:
-                resource = taskinfo.resources.add()
+                resource = addict.Dict()
                 resource.name = r
-                resource.type = mesos_pb2.Value.RANGES
+                resource.type = 'RANGES'
+                resource.ranges.range = []
                 for item in value:
-                    rng = resource.ranges.range.add()
-                    rng.begin = item
-                    rng.end = item
-        taskinfo.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
+                    resource.ranges.range.append(addict.Dict(begin=item, end=item))
+                taskinfo.resources.append(resource)
+        taskinfo.discovery.visibility = 'EXTERNAL'
         taskinfo.discovery.name = self.name
+        taskinfo.discovery.ports.ports = []
         for port_name, port_number in six.iteritems(self.ports):
-            port = taskinfo.discovery.ports.ports.add()
-            port.number = port_number
-            port.name = port_name
-            port.protocol = 'tcp'    # TODO: need a way to indicate this
+            # TODO: need a way to indicate non-TCP
+            taskinfo.discovery.ports.ports.append(
+                addict.Dict(number=port_number,
+                            name=port_name,
+                            protocol='tcp'))
         self.taskinfo = taskinfo
 
     def subst_args(self):
@@ -959,7 +964,7 @@ def run_in_event_loop(func, *args, **kw):
     args[0]._loop.call_soon_threadsafe(func, *args, **kw)
 
 
-class Scheduler(mesos.interface.Scheduler):
+class Scheduler(pymesos.Scheduler):
     """Top-level scheduler implementing the Mesos Scheduler API.
 
     Mesos calls the callbacks provided in this class from another thread. To
@@ -1019,7 +1024,7 @@ class Scheduler(mesos.interface.Scheduler):
                                 break
                             except InsufficientResourcesError as e:
                                 logger.debug('Cannot add %s to %s: %s',
-                                             node.name, agent.slave_id, e)
+                                             node.name, agent.agent_id, e)
                         else:
                             raise InsufficientResourcesError(
                                 'No agent found for {}'.format(node.name))
@@ -1043,7 +1048,7 @@ class Scheduler(mesos.interface.Scheduler):
                     # TODO: does this need to use run_in_executor? Is it
                     # thread-safe to do so?
                     self._driver.launchTasks(offer_ids, taskinfos[agent])
-                    logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.slave_id)
+                    logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.agent_id)
                 self._offers = {}
                 self._pending.popleft()
                 if not self._pending:
@@ -1062,7 +1067,7 @@ class Scheduler(mesos.interface.Scheduler):
     @run_in_event_loop
     def resourceOffers(self, driver, offers):
         for offer in offers:
-            self._offers.setdefault(offer.slave_id.value, {})[offer.id.value] = offer
+            self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
         if self._pending:
             self._try_launch()
         else:
@@ -1070,11 +1075,11 @@ class Scheduler(mesos.interface.Scheduler):
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
-        for slave_id, offers in six.iteritems(self._offers):
+        for agent_id, offers in six.iteritems(self._offers):
             try:
                 del offers[offer_id.value]
                 if not offers:
-                    del self._offers[slave_id]
+                    del self._offers[agent_id]
                 break
             except KeyError:
                 pass
@@ -1083,8 +1088,7 @@ class Scheduler(mesos.interface.Scheduler):
     def statusUpdate(self, driver, status):
         logging.debug(
             'Update: task %s in state %s (%s)',
-            status.task_id.value, mesos_pb2.TaskState.Name(status.state),
-            status.message)
+            status.task_id.value, status.state, status.message)
         try:
             task = self._active[status.task_id.value][0]
         except KeyError:
@@ -1093,7 +1097,7 @@ class Scheduler(mesos.interface.Scheduler):
             if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
                 del self._active[status.task_id.value]
-            elif status.state == mesos_pb2.TASK_RUNNING:
+            elif status.state == 'TASK_RUNNING':
                 if task.state < TaskState.RUNNING:
                     task.set_state(TaskState.RUNNING)
                     # The task itself is responsible for advancing to
