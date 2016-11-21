@@ -3,8 +3,6 @@ import mock
 from nose.tools import *
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
-from mesos.interface import mesos_pb2
-import mesos.scheduler
 import uuid
 import ipaddress
 import logging
@@ -13,6 +11,8 @@ import contextlib
 import socket
 import trollius
 import networkx
+import pymesos
+from addict import Dict
 from trollius import From, Return
 try:
     import unittest2 as unittest
@@ -81,13 +81,11 @@ class TestRangeResource(object):
 
     def test_add_resource(self):
         rr = scheduler.RangeResource()
-        resource = mesos_pb2.Resource()
-        range1 = resource.ranges.range.add()
-        range1.begin = 5
-        range1.end = 7
-        range2 = resource.ranges.range.add()
-        range2.begin = 20
-        range2.end = 29
+        resource = Dict()
+        resource.ranges.range = [
+            Dict(begin=5, end=7),
+            Dict(begin=20, end=29)
+        ]
         rr.add_resource(resource)
         assert_equal([(5, 8), (20, 30)], list(rr._ranges))
         assert_equal(13, len(rr))
@@ -222,42 +220,41 @@ class TestTaskIDAllocator(object):
 def _make_resources(resources):
     out = []
     for name, value in six.iteritems(resources):
-        resource = mesos_pb2.Resource()
+        resource = Dict()
         resource.name = name
         if isinstance(value, float):
-            resource.type = mesos_pb2.Value.SCALAR
+            resource.type = 'SCALAR'
             resource.scalar.value = value
         else:
-            resource.type = mesos_pb2.Value.RANGES
+            resource.type = 'RANGES'
+            resource.ranges.range = []
             for start, stop in value:
-                rng = resource.ranges.range.add()
-                rng.begin = start
-                rng.end = stop - 1
+                resource.ranges.range.append(Dict(begin=start, end=stop - 1))
         out.append(resource)
     return out
 
 
 def _make_text_attr(name, value):
-    attr = mesos_pb2.Attribute()
+    attr = Dict()
     attr.name = name
-    attr.type = mesos_pb2.Value.SCALAR
+    attr.type = 'SCALAR'
     attr.text.value = value
     return attr
 
 
-def _make_offer(framework_id, slave_id, host, resources, attrs=()):
-    offer = mesos_pb2.Offer()
+def _make_offer(framework_id, agent_id, host, resources, attrs=()):
+    offer = Dict()
     offer.id.value = uuid.uuid4().hex
     offer.framework_id.value = framework_id
-    offer.slave_id.value = slave_id
+    offer.agent_id.value = agent_id
     offer.hostname = host
-    offer.resources.extend(_make_resources(resources))
-    offer.attributes.extend(attrs)
+    offer.resources = _make_resources(resources)
+    offer.attributes = attrs
     return offer
 
 
 def _make_status(task_id, state):
-    status = mesos_pb2.TaskStatus()
+    status = Dict()
     status.task_id.value = task_id
     status.state = state
     return status
@@ -269,11 +266,11 @@ class TestAgent(unittest.TestCase):
     This imports from :class:`unittest.TestCase` so that we can use
     ``assertLogs``, which has not been ported to :mod:`nose.tools` yet."""
     def _make_offer(self, resources, attrs=()):
-        return _make_offer(self.framework_id, self.slave_id, self.host, resources, attrs)
+        return _make_offer(self.framework_id, self.agent_id, self.host, resources, attrs)
 
     def setUp(self):
-        self.slave_id = 'slaveid'
-        self.host = 'slavehostname'
+        self.agent_id = 'agentid'
+        self.host = 'agenthostname'
         self.framework_id = 'framework'
         self.if_attr = _make_text_attr(
             'interface_eth0',
@@ -295,7 +292,7 @@ class TestAgent(unittest.TestCase):
                               'cores': [(8, 9)]}, attrs)
         ]
         agent = scheduler.Agent(offers)
-        assert_equal(self.slave_id, agent.slave_id)
+        assert_equal(self.agent_id, agent.agent_id)
         assert_equal(self.host, agent.host)
         assert_equal(len(attrs), len(agent.attributes))
         for attr, agent_attr in zip(attrs, agent.attributes):
@@ -403,7 +400,7 @@ class TestPhysicalTask(object):
                 'interface_eth2',
                 '{"name": "eth2", "network": "net1", "ipv4_address": "192.168.3.1"}')
         ]
-        offers = [_make_offer('framework', 'slaveid', 'slavehost',
+        offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
                                'ports': [(30000, 31000)], 'cores': [(1, 8)]},
                               attributes)]
@@ -419,7 +416,7 @@ class TestPhysicalTask(object):
         physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
         assert_is_none(physical_task.agent)
         assert_is_none(physical_task.host)
-        assert_is_none(physical_task.slave_id)
+        assert_is_none(physical_task.agent_id)
         assert_is_none(physical_task.taskinfo)
         assert_is_none(physical_task.allocation)
         assert_equal({}, physical_task.interfaces)
@@ -431,8 +428,8 @@ class TestPhysicalTask(object):
         physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
         physical_task.allocate(self.allocation)
         assert_is(self.allocation.agent, physical_task.agent)
-        assert_equal('slavehost', physical_task.host)
-        assert_equal('slaveid', physical_task.slave_id)
+        assert_equal('agenthost', physical_task.host)
+        assert_equal('agentid', physical_task.agent_id)
         assert_is(self.allocation, physical_task.allocation)
         eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None)
         eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None)
@@ -467,9 +464,9 @@ class AnyOrderList(list):
 
 class TestScheduler(object):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
-    def _make_offer(self, resources, slave_num=0, attrs=()):
-        return _make_offer(self.framework_id, 'slaveid{}'.format(slave_num),
-                           'slavehost{}'.format(slave_num), resources, attrs)
+    def _make_offer(self, resources, agent_num=0, attrs=()):
+        return _make_offer(self.framework_id, 'agentid{}'.format(agent_num),
+                           'agenthost{}'.format(agent_num), resources, attrs)
 
     def _status_update(self, task_id, state):
         status = _make_status(task_id, state)
@@ -511,7 +508,7 @@ class TestScheduler(object):
             self.nodes[2].host = 'remotehost'
             self.nodes[2].ports['foo'] = 10000
             self.sched = scheduler.Scheduler(self.loop)
-            self.driver = mock.create_autospec(mesos.scheduler.MesosSchedulerDriver,
+            self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
                                                spec_set=True, instance=True)
             self.sched.set_driver(self.driver)
             self.sched.registered(self.driver, 'framework', mock.sentinel.master_info)
@@ -586,40 +583,36 @@ class TestScheduler(object):
         # - custom wait_ports
         offer0 = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
         offer1 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
-        expected_taskinfo0 = mesos_pb2.TaskInfo()
+        expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
         expected_taskinfo0.task_id.value = 'test-00000000'
-        expected_taskinfo0.slave_id.value = 'slaveid0'
+        expected_taskinfo0.agent_id.value = 'agentid0'
         expected_taskinfo0.command.shell = False
         expected_taskinfo0.command.value = 'hello'
-        expected_taskinfo0.command.arguments.extend(['--port=30000'])
-        expected_taskinfo0.container.type = mesos_pb2.ContainerInfo.DOCKER
+        expected_taskinfo0.command.arguments = ['--port=30000']
+        expected_taskinfo0.container.type = 'DOCKER'
         expected_taskinfo0.container.docker.image = 'sdp/image0:latest'
         expected_taskinfo0.container.docker.force_pull_image = False
-        expected_taskinfo0.resources.extend(
-            _make_resources({'cpus': 1.0, 'ports': [(30000, 30001)]}))
-        expected_taskinfo0.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
+        expected_taskinfo0.resources = _make_resources({'cpus': 1.0, 'ports': [(30000, 30001)]})
+        expected_taskinfo0.discovery.visibility = 'EXTERNAL'
         expected_taskinfo0.discovery.name = 'node0'
-        port = expected_taskinfo0.discovery.ports.ports.add()
-        port.number = 30000
-        port.name = 'port'
-        port.protocol = 'tcp'
-        expected_taskinfo1 = mesos_pb2.TaskInfo()
+        expected_taskinfo0.discovery.ports.ports = [Dict(number=30000, name='port', protocol='tcp')]
+        expected_taskinfo1 = Dict()
         expected_taskinfo1.name = 'node1'
         expected_taskinfo1.task_id.value = 'test-00000001'
-        expected_taskinfo1.slave_id.value = 'slaveid1'
+        expected_taskinfo1.agent_id.value = 'agentid1'
         expected_taskinfo1.command.shell = False
         expected_taskinfo1.command.value = 'test'
-        expected_taskinfo1.command.arguments.extend([
-            '--host=slavehost1', '--remote=slavehost0:30000',
-            '--another=remotehost:10000'])
-        expected_taskinfo1.container.type = mesos_pb2.ContainerInfo.DOCKER
+        expected_taskinfo1.command.arguments = [
+            '--host=agenthost1', '--remote=agenthost0:30000',
+            '--another=remotehost:10000']
+        expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
         expected_taskinfo1.container.docker.force_pull_image = False
-        expected_taskinfo1.resources.extend(
-            _make_resources({'cpus': 0.5}))
-        expected_taskinfo1.discovery.visibility = mesos_pb2.DiscoveryInfo.EXTERNAL
+        expected_taskinfo1.resources = _make_resources({'cpus': 0.5})
+        expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'
+        expected_taskinfo1.discovery.ports.ports = []
 
         launch = trollius.async(self.sched.launch(
             self.physical_graph, self.resolver), loop=self.loop)
@@ -644,8 +637,8 @@ class TestScheduler(object):
         self.sched.resourceOffers(self.driver, [offer0])
         yield From(defer(loop=self.loop))
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
-        assert_equal('slavehost0', self.nodes[0].host)
-        assert_equal('slaveid0', self.nodes[0].slave_id)
+        assert_equal('agenthost0', self.nodes[0].host)
+        assert_equal('agentid0', self.nodes[0].agent_id)
         assert_equal({'port': 30000}, self.nodes[0].ports)
         assert_equal({}, self.nodes[0].cores)
         assert_is_none(self.nodes[0].status)
@@ -662,14 +655,14 @@ class TestScheduler(object):
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = trollius.Future(self.loop)
             poll_ports.return_value = poll_future
-            status = self._status_update('test-00000000', mesos_pb2.TASK_RUNNING)
+            status = self._status_update('test-00000000', 'TASK_RUNNING')
             yield From(defer(loop=self.loop))
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
             assert_equal(status, self.nodes[0].status)
             assert_equal([mock.call.acknowledgeStatusUpdate(status)],
                          self.driver.mock_calls)
             self.driver.reset_mock()
-            poll_ports.assert_called_once_with('slavehost0', [30000], self.loop)
+            poll_ports.assert_called_once_with('agenthost0', [30000], self.loop)
         # Make poll_ports ready. Node 0 should now become ready, and offers
         # should be revived to get resources for node 1.
         poll_future.set_result(None)
@@ -682,14 +675,14 @@ class TestScheduler(object):
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.STARTED, self.nodes[1].state)
         assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
-        assert_equal('slaveid1', self.nodes[1].slave_id)
+        assert_equal('agentid1', self.nodes[1].agent_id)
         assert_equal([
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers()], self.driver.mock_calls)
         self.driver.reset_mock()
         # Finally, tell the scheduler that node 1 is running. There are no
         # ports, so it will go straight to READY.
-        status = self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
+        status = self._status_update('test-00000001', 'TASK_RUNNING')
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_equal(status, self.nodes[1].status)
@@ -729,7 +722,7 @@ class TestScheduler(object):
                 with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
                     poll_future = trollius.Future(self.loop)
                     poll_ports.return_value = poll_future
-                    self._status_update('test-00000000', mesos_pb2.TASK_RUNNING)
+                    self._status_update('test-00000000', 'TASK_RUNNING')
                     yield From(defer(loop=self.loop))
                 assert_equal(TaskState.RUNNING, self.nodes[0].state)
                 if target_state > TaskState.RUNNING:
@@ -742,7 +735,7 @@ class TestScheduler(object):
                         yield From(defer(loop=self.loop))
                         assert_equal(TaskState.KILLED, self.nodes[0].state)
                         if target_state > TaskState.KILLED:
-                            self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+                            self._status_update('test-00000000', 'TASK_KILLED')
                         yield From(defer(loop=self.loop))
         self.driver.reset_mock()
         assert_equal(target_state, self.nodes[0].state)
@@ -755,7 +748,7 @@ class TestScheduler(object):
         offer = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.resourceOffers(self.driver, [offer])
         yield From(defer(loop=self.loop))
-        self._status_update('test-00000001', mesos_pb2.TASK_RUNNING)
+        self._status_update('test-00000001', 'TASK_RUNNING')
         yield From(defer(loop=self.loop))
         assert_true(launch.done())  # Ensures the next line won't hang the test
         yield From(launch)
@@ -822,7 +815,7 @@ class TestScheduler(object):
         yield From(defer(loop=self.loop))
         if state > TaskState.STARTING:
             assert_equal(TaskState.KILLED, self.nodes[0].state)
-            status = self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+            status = self._status_update('test-00000000', 'TASK_KILLED')
             yield From(defer(loop=self.loop))
             assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
@@ -858,7 +851,7 @@ class TestScheduler(object):
     def _test_die_in_state(self, state):
         """Test a node dying on its own while it is in the given state"""
         launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
-        status = self._status_update('test-00000000', mesos_pb2.TASK_FINISHED)
+        status = self._status_update('test-00000000', 'TASK_FINISHED')
         yield From(defer(loop=self.loop))
         assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
@@ -895,7 +888,7 @@ class TestScheduler(object):
         assert_equal(TaskState.READY, self.nodes[2].state)
         self.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
-        status = self._status_update('test-00000001', mesos_pb2.TASK_KILLED)
+        status = self._status_update('test-00000001', 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         assert_equal(AnyOrderList([
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
@@ -906,7 +899,7 @@ class TestScheduler(object):
         assert_equal(TaskState.DEAD, self.nodes[2].state)
         assert_false(kill.done())
         # node0 now dies, to finish the cleanup
-        self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+        self._status_update('test-00000000', 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.DEAD, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
@@ -924,9 +917,9 @@ class TestScheduler(object):
         yield From(defer(loop=self.loop))
         close = trollius.async(self.sched.close(), loop=self.loop)
         yield From(defer(loop=self.loop))
-        status1 = self._status_update('test-00000001', mesos_pb2.TASK_KILLED)
+        status1 = self._status_update('test-00000001', 'TASK_KILLED')
         yield From(defer(loop=self.loop))
-        status0 = self._status_update('test-00000000', mesos_pb2.TASK_KILLED)
+        status0 = self._status_update('test-00000000', 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         assert_true(close.done())
         yield From(close)
@@ -949,4 +942,4 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_status_unknown_task_id(self):
         """statusUpdate must correctly handle an unknown task ID"""
-        self._status_update('test-01234567', mesos_pb2.TASK_LOST)
+        self._status_update('test-01234567', 'TASK_LOST')
