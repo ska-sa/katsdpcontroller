@@ -21,7 +21,7 @@ from katsdpcontroller.scheduler import (
     LogicalExternal, PhysicalExternal,
     LogicalTask, PhysicalTask,
     TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator,
-    instantiate)
+    instantiate, RANGE_RESOURCES)
 
 
 logger = logging.getLogger(__name__)
@@ -31,27 +31,33 @@ class TelstateTask(PhysicalTask):
     def resolve(self, resolver, graph):
         super(TelstateTask, self).resolve(resolver, graph)
         # Add a port mapping
-        self.taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
-        portmap = self.taskinfo.container.docker.port_mappings.add()
+        self.taskinfo.container.docker.network = 'BRIDGE'
+        portmap = addict.Dict()
         portmap.host_port = self.ports['telstate']
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
+        self.taskinfo.container.docker.port_mappings = [portmap]
 
 
 class SDPTask(PhysicalTask):
     """Task that stores configuration in telstate"""
     def resolve(self, resolver, graph):
         super(SDPTask, self).resolve(resolver, graph)
-        config = graph.node[self].get('config', {})
+        config = {}
+        fconfig = {}   # Convert processed through subst_args
+        fconfig.update(graph.node[self].get('config', {}))
+        for r in RANGE_RESOURCES:
+            for name, value in six.iteritems(getattr(self, r)):
+                config[name] = value
         for src, trg, attr in graph.out_edges_iter(self, data=True):
-            config.update(attr.get('config', {}))
+            fconfig.update(attr.get('config', {}))
             if 'port' in attr and trg.state >= TaskState.STARTED:
                 port = attr['port']
                 config[port] = trg.host + ':' + str(trg.ports[port])
         for src, trg, attr in graph.in_edges_iter(self, data=True):
-            config.update(attr.get('config', {}))
+            fconfig.update(attr.get('config', {}))
         subst = self.subst_args()
-        for key, value in six.iteritems(config):
+        for key, value in six.iteritems(fconfig):
             config[key] = value.format(**subst)
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
