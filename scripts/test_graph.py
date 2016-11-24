@@ -4,14 +4,14 @@ import logging
 import argparse
 import trollius
 import signal
-import six
 import sys
+import six
 import networkx
 from trollius import From, Return
-from mesos.interface import mesos_pb2
-import mesos.scheduler
-import katcp
+import pymesos
+import addict
 from decorator import decorator
+import katcp
 from katcp.kattypes import request, return_reply, Str, Float
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
@@ -21,7 +21,7 @@ from katsdpcontroller.scheduler import (
     LogicalExternal, PhysicalExternal,
     LogicalTask, PhysicalTask,
     TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator,
-    instantiate)
+    instantiate, RANGE_RESOURCES)
 
 
 logger = logging.getLogger(__name__)
@@ -31,27 +31,33 @@ class TelstateTask(PhysicalTask):
     def resolve(self, resolver, graph):
         super(TelstateTask, self).resolve(resolver, graph)
         # Add a port mapping
-        self.taskinfo.container.docker.network = mesos_pb2.ContainerInfo.DockerInfo.BRIDGE
-        portmap = self.taskinfo.container.docker.port_mappings.add()
+        self.taskinfo.container.docker.network = 'BRIDGE'
+        portmap = addict.Dict()
         portmap.host_port = self.ports['telstate']
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
+        self.taskinfo.container.docker.port_mappings = [portmap]
 
 
 class SDPTask(PhysicalTask):
     """Task that stores configuration in telstate"""
     def resolve(self, resolver, graph):
         super(SDPTask, self).resolve(resolver, graph)
-        config = graph.node[self].get('config', {})
+        config = {}
+        fconfig = {}   # Convert processed through subst_args
+        fconfig.update(graph.node[self].get('config', {}))
+        for r in RANGE_RESOURCES:
+            for name, value in six.iteritems(getattr(self, r)):
+                config[name] = value
         for src, trg, attr in graph.out_edges_iter(self, data=True):
-            config.update(attr.get('config', {}))
+            fconfig.update(attr.get('config', {}))
             if 'port' in attr and trg.state >= TaskState.STARTED:
                 port = attr['port']
                 config[port] = trg.host + ':' + str(trg.ports[port])
         for src, trg, attr in graph.in_edges_iter(self, data=True):
-            config.update(attr.get('config', {}))
+            fconfig.update(attr.get('config', {}))
         subst = self.subst_args()
-        for key, value in six.iteritems(config):
+        for key, value in six.iteritems(fconfig):
             config[key] = value.format(**subst)
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
@@ -96,10 +102,11 @@ def make_graph():
     filewriter.image = 'katsdpfilewriter'
     filewriter.command = ['file_writer.py', '--file-base', '/var/kat/data']
     filewriter.ports = ['port']
-    data_vol = filewriter.container.volumes.add()
-    data_vol.mode = mesos_pb2.Volume.RW
+    data_vol = addict.Dict()
+    data_vol.mode = 'RW'
     data_vol.container_path = '/var/kat/data'
     data_vol.host_path = '/tmp'
+    filewriter.container.volumes = [data_vol]
     g.add_node(filewriter)
     g.add_edge(filewriter, l0_spectral, port='SPEAD')
 
@@ -129,6 +136,15 @@ def async_request(func, *args, **kwargs):
     raise katcp.AsyncReply()
 
 
+class Driver(pymesos.MesosSchedulerDriver):
+    """Overrides :class:`pymesos.MesosSchedulerDriver` to make acknowledgements
+    explicit. This is a bit fragile and should eventually be pushed to pymesos.
+    """
+    def on_update(self, event):
+        status = event['status']
+        self.sched.statusUpdate(self, self._dict_cls(status))
+
+
 class Server(katcp.DeviceServer):
     VERSION_INFO = ('dummy', 0, 1)
     BUILD_INFO = ('katsdpcontroller',) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
@@ -137,8 +153,8 @@ class Server(katcp.DeviceServer):
         super(Server, self).__init__(*args, **kwargs)
         self._loop = loop
         self._scheduler = Scheduler(loop)
-        self._driver = mesos.scheduler.MesosSchedulerDriver(
-            self._scheduler, framework, master, False)
+        self._driver = Driver(
+            self._scheduler, framework, master, use_addict=True)
         self._scheduler.set_driver(self._driver)
         self._driver.start()
         self._resolver = resolver
@@ -262,8 +278,8 @@ def main():
     parser.add_argument('-a', '--host', type=str, default='', metavar='HOST', help='katcp host address')
     args = parser.parse_args()
 
-    framework = mesos_pb2.FrameworkInfo()
-    framework.user = ''      # Let Mesos work it out
+    framework = addict.Dict()
+    framework.user = 'root'
     framework.name = 'katsdpcontroller'
     framework.checkpoint = True
     framework.principal = 'sdp-sample-framework'
@@ -293,7 +309,7 @@ def main():
 
     loop.add_signal_handler(signal.SIGINT, lambda: trollius.async(shutdown()))
     status = loop.run_until_complete(finished)
-    if status != mesos_pb2.DRIVER_STOPPED:
+    if status != 'DRIVER_STOPPED':
         sys.exit(1)
 
 
