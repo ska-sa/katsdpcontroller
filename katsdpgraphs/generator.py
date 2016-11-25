@@ -22,6 +22,18 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
+    streams = "{}:visibility".format(c_stream.lower())
+     # string containing a mapping from stream_name to stream_type.
+     # This is temporary for AR1/1.5 and should be replaced by a
+     # per stream sensor indicating type directly from the CBF
+     # The .lower() is needed because CBF uses lower case in stream
+     # specific sensor names, but reports stream names to CAM in mixed case.
+    if beamformer_mode != 'none':
+        streams += ",beam_0x:beamformer,beam_0y:beamformer"
+     # we also include a reference to the fengine stream so
+     # we can get n_samples_between_spectra
+    streams += ",fengine_stream:fengine"
+
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
@@ -40,6 +52,8 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     # cam2telstate node
     G.add_node('sdp.cam2telstate.1', {
         'url': r.get_url('CAMDATA'),
+        'streams': streams,
+        'collapse_streams': True,
         'docker_image': r.get_image_path('katsdpingest'),
         'docker_cmd': 'cam2telstate.py',
         'docker_host_class': 'sdpmc',
@@ -141,6 +155,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     G.add_node('sdp.timeplot.1',{
         'spead_port': r.get_port('spead_sdisp'),
         'html_port': r.get_sdisp_port_pair('timeplot')[0],
+        'cbf_channels': cbf_channels,
         'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),
         'config_base': '/var/kat/config/.katsdpdisp',
         'data_port': r.get_sdisp_port_pair('timeplot')[1],
