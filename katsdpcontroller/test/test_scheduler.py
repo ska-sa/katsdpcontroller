@@ -920,9 +920,9 @@ class TestScheduler(object):
         status1 = self._status_update('test-00000001', 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         status0 = self._status_update('test-00000000', 'TASK_KILLED')
-        yield From(defer(loop=self.loop))
-        assert_true(close.done())
-        yield From(close)
+        # defer is insufficient here, because close() uses run_in_executor to
+        # join the driver thread. Wait up to 5 seconds for that to happen.
+        yield From(trollius.wait_for(close, 5, loop=self.loop))
         for node in self.physical_graph:
             assert_equal(TaskState.DEAD, node.state)
         for node in physical_graph2:
