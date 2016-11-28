@@ -65,6 +65,29 @@ def defer(depth=20, loop=None):
     return future
 
 
+class AnyOrderList(list):
+    """Used for asserting that a list is present in a call, but without
+    constraining the order. It does not require the elements to be hashable.
+    """
+    def __eq__(self, other):
+        if isinstance(other, list):
+            if len(self) != len(other):
+                return False
+            tmp = list(other)
+            for item in self:
+                try:
+                    tmp.remove(item)
+                except ValueError:
+                    return False
+            return True
+        return NotImplemented
+
+    def __ne__(self, other):
+        if isinstance(other, list):
+            return not (self == other)
+        return NotImplemented
+
+
 class TestRangeResource(object):
     """Tests for :class:`katsdpcontroller.scheduler.RangeResource`"""
     def test_len(self):
@@ -189,13 +212,13 @@ class TestTaskState(object):
         # Python 2 allows ordering comparisons between any objects, so
         # only test this on Python 3
         if six.PY3:
-            with assert_raises(NotImplementedError):
+            with assert_raises(TypeError):
                 TaskState.RUNNING < 3
-            with assert_raises(NotImplementedError):
+            with assert_raises(TypeError):
                 TaskState.RUNNING > 3
-            with assert_raises(NotImplementedError):
+            with assert_raises(TypeError):
                 TaskState.RUNNING <= 3
-            with assert_raises(NotImplementedError):
+            with assert_raises(TypeError):
                 TaskState.RUNNING >= 3
 
 
@@ -218,7 +241,7 @@ class TestTaskIDAllocator(object):
 
 
 def _make_resources(resources):
-    out = []
+    out = AnyOrderList()
     for name, value in six.iteritems(resources):
         resource = Dict()
         resource.name = name
@@ -439,29 +462,6 @@ class TestPhysicalTask(object):
         assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
 
 
-class AnyOrderList(list):
-    """Used for asserting that a list is present in a call, but without
-    constraining the order. It does not require the elements to be hashable.
-    """
-    def __eq__(self, other):
-        if isinstance(other, list):
-            if len(self) != len(other):
-                return False
-            tmp = list(other)
-            for item in self:
-                try:
-                    tmp.remove(item)
-                except ValueError:
-                    return False
-            return True
-        return NotImplemented
-
-    def __ne__(self, other):
-        if isinstance(other, list):
-            return not (self == other)
-        return NotImplemented
-
-
 class TestScheduler(object):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
     def _make_offer(self, resources, agent_num=0, attrs=()):
@@ -479,7 +479,7 @@ class TestScheduler(object):
         # IDs globally unique, but we want the test to be isolated. Bypass its
         # __new__.
         self.image_resolver = scheduler.ImageResolver()
-        self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator, 'test-')
+        self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator)
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator)

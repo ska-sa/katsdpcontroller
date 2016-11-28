@@ -243,7 +243,7 @@ class RangeResource(object):
             self.add_range(r.begin, r.end + 1)   # Mesos has inclusive ranges
 
     def __iter__(self):
-        return itertools.chain(*[xrange(start, stop) for (start, stop) in self._ranges])
+        return itertools.chain(*[six.moves.range(start, stop) for (start, stop) in self._ranges])
 
     def popleft(self):
         if not self._ranges:
@@ -375,7 +375,7 @@ class TaskIDAllocator(object):
         try:
             return TaskIDAllocator._by_prefix[prefix]
         except KeyError:
-            alloc = super(TaskIDAllocator, cls).__new__(cls, prefix)
+            alloc = super(TaskIDAllocator, cls).__new__(cls)
             alloc._prefix = prefix
             alloc._next_id = 0
             TaskIDAllocator._by_prefix[prefix] = alloc
