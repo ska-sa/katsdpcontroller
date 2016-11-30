@@ -21,6 +21,8 @@ from katcp import DeviceServer, Sensor, Message, BlockingClient
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 
+from prometheus_client import Gauge
+
 try:
     import docker
     import requests
@@ -43,6 +45,11 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','output-rate']
+ # list of sensors to be exposed via prometheus
+ # some of these will match multiple nodes, which is fine since they get fully qualified names when
+ # created as a prometheus metric
+ # TODO: harmonise sodding -/_ convention
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -439,7 +446,7 @@ class SDPNode(object):
             self.sdp_controller.remove_sensor(sensor_name)
         self.host.stop_container(self.container_id)
 
-    def _chained_read(self, base_name='', katcp_connection=None):
+    def _chained_read(self, base_name='', katcp_connection=None, prometheus_gauge=None):
          # used to chain a sensor in the master controller
          # to the actual sensor on the subordinate device
         if self.katcp_connection:
@@ -460,6 +467,11 @@ class SDPNode(object):
             except KeyError:
                 s_state = Sensor.UNKNOWN
             s_value = args[4]
+            if prometheus_gauge:
+                try:
+                    prometheus_gauge.set(s_value)
+                except ValueError:
+                    logger.warning("Failed to set prometheus gauge {} to {}".format(base_name, s_value))
             logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
             return (s_value, s_state, s_ts)
         else:
@@ -504,7 +516,11 @@ class SDPNode(object):
                              # sensor and thus will need conversion out of their string form 
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
-                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
+                        prometheus_gauge = None
+                        if args[0] in PROMETHEUS_SENSORS:
+                            logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
+                            prometheus_gauge = Gauge('{}_{}'.format(self.name.replace(".","_"), args[0]),s_description)
+                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection, prometheus_gauge=prometheus_gauge)
                         self.add_sensor(s)
                         if self.name == 'sdp.ingest.1' and args[0] == 'status':
                             s.name = "data-product-status-{}".format(self.subarray_product_id)
