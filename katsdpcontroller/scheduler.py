@@ -95,8 +95,9 @@ from addict import Dict
 import pymesos
 
 
-SCALAR_RESOURCES = ['cpus', 'gpus', 'mem']
+SCALAR_RESOURCES = ['cpus', 'gpus', 'mem', 'disk']
 RANGE_RESOURCES = ['ports', 'cores']
+#: Mesos task states that indicate that the task is dead (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset([
     'TASK_FINISHED',
     'TASK_FAILED',
@@ -400,7 +401,7 @@ class Resolver(object):
 
 class InsufficientResourcesError(RuntimeError):
     """Internal error used when there are currently insufficient resources for
-    an operation. Users should not see this error.
+    an operation. Exceptions of this class do not escape this module.
     """
     pass
 
@@ -457,6 +458,8 @@ class LogicalTask(LogicalNode):
         GPU resources required
     mem : float
         Mesos memory reservation (megabytes)
+    disk : float
+        Mesos disk reservation (megabytes)
     cores : list of str
         Reserved CPU cores. If this is empty, then the task will not be pinned.
         If it is non-empty, then the task will be pinned to the assigned cores,
@@ -550,6 +553,10 @@ class Agent(object):
             setattr(self, r, RangeResource())
         for offer in offers:
             for resource in offer.resources:
+                # Skip specialised resource types and use only general-purpose
+                # resources.
+                if 'disk' in resource and 'source' in resource.disk:
+                    continue
                 if resource.name in SCALAR_RESOURCES:
                     self._inc_attr(resource.name, resource.scalar.value)
                 elif resource.name in RANGE_RESOURCES:
@@ -1030,7 +1037,9 @@ class Scheduler(pymesos.Scheduler):
                                 'No agent found for {}'.format(node.name))
                         allocations.append((node, allocation))
             except InsufficientResourcesError:
-                logger.debug('Could not launch graph due to insufficient resources')
+                # TODO: if the resources never become available, it would be
+                # useful for the caller to know what the bottleneck is.
+                logger.debug('Could not yet launch graph due to insufficient resources')
             else:
                 # Two-phase resolving
                 logger.debug('Allocating resources to tasks')
