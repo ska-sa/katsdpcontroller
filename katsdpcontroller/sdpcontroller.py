@@ -519,7 +519,8 @@ class SDPNode(object):
                         prometheus_gauge = None
                         if args[0] in PROMETHEUS_SENSORS:
                             logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
-                            prometheus_gauge = Gauge('{}_{}'.format(self.name.replace(".","_"), args[0]),s_description)
+                            prom_name = '{}_{}'.format(self.name, args[0]).replace(".","_").replace("-","_")
+                            prometheus_gauge = Gauge(prom_name, s_description)
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection, prometheus_gauge=prometheus_gauge)
                         self.add_sensor(s)
                         if self.name == 'sdp.ingest.1' and args[0] == 'status':
