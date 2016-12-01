@@ -22,7 +22,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
-    streams = "{}:visibility".format(c_stream[:-6].lower())
+    streams = "corr.{}:visibility".format(c_stream[:-6].lower())
      # string containing a mapping from stream_name to stream_type.
      # This is temporary for AR1/1.5 and should be replaced by a
      # per stream sensor indicating type directly from the CBF
@@ -30,7 +30,11 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # specific sensor names, but reports stream names to CAM in mixed case.
      # The [:-6] strips off the _spead suffix that sdpcontroller.py added.
     if beamformer_mode != 'none':
-        streams += ",beam_0x:beamformer,beam_0y:beamformer"
+        beams = ['corr.beam_0x', 'corr.beam_0y']
+    else:
+        beams = []
+    for beam in beams:
+        streams += ",{}:beamformer".format(beam)
      # we also include a reference to the fengine stream so
      # we can get n_samples_between_spectra
     streams += ",fengine_stream:fengine"
@@ -91,7 +95,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
              'state_transitions':{2:'capture-init',5:'capture-done'}\
             })
     elif beamformer_mode != 'none':
-        for i in range(2):
+        for i, beam in enumerate(beams):
             if beamformer_mode == 'hdf5_ram':
                 affinity = [[4, 6], [5, 7]][i]
                 interface = 'p4p1'
@@ -112,6 +116,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
                 'affinity': affinity,
+                'stream_name': beam,
                 'docker_image': r.get_image_path('katsdpingest'),
                 'docker_host_class': host_class,
                 'docker_cmd': 'taskset -c {} bf_ingest.py'.format(cpuset),
