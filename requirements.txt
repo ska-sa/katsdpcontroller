@@ -17,6 +17,7 @@ numpy
 pbr
 pkginfo
 ply
+prometheus_client==0.0.18
 ProxyTypes
 redis
 requests==2.8.1
