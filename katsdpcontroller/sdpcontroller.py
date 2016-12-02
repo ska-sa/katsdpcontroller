@@ -1348,7 +1348,7 @@ class SDPControllerServer(DeviceServer):
         logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
         try:
             odict = json.loads(override_dict_json)
-            if not type(odict) is dict: raise ValueError
+            if type(odict) is not dict: raise ValueError
             logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
