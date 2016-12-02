@@ -520,7 +520,12 @@ class SDPNode(object):
                         if args[0] in PROMETHEUS_SENSORS:
                             logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
                             prom_name = '{}_{}'.format(self.name, args[0]).replace(".","_").replace("-","_")
-                            prometheus_gauge = Gauge(prom_name, s_description)
+                            try:
+                                prometheus_gauge = Gauge(prom_name, s_description)
+                            except ValueError as e:
+                                logger.info("Prometheus Gauge {} already exists - not adding again. ({})".format(prom_name, e))
+                                 # set to info as this only happens when the gauge already exists, and this only
+                                 # happens during a reconfigure.
                         s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection, prometheus_gauge=prometheus_gauge)
                         self.add_sensor(s)
                         if self.name == 'sdp.ingest.1' and args[0] == 'status':
