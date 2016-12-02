@@ -638,7 +638,6 @@ class SDPGraph(object):
                     continue
 
         config.update(additional_config)
-
          # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
         try:
@@ -1188,6 +1187,8 @@ class SDPControllerServer(DeviceServer):
          # store calling arguments used to create a specified subarray_product
          # this has either the current args or those most recently
          # configured for this subarray_product
+        self.override_dicts = {}
+         # per subarray product dictionaries used to override internal config
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
@@ -1321,6 +1322,34 @@ class SDPControllerServer(DeviceServer):
         for subarray_product_id in self.subarray_products.keys():
             rcode, rval = self.deregister_product(subarray_product_id,force=True)
             logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+
+    @request(Str(), Str())
+    @return_reply(Str())
+    def request_set_config_override(self, req, subarray_product_id, override_dict_json):
+        """Override internal configuration parameters for the next configure of the
+        specified subarray product.
+
+        An existing override for this subarry product will be completely overwritten.
+
+        The override will only persist until a successful configure has been called on the subarray product.
+
+        Inform Arguments
+        ----------------
+        subarray_product_id : string
+            The ID of the subarray product to set overrides for in the form [<subarray_name>_]<data_product_name>.
+        override_dict_json : string
+            A json string containing a dict of config key:value overrides to use.
+        """
+        logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
+        try:
+            odict = json.loads(override_dict_json)
+            logger.info("Dict: {}, Len: {}".format(odict, len(odict)))
+            self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
+        except ValueError as e:
+            msg = "The supplied override dict {} does not appear to be a valid json string. {}".format(override_dict_json, e)
+            logger.error(msg)
+            return ('fail', msg)
+        return ('ok',"Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
     @request(Str(), include_msg=True)
     @return_reply(Str())
@@ -1500,6 +1529,11 @@ class SDPControllerServer(DeviceServer):
             'subarray_numeric_id':subarray_numeric_id
         }
          # holds additional config that must reside within the config dict in the telstate 
+        if subarray_product_id in self.override_dicts:
+            odict = self.override_dicts.pop(subarray_product_id)
+             # this is a use once set of overrides
+            logger.warning("Setting overrides on {} for the following keys: {}".format(subarray_product_id, odict))
+            additional_config.update(odict)
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
