@@ -1338,7 +1338,7 @@ class SDPControllerServer(DeviceServer):
 
         The override will only persist until a successful configure has been called on the subarray product.
 
-        Inform Arguments
+        Request Arguments
         ----------------
         subarray_product_id : string
             The ID of the subarray product to set overrides for in the form [<subarray_name>_]<data_product_name>.
@@ -1348,13 +1348,14 @@ class SDPControllerServer(DeviceServer):
         logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
         try:
             odict = json.loads(override_dict_json)
-            logger.info("Dict: {}, Len: {}".format(odict, len(odict)))
+            if not type(odict) is dict: raise ValueError
+            logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
-            msg = "The supplied override dict {} does not appear to be a valid json string. {}".format(override_dict_json, e)
+            msg = "The supplied override string {} does not appear to be a valid json string containing a dict. {}".format(override_dict_json, e)
             logger.error(msg)
             return ('fail', msg)
-        return ('ok',"Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
+        return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
     @request(Str(), include_msg=True)
     @return_reply(Str())
@@ -1536,8 +1537,8 @@ class SDPControllerServer(DeviceServer):
          # holds additional config that must reside within the config dict in the telstate 
         if subarray_product_id in self.override_dicts:
             odict = self.override_dicts.pop(subarray_product_id)
-             # this is a use once set of overrides
-            logger.warning("Setting overrides on {} for the following keys: {}".format(subarray_product_id, odict))
+             # this is a use-once set of overrides
+            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
             additional_config.update(odict)
 
         if self.interface_mode:
