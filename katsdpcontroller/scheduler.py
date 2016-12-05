@@ -213,11 +213,11 @@ def poll_ports(host, ports, loop):
                 try:
                     yield From(loop.sock_connect(sock, (sockaddr[0], port)))
                 except OSError as e:
-                    logging.debug('Port %d on %s not ready: %s', port, host, e)
+                    logger.debug('Port %d on %s not ready: %s', port, host, e)
                     yield From(trollius.sleep(1, loop=loop))
                 else:
                     break
-        logging.debug('Port %d on %s ready', port, host)
+        logger.debug('Port %d on %s ready', port, host)
 
 
 class RangeResource(object):
@@ -424,17 +424,21 @@ class LogicalNode(object):
     ----------
     name : str
         Node name
+    wait_ports : list of str
+        Subset of ports which must be open before the task is considered
+        ready. If set to `None`, defaults to `ports`.
     physical_factory : callable
         Creates the physical task (must return :class:`PhysicalNode`
         or subclass). It is passed the logical task and the event loop.
     """
     def __init__(self, name):
         self.name = name
+        self.wait_ports = None
         self.physical_factory = PhysicalNode
 
 
 class LogicalExternal(LogicalNode):
-    """An external service. It is assumed to be ready as soon as it starts.
+    """An external service. It is assumed to be running as soon as it starts.
 
     The host and port must be set manually on the physical node."""
     def __init__(self, name):
@@ -472,9 +476,6 @@ class LogicalTask(LogicalNode):
     ports : list of str
         Network service ports. Each element in the list is a logical name for
         the port.
-    wait_ports : list of str
-        Subset of `ports` which must be open before the task is considered
-        ready. If set to `None`, defaults to `ports`.
     networks : list
         Abstract names of networks for which network interfaces are required.
     image : str
@@ -499,7 +500,6 @@ class LogicalTask(LogicalNode):
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
-        self.wait_ports = None
         self.networks = []
         self.image = None
         self.command = []
@@ -641,6 +641,10 @@ class PhysicalNode(object):
         The logical node passed to the constructor
     loop : :class:`trollius.BaseEventLoop`
         The event loop used for constructing futures etc
+    host : str
+        Host on which this node is operating (if any).
+    ports : dict
+        Dictionary mapping logical port names to port numbers.
     state : :class:`TaskState`
         The current state of the task (see :class:`TaskState`). Do not
         modify this directly; use :meth:`set_state` instead.
@@ -651,14 +655,24 @@ class PhysicalNode(object):
     dead_event : :class:`trollius.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
+    _ready_waiter : :class:`trollius.Task`
+        Task which asynchronously waits for the to be ready (e.g. for ports to
+        be open). It is started on reaching :class:`~TaskState.RUNNING`.
     """
     def __init__(self, logical_node, loop):
         self.logical_node = logical_node
         self.name = logical_node.name
+        # In PhysicalTask it is a property and cannot be set
+        try:
+            self.host = None
+        except AttributeError:
+            pass
+        self.ports = {}
         self.state = TaskState.NOT_READY
         self.ready_event = trollius.Event(loop=loop)
         self.dead_event = trollius.Event(loop=loop)
         self.loop = loop
+        self._ready_waiter = None
 
     def resolve(self, resolver, graph):
         """Make final preparations immediately before starting.
@@ -672,6 +686,37 @@ class PhysicalNode(object):
         """
         pass
 
+    @trollius.coroutine
+    def wait_ready(self):
+        """Wait for the task to be ready for dependent tasks to communicate
+        with, by polling the ports. This method may be overloaded to implement
+        other checks, but it must be cancellation-safe.
+        """
+        if self.logical_node.wait_ports is not None:
+            wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
+        else:
+            wait_ports = list(six.itervalues(self.ports))
+        if wait_ports:
+            yield From(poll_ports(self.host, wait_ports, self.loop))
+
+    def _ready_callback(self, future):
+        """This callback is called when the waiter is either finished or
+        cancelled. If it is finished, we would normally not have
+        advanced beyond READY, because set_state will cancel the
+        waiter if we do. However, there is a race condition if
+        set_state is called between the waiter completing and the
+        call to this callback."""
+        self._ready_waiter = None
+        try:
+            future.result()  # throw the exception, if any
+            if self.state < TaskState.READY:
+                self.set_state(TaskState.READY)
+        except trollius.CancelledError:
+            pass
+        except Exception:
+            logger.error('exception while waiting for task {} to be ready'.format(self.name),
+                         exc_info=True)
+
     def set_state(self, state):
         """Update :attr:`state`.
 
@@ -681,19 +726,26 @@ class PhysicalNode(object):
         Subclasses may override this to take special actions on particular
         transitions, but should chain to the base class.
         """
+        logger.debug('Task %s: %s -> %s', self.name, self.state, state)
         if state < self.state:
             # STARTING -> NOT_READY is permitted, for the case where a
             # launch is cancelled before the tasks are actually launched.
             if state != TaskState.NOT_READY or self.state != TaskState.STARTING:
-                logging.warn('Ignoring state change that went backwards (%s -> %s) on task %s',
-                             self.state, state, self.name)
+                logger.warn('Ignoring state change that went backwards (%s -> %s) on task %s',
+                            self.state, state, self.name)
                 return
         self.state = state
         if state == TaskState.DEAD:
             self.dead_event.set()
             self.ready_event.set()
-        if state == TaskState.READY:
+        elif state == TaskState.READY:
             self.ready_event.set()
+        elif state == TaskState.RUNNING and self._ready_waiter is None:
+            self._ready_waiter = trollius.async(self.wait_ready(), loop=self.loop)
+            self._ready_waiter.add_done_callback(self._ready_callback)
+        if state > TaskState.READY and self._ready_waiter is not None:
+            self._ready_waiter.cancel()
+            self._ready_waiter = None
 
     def kill(self, driver):
         """Start killing off the node. This is guaranteed to be called only if
@@ -709,24 +761,12 @@ class PhysicalNode(object):
 class PhysicalExternal(PhysicalNode):
     """External service with a hostname and ports. The service moves
     automatically from :const:`TaskState.STARTED` to
-    :const:`TaskState.READY`, and from :const:`TaskState.KILLED` to
+    :const:`TaskState.RUNNING`, and from :const:`TaskState.KILLED` to
     :const:`TaskState.DEAD`.
-
-    Attributes
-    ----------
-    host : str
-        Host on which this node is operating (if any).
-    ports : dict
-        Dictionary mapping logical port names to port numbers.
     """
-    def __init__(self, logical_node, loop):
-        super(PhysicalExternal, self).__init__(logical_node, loop)
-        self.host = None
-        self.ports = {}
-
     def set_state(self, state):
         if state >= TaskState.STARTED and state < TaskState.READY:
-            state = TaskState.READY
+            state = TaskState.RUNNING
         elif state == TaskState.KILLED:
             state = TaskState.DEAD
         super(PhysicalExternal, self).set_state(state)
@@ -767,13 +807,8 @@ class PhysicalTask(PhysicalNode):
         Maps core names given in the logical task to core numbers.
     agent : :class:`Agent`
         Information about the agent on which this task is running.
-    host : str
-        Host on which this task is running
     agent_id : str
         Slave ID of the agent on which this task is running
-    _poller : :class:`trollius.Task`
-        Task which asynchronously waits for the task's ports to open up. It is
-        started on reaching :class:`~TaskState.RUNNING`.
     """
     def __init__(self, logical_task, loop):
         super(PhysicalTask, self).__init__(logical_task, loop)
@@ -784,7 +819,6 @@ class PhysicalTask(PhysicalNode):
         self.status = None
         for r in RANGE_RESOURCES:
             setattr(self, r, {})
-        self._poller = None
 
     @property
     def agent(self):
@@ -912,39 +946,6 @@ class PhysicalTask(PhysicalNode):
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
         super(PhysicalTask, self).kill(driver)
-
-    def set_state(self, state):
-        def callback(future):
-            # This callback is called when the poller is either finished or
-            # cancelled. If it is finished, we would normally not have
-            # advanced beyond READY, because set_state will cancel the
-            # poller if we do. However, there is a race condition if
-            # set_state is called between the poller completing and the
-            # call to this callback.
-            self._poller = None
-            try:
-                future.result()  # throw the exception, if any
-                if self.state < TaskState.READY:
-                    self.set_state(TaskState.READY)
-            except trollius.CancelledError:
-                pass
-            except Exception:
-                logging.error('exception while polling for open ports', exc_info=True)
-
-        super(PhysicalTask, self).set_state(state)
-        if state == TaskState.RUNNING and self._poller is None:
-            if self.logical_node.wait_ports is not None:
-                wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
-            else:
-                wait_ports = list(six.itervalues(self.ports))
-            if wait_ports:
-                self._poller = trollius.async(poll_ports(self.host, wait_ports, self.loop))
-                self._poller.add_done_callback(callback)
-            else:
-                self.set_state(TaskState.READY)
-        elif state > TaskState.READY and self._poller is not None:
-            self._poller.cancel()
-            self._poller = None
 
 
 def instantiate(logical_graph, loop):
@@ -1095,7 +1096,7 @@ class Scheduler(pymesos.Scheduler):
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
-        logging.debug(
+        logger.debug(
             'Update: task %s in state %s (%s)',
             status.task_id.value, status.state, status.message)
         try:

@@ -245,9 +245,9 @@ def _make_resources(resources):
     for name, value in six.iteritems(resources):
         resource = Dict()
         resource.name = name
-        if isinstance(value, float):
+        if isinstance(value, (int, float)):
             resource.type = 'SCALAR'
-            resource.scalar.value = value
+            resource.scalar.value = float(value)
         else:
             resource.type = 'RANGES'
             resource.ranges.range = []
@@ -335,6 +335,15 @@ class TestAgent(unittest.TestCase):
         """ValueError is raised if zero offers are passed"""
         with assert_raises(ValueError):
             scheduler.Agent([])
+
+    def test_special_disk_resource(self):
+        """A resource for a non-root disk is ignored"""
+        offers = [self._make_offer({'disk': 1024})]
+        # Example from https://mesos.apache.org/documentation/latest/multiple-disk/
+        offers[0].resources[0].disk.source.type = 'PATH'
+        offers[0].resources[0].disk.source.path.root = '/mnt/data'
+        agent = scheduler.Agent(offers)
+        assert_equal(0, agent.disk)
 
     def test_bad_json(self):
         """A warning must be printed if an interface description is not valid JSON"""
@@ -494,6 +503,7 @@ class TestScheduler(object):
                          '--another={endpoints[node2_foo]}']
         node1.image = 'image1'
         node2 = scheduler.LogicalExternal('node2')
+        node2.wait_ports = []
         self.logical_graph = networkx.MultiDiGraph()
         self.logical_graph.add_nodes_from([node0, node1, node2])
         self.logical_graph.add_edge(node1, node0, port='port', order='strong')
@@ -651,7 +661,7 @@ class TestScheduler(object):
         ]), self.driver.mock_calls)
         self.driver.reset_mock()
         # Tell scheduler that node0 is now running. This will start up the
-        # the poller, so we need to mock poll_ports.
+        # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = trollius.Future(self.loop)
             poll_ports.return_value = poll_future
@@ -714,29 +724,29 @@ class TestScheduler(object):
         kill = None
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.STARTING, self.nodes[0].state)
-        if target_state > TaskState.STARTING:
-            self.sched.resourceOffers(self.driver, [offer])
-            yield From(defer(loop=self.loop))
-            assert_equal(TaskState.STARTED, self.nodes[0].state)
-            if target_state > TaskState.STARTED:
-                with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-                    poll_future = trollius.Future(self.loop)
-                    poll_ports.return_value = poll_future
+        with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
+            poll_future = trollius.Future(self.loop)
+            poll_ports.return_value = poll_future
+            if target_state > TaskState.STARTING:
+                self.sched.resourceOffers(self.driver, [offer])
+                yield From(defer(loop=self.loop))
+                assert_equal(TaskState.STARTED, self.nodes[0].state)
+                if target_state > TaskState.STARTED:
                     self._status_update('test-00000000', 'TASK_RUNNING')
                     yield From(defer(loop=self.loop))
-                assert_equal(TaskState.RUNNING, self.nodes[0].state)
-                if target_state > TaskState.RUNNING:
-                    poll_future.set_result(None)   # Mark ports as ready
-                    yield From(defer(loop=self.loop))
-                    assert_equal(TaskState.READY, self.nodes[0].state)
-                    if target_state > TaskState.READY:
-                        kill = trollius.async(self.sched.kill(
-                            self.physical_graph, nodes), loop=self.loop)
+                    assert_equal(TaskState.RUNNING, self.nodes[0].state)
+                    if target_state > TaskState.RUNNING:
+                        poll_future.set_result(None)   # Mark ports as ready
                         yield From(defer(loop=self.loop))
-                        assert_equal(TaskState.KILLED, self.nodes[0].state)
-                        if target_state > TaskState.KILLED:
-                            self._status_update('test-00000000', 'TASK_KILLED')
-                        yield From(defer(loop=self.loop))
+                        assert_equal(TaskState.READY, self.nodes[0].state)
+                        if target_state > TaskState.READY:
+                            kill = trollius.async(self.sched.kill(
+                                self.physical_graph, nodes), loop=self.loop)
+                            yield From(defer(loop=self.loop))
+                            assert_equal(TaskState.KILLED, self.nodes[0].state)
+                            if target_state > TaskState.KILLED:
+                                self._status_update('test-00000000', 'TASK_KILLED')
+                            yield From(defer(loop=self.loop))
         self.driver.reset_mock()
         assert_equal(target_state, self.nodes[0].state)
         raise Return((launch, kill))
