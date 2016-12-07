@@ -147,10 +147,10 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # calibration node
 
     if simulate:
-        # create-fx-product is passed on the command-line insteead of telstate
+        # create-fx-stream is passed on the command-line insteead of telstate
         # for now due to SR-462.
         G.add_node('sdp.sim.1',{'port': r.get_port('sdp_sim_1_katcp'), 'cbf_channels': cbf_channels,
-             'docker_image':r.get_image_path('katcbfsim'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'cbfsim.py --create-fx-product ' + r.prefix,\
+             'docker_image':r.get_image_path('katcbfsim'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'cbfsim.py --create-fx-stream ' + r.prefix,\
              'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
                               "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]}
             })
