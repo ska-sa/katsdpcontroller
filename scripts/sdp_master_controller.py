@@ -36,6 +36,9 @@ if __name__ == "__main__":
     parser.add_option('-s', '--simulate', dest='simulate', default=False,
                       action='store_true', metavar='SIMULATE',
                       help='run controller in simulation mode suitable for lab testing (default: %default)')
+    parser.add_option('--no-prometheus', dest='prometheus', default=True,
+                      action='store_false',
+                      help='disable Prometheus client HTTP service')
     parser.add_option('-i', '--interface_mode', dest='interface_mode', default=False,
                       action='store_true', metavar='INTERFACE',
                       help='run the controller in interface only mode for testing integration and ICD compliance. (default: %default)')
@@ -129,8 +132,9 @@ if __name__ == "__main__":
     if manhole:
         manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
          # allow remote debug connections and expose server and opts
-    start_http_server(8081)
-     # expose any prometheus metrics that we create
+    if opts.prometheus:
+        start_http_server(8081)
+         # expose any prometheus metrics that we create
     try:
         while running:
             try:
