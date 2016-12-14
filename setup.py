@@ -27,7 +27,9 @@ setup (
         'six',
         'katcp',
         'tornado',
-        'katsdptelstate'
+        'katsdptelstate',
+        'faulthandler',
+        'kazoo'
     ],
     use_katversion = True,
     license='MIT'
