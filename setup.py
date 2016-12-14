@@ -14,6 +14,21 @@ setup (
     scripts = [
         "scripts/sdp_master_controller.py",
         ],
-    license='MIT',
-    zip_safe = False,
+    setup_requires = ['katversion'],
+    install_requires = [
+        'pymesos>=0.2.0',
+        'addict',
+        'trollius',
+        'decorator',
+        'jsonschema',
+        'networkx',
+        'enum34',
+        'ipaddress',
+        'six',
+        'katcp',
+        'tornado',
+        'katsdptelstate'
+    ],
+    use_katversion = True,
+    license='MIT'
 )
