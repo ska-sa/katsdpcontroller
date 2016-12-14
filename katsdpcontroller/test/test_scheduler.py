@@ -1,14 +1,16 @@
 from __future__ import print_function, division, absolute_import
+import json
+import base64
+import socket
+import contextlib
+import logging
+import uuid
 import mock
 from nose.tools import *
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
-import uuid
 import ipaddress
-import logging
 import six
-import contextlib
-import socket
 import trollius
 import networkx
 import pymesos
@@ -260,9 +262,13 @@ def _make_resources(resources):
 def _make_text_attr(name, value):
     attr = Dict()
     attr.name = name
-    attr.type = 'SCALAR'
+    attr.type = 'TEXT'
     attr.text.value = value
     return attr
+
+
+def _make_json_attr(name, value):
+    return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value)))
 
 
 def _make_offer(framework_id, agent_id, host, resources, attrs=()):
@@ -295,15 +301,15 @@ class TestAgent(unittest.TestCase):
         self.agent_id = 'agentid'
         self.host = 'agenthostname'
         self.framework_id = 'framework'
-        self.if_attr = _make_text_attr(
-            'interface_eth0',
-            '{"name": "eth0", "network": "net0", "ipv4_address": "192.168.254.254"}')
+        self.if_attr = _make_json_attr(
+            'katsdpcontroller.interfaces',
+            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254'}])
         self.if_attr_bad_json = _make_text_attr(
-            'interface_bad_json',
-            '{not valid json')
-        self.if_attr_bad_schema = _make_text_attr(
-            'interface_bad_schema',
-            '{"name": "eth1"}')
+            'katsdpcontroller.interfaces',
+            base64.urlsafe_b64encode('{not valid json'))
+        self.if_attr_bad_schema = _make_json_attr(
+            'katsdpcontroller.interfaces',
+            [{'name': 'eth1'}])
 
     def test_construct(self):
         """Construct an agent from some offers"""
@@ -311,7 +317,7 @@ class TestAgent(unittest.TestCase):
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
                               'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
-            self._make_offer({'cpus': 0.5, 'mem': 123.5, 'gpus': 1.0,
+            self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5,
                               'cores': [(8, 9)]}, attrs)
         ]
         agent = scheduler.Agent(offers)
@@ -322,13 +328,14 @@ class TestAgent(unittest.TestCase):
             assert_equal(attr, agent_attr)
         assert_equal(4.5, agent.cpus)
         assert_equal(1147.5, agent.mem)
-        assert_equal(1.0, agent.gpus)
+        assert_equal(1024.5, agent.disk)
         assert_equal(list(range(0, 9)), list(agent.cores))
         assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.ports))
         assert_equal([scheduler.Interface(name='eth0',
                                           network='net0',
                                           ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
-                                          numa_node=None)],
+                                          numa_node=None,
+                                          speed=None)],
                      agent.interfaces)
 
     def test_no_offers(self):
@@ -386,7 +393,7 @@ class TestAgent(unittest.TestCase):
     def test_allocate_missing_network(self):
         """allocate raises if the task requires a network that is not present"""
         task = scheduler.LogicalTask('task')
-        task.networks = ['net0', 'net1']
+        task.networks = [scheduler.NetworkRequest('net0'), scheduler.NetworkRequest('net1')]
         agent = scheduler.Agent([self._make_offer({}, [self.if_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
@@ -397,17 +404,17 @@ class TestAgent(unittest.TestCase):
         task.cpus = 4.0
         task.mem = 128.0
         task.cores = ['a', 'b', 'c']
-        task.networks = ['net0']
+        task.networks = [scheduler.NetworkRequest('net0')]
         agent = scheduler.Agent([
             self._make_offer({'cpus': 4.0, 'mem': 200.0, 'cores': [(4, 8)]}, [self.if_attr])])
         ra = agent.allocate(task)
-        assert_equal(0.0, ra.gpus)
+        assert_equal([], ra.gpus)
         assert_equal(4.0, ra.cpus)
         assert_equal(128.0, ra.mem)
         assert_equal([4, 5, 6], ra.cores)
         assert_equal(0.0, agent.cpus)
         assert_equal(72.0, agent.mem)
-        assert_equal(0.0, agent.gpus)
+        assert_equal([], agent.gpus)
         assert_equal([7], list(agent.cores))
 
 
@@ -422,15 +429,10 @@ class TestPhysicalTask(object):
         self.logical_task.cores = ['core1', 'core2', 'core3']
         self.logical_task.networks = ['net0', 'net1']
         attributes = [
-            _make_text_attr(
-                'interface_eth0',
-                '{"name": "eth0", "network": "net0", "ipv4_address": "192.168.1.1"}'),
-            _make_text_attr(
-                'interface_eth1',
-                '{"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}'),
-            _make_text_attr(
-                'interface_eth2',
-                '{"name": "eth2", "network": "net1", "ipv4_address": "192.168.3.1"}')
+            _make_json_attr('katsdpcontroller.interfaces', [
+                {"name": "eth0", "network": "net0", "ipv4_address": "192.168.1.1"},
+                {"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}
+            ])
         ]
         offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
@@ -463,8 +465,8 @@ class TestPhysicalTask(object):
         assert_equal('agenthost', physical_task.host)
         assert_equal('agentid', physical_task.agent_id)
         assert_is(self.allocation, physical_task.allocation)
-        eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None)
-        eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None)
+        eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None, None)
+        eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None, None)
         assert_equal({'net0': eth0, 'net1': eth1}, physical_task.interfaces)
         assert_equal({}, physical_task.endpoints)
         assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
