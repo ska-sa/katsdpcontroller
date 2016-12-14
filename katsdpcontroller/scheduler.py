@@ -440,10 +440,13 @@ class LogicalNode(object):
 class LogicalExternal(LogicalNode):
     """An external service. It is assumed to be running as soon as it starts.
 
-    The host and port must be set manually on the physical node."""
+    The host and port must be set manually on the physical node. It also
+    defaults to an empty :attr:`~LogicalNode.wait_ports`, which must be
+    overridden is waiting is desired."""
     def __init__(self, name):
         super(LogicalExternal, self).__init__(name)
         self.physical_factory = PhysicalExternal
+        self.wait_ports = []
 
 
 class LogicalTask(LogicalNode):
