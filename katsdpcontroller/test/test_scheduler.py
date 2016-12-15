@@ -310,15 +310,25 @@ class TestAgent(unittest.TestCase):
         self.if_attr_bad_schema = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth1'}])
+        self.gpu_attr = _make_json_attr(
+            'katsdpcontroller.gpus',
+            [{'device': '/dev/nvidia0', 'driver_version': '123.45', 'numa_node': 1},
+             {'device': '/dev/nvidia1', 'driver_version': '123.45', 'numa_node': 0}])
 
     def test_construct(self):
         """Construct an agent from some offers"""
-        attrs = [self.if_attr]
+        attrs = [self.if_attr, self.gpu_attr]
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
                               'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
             self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5,
-                              'cores': [(8, 9)]}, attrs)
+                              'katsdpcontroller.gpu.0.compute': 0.25,
+                              'katsdpcontroller.gpu.0.mem': 256.0,
+                              'cores': [(8, 9)]}, attrs),
+            self._make_offer({'katsdpcontroller.gpu.0.compute': 0.5,
+                              'katsdpcontroller.gpu.0.mem': 1024.0,
+                              'katsdpcontroller.gpu.1.compute': 0.125,
+                              'katsdpcontroller.gpu.1.mem': 2048.0})
         ]
         agent = scheduler.Agent(offers)
         assert_equal(self.agent_id, agent.agent_id)
@@ -329,6 +339,11 @@ class TestAgent(unittest.TestCase):
         assert_equal(4.5, agent.cpus)
         assert_equal(1147.5, agent.mem)
         assert_equal(1024.5, agent.disk)
+        assert_equal(2, len(agent.gpus))
+        assert_equal(0.75, agent.gpus[0].compute)
+        assert_equal(1280.0, agent.gpus[0].mem)
+        assert_equal(0.125, agent.gpus[1].compute)
+        assert_equal(2048.0, agent.gpus[1].mem)
         assert_equal(list(range(0, 9)), list(agent.cores))
         assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.ports))
         assert_equal([scheduler.Interface(name='eth0',
@@ -398,6 +413,20 @@ class TestAgent(unittest.TestCase):
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
+    def test_allocate_insufficient_gpu(self):
+        """allocate raises if the task requires more GPU resources than available"""
+        task = scheduler.LogicalTask('task')
+        task.gpus.append(scheduler.GPURequest())
+        task.gpus[-1].compute = 0.5
+        task.gpus[-1].mem = 3000.0
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.gpu.0.compute': 1.0,
+            'katsdpcontroller.gpu.0.mem': 2048.0,
+            'katsdpcontroller.gpu.1.compute': 1.0,
+            'katsdpcontroller.gpu.1.mem': 2048.0}, [self.gpu_attr])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
     def test_allocate_success(self):
         """Tests allocate in the success case"""
         task = scheduler.LogicalTask('task')
@@ -405,17 +434,35 @@ class TestAgent(unittest.TestCase):
         task.mem = 128.0
         task.cores = ['a', 'b', 'c']
         task.networks = [scheduler.NetworkRequest('net0')]
+        task.gpus = [scheduler.GPURequest(), scheduler.GPURequest()]
+        task.gpus[0].compute = 0.5
+        task.gpus[0].mem = 1024.0
+        task.gpus[1].compute = 0.5
+        task.gpus[1].mem = 256.0
         agent = scheduler.Agent([
-            self._make_offer({'cpus': 4.0, 'mem': 200.0, 'cores': [(4, 8)]}, [self.if_attr])])
+            self._make_offer({
+                'cpus': 4.0, 'mem': 200.0, 'cores': [(4, 8)],
+                'katsdpcontroller.gpu.0.compute': 0.75,
+                'katsdpcontroller.gpu.0.mem': 2048.0,
+                'katsdpcontroller.gpu.1.compute': 0.75,
+                'katsdpcontroller.gpu.1.mem': 256.0
+            }, [self.if_attr, self.gpu_attr])])
         ra = agent.allocate(task)
-        assert_equal([], ra.gpus)
         assert_equal(4.0, ra.cpus)
         assert_equal(128.0, ra.mem)
+        assert_equal(2, len(ra.gpus))
+        assert_equal(0.5, ra.gpus[0].compute)
+        assert_equal(1024.0, ra.gpus[0].mem)
+        assert_equal(0.5, ra.gpus[1].compute)
+        assert_equal(256.0, ra.gpus[1].mem)
         assert_equal([4, 5, 6], ra.cores)
         assert_equal(0.0, agent.cpus)
         assert_equal(72.0, agent.mem)
-        assert_equal([], agent.gpus)
         assert_equal([7], list(agent.cores))
+        assert_equal(0.25, agent.gpus[0].compute)
+        assert_equal(1024.0, agent.gpus[0].mem)
+        assert_equal(0.25, agent.gpus[1].compute)
+        assert_equal(0.0, agent.gpus[1].mem)
 
 
 class TestPhysicalTask(object):
@@ -499,6 +546,9 @@ class TestScheduler(object):
         node0.command = ['hello', '--port={ports[port]}']
         node0.ports = ['port']
         node0.image = 'image0'
+        node0.gpus.append(scheduler.GPURequest())
+        node0.gpus[-1].compute = 0.5
+        node0.gpus[-1].mem = 256.0
         node1 = scheduler.LogicalTask('node1')
         node1.cpus = 0.5
         node1.command = ['test', '--host={host}', '--remote={endpoints[node0_port]}',
@@ -593,7 +643,16 @@ class TestScheduler(object):
         # - NUMA awareness
         # - network interfaces
         # - custom wait_ports
-        offer0 = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
+        offer0 = self._make_offer({
+            'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)],
+            'katsdpcontroller.gpu.0.compute': 0.25,
+            'katsdpcontroller.gpu.0.mem': 2048.0,
+            'katsdpcontroller.gpu.1.compute': 1.0,
+            'katsdpcontroller.gpu.1.mem': 1024.0
+        }, 0, [_make_json_attr('katsdpcontroller.gpus', [
+            {'driver_version': '123.45', 'device': '/dev/nvidia0'},
+            {'driver_version': '123.45', 'device': '/dev/nvidia1'}
+        ])])
         offer1 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
@@ -605,7 +664,24 @@ class TestScheduler(object):
         expected_taskinfo0.container.type = 'DOCKER'
         expected_taskinfo0.container.docker.image = 'sdp/image0:latest'
         expected_taskinfo0.container.docker.force_pull_image = False
-        expected_taskinfo0.resources = _make_resources({'cpus': 1.0, 'ports': [(30000, 30001)]})
+        expected_taskinfo0.container.docker.parameters = AnyOrderList([
+            Dict(key='device', value='/dev/nvidia1'),
+            Dict(key='device', value='/dev/nvidiactl'),
+            Dict(key='device', value='/dev/nvidia-uvm'),
+            Dict(key='device', value='/dev/nvidia-uvm-tools')
+        ])
+        volume = Dict()
+        volume.mode = 'RO'
+        volume.container_path = '/usr/local/nvidia'
+        volume.source.type = 'DOCKER_VOLUME'
+        volume.source.docker_volume.driver = 'nvidia-docker'
+        volume.source.docker_volume.name = 'nvidia_driver_123.45'
+        expected_taskinfo0.container.volumes = [volume]
+        expected_taskinfo0.resources = _make_resources({
+            'cpus': 1.0, 'ports': [(30000, 30001)],
+            'katsdpcontroller.gpu.1.compute': 0.5,
+            'katsdpcontroller.gpu.1.mem': 256.0
+        })
         expected_taskinfo0.discovery.visibility = 'EXTERNAL'
         expected_taskinfo0.discovery.name = 'node0'
         expected_taskinfo0.discovery.ports.ports = [Dict(number=30000, name='port', protocol='tcp')]
@@ -720,7 +796,16 @@ class TestScheduler(object):
             :const:`TaskState.DEAD`, then `kill` is ``None``
         """
         assert target_state > TaskState.NOT_READY
-        offer = self._make_offer({'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)]}, 0)
+        offer = self._make_offer({
+            'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)],
+            'katsdpcontroller.gpu.0.compute': 0.25,
+            'katsdpcontroller.gpu.0.mem': 2048.0,
+            'katsdpcontroller.gpu.1.compute': 1.0,
+            'katsdpcontroller.gpu.1.mem': 1024.0
+        }, 0, [_make_json_attr('katsdpcontroller.gpus', [
+            {'driver_version': '123.45', 'device': '/dev/nvidia0'},
+            {'driver_version': '123.45', 'device': '/dev/nvidia1'}
+        ])])
         launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                 loop=self.loop)
         kill = None
