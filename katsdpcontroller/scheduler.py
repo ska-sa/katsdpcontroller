@@ -187,7 +187,7 @@ GPUS_SCHEMA = {
                 'minimum': 0
             }
         },
-        'required': ['driver_version']
+        'required': ['device', 'driver_version']
     }
 }
 logger = logging.getLogger(__name__)
@@ -775,10 +775,10 @@ class Agent(ResourceCollector):
             for name in getattr(logical_task, r):
                 value = getattr(self, r).popleft()
                 getattr(alloc, r).append(value)
-        for i in range(len(self.gpus)):
+        for i, gpu in enumerate(self.gpus):
             if gpu_map[i] is not None:
                 for r in GPU_SCALAR_RESOURCES:
-                    need = getattr(request, r)
+                    need = getattr(gpu_map[i], r)
                     gpu.inc_attr(r, -need)
                     setattr(alloc.gpus[i], r, need)
         return alloc
