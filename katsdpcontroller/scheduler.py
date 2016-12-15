@@ -762,7 +762,7 @@ class Agent(ResourceCollector):
                     use_gpu = j
                     break
             if use_gpu is None:
-                raise InsufficientResourcesError('No suitable GPU found')
+                raise InsufficientResourcesError('No suitable GPU found for request {}'.format(i))
             gpu_map[j] = request
 
         # Have now verified that the task fits. Create the resources for it
