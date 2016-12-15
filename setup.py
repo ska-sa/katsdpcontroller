@@ -33,11 +33,11 @@ setup (
         'faulthandler',
         'kazoo'
     ],
-    tests_require: tests_require,
+    tests_require = tests_require,
     extras_require = {
         'agent': ['netifaces', 'psutil', 'nvidia-ml-py'],
         'test': tests_require
-    }
+    },
     use_katversion = True,
     license='MIT'
 )
