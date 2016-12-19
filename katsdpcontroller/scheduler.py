@@ -648,6 +648,7 @@ class LogicalTask(LogicalNode):
         - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
         - `endpoints` : dictionary of remote endpoints. Keys are of the form
           :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
+        - `resolver` : resolver object
     """
     def __init__(self, name):
         super(LogicalTask, self).__init__(name)
@@ -1152,7 +1153,7 @@ class PhysicalTask(PhysicalNode):
         taskinfo = Dict()
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
-        args = self.subst_args()
+        args = self.subst_args(resolver)
         command = [x.format(**args) for x in self.logical_node.command]
         if self.allocation.cores:
             # TODO: see if this can be done through Docker instead of with taskset
@@ -1227,7 +1228,7 @@ class PhysicalTask(PhysicalNode):
                      protocol='tcp'))
         self.taskinfo = taskinfo
 
-    def subst_args(self):
+    def subst_args(self, resolver):
         """Returns a dictionary that is passed when formatting the command
         from the logical task.
         """
@@ -1237,6 +1238,7 @@ class PhysicalTask(PhysicalNode):
         args['interfaces'] = self.interfaces
         args['endpoints'] = self.endpoints
         args['host'] = self.host
+        args['resolver'] = resolver
         return args
 
     def kill(self, driver):
