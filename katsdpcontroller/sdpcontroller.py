@@ -1128,13 +1128,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 rcode, rval = self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim')
                  # instruct the simulator to rebuild its local config from the values in telstate
                 if rcode == 'ok':
-                    rcode, rval = self._issue_req('configure-product-from-telstate', args=[self.subarray_product_id], node_type='sdp.sim')
-                    if rcode == 'ok':
-                        rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
-                    else:
-                        logger.error("SIMULATE: configure-product-from-telstate {} failed ({})".format(self.subarray_product_id,rval))
+                    rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
                 else:
-                    logger.error("SIMULATE: configure-product-from-telstate failed ({})".format(rval))
+                    logger.error("SIMULATE: configure-subarray-from-telstate failed ({})".format(rval))
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
