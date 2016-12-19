@@ -226,19 +226,37 @@ class GPURequest(object):
         Fraction of GPU's compute resource consumed
     mem : float
         Memory usage (megabytes)
+    affinity : bool
+        If true, the GPU must be on the same NUMA node as the chosen CPU
+        cores (ignored if no CPU cores are reserved).
     """
     def __init__(self):
         for r in GPU_SCALAR_RESOURCES:
             setattr(self, r, 0.0)
+        self.affinity = False
 
 
 class NetworkRequest(object):
     """Request for resources on a network interface. At the moment only
     a logical network name can be specified, but this may be augmented in
     future to allocate bandwidth.
+
+    Attributes
+    ----------
+    network : str
+        Logical network name
+    affinity : bool
+        If true, the network device must be on the same NUMA node as the chosen
+        CPU cores (ignored if no CPU cores are reserved).
     """
     def __init__(self, network):
         self.network = network
+        self.affinity = False
+
+    def matches(self, interface, numa_node):
+        if self.affinity and numa_node is not None and interface.numa_node != numa_node:
+            return False
+        return self.network == interface.network
 
 
 class OrderedEnum(Enum):
@@ -338,6 +356,26 @@ class RangeResource(object):
     def __iter__(self):
         return itertools.chain(*[six.moves.range(start, stop) for (start, stop) in self._ranges])
 
+    def remove(self, item):
+        for i, (start, stop) in enumerate(self._ranges):
+            if item >= start and item < stop:
+                if item == start and item + 1 == stop:
+                    del self._ranges[i]
+                elif item == start:
+                    self._ranges[i] = (start + 1, stop)
+                elif item + 1 == stop:
+                    self._ranges[i] = (start, stop - 1)
+                else:
+                    # Need to split the range. deque doesn't have .insert, so we
+                    # have to fake it using rotations.
+                    self._ranges.rotate(-i)
+                    self._ranges[0] = (item + 1, stop)
+                    self._ranges.append((start, item))
+                    self._ranges.rotate(i + 1)
+                return
+        raise ValueError('item not in list')
+
+
     def popleft(self):
         if not self._ranges:
             raise IndexError('pop from empty list')
@@ -389,6 +427,7 @@ class ResourceAllocation(object):
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
         self.gpus = [GPUResourceAllocation() for gpu in agent.gpus]
+        self.interfaces = []
 
 
 class ImageResolver(object):
@@ -555,7 +594,7 @@ class LogicalTask(LogicalNode):
     running task.
 
     The command is processed by :meth:`str.format` to substitute dynamic
-    values. The following named values are provided:
+    values.
 
     Attributes
     ----------
@@ -712,34 +751,25 @@ class Agent(ResourceCollector):
                     if resource_name in GPU_SCALAR_RESOURCES:
                         self.gpus[index].inc_attr(resource_name, resource.scalar.value)
 
-    def allocate(self, logical_task):
-        """Allocate the resources for a logical task, if possible.
+    def _allocate_numa_node(self, numa_node, logical_task):
+        # Check that there are sufficient cores on this node
+        if numa_node is not None:
+            # TODO: would be more efficient to replace self.numa with a map
+            # from core to node
+            cores = deque(core for core in self.numa[numa_node] if core in self.cores)
+        else:
+            cores = deque()
+        need = len(logical_task.cores)
+        have = len(cores)
+        if need > have:
+            raise InsufficientResourcesError('not enough cores on node {} ({} < {})'.format(
+                numa_node, have, need))
 
-        Returns
-        -------
-        ResourceAllocation
-
-        Raises
-        ------
-        InsufficientResourcesError
-            if there are not enough resources to add the task
-        """
-        if not logical_task.valid_agent(self.attributes):
-            raise InsufficientResourcesError('Task does not match this agent')
-        # TODO: add NUMA awareness
-        for r in SCALAR_RESOURCES:
-            need = getattr(logical_task, r)
-            have = getattr(self, r)
-            if have < need:
-                raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
-        for r in RANGE_RESOURCES:
-            need = len(getattr(logical_task, r))
-            have = len(getattr(self, r))
-            if have < need:
-                raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
+        # Match network requests to interfaces
         for request in logical_task.networks:
-            if not any(interface.network == request.network for interface in self.interfaces):
+            if not any(request.matches(interface, numa_node) for interface in self.interfaces):
                 raise InsufficientResourcesError('Network {} not present'.format(request.network))
+
         # Match GPU requests to GPUs. At the moment this is very dumb,
         # assigning any GPU that will fit without any packing optimisation.
         # It may even fail unnecessarily for multi-GPU requests.
@@ -748,6 +778,8 @@ class Agent(ResourceCollector):
             use_gpu = None
             for j, gpu in enumerate(self.gpus):
                 if gpu_map[j] is not None:
+                    continue     # Already been used for a request in this task
+                if numa_node is not None and request.affinity and gpu.numa_node != numa_node:
                     continue
                 good = True
                 for r in GPU_SCALAR_RESOURCES:
@@ -772,9 +804,18 @@ class Agent(ResourceCollector):
             self.inc_attr(r, -need)
             setattr(alloc, r, need)
         for r in RANGE_RESOURCES:
-            for name in getattr(logical_task, r):
-                value = getattr(self, r).popleft()
-                getattr(alloc, r).append(value)
+            if r != 'cores':
+                for name in getattr(logical_task, r):
+                    value = getattr(self, r).popleft()
+                    getattr(alloc, r).append(value)
+            else:
+                for name in logical_task.cores:
+                    value = cores.popleft()
+                    alloc.cores.append(value)
+                    self.cores.remove(value)
+        for request in logical_task.networks:
+            alloc.interfaces.append(next(interface for interface in self.interfaces
+                                         if request.matches(interface, numa_node)))
         for i, gpu in enumerate(self.gpus):
             if gpu_map[i] is not None:
                 for r in GPU_SCALAR_RESOURCES:
@@ -782,6 +823,43 @@ class Agent(ResourceCollector):
                     gpu.inc_attr(r, -need)
                     setattr(alloc.gpus[i], r, need)
         return alloc
+
+    def allocate(self, logical_task):
+        """Allocate the resources for a logical task, if possible.
+
+        Returns
+        -------
+        ResourceAllocation
+
+        Raises
+        ------
+        InsufficientResourcesError
+            if there are not enough resources to add the task
+        """
+        if not logical_task.valid_agent(self.attributes):
+            raise InsufficientResourcesError('Task does not match this agent')
+        for r in SCALAR_RESOURCES:
+            need = getattr(logical_task, r)
+            have = getattr(self, r)
+            if have < need:
+                raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
+        for r in RANGE_RESOURCES:
+            need = len(getattr(logical_task, r))
+            have = len(getattr(self, r))
+            if have < need:
+                raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
+
+        if logical_task.cores:
+            # For tasks requesting cores we activate NUMA awareness
+            for numa_node in range(len(self.numa)):
+                try:
+                    return self._allocate_numa_node(numa_node, logical_task)
+                except InsufficientResourcesError:
+                    logger.debug('Failed to allocate NUMA node %d on %s',
+                                 numa_node, self.agent_id, exc_info=True)
+            raise InsufficientResourcesError('No suitable NUMA node found')
+        else:
+            return self._allocate_numa_node(None, logical_task)
 
 
 class TaskState(OrderedEnum):
@@ -1025,11 +1103,8 @@ class PhysicalTask(PhysicalNode):
             Specific resources assigned to the task
         """
         self.allocation = allocation
-        for network in self.logical_node.networks:
-            for interface in self.agent.interfaces:
-                if interface.network == network:
-                    self.interfaces[network] = interface
-                    break
+        for name, value in zip(self.logical_node.networks, self.allocation.interfaces):
+            self.interfaces[name] = value
         for r in RANGE_RESOURCES:
             d = {}
             for name, value in zip(getattr(self.logical_node, r), getattr(self.allocation, r)):

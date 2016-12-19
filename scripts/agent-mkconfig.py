@@ -164,7 +164,7 @@ def attributes_resources(args):
     attributes['katsdpcontroller.gpus'] = gpus
 
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
-    resources['katsdpcontroller.cpus'] = collapse_ranges(hwloc.cpu_nodes().keys())
+    resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     # Mesos sees "cpus" and "mem" in our custom resource names, and skips the
     # automatic detection. We have to recreate its logic.
     resources['cpus'] = len(hwloc.cpu_nodes())
