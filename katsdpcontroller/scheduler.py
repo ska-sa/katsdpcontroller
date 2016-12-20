@@ -768,7 +768,11 @@ class Agent(ResourceCollector):
         # Match network requests to interfaces
         for request in logical_task.networks:
             if not any(request.matches(interface, numa_node) for interface in self.interfaces):
-                raise InsufficientResourcesError('Network {} not present'.format(request.network))
+                if not any(request.matches(interface, None) for interface in self.interfaces):
+                    raise InsufficientResourcesError('Network {} not present'.format(request.network))
+                else:
+                    raise InsufficientResourcesError(
+                        'Network {} not present on NUMA node {}'.format(request.network, numa_node))
 
         # Match GPU requests to GPUs. At the moment this is very dumb,
         # assigning any GPU that will fit without any packing optimisation.
