@@ -1520,8 +1520,9 @@ class SDPControllerServer(DeviceServer):
         Returns
         -------
         success : ('ok'|'fail', message, product)
-            - Returns OK on either a successful configure or if the configuration already exists. On success product is a reference to newly created SDPSubarrayProduct
-            - Returns fail on the following (product is returned as None):
+            - Returns OK on either a successful configure or if the configuration already exists. 
+                - If a new subarray has been configured then product is a reference to newly created SDPSubarrayProduct, else None
+            - Returns fail on the following (product is always None):
                 - The specified subarray product id already exists, but the config differs from that specified
                 - If the antennas, channels, dump rate, beams and stream sources are not specified
                 - If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
