@@ -42,6 +42,17 @@ class TelstateTask(PhysicalTask):
         self.taskinfo.container.docker.port_mappings = [portmap]
 
 
+class GPURequestByName(GPURequest):
+    def __init__(self, name):
+        super(GPURequestByName, self).__init__()
+        self.name = name
+
+    def matches(self, agent_gpu, numa_node):
+        if agent_gpu.name != self.name:
+            return False
+        return super(GPURequestByName, self).matches(agent_gpu, numa_node)
+
+
 class SDPTask(PhysicalTask):
     """Task that stores configuration in telstate"""
     def resolve(self, resolver, graph):
@@ -147,7 +158,7 @@ def make_graph(beamformer_mode, cbf_channels, simulate):
         ingest.command = ['ingest.py']
         ingest.ports = ['port']
         ingest.cores = [None] * 2
-        ingest.gpus = [GPURequest()]
+        ingest.gpus = [GPURequestByName('GeForce GTX TITAN X')]
         ingest.gpus[0].compute = 0.5
         ingest.gpus[0].mem = 4096.0      # TODO: compute from channels and antennas
         ingest.cpus = 2

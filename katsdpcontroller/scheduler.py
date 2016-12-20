@@ -248,6 +248,9 @@ class GPURequest(object):
             setattr(self, r, 0.0)
         self.affinity = False
 
+    def matches(self, agent_gpu, numa_node):
+        return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
+
 
 class NetworkRequest(object):
     """Request for resources on a network interface. At the moment only
@@ -800,7 +803,7 @@ class Agent(ResourceCollector):
             for j, gpu in enumerate(self.gpus):
                 if gpu_map[j] is not None:
                     continue     # Already been used for a request in this task
-                if numa_node is not None and request.affinity and gpu.numa_node != numa_node:
+                if not request.matches(gpu, numa_node):
                     continue
                 good = True
                 for r in GPU_SCALAR_RESOURCES:
