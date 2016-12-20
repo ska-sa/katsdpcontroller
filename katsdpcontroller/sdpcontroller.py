@@ -1378,6 +1378,8 @@ class SDPControllerServer(DeviceServer):
                 logger.error(retmsg, exc_info=True)
                 req.reply('fail', retmsg)
             finally:
+                executor.shutdown(wait=False)
+                 # executor will shutdown when all existing futures have completed
                 try:
                     dp_handle = self.subarray_products[subarray_product_id]
                     dp_handle._async_busy = False
@@ -1467,7 +1469,8 @@ class SDPControllerServer(DeviceServer):
          # we are only going to allow a single conf/deconf at a time
         self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
                             subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
-
+        executor.shutdown(wait=False)
+         # executor will shutdown when all existing futures have completed
         config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
          # store our calling context for later use in the reconfigure command
 
@@ -1504,7 +1507,22 @@ class SDPControllerServer(DeviceServer):
 
 
     def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
-        """Asynchronous portion of data product configure. See docstring for request_data_product_configure above."""
+        """Asynchronous portion of data product configure. See docstring for request_data_product_configure above.
+
+        Returns
+        -------
+        success : ('ok'|'fail', string)
+            Returns OK on either a succesfull configure or if the configuration already exists
+            Returns fail on the following:
+                The specified subarray product id already exists, but the config differs from that specified
+                If the antennas, channels, dump rate, beams and stream sources are not specified
+                If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
+                If the specified subarray_product_id cannot be parsed into suitable components
+                If neither telstate nor docker python libraries are installed and we are not using interface mode
+                If one or more nodes fail to launch (e.g. container not found)
+                If one or more nodes fail to become alive (essentially a NOP for now)
+                If we fail to establish katcp connection to all nodes requiring them.
+        """
         if antennas == "0" or antennas == "":
             (rcode, rval) = self.deregister_product(subarray_product_id)
             return (rcode, rval, None)
@@ -1617,7 +1635,7 @@ class SDPControllerServer(DeviceServer):
         try:
             graph.execute_graph(req)
              # launch containers for those nodes that require them
-        except docker.errors.DockerException, e:
+        except docker.errors.DockerException as e:
             graph.shutdown()
             return ('fail',e,None)
         req.inform("All nodes launched")
