@@ -22,9 +22,14 @@ except ImportError:
 
 @tornado.gen.coroutine
 def on_shutdown(ioloop, server):
+    si = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    st = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+     # avoid any further interruptions whilst we handle shutdown
     server.handle_exit()
     yield server.stop()
     ioloop.stop()
+    signal.signal(signal.SIGINT, si)
+    signal.signal(signal.SIGTERM, st)
 
 if __name__ == "__main__":
 
