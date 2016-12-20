@@ -1306,9 +1306,9 @@ class SDPControllerServer(DeviceServer):
         if rcode == 'fail': return (rcode, rval)
         return (rcode, rval)
 
-    def handle_exit(self):
+    def deconfigure_on_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
-        logger.warning("SDP Master Controller interrupted.")
+        logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
         for subarray_product_id in self.subarray_products.keys():
             try:
                 rcode, rval = self.deregister_product(subarray_product_id,force=True)
@@ -1823,12 +1823,9 @@ class SDPControllerServer(DeviceServer):
             Comma separated lists of hosts that have been shutdown (excl mc host)
         """
         logger.info("SDP Shutdown called.")
-        for subarray_product_id in self.subarray_products.keys():
-            try:
-                rcode, rval = self.deregister_product(subarray_product_id,force=True)
-                logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
-            except Exception as e:
-                logger.warning("Failed to deconfigure product {} during shutdown. Forging ahead...".format(subarray_product_id))
+        self.deconfigure_on_exit()
+         # attempt to deconfigure any existing subarrays
+         # will always succeed even if some deconfigure fails
 
         self.resources.hosts.pop('localhost.localdomain')
          # remove this to prevent accidental shutdown of master controller whilst handling remotes
