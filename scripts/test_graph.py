@@ -21,6 +21,7 @@ from katsdpcontroller.scheduler import (
     LogicalExternal, PhysicalExternal,
     LogicalTask, PhysicalTask,
     TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator,
+    GPURequest, NetworkRequest,
     instantiate, RANGE_RESOURCES)
 
 
@@ -118,6 +119,17 @@ def make_graph():
             node.physical_factory = SDPTask
             g.add_edge(node, telstate, port='telstate', order='strong',
                        config={'test_edge': 'batman'})
+
+    # cuda test node
+    cuda = LogicalTask('sdp.cuda.1')
+    cuda.cpus = 0.2
+    cuda.mem = 256
+    cuda.image = 'nvidia/cuda:8.0-runtime'
+    cuda.command = ['nvidia-smi']
+    cuda.gpus.append(GPURequest())
+    cuda.gpus[-1].compute = 0.5
+    cuda.gpus[-1].mem = 256
+    g.add_node(cuda)
 
     return g
 

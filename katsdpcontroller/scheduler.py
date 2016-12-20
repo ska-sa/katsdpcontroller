@@ -70,6 +70,25 @@ Edges are used for several distinct but overlapping purposes.
 
 It is permitted for the graph to have cycles, as long as no cycle contains a
 strong edge.
+
+GPU support
+-----------
+GPUs are supported independently of Mesos' built-in GPU support, which is not
+very flexible. Mesos allows only a whole number of GPUs to be allocated to a
+task, and they are reserved exclusively for that task. katsdpcontroller allows
+tasks to share a GPU, and provides resources for compute and memory. There is
+no isolation of GPU memory.
+
+To use this support, the agent must be configured with attributes and
+resources. The attribute :code:`katsdpcontroller.gpus` must be a
+base64url-encoded JSON string, describing a list of GPUs, and conforming to
+:const:`GPUS_SCHEMA`. For the ith GPU in this list (counting from 0), there
+must be corresponding resources :samp:`katsdpcontroller.gpu.{i}.compute`
+(generally with capacity 1.0) and :samp:`katsdpcontroller.gpu.{i}.mem` (in
+MiB).
+
+The node must also provide nvidia-docker-plugin so that driver volumes can be
+loaded.
 """
 
 
@@ -78,6 +97,7 @@ import logging
 import json
 import itertools
 import re
+import base64
 import socket
 import contextlib
 import copy
@@ -95,7 +115,8 @@ from addict import Dict
 import pymesos
 
 
-SCALAR_RESOURCES = ['cpus', 'gpus', 'mem', 'disk']
+SCALAR_RESOURCES = ['cpus', 'mem', 'disk']
+GPU_SCALAR_RESOURCES = ['compute', 'mem']
 RANGE_RESOURCES = ['ports', 'cores']
 #: Mesos task states that indicate that the task is dead (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset([
@@ -104,37 +125,93 @@ TERMINAL_STATUSES = frozenset([
     'TASK_KILLED',
     'TASK_LOST',
     'TASK_ERROR'])
-INTERFACE_SCHEMA = {
-    'type': 'object',
-    'properties': {
-        'name': {
-            'type': 'string',
-            'minLength': 1
-        },
-        'network': {
-            'type': 'string',
-            'minLength': 1
-        },
-        'ipv4_address': {
-            'type': 'string',
-            'format': 'ipv4'
-        },
-        'numa_node': {
+NUMA_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'array',
+        'items': {
             'type': 'integer',
-            'minimum': 0
-        }
+            'minimum': 0,
+        },
+        'minItems': 1,
+        'uniqueItems': True
     },
-    'required': ['name', 'network', 'ipv4_address']
+    'minItems': 1,
+    'uniqueItems': True
+}
+INTERFACES_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'object',
+        'properties': {
+            'name': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'network': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'ipv4_address': {
+                'type': 'string',
+                'format': 'ipv4'
+            },
+            'numa_node': {
+                'type': 'integer',
+                'minimum': 0
+            },
+            'speed': {
+                'type': 'number',
+                'minimum': 0.0,
+                'exclusiveMinimum': True
+            }
+        },
+        'required': ['name', 'network', 'ipv4_address']
+    }
+}
+GPUS_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'object',
+        'properties': {
+            'device': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'driver_version': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'name': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'compute_capability': {
+                'type': 'array',
+                'items': {'type': 'integer', 'minimum': 0},
+                'minLength': 2,
+                'maxLength': 2
+            },
+            'device_attributes': {
+                'type': 'object'
+            },
+            'numa_node': {
+                'type': 'integer',
+                'minimum': 0
+            }
+        },
+        'required': ['device', 'driver_version', 'name', 'compute_capability', 'device_attributes']
+    }
 }
 logger = logging.getLogger(__name__)
 
 
-Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node'])
+Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node', 'speed'])
 """Abstraction of a network interface on a machine.
 
-An interface is defined by setting a Mesos attribute of the form
-:samp:`interface_{name}`, whose value is a JSON string that adheres to the
-schema in :const:`INTERFACE_SCHEMA`.
+Interfaces are defined by setting the Mesos attribute
+:code:`katsdpcontroller.interfaces`, whose value is a JSON string that adheres
+to the schema in :const:`INTERFACES_SCHEMA`.
 
 Attributes
 ----------
@@ -144,9 +221,55 @@ network : str
     Logical name for the network to which the interface is attached
 ipv4_address : :class:`ipaddress.IPv4Address`
     IPv4 local address of the interface
-numa_node : int
+numa_node : int, optional
     Index of the NUMA socket to which the NIC is connected
+speed : float, optional
+    Speed (in bits per second) of the interface
 """
+
+
+class GPURequest(object):
+    """Request for resources on a single GPU. These resources are not isolated,
+    so the request functions purely to ensure that the scheduler does not try
+    to over-allocate a GPU.
+
+    Attributes
+    ----------
+    compute : float
+        Fraction of GPU's compute resource consumed
+    mem : float
+        Memory usage (megabytes)
+    affinity : bool
+        If true, the GPU must be on the same NUMA node as the chosen CPU
+        cores (ignored if no CPU cores are reserved).
+    """
+    def __init__(self):
+        for r in GPU_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+        self.affinity = False
+
+
+class NetworkRequest(object):
+    """Request for resources on a network interface. At the moment only
+    a logical network name can be specified, but this may be augmented in
+    future to allocate bandwidth.
+
+    Attributes
+    ----------
+    network : str
+        Logical network name
+    affinity : bool
+        If true, the network device must be on the same NUMA node as the chosen
+        CPU cores (ignored if no CPU cores are reserved).
+    """
+    def __init__(self, network):
+        self.network = network
+        self.affinity = False
+
+    def matches(self, interface, numa_node):
+        if self.affinity and numa_node is not None and interface.numa_node != numa_node:
+            return False
+        return self.network == interface.network
 
 
 class OrderedEnum(Enum):
@@ -246,6 +369,26 @@ class RangeResource(object):
     def __iter__(self):
         return itertools.chain(*[six.moves.range(start, stop) for (start, stop) in self._ranges])
 
+    def remove(self, item):
+        for i, (start, stop) in enumerate(self._ranges):
+            if item >= start and item < stop:
+                if item == start and item + 1 == stop:
+                    del self._ranges[i]
+                elif item == start:
+                    self._ranges[i] = (start + 1, stop)
+                elif item + 1 == stop:
+                    self._ranges[i] = (start, stop - 1)
+                else:
+                    # Need to split the range. deque doesn't have .insert, so we
+                    # have to fake it using rotations.
+                    self._ranges.rotate(-i)
+                    self._ranges[0] = (item + 1, stop)
+                    self._ranges.append((start, item))
+                    self._ranges.rotate(i + 1)
+                return
+        raise ValueError('item not in list')
+
+
     def popleft(self):
         if not self._ranges:
             raise IndexError('pop from empty list')
@@ -280,15 +423,24 @@ class RangeResource(object):
         return ','.join(format_range(rng) for rng in self._ranges)
 
 
+class GPUResourceAllocation(object):
+    """Collection of specific resources allocated from a single agent GPU."""
+    def __init__(self):
+        for r in GPU_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+
+
 class ResourceAllocation(object):
     """Collection of specific resources allocated from a collection of offers.
     """
     def __init__(self, agent):
+        self.agent = agent
         for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
-        self.agent = agent
+        self.gpus = [GPUResourceAllocation() for gpu in agent.gpus]
+        self.interfaces = []
 
 
 class ImageResolver(object):
@@ -440,10 +592,13 @@ class LogicalNode(object):
 class LogicalExternal(LogicalNode):
     """An external service. It is assumed to be running as soon as it starts.
 
-    The host and port must be set manually on the physical node."""
+    The host and port must be set manually on the physical node. It also
+    defaults to an empty :attr:`~LogicalNode.wait_ports`, which must be
+    overridden is waiting is desired."""
     def __init__(self, name):
         super(LogicalExternal, self).__init__(name)
         self.physical_factory = PhysicalExternal
+        self.wait_ports = []
 
 
 class LogicalTask(LogicalNode):
@@ -452,14 +607,12 @@ class LogicalTask(LogicalNode):
     running task.
 
     The command is processed by :meth:`str.format` to substitute dynamic
-    values. The following named values are provided:
+    values.
 
     Attributes
     ----------
     cpus : float
         Mesos CPU shares.
-    gpus : float
-        GPU resources required
     mem : float
         Mesos memory reservation (megabytes)
     disk : float
@@ -477,7 +630,9 @@ class LogicalTask(LogicalNode):
         Network service ports. Each element in the list is a logical name for
         the port.
     networks : list
-        Abstract names of networks for which network interfaces are required.
+        List of :class:`NetworkRequest` objects, one per network requested
+    gpus : list
+        List of :class:`GPURequest` objects, one per GPU needed
     image : str
         Base name of the Docker image (without registry or tag).
     container : `mesos_pb2.ContainerInfo`
@@ -500,6 +655,7 @@ class LogicalTask(LogicalNode):
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
+        self.gpus = []
         self.networks = []
         self.image = None
         self.command = []
@@ -515,7 +671,37 @@ class LogicalTask(LogicalNode):
         return True
 
 
-class Agent(object):
+class ResourceCollector(object):
+    def inc_attr(self, key, delta):
+        setattr(self, key, getattr(self, key) + delta)
+
+    def add_range_attr(self, key, resource):
+        getattr(self, key).add_resource(resource)
+
+
+class AgentGPU(ResourceCollector):
+    """A single GPU on an agent machine, tracking both attributes and free resources."""
+    def __init__(self, spec):
+        self.device = spec['device']
+        self.driver_version = spec['driver_version']
+        self.name = spec['name']
+        self.compute_capability = tuple(spec['compute_capability'])
+        self.device_attributes = spec['device_attributes']
+        self.numa_node = spec.get('numa_node')
+        for r in GPU_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+
+
+def _decode_json_base64(text):
+    """Decodes a object that has been encoded with JSON then url-safe base64.
+    It gets a bit complicated because the text is unicode, but base64 expects
+    bytes (in Python 2; Python 3 allows bytes), and returns bytes, and JSON
+    decode expects text."""
+    json_bytes = base64.urlsafe_b64decode(text.encode('us-ascii'))
+    return json.loads(json_bytes.decode('utf-8'))
+
+
+class Agent(ResourceCollector):
     """Collects multiple offers for a single Mesos agent and allows
     :class:`ResourceAllocation`s to be made from it.
     """
@@ -527,25 +713,37 @@ class Agent(object):
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
+        self.gpus = []
+        self.numa = []
         for attribute in offers[0].attributes:
-            if attribute.name.startswith('interface_') and \
-                    attribute.type == 'SCALAR':
-                try:
-                    value = json.loads(attribute.text.value)
-                    jsonschema.validate(value, INTERFACE_SCHEMA)
-                    interface = Interface(
-                        name=value['name'],
-                        network=value['network'],
-                        ipv4_address=ipaddress.IPv4Address(value['ipv4_address']),
-                        numa_node=value.get('numa_node'))
-                except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
-                    logger.warn('Could not parse %s (%s)',
-                                attribute.name, attribute.text.value)
-                    logger.debug('Exception', exc_info=True)
-                except jsonschema.ValidationError as e:
-                    logger.warn('Validation error parsing %s: %s', value, e)
-                else:
-                    self.interfaces.append(interface)
+            try:
+                if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    jsonschema.validate(value, INTERFACES_SCHEMA)
+                    interfaces = []
+                    for item in value:
+                        interfaces.append(Interface(
+                            name=item['name'],
+                            network=item['network'],
+                            ipv4_address=ipaddress.IPv4Address(item['ipv4_address']),
+                            numa_node=item.get('numa_node'),
+                            speed=item.get('speed')))
+                    self.interfaces = interfaces
+                elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    jsonschema.validate(value, GPUS_SCHEMA)
+                    self.gpus = [AgentGPU(item) for item in value]
+                elif attribute.name == 'katsdpcontroller.numa' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    jsonschema.validate(value, NUMA_SCHEMA)
+                    self.numa = value
+            except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
+                logger.warn('Could not parse %s (%s)',
+                            attribute.name, attribute.text.value)
+                logger.debug('Exception', exc_info=True)
+            except jsonschema.ValidationError as e:
+                logger.warn('Validation error parsing %s: %s', value, e)
+
         # These resources all represent resources not yet allocated
         for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
@@ -558,15 +756,93 @@ class Agent(object):
                 if 'disk' in resource and 'source' in resource.disk:
                     continue
                 if resource.name in SCALAR_RESOURCES:
-                    self._inc_attr(resource.name, resource.scalar.value)
+                    self.inc_attr(resource.name, resource.scalar.value)
                 elif resource.name in RANGE_RESOURCES:
-                    self._add_range_attr(resource.name, resource)
+                    self.add_range_attr(resource.name, resource)
+                elif resource.name.startswith('katsdpcontroller.gpu.'):
+                    parts = resource.name.split('.', 3)
+                    # TODO: catch exceptions here
+                    index = int(parts[2])
+                    resource_name = parts[3]
+                    if resource_name in GPU_SCALAR_RESOURCES:
+                        self.gpus[index].inc_attr(resource_name, resource.scalar.value)
 
-    def _inc_attr(self, key, delta):
-        setattr(self, key, getattr(self, key) + delta)
+    def _allocate_numa_node(self, numa_node, logical_task):
+        # Check that there are sufficient cores on this node
+        if numa_node is not None:
+            # TODO: would be more efficient to replace self.numa with a map
+            # from core to node
+            cores = deque(core for core in self.numa[numa_node] if core in self.cores)
+        else:
+            cores = deque()
+        need = len(logical_task.cores)
+        have = len(cores)
+        if need > have:
+            raise InsufficientResourcesError('not enough cores on node {} ({} < {})'.format(
+                numa_node, have, need))
 
-    def _add_range_attr(self, key, resource):
-        getattr(self, key).add_resource(resource)
+        # Match network requests to interfaces
+        for request in logical_task.networks:
+            if not any(request.matches(interface, numa_node) for interface in self.interfaces):
+                if not any(request.matches(interface, None) for interface in self.interfaces):
+                    raise InsufficientResourcesError('Network {} not present'.format(request.network))
+                else:
+                    raise InsufficientResourcesError(
+                        'Network {} not present on NUMA node {}'.format(request.network, numa_node))
+
+        # Match GPU requests to GPUs. At the moment this is very dumb,
+        # assigning any GPU that will fit without any packing optimisation.
+        # It may even fail unnecessarily for multi-GPU requests.
+        gpu_map = [None] * len(self.gpus)
+        for i, request in enumerate(logical_task.gpus):
+            use_gpu = None
+            for j, gpu in enumerate(self.gpus):
+                if gpu_map[j] is not None:
+                    continue     # Already been used for a request in this task
+                if numa_node is not None and request.affinity and gpu.numa_node != numa_node:
+                    continue
+                good = True
+                for r in GPU_SCALAR_RESOURCES:
+                    need = getattr(request, r)
+                    have = getattr(gpu, r)
+                    if have < need:
+                        logger.debug('Not enough %s on GPU %d for request %d',
+                                     r, j, i)
+                        good = False
+                        break
+                if good:
+                    use_gpu = j
+                    break
+            if use_gpu is None:
+                raise InsufficientResourcesError('No suitable GPU found for request {}'.format(i))
+            gpu_map[j] = request
+
+        # Have now verified that the task fits. Create the resources for it
+        alloc = ResourceAllocation(self)
+        for r in SCALAR_RESOURCES:
+            need = getattr(logical_task, r)
+            self.inc_attr(r, -need)
+            setattr(alloc, r, need)
+        for r in RANGE_RESOURCES:
+            if r != 'cores':
+                for name in getattr(logical_task, r):
+                    value = getattr(self, r).popleft()
+                    getattr(alloc, r).append(value)
+            else:
+                for name in logical_task.cores:
+                    value = cores.popleft()
+                    alloc.cores.append(value)
+                    self.cores.remove(value)
+        for request in logical_task.networks:
+            alloc.interfaces.append(next(interface for interface in self.interfaces
+                                         if request.matches(interface, numa_node)))
+        for i, gpu in enumerate(self.gpus):
+            if gpu_map[i] is not None:
+                for r in GPU_SCALAR_RESOURCES:
+                    need = getattr(gpu_map[i], r)
+                    gpu.inc_attr(r, -need)
+                    setattr(alloc.gpus[i], r, need)
+        return alloc
 
     def allocate(self, logical_task):
         """Allocate the resources for a logical task, if possible.
@@ -582,7 +858,6 @@ class Agent(object):
         """
         if not logical_task.valid_agent(self.attributes):
             raise InsufficientResourcesError('Task does not match this agent')
-        # TODO: add NUMA awareness
         for r in SCALAR_RESOURCES:
             need = getattr(logical_task, r)
             have = getattr(self, r)
@@ -593,21 +868,18 @@ class Agent(object):
             have = len(getattr(self, r))
             if have < need:
                 raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
-        for network in logical_task.networks:
-            if not any(interface.network == network for interface in self.interfaces):
-                raise InsufficientResourcesError('Network {} not present'.format(network))
 
-        # Have now verified that the task fits. Create the resources for it
-        alloc = ResourceAllocation(self)
-        for r in SCALAR_RESOURCES:
-            need = getattr(logical_task, r)
-            self._inc_attr(r, -need)
-            setattr(alloc, r, need)
-        for r in RANGE_RESOURCES:
-            for name in getattr(logical_task, r):
-                value = getattr(self, r).popleft()
-                getattr(alloc, r).append(value)
-        return alloc
+        if logical_task.cores:
+            # For tasks requesting cores we activate NUMA awareness
+            for numa_node in range(len(self.numa)):
+                try:
+                    return self._allocate_numa_node(numa_node, logical_task)
+                except InsufficientResourcesError:
+                    logger.debug('Failed to allocate NUMA node %d on %s',
+                                 numa_node, self.agent_id, exc_info=True)
+            raise InsufficientResourcesError('No suitable NUMA node found')
+        else:
+            return self._allocate_numa_node(None, logical_task)
 
 
 class TaskState(OrderedEnum):
@@ -851,11 +1123,8 @@ class PhysicalTask(PhysicalNode):
             Specific resources assigned to the task
         """
         self.allocation = allocation
-        for network in self.logical_node.networks:
-            for interface in self.agent.interfaces:
-                if interface.network == network:
-                    self.interfaces[network] = interface
-                    break
+        for name, value in zip(self.logical_node.networks, self.allocation.interfaces):
+            self.interfaces[name] = value
         for r in RANGE_RESOURCES:
             d = {}
             for name, value in zip(getattr(self.logical_node, r), getattr(self.allocation, r)):
@@ -917,6 +1186,36 @@ class PhysicalTask(PhysicalNode):
                 for item in value:
                     resource.ranges.range.append(Dict(begin=item, end=item))
                 taskinfo.resources.append(resource)
+
+        gpu_driver_version = None
+        gpu_parameters = []
+        for i, gpu_alloc in enumerate(self.allocation.gpus):
+            for r in GPU_SCALAR_RESOURCES:
+                value = getattr(gpu_alloc, r)
+                if value:
+                    resource = Dict()
+                    resource.name = 'katsdpcontroller.gpu.{}.{}'.format(i, r)
+                    resource.type = 'SCALAR'
+                    resource.scalar.value = value
+                    taskinfo.resources.append(resource)
+            if gpu_alloc.compute > 0:
+                gpu_parameters.append({'key': 'device', 'value': self.agent.gpus[i].device})
+                # We assume all GPUs on an agent have the same driver version.
+                # This is reflected in the NVML API, so should be safe.
+                gpu_driver_version = self.agent.gpus[i].driver_version
+        if gpu_driver_version is not None:
+            for device in ['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools']:
+                gpu_parameters.append({'key': 'device', 'value': device})
+            volume = Dict()
+            volume.mode = 'RO'
+            volume.container_path = '/usr/local/nvidia'
+            volume.source.type = 'DOCKER_VOLUME'
+            volume.source.docker_volume.driver = 'nvidia-docker'
+            volume.source.docker_volume.name = 'nvidia_driver_' + gpu_driver_version
+            taskinfo.container.setdefault('volumes', []).append(volume)
+        if gpu_parameters:
+            taskinfo.container.docker.setdefault('parameters', []).extend(gpu_parameters)
+
         taskinfo.discovery.visibility = 'EXTERNAL'
         taskinfo.discovery.name = self.name
         taskinfo.discovery.ports.ports = []
@@ -1021,7 +1320,7 @@ class Scheduler(pymesos.Scheduler):
                 # there is no other choice. Should eventually look into smarter
                 # algorithms e.g. Dominant Resource Fairness
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                agents.sort(key=lambda agent: (agent.gpus, agent.mem))
+                agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
                 allocations = []
                 for node in nodes:
                     allocation = None
@@ -1293,6 +1592,7 @@ __all__ = [
     'LogicalNode', 'PhysicalNode',
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
-    'Interface', 'ResourceAllocation',
+    'Interface', 'ResourceAllocation', 'GPUResourceAllocation',
+    'NetworkRequest', 'GPURequest',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Scheduler', 'instantiate']
