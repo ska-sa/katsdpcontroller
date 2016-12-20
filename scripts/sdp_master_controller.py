@@ -14,6 +14,7 @@ import tornado.gen
 from optparse import OptionParser
 import logging
 import logging.handlers
+from prometheus_client import start_http_server
 
 try:
     import manhole
@@ -46,6 +47,9 @@ if __name__ == "__main__":
     parser.add_option('-s', '--simulate', dest='simulate', default=False,
                       action='store_true', metavar='SIMULATE',
                       help='run controller in simulation mode suitable for lab testing (default: %default)')
+    parser.add_option('--no-prometheus', dest='prometheus', default=True,
+                      action='store_false',
+                      help='disable Prometheus client HTTP service')
     parser.add_option('-i', '--interface_mode', dest='interface_mode', default=False,
                       action='store_true', metavar='INTERFACE',
                       help='run the controller in interface only mode for testing integration and ICD compliance. (default: %default)')
@@ -128,6 +132,10 @@ if __name__ == "__main__":
          # allow remote debug connections and expose server and opts
 
     logger.info("Starting SDP...")
+
+    if opts.prometheus:
+        start_http_server(8081)
+         # expose any prometheus metrics that we create
 
     server.set_ioloop(ioloop)
     signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))

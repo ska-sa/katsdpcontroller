@@ -24,6 +24,8 @@ from katcp import DeviceServer, Sensor, Message, BlockingClient, AsyncReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 
+from prometheus_client import Gauge
+
 try:
     import docker
     import requests
@@ -46,6 +48,11 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','output-rate']
+ # list of sensors to be exposed via prometheus
+ # some of these will match multiple nodes, which is fine since they get fully qualified names when
+ # created as a prometheus metric
+ # TODO: harmonise sodding -/_ convention
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -442,7 +449,7 @@ class SDPNode(object):
             self.sdp_controller.remove_sensor(sensor_name)
         self.host.stop_container(self.container_id)
 
-    def _chained_read(self, base_name='', katcp_connection=None):
+    def _chained_read(self, base_name='', katcp_connection=None, prometheus_gauge=None):
          # used to chain a sensor in the master controller
          # to the actual sensor on the subordinate device
         if self.katcp_connection:
@@ -463,6 +470,11 @@ class SDPNode(object):
             except KeyError:
                 s_state = Sensor.UNKNOWN
             s_value = args[4]
+            if prometheus_gauge:
+                try:
+                    prometheus_gauge.set(s_value)
+                except ValueError:
+                    logger.warning("Failed to set prometheus gauge {} to {}".format(base_name, s_value))
             logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
             return (s_value, s_state, s_ts)
         else:
@@ -507,7 +519,17 @@ class SDPNode(object):
                              # sensor and thus will need conversion out of their string form 
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
-                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
+                        prometheus_gauge = None
+                        if args[0] in PROMETHEUS_SENSORS:
+                            logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
+                            prom_name = '{}_{}'.format(self.name, args[0]).replace(".","_").replace("-","_")
+                            try:
+                                prometheus_gauge = Gauge(prom_name, s_description)
+                            except ValueError as e:
+                                logger.info("Prometheus Gauge {} already exists - not adding again. ({})".format(prom_name, e))
+                                 # set to info as this only happens when the gauge already exists, and this only
+                                 # happens during a reconfigure.
+                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection, prometheus_gauge=prometheus_gauge)
                         self.add_sensor(s)
                         if self.name == 'sdp.ingest.1' and args[0] == 'status':
                             s.name = "data-product-status-{}".format(self.subarray_product_id)
@@ -624,7 +646,6 @@ class SDPGraph(object):
                     continue
 
         config.update(additional_config)
-
          # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
         try:
@@ -820,6 +841,9 @@ class SDPHost(object):
         except docker.errors.NotFound:
             pass
              # generally benign - probably a new host or someone cleaned up aggressively
+        except docker.errors.NullResource:
+            pass
+             # on occasion the docker-base container used for kibisis may not exist
         except docker.errors.APIError:
             logger.warning("Failed to rename old container {} to {}. Removing to allow startup of new container".format(image.name_to_use, old_image_rename))
              # seems our unique ID is not so unique, or some other docker calamity has occured
@@ -839,7 +863,7 @@ class SDPHost(object):
                  # the specific entry we are looking for has the following form (hash shortened for brevity):
                  # {"status":"Digest: sha256:ca02ec...cfb906a"}
                 logger.info("Image {} pulled in {:.2f}s".format(image.image, time.time()-st))
-            _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset)
+            _container = self._docker_client.create_container(name=image.name_to_use, image=image.image, command=image.cmd, volumes=image.volumes, cpuset=image.cpuset, user=image.user)
         except docker.errors.APIError, e:
             logger.error("Failed to build container ({})".format(e))
             return (None, None)
@@ -888,7 +912,7 @@ class SDPImage(object):
     
     """
     def __init__(self, image, name_to_use=None, port_bindings=None, network=None, devices=None, volumes=None, cmd=None, image_class=None, binds=None, cpuset=None,\
-                              privileged=None, ulimits=None, ipc_mode=None):
+                              privileged=None, ulimits=None, ipc_mode=None, user=None):
         self.image = image
         self.name_to_use = name_to_use
         self.port_bindings = port_bindings
@@ -901,10 +925,11 @@ class SDPImage(object):
         self.privileged = privileged
         self.ulimits = ulimits
         self.ipc_mode = ipc_mode
+        self.user = user
 
     def __repr__(self):
-        return "Image: {} ({}), Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}".format(self.image,\
-                self.name_to_use, self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd)
+        return "Image: {} ({}), Port Bindings: {}, Network: {}, Devices: {}, Volumes: {}, CPUs: {}, Cmd: {}, User: {}".format(self.image,\
+                self.name_to_use, self.port_bindings, self.network, self.devices, self.volumes, self.cpuset, self.cmd, self.user)
 
 
 class SDPTask(object):
@@ -1114,13 +1139,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 rcode, rval = self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim')
                  # instruct the simulator to rebuild its local config from the values in telstate
                 if rcode == 'ok':
-                    rcode, rval = self._issue_req('configure-product-from-telstate', args=[self.subarray_product_id], node_type='sdp.sim')
-                    if rcode == 'ok':
-                        rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
-                    else:
-                        logger.error("SIMULATE: configure-product-from-telstate {} failed ({})".format(self.subarray_product_id,rval))
+                    rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
                 else:
-                    logger.error("SIMULATE: configure-product-from-telstate failed ({})".format(rval))
+                    logger.error("SIMULATE: configure-subarray-from-telstate failed ({})".format(rval))
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
@@ -1180,6 +1201,8 @@ class SDPControllerServer(DeviceServer):
          # store calling arguments used to create a specified subarray_product
          # this has either the current args or those most recently
          # configured for this subarray_product
+        self.override_dicts = {}
+         # per subarray product dictionaries used to override internal config
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
@@ -1319,6 +1342,35 @@ class SDPControllerServer(DeviceServer):
                     logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
             except Exception as e:
                 logger.warning("Failed to deconfigure product {} during master controller exit ({}). Forging ahead...".format(subarray_product_id, e))
+
+    @request(Str(), Str())
+    @return_reply(Str())
+    def request_set_config_override(self, req, subarray_product_id, override_dict_json):
+        """Override internal configuration parameters for the next configure of the
+        specified subarray product.
+
+        An existing override for this subarry product will be completely overwritten.
+
+        The override will only persist until a successful configure has been called on the subarray product.
+
+        Request Arguments
+        ----------------
+        subarray_product_id : string
+            The ID of the subarray product to set overrides for in the form [<subarray_name>_]<data_product_name>.
+        override_dict_json : string
+            A json string containing a dict of config key:value overrides to use.
+        """
+        logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
+        try:
+            odict = json.loads(override_dict_json)
+            if type(odict) is not dict: raise ValueError
+            logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
+            self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
+        except ValueError as e:
+            msg = "The supplied override string {} does not appear to be a valid json string containing a dict. {}".format(override_dict_json, e)
+            logger.error(msg)
+            return ('fail', msg)
+        return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
     @request(Str(), include_msg=True)
     @return_reply(Str())
@@ -1617,6 +1669,11 @@ class SDPControllerServer(DeviceServer):
         }
          # holds additional config that must reside within the config dict in the telstate 
         req.inform("Graph {} construction complete.".format(graph_name))
+        if subarray_product_id in self.override_dicts:
+            odict = self.override_dicts.pop(subarray_product_id)
+             # this is a use-once set of overrides
+            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            additional_config.update(odict)
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
@@ -1828,30 +1885,34 @@ class SDPControllerServer(DeviceServer):
          # attempt to deconfigure any existing subarrays
          # will always succeed even if some deconfigure fails
 
-        self.resources.hosts.pop('localhost.localdomain')
-         # remove this to prevent accidental shutdown of master controller whilst handling remotes
-
-        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd="/sbin/poweroff", network='host')
+        kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd='/sbin/poweroff', network='host', user='root')
          # prepare a docker image to halt remote hosts
 
         shutdown_hosts = ""
+        mc_host = None
         for (host_name, host) in self.resources.hosts.iteritems():
-            if socket.gethostbyname(host.ip) != '127.0.0.1':
+            if socket.gethostbyname(host.ip) != '127.0.0.1' and host_name != 'localhost.localdomain':
                  # make sure a localhost hasn't snuck in to spoil the party
                 logger.debug("Launching halt image on host {}".format(host_name))
-                (container, pullable_version) = host.launch(kibisis)
+                container = None
+                try:
+                    (container, pullable_version) = host.launch(kibisis)
+                except Exception as e:
+                    logger.error("Exception whilst launching shutdown container on host {}: {}".format(host_name, e))
+                     # we tried our best
                 if container is None: logger.error("Failed to launch shutdown container on host {}".format(host_name))
                 shutdown_hosts += "{}{},".format(host_name,"" if container else "(failed)")
+            else:
+                mc_host = host
 
-        logger.warning("Shutting down master controller host...")
-        retval = os.system('sudo --non-interactive /sbin/poweroff')
-         # finally shutdown localhost - relying on upstart to shutdown the master controller
-        if retval != 0:
-            retmsg = "Failed to issue /sbin/poweroff on MC host. This is most likely a sudoers permission issue."
-            logger.error(retmsg)
-            return ("fail", retmsg)
-        return ("ok", shutdown_hosts[:shutdown_hosts.rfind(',')])
-
+         # and now we finish ourselves off
+        try:
+            (container, pullable_version) = mc_host.launch(kibisis)
+        except Exception as e:
+            logger.error("Exception whilst launching shutdown container on master controller host: {}".format(e))
+            container = None
+        shutdown_hosts += "{}{}".format("localhost","" if container else "(failed)")
+        return ("ok", shutdown_hosts)
 
     @request(include_msg=True)
     @return_reply(Int(min=0))

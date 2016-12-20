@@ -22,6 +22,23 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
+    streams = "corr.{}:visibility".format(c_stream[:-6].lower())
+     # string containing a mapping from stream_name to stream_type.
+     # This is temporary for AR1/1.5 and should be replaced by a
+     # per stream sensor indicating type directly from the CBF
+     # The .lower() is needed because CBF uses lower case in stream
+     # specific sensor names, but reports stream names to CAM in mixed case.
+     # The [:-6] strips off the _spead suffix that sdpcontroller.py added.
+    if beamformer_mode != 'none':
+        beams = ['corr.beam_0x', 'corr.beam_0y']
+    else:
+        beams = []
+    for beam in beams:
+        streams += ",{}:beamformer".format(beam)
+     # we also include a reference to the fengine stream so
+     # we can get n_samples_between_spectra
+    streams += ",fengine_stream:fengine"
+
     G = nx.DiGraph()
 
      # top level attributes of this graph, used by all nodes
@@ -40,6 +57,8 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     # cam2telstate node
     G.add_node('sdp.cam2telstate.1', {
         'url': r.get_url('CAMDATA'),
+        'streams': streams,
+        'collapse_streams': True,
         'docker_image': r.get_image_path('katsdpingest'),
         'docker_cmd': 'cam2telstate.py',
         'docker_host_class': 'sdpmc',
@@ -76,7 +95,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
              'state_transitions':{2:'capture-init',5:'capture-done'}\
             })
     elif beamformer_mode != 'none':
-        for i in range(2):
+        for i, beam in enumerate(beams):
             if beamformer_mode == 'hdf5_ram':
                 affinity = [[4, 6], [5, 7]][i]
                 interface = 'p4p1'
@@ -93,11 +112,11 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
             G.add_node('sdp.bf_ingest.{}'.format(i+1), {
                 'port': r.get_port('sdp_bf_ingest_{}_katcp'.format(i+1)),
                 'file_base': '/data',
-                'cbf_channels': cbf_channels,
                 'interface': interface,
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
                 'affinity': affinity,
+                'stream_name': beam,
                 'docker_image': r.get_image_path('katsdpingest'),
                 'docker_host_class': host_class,
                 'docker_cmd': 'taskset -c {} bf_ingest.py'.format(cpuset),
@@ -128,10 +147,10 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # calibration node
 
     if simulate:
-        # create-fx-product is passed on the command-line insteead of telstate
+        # create-fx-stream is passed on the command-line insteead of telstate
         # for now due to SR-462.
         G.add_node('sdp.sim.1',{'port': r.get_port('sdp_sim_1_katcp'), 'cbf_channels': cbf_channels,
-             'docker_image':r.get_image_path('katcbfsim'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'cbfsim.py --create-fx-product ' + r.prefix,\
+             'docker_image':r.get_image_path('katcbfsim'),'docker_host_class':'nvidia_gpu', 'docker_cmd':'cbfsim.py --create-fx-stream ' + r.prefix,\
              'docker_params': {"network":"host", "devices":["/dev/nvidiactl:/dev/nvidiactl",\
                               "/dev/nvidia-uvm:/dev/nvidia-uvm","/dev/nvidia0:/dev/nvidia0"]}
             })
@@ -141,6 +160,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     G.add_node('sdp.timeplot.1',{
         'spead_port': r.get_port('spead_sdisp'),
         'html_port': r.get_sdisp_port_pair('timeplot')[0],
+        'cbf_channels': cbf_channels,
         'capture_server': '{}:{}'.format('127.0.0.1', r.get_port('sdp_ingest_1_katcp')),
         'config_base': '/var/kat/config/.katsdpdisp',
         'data_port': r.get_sdisp_port_pair('timeplot')[1],

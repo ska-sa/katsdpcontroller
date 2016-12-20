@@ -1,5 +1,6 @@
 #!groovy
 
-def katsdp = fileLoader.fromGit('scripts/katsdp.groovy', 'git@github.com:ska-sa/katsdpjenkins', 'master', 'katpull', '')
+@Library('katsdpjenkins') _
 katsdp.setDependencies(['ska-sa/katsdpdockerbase/master'])
-katsdp.standardBuild(maintainer: 'simonr@ska.ac.za', docker_venv: true)
+katsdp.standardBuild(docker_venv: true)
+katsdp.mail('simonr@ska.ac.za')
