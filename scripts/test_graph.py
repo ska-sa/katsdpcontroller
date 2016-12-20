@@ -251,15 +251,6 @@ def async_request(func, *args, **kwargs):
     raise katcp.AsyncReply()
 
 
-class Driver(pymesos.MesosSchedulerDriver):
-    """Overrides :class:`pymesos.MesosSchedulerDriver` to make acknowledgements
-    explicit. This is a bit fragile and should eventually be pushed to pymesos.
-    """
-    def on_update(self, event):
-        status = event['status']
-        self.sched.statusUpdate(self, self._dict_cls(status))
-
-
 class Server(katcp.DeviceServer):
     VERSION_INFO = ('dummy', 0, 1)
     BUILD_INFO = ('katsdpcontroller',) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
@@ -268,8 +259,9 @@ class Server(katcp.DeviceServer):
         super(Server, self).__init__(*args, **kwargs)
         self._loop = loop
         self._scheduler = Scheduler(loop)
-        self._driver = Driver(
-            self._scheduler, framework, master, use_addict=True)
+        self._driver = pymesos.MesosSchedulerDriver(
+            self._scheduler, framework, master, use_addict=True,
+            implicit_acknowledgements=False)
         self._scheduler.set_driver(self._driver)
         self._driver.start()
         self._resolver = resolver

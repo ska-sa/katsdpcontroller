@@ -23,7 +23,7 @@ numpy
 pbr
 pkginfo
 ply
-pymesos==0.2.7
+pymesos==0.2.9
 ProxyTypes
 redis
 requests==2.8.1

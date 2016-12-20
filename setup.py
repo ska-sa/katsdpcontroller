@@ -18,7 +18,7 @@ setup (
         ],
     setup_requires = ['katversion'],
     install_requires = [
-        'pymesos>=0.2.0',
+        'pymesos>=0.2.9',
         'addict',
         'trollius',
         'decorator',
