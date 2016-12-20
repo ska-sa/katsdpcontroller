@@ -182,12 +182,25 @@ GPUS_SCHEMA = {
                 'type': 'string',
                 'minLength': 1
             },
+            'name': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'compute_capability': {
+                'type': 'array',
+                'items': {'type': 'integer', 'minimum': 0},
+                'minLength': 2,
+                'maxLength': 2
+            },
+            'device_attributes': {
+                'type': 'object'
+            },
             'numa_node': {
                 'type': 'integer',
                 'minimum': 0
             }
         },
-        'required': ['device', 'driver_version']
+        'required': ['device', 'driver_version', 'name', 'compute_capability', 'device_attributes']
     }
 }
 logger = logging.getLogger(__name__)
@@ -671,6 +684,9 @@ class AgentGPU(ResourceCollector):
     def __init__(self, spec):
         self.device = spec['device']
         self.driver_version = spec['driver_version']
+        self.name = spec['name']
+        self.compute_capability = tuple(spec['compute_capability'])
+        self.device_attributes = spec['device_attributes']
         self.numa_node = spec.get('numa_node')
         for r in GPU_SCALAR_RESOURCES:
             setattr(self, r, 0.0)

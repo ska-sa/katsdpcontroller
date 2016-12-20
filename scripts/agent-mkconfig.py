@@ -13,8 +13,11 @@ from collections import OrderedDict
 import xml.etree.ElementTree
 import netifaces
 import psutil
+import six
 try:
     import pynvml
+    import pycuda.driver
+    pycuda.driver.init()
 except ImportError:
     pynvml = None
 
@@ -35,11 +38,39 @@ def nvml_manager():
 
 
 class GPU(object):
-    def __init__(self, node, mem, minor, driver_version):
-        self.node = node           #: Nearest NUMA node
-        self.mem = mem             #: Memory in bytes
-        self.minor = minor         #: Device minor number
-        self.driver_version = driver_version   #: Device driver version string
+    def __init__(self, handle, cpu_to_node):
+        node = None
+        # TODO: use number of CPU cores to determine cpuset size
+        # This is very hacky at the moment
+        affinity = pynvml.nvmlDeviceGetCpuAffinity(handle, 1)
+        n_cpus = max(cpu_to_node.keys()) + 1
+        for j in range(n_cpus):
+            if affinity[0] & (1 << j):
+                cur_node = cpu_to_node[j]
+                if node is not None and node != cur_node:
+                    node = -1    # Sentinel to indicate unknown affinity
+                else:
+                    node = cur_node
+        if node == -1:
+            node = None
+        self.node = node
+        self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
+        self.minor = pynvml.nvmlDeviceGetMinorNumber(handle)
+        self.name = pynvml.nvmlDeviceGetName(handle)
+        self.driver_version = pynvml.nvmlSystemGetDriverVersion()
+        # NVML doesn't report compute capability, so we need CUDA
+        pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
+        cuda_device = pycuda.driver.Device(pci_bus_id)
+        self.compute_capability = cuda_device.compute_capability()
+        self.device_attributes = {}
+        for key, value in six.iteritems(cuda_device.get_attributes()):
+            if isinstance(value, (six.integer_types, six.string_types, float)):
+                # Some of the attributes use Boost.Python's enum, which is
+                # derived from int but which leads to invalid JSON when passed
+                # to json.dumps.
+                if isinstance(value, int) and type(value) != int:
+                    value = str(value)
+                self.device_attributes[str(key)] = value
 
 
 class HWLocParser(object):
@@ -84,23 +115,8 @@ class HWLocParser(object):
             n_cpus = max(cpu_to_node.keys()) + 1
             n_devices = pynvml.nvmlDeviceGetCount()
             for i in range(n_devices):
-                node = None
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                # TODO: get number of CPU cores to determine cpuset size
-                # This is very hacky at the moment
-                affinity = pynvml.nvmlDeviceGetCpuAffinity(handle, 1)
-                for j in range(n_cpus):
-                    if affinity[0] & (1 << j):
-                        cur_node = cpu_to_node[j]
-                        if node is not None and node != cur_node:
-                            node = -1    # Sentinel to indicate unknown affinity
-                        else:
-                            node = cur_node
-                if node == -1:
-                    node = None
-                mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
-                minor = pynvml.nvmlDeviceGetMinorNumber(handle)
-                out.append(GPU(node, mem, minor, driver_version))
+                out.append(GPU(handle, cpu_to_node))
         return out
 
 
@@ -153,8 +169,13 @@ def attributes_resources(args):
 
     gpus = []
     for i, gpu in enumerate(hwloc.gpus()):
-        config = {'device': '/dev/nvidia{}'.format(gpu.minor),
-                  'driver_version': gpu.driver_version}
+        config = {
+            'device': '/dev/nvidia{}'.format(gpu.minor),
+            'driver_version': gpu.driver_version,
+            'name': gpu.name,
+            'compute_capability': gpu.compute_capability,
+            'device_attributes': gpu.device_attributes
+        }
         if gpu.node is not None:
             config['numa_node'] = gpu.node
         gpus.append(config)
@@ -186,7 +207,11 @@ def encode(d):
 def write_dict(name, path, args, d, do_encode=False):
     if args.dry_run:
         print(name + ':')
-        for key, value in d.iteritems():
+        if do_encode:
+            converted = json.loads(json.dumps(d))
+        else:
+            converted = d
+        for key, value in six.iteritems(converted):
             print('    {}:{}'.format(key, value))
     else:
         try:

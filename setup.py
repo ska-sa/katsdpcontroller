@@ -35,7 +35,7 @@ setup (
     ],
     tests_require = tests_require,
     extras_require = {
-        'agent': ['netifaces', 'psutil', 'nvidia-ml-py'],
+        'agent': ['netifaces', 'psutil', 'nvidia-ml-py', 'pycuda'],
         'test': tests_require
     },
     use_katversion = True,

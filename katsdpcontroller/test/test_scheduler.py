@@ -328,8 +328,8 @@ class TestAgent(unittest.TestCase):
             [{'name': 'eth1'}])
         self.gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
-            [{'device': '/dev/nvidia0', 'driver_version': '123.45', 'numa_node': 1},
-             {'device': '/dev/nvidia1', 'driver_version': '123.45', 'numa_node': 0}])
+            [{'device': '/dev/nvidia0', 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 1},
+             {'device': '/dev/nvidia1', 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 0}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
 
@@ -720,8 +720,10 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.1.mem': 1024.0
         }, 0, [
             _make_json_attr('katsdpcontroller.gpus', [
-                {'driver_version': '123.45', 'device': '/dev/nvidia0'},
-                {'driver_version': '123.45', 'device': '/dev/nvidia1'}
+                {'driver_version': '123.45', 'device': '/dev/nvidia0',
+                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
+                {'driver_version': '123.45', 'device': '/dev/nvidia1',
+                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
             ]),
             numa_attr
         ])
@@ -878,8 +880,10 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 1024.0
         }, 0, [_make_json_attr('katsdpcontroller.gpus', [
-            {'driver_version': '123.45', 'device': '/dev/nvidia0'},
-            {'driver_version': '123.45', 'device': '/dev/nvidia1'}
+            {'driver_version': '123.45', 'device': '/dev/nvidia0',
+             'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
+            {'driver_version': '123.45', 'device': '/dev/nvidia1',
+             'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
         ])])
         launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                 loop=self.loop)
