@@ -13,7 +13,7 @@ import signal
 import socket
 import re
 
-import concurrent
+import concurrent.futures
 from tornado import gen
 
 import netifaces
@@ -669,7 +669,7 @@ class SDPGraph(object):
              # make sure we don't launch the telstate node again
             if 'docker_image' in data:
                 self._launch(node, data)
-            if launch_count % (node_count // 2) == 0: req.inform("Launched {} of {} nodes.".format(launch_count, node_count))
+                req.inform("Launched node {} at {} ({} of {}).".format(node, time.time(), launch_count, node_count))
             launch_count += 1
 
     def shutdown(self):
@@ -1308,9 +1308,15 @@ class SDPControllerServer(DeviceServer):
         """Try to shutdown as gracefully as possible when interrupted."""
         logger.warning("SDP Master Controller interrupted.")
         for subarray_product_id in self.subarray_products.keys():
-            rcode, rval = self.deregister_product(subarray_product_id,force=True)
-            if rcode != 'fail': self.subarray_products.pop(subarray_product_id)
-            logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+            try:
+                rcode, rval = self.deregister_product(subarray_product_id,force=True)
+                if rcode != 'fail':
+                    self.subarray_products.pop(subarray_product_id)
+                    logger.info("Deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+                else:
+                    logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_rpdocut_id, rcode, rval))
+            except Exception as e:
+                logger.warning("Failed to deconfigure product {} during master controller exit ({}). Forging ahead...".format(subarray_product_id, e))
 
     @request(Str(), include_msg=True)
     @return_reply(Str())
@@ -1371,7 +1377,7 @@ class SDPControllerServer(DeviceServer):
                         self.subarray_product_config.pop(subarray_product_id)
                          # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
                     self.mass_inform(Message.inform("interface-changed"))
-                         # let CAM know that our interface has changed
+                     # let CAM know that our interface has changed
                 req.reply(retval, retmsg)
             except Exception as e:
                 retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
@@ -1448,7 +1454,7 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id])))
             else: return ('fail',"This subarray product id has no current configuration.")
 
-         # we have either a configure or deconfigure, which may take time, so we go async from here
+         # we have either a configure or deconfigure, which may take time, so we proceed with async if allowed
         if self._conf_future:
             return ('fail',"A data product configure command is currently executing.")
 
@@ -1461,7 +1467,7 @@ class SDPControllerServer(DeviceServer):
                 dp_handle._async_busy = True
                 req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
             except KeyError:
-                return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
+                return ('fail',"Deconfiguration of subarray product {} requested, but no configuration found.".format(subarray_product_id))
         else:
             req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
 
@@ -1498,7 +1504,7 @@ class SDPControllerServer(DeviceServer):
                 try:
                     dp_handle = self.subarray_products[subarray_product_id]
                     dp_handle._async_busy = False
-                     # we must have failed to deconfigure, so lets clean up
+                     # we may have failed to deconfigure, so make sure we clean up
                 except KeyError:
                     pass 
                 self._conf_future = None
@@ -1816,8 +1822,11 @@ class SDPControllerServer(DeviceServer):
         """
         logger.info("SDP Shutdown called.")
         for subarray_product_id in self.subarray_products.keys():
-            rcode, rval = self.deregister_product(subarray_product_id,force=True)
-            logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+            try:
+                rcode, rval = self.deregister_product(subarray_product_id,force=True)
+                logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+            except Exception as e:
+                logger.warning("Failed to deconfigure product {} during shutdown. Forging ahead...".format(subarray_product_id))
 
         self.resources.hosts.pop('localhost.localdomain')
          # remove this to prevent accidental shutdown of master controller whilst handling remotes
