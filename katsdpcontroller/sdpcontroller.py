@@ -662,15 +662,17 @@ class SDPGraph(object):
     def execute_graph(self, req):
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
-        node_count = self.graph.number_of_nodes()
+        nodes_to_launch = []
         launch_count = 0
         for (node, data) in self.graph.nodes_iter(data=True):
             if node == self.telstate_node: continue
              # make sure we don't launch the telstate node again
-            if 'docker_image' in data:
-                self._launch(node, data)
-                req.inform("Launched node {} at {} ({} of {}).".format(node, time.time(), launch_count, node_count))
+            if 'docker_image' in data: nodes_to_launch.append([node, data])
+
+        for (node, data) in nodes_to_launch:
+            self._launch(node, data)
             launch_count += 1
+            req.inform("Launched node {} at {} ({} of {}).".format(node, time.time(), launch_count, len(nodes_to_launch)))
 
     def shutdown(self):
         for node in self.nodes.itervalues():
@@ -1314,7 +1316,7 @@ class SDPControllerServer(DeviceServer):
                     self.subarray_products.pop(subarray_product_id)
                     logger.info("Deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
                 else:
-                    logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_rpdocut_id, rcode, rval))
+                    logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
             except Exception as e:
                 logger.warning("Failed to deconfigure product {} during master controller exit ({}). Forging ahead...".format(subarray_product_id, e))
 
@@ -1517,17 +1519,17 @@ class SDPControllerServer(DeviceServer):
 
         Returns
         -------
-        success : ('ok'|'fail', string)
-            Returns OK on either a succesfull configure or if the configuration already exists
-            Returns fail on the following:
-                The specified subarray product id already exists, but the config differs from that specified
-                If the antennas, channels, dump rate, beams and stream sources are not specified
-                If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
-                If the specified subarray_product_id cannot be parsed into suitable components
-                If neither telstate nor docker python libraries are installed and we are not using interface mode
-                If one or more nodes fail to launch (e.g. container not found)
-                If one or more nodes fail to become alive (essentially a NOP for now)
-                If we fail to establish katcp connection to all nodes requiring them.
+        success : ('ok'|'fail', message, product)
+            - Returns OK on either a successful configure or if the configuration already exists. On success product is a reference to newly created SDPSubarrayProduct
+            - Returns fail on the following (product is returned as None):
+                - The specified subarray product id already exists, but the config differs from that specified
+                - If the antennas, channels, dump rate, beams and stream sources are not specified
+                - If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
+                - If the specified subarray_product_id cannot be parsed into suitable components
+                - If neither telstate nor docker python libraries are installed and we are not using interface mode
+                - If one or more nodes fail to launch (e.g. container not found)
+                - If one or more nodes fail to become alive (essentially a NOP for now)
+                - If we fail to establish katcp connection to all nodes requiring them.
         """
         if antennas == "0" or antennas == "":
             (rcode, rval) = self.deregister_product(subarray_product_id)
