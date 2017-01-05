@@ -3,7 +3,6 @@ backports-abc
 backports.ssl-match-hostname
 certifi
 decorator
-docker-py==1.8.1
 enum34
 faulthandler==2.4
 futures

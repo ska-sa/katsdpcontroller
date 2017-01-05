@@ -11,70 +11,74 @@ import Queue
 import signal
 import tornado
 import tornado.gen
-from optparse import OptionParser
+import argparse
 import logging
 import logging.handlers
+import addict
+import trollius
+from trollius import From
+from tornado.platform.asyncio import AsyncIOMainLoop
 from prometheus_client import start_http_server
+from katsdpcontroller import scheduler, sdpcontroller
 
 try:
     import manhole
 except ImportError:
     manhole = None
 
-@tornado.gen.coroutine
-def on_shutdown(ioloop, server):
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+@trollius.coroutine
+def on_shutdown(loop, server):
+    loop.remove_signal_handler(signal.SIGINT)
+    loop.remove_signal_handler(signal.SIGTERM)
      # in case the exit code below borks, we allow shutdown via traditional means
-    server.deconfigure_on_exit()
-    yield server.stop()
+    yield From(server.async_stop())
     ioloop.stop()
+    loop.stop()
 
 if __name__ == "__main__":
 
-    usage = "usage: %prog [options]"
-    parser = OptionParser(usage=usage)
-    parser.add_option('-a', '--host', dest='host', type="string", default="", metavar='HOST',
-                      help='attach to server HOST (default="%default" - localhost)')
-    parser.add_option('-p', '--port', dest='port', type="int", default=5001, metavar='N',
-                      help='katcp listen port (default=%default)')
-    parser.add_option('-w', '--working-folder', dest='workpath',
-                      default=os.path.join("/", "var", "kat", "sdpcontroller"), metavar='WORKING_PATH',
-                      help='folder to write process standard out logs into (default=%default)')
-    parser.add_option('-l', '--loglevel', dest='loglevel', type="string",
-                      default="info", metavar='LOGLEVEL',
-                      help='set the Python logging level (default=%default)')
-    parser.add_option('-s', '--simulate', dest='simulate', default=False,
-                      action='store_true', metavar='SIMULATE',
-                      help='run controller in simulation mode suitable for lab testing (default: %default)')
-    parser.add_option('--no-prometheus', dest='prometheus', default=True,
-                      action='store_false',
-                      help='disable Prometheus client HTTP service')
-    parser.add_option('-i', '--interface_mode', dest='interface_mode', default=False,
-                      action='store_true', metavar='INTERFACE',
-                      help='run the controller in interface only mode for testing integration and ICD compliance. (default: %default)')
-    parser.add_option('--local-resources', dest='local_resources', default=False,
-                      action='store_true', metavar='LOCALRESOURCES',
-                      help='launch all containers on local machine via /var/run/docker.sock (default: %default)')
-    parser.add_option('--registry', dest='private_registry', type="string",
-                      default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                      help='registry from which to pull images (use empty string to disable) (default: %default)')
-    parser.add_option('--image-override', dest='image_override', action='append',
-                      default=[], metavar='NAME:IMAGE',
-                      help='Override an image name lookup (default: none)')
-    parser.add_option('--image-tag-file', dest='image_tag_file', type='string',
-                      metavar='FILE', help='Load image tag to run from file (on each configure)')
-    parser.add_option('--safe-multicast-cidr', dest='safe_multicast_cidr', type='string', default='225.100.0.0/16',
-                      metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %default)')
-    parser.add_option('--graph-override', dest='graph_override', action='append',
-                      default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
-                      help='Override the graph to be used for the specified subarray product id (default: none)')
-    parser.add_option('--no-pull', action='store_true', default=False,
-                      help='Skip pulling images from the registry')
-    parser.add_option('-v', '--verbose', dest='verbose', default=False,
-                      action='store_true', metavar='VERBOSE',
-                      help='print verbose output (default: %default)')
-    (opts, args) = parser.parse_args()
+    usage = "%(prog)s [options] master"
+    parser = argparse.ArgumentParser(usage=usage)
+    parser.add_argument('-a', '--host', dest='host', default="", metavar='HOST',
+                        help='attach to server HOST (default=localhost)')
+    parser.add_argument('-p', '--port', dest='port', type=int, default=5001, metavar='N',
+                        help='katcp listen port (default=%(default)s)')
+    parser.add_argument('-l', '--loglevel', dest='loglevel',
+                        default="info", metavar='LOGLEVEL',
+                        help='set the Python logging level (default=%(default)s)')
+    parser.add_argument('-s', '--simulate', dest='simulate', default=False,
+                        action='store_true',
+                        help='run controller in simulation mode suitable for lab testing (default: %(default)s)')
+    parser.add_argument('--no-prometheus', dest='prometheus', default=True,
+                        action='store_false',
+                        help='disable Prometheus client HTTP service')
+    parser.add_argument('-i', '--interface_mode', dest='interface_mode', default=False,
+                        action='store_true',
+                        help='run the controller in interface only mode for testing integration and ICD compliance. (default: %(default)s)')
+    parser.add_argument('--registry', dest='private_registry',
+                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
+                        help='registry from which to pull images (use empty string to disable) (default: %(default)s)')
+    parser.add_argument('--image-override', dest='image_override', action='append',
+                        default=[], metavar='NAME:IMAGE',
+                        help='Override an image name lookup (default: none)')
+    parser.add_argument('--image-tag-file', dest='image_tag_file',
+                        metavar='FILE', help='Load image tag to run from file (on each configure)')
+    parser.add_argument('--safe-multicast-cidr', dest='safe_multicast_cidr', default='225.100.0.0/16',
+                        metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %(default)s)')
+    parser.add_argument('--graph-override', dest='graph_override', action='append',
+                        default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
+                        help='Override the graph to be used for the specified subarray product id (default: none)')
+    parser.add_argument('--no-pull', action='store_true', default=False,
+                        help='Skip pulling images from the registry if already present')
+    parser.add_argument('--role', default='katsdpcontroller',
+                        help='Mesos role for the framework (default: %(default)s)')
+    parser.add_argument('--principal', default='katsdpcontroller',
+                        help='Mesos principal for the principal (default: %(default)s')
+    parser.add_argument('-v', '--verbose', dest='verbose', default=False,
+                        action='store_true',
+                        help='print verbose output (default: %(default)s)')
+    parser.add_argument('master', help='Zookeeper URL for discovering Mesos master')
+    opts = parser.parse_args()
 
     def die(msg=None):
         if msg:
@@ -98,10 +102,8 @@ if __name__ == "__main__":
 
     logger = logging.getLogger('sdpcontroller')
 
-    from katsdpcontroller import sdpcontroller
-
     logger.info("Starting SDP Controller...")
-    image_resolver = sdpcontroller.ImageResolver(
+    image_resolver = scheduler.ImageResolver(
             private_registry=opts.private_registry or None,
             tag_file=opts.image_tag_file,
             pull=not opts.no_pull)
@@ -117,12 +119,20 @@ if __name__ == "__main__":
 
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
 
-    ioloop = tornado.ioloop.IOLoop.current()
+    framework_info = addict.Dict()
+    framework_info.user = 'root'
+    framework_info.name = 'katsdpcontroller'
+    framework_info.checkpoint = True
+    framework_info.principal = opts.principal
+    framework_info.role = opts.role
+
+    loop = trollius.get_event_loop()
+    ioloop = AsyncIOMainLoop()
+    ioloop.install()
     server = sdpcontroller.SDPControllerServer(
-        opts.host, opts.port,
+        opts.host, opts.port, framework_info, opts.master, loop,
         simulate=opts.simulate,
         interface_mode=opts.interface_mode,
-        local_resources=opts.local_resources,
         image_resolver=image_resolver,
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr)
@@ -137,8 +147,7 @@ if __name__ == "__main__":
         start_http_server(8081)
          # expose any prometheus metrics that we create
 
-    server.set_ioloop(ioloop)
-    signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
-    signal.signal(signal.SIGTERM, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        loop.add_signal_handler(sig, lambda: trollius.ensure_future(on_shutdown(loop, server)))
     ioloop.add_callback(server.start)
     ioloop.start()

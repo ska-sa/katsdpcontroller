@@ -31,7 +31,8 @@ setup (
         'tornado',
         'katsdptelstate',
         'faulthandler',
-        'kazoo'
+        'kazoo',
+        'tornado>=4.3'
     ],
     tests_require = tests_require,
     extras_require = {
