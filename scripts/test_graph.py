@@ -208,7 +208,7 @@ def make_graph(beamformer_mode, cbf_channels, simulate):
 
     # Simulator node
     if simulate:
-        # create-fx-product is passed on the command-line insteead of telstate
+        # create-fx-product is passed on the command-line instead of telstate
         # for now due to SR-462.
         sim = LogicalTask('sdp.sim.1')
         sim.image = 'katcbfsim'
