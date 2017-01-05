@@ -1625,7 +1625,7 @@ class SDPControllerServer(DeviceServer):
                         # stream names. This code should be deleted once CAM is
                         # updated.
                         if (host == 'baseline-correlation-products' or
-                                host.startswith('tied-array-channelised-voltage.'):
+                                host.startswith('tied-array-channelised-voltage.')):
                             host = 'corr.' + host
                         streams["{}_spead".format(stream_name)] = (host, port)
                         logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
