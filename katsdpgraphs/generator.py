@@ -19,7 +19,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     if beamformer_mode not in ['none', 'ptuse', 'hdf5_ssd', 'hdf5_ram']:
         raise ValueError('Unrecognised beamformer_mode ' + beamformer_mode)
     r = resources
-    c_stream = 'c856M{}k_spead'.format(cbf_channels // 1024)
+    c_stream = 'baseline-correlation-products'
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
     streams = "corr.{}:visibility".format(c_stream[:-6].lower())
@@ -30,7 +30,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # specific sensor names, but reports stream names to CAM in mixed case.
      # The [:-6] strips off the _spead suffix that sdpcontroller.py added.
     if beamformer_mode != 'none':
-        beams = ['corr.beam_0x', 'corr.beam_0y']
+        beams = ['corr.tied-array-channelised-voltage.0x', 'corr.tied-array-channelised-voltage.0y']
     else:
         beams = []
     for beam in beams:
@@ -190,8 +190,8 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     if beamformer_mode == 'ptuse':
-        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('beam_0x_spead'),
-                                                        'cbf_speady':r.get_multicast('beam_0y_spead')})
+        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('tied-array-channelised-voltage.0x_spead'),
+                                                        'cbf_speady':r.get_multicast('tied-array-channelised-voltage.0y_spead')})
     elif beamformer_mode != 'none':
         for i in range(2):
             stream = 'beam_0{}_spead'.format('xy'[i])

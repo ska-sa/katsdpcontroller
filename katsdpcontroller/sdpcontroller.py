@@ -1607,10 +1607,9 @@ class SDPControllerServer(DeviceServer):
         urls = {}
          # local dict to hold streams associated with the specified data product
         try:
-            streams['c856M4k_spead'] = stream_sources.split(":",2)
-             # for DEPRECATED usage we can only support c856M4k graphs
+            streams['baseline-correlation-products_spead'] = stream_sources.split(":",2)
             streams['CAM_spead'] = deprecated_cam_source.split(":",2)
-            logger.info("Adding DEPRECATED endpoints for c856M4k_spead ({}) and CAM_spead ({})".format(streams['c856M4k_spead'],streams['CAM_spead']))
+            logger.info("Adding DEPRECATED endpoints for baseline-correlation-products_spead ({}) and CAM_spead ({})".format(streams['baseline-correlation-products_spead'],streams['CAM_spead']))
         except (AttributeError, ValueError):
              # check to see if we are using the new stream_sources specifier
             try:
