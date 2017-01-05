@@ -1624,9 +1624,9 @@ class SDPControllerServer(DeviceServer):
                         # Hack to handle CAM not yet passing us fully-qualified
                         # stream names. This code should be deleted once CAM is
                         # updated.
-                        if (host == 'baseline-correlation-products' or
-                                host.startswith('tied-array-channelised-voltage.')):
-                            host = 'corr.' + host
+                        if (stream_name == 'baseline-correlation-products' or
+                                stream_name.startswith('tied-array-channelised-voltage.')):
+                            stream_name = 'corr.' + stream_name
                         streams["{}_spead".format(stream_name)] = (host, port)
                         logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
             except ValueError:
