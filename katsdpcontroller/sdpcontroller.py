@@ -1621,6 +1621,12 @@ class SDPControllerServer(DeviceServer):
                     else:
                         (host, port) = value.split(":", 2)
                          # just to make it explicit what we are expecting
+                        # Hack to handle CAM not yet passing us fully-qualified
+                        # stream names. This code should be deleted once CAM is
+                        # updated.
+                        if (host == 'baseline-correlation-products' or
+                                host.startswith('tied-array-channelised-voltage.'):
+                            host = 'corr.' + host
                         streams["{}_spead".format(stream_name)] = (host, port)
                         logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
             except ValueError:
