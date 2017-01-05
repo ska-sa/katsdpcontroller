@@ -19,10 +19,10 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     if beamformer_mode not in ['none', 'ptuse', 'hdf5_ssd', 'hdf5_ram']:
         raise ValueError('Unrecognised beamformer_mode ' + beamformer_mode)
     r = resources
-    c_stream = 'baseline-correlation-products'
+    c_stream = 'corr.baseline-correlation-products'
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
-    streams = "corr.{}:visibility".format(c_stream[:-6].lower())
+    streams = "{}:visibility".format(c_stream[:-6].lower())
      # string containing a mapping from stream_name to stream_type.
      # This is temporary for AR1/1.5 and should be replaced by a
      # per stream sensor indicating type directly from the CBF
@@ -190,11 +190,11 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     if beamformer_mode == 'ptuse':
-        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('tied-array-channelised-voltage.0x_spead'),
-                                                        'cbf_speady':r.get_multicast('tied-array-channelised-voltage.0y_spead')})
+        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('corr.tied-array-channelised-voltage.0x_spead'),
+                                                        'cbf_speady':r.get_multicast('corr.tied-array-channelised-voltage.0y_spead')})
     elif beamformer_mode != 'none':
         for i in range(2):
-            stream = 'tied-array-channelised-voltage.0{}_spead'.format('xy'[i])
+            stream = 'corr.tied-array-channelised-voltage.0{}_spead'.format('xy'[i])
             G.add_edge('cbf.bf_output.{}'.format(i+1), 'sdp.bf_ingest.{}'.format(i+1), {
                 'cbf_spead': '{}:{}'.format(r.get_multicast_ip(stream), r.get_port(stream))
             })
