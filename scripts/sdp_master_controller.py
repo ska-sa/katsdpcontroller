@@ -9,14 +9,26 @@ import sys
 import os
 import Queue
 import signal
+import tornado
+import tornado.gen
 from optparse import OptionParser
 import logging
 import logging.handlers
+from prometheus_client import start_http_server
 
 try:
     import manhole
 except ImportError:
     manhole = None
+
+@tornado.gen.coroutine
+def on_shutdown(ioloop, server):
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+     # in case the exit code below borks, we allow shutdown via traditional means
+    server.deconfigure_on_exit()
+    yield server.stop()
+    ioloop.stop()
 
 if __name__ == "__main__":
 
@@ -35,6 +47,9 @@ if __name__ == "__main__":
     parser.add_option('-s', '--simulate', dest='simulate', default=False,
                       action='store_true', metavar='SIMULATE',
                       help='run controller in simulation mode suitable for lab testing (default: %default)')
+    parser.add_option('--no-prometheus', dest='prometheus', default=True,
+                      action='store_false',
+                      help='disable Prometheus client HTTP service')
     parser.add_option('-i', '--interface_mode', dest='interface_mode', default=False,
                       action='store_true', metavar='INTERFACE',
                       help='run the controller in interface only mode for testing integration and ICD compliance. (default: %default)')
@@ -102,6 +117,7 @@ if __name__ == "__main__":
 
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
 
+    ioloop = tornado.ioloop.IOLoop.current()
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port,
         simulate=opts.simulate,
@@ -111,39 +127,18 @@ if __name__ == "__main__":
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr)
 
-    restart_queue = Queue.Queue()
-    server.set_restart_queue(restart_queue)
-
-    running = True
-    def stop_running(signum, frame):
-        """Stop the global server."""
-        global running
-        running = False
-    signal.signal(signal.SIGQUIT, stop_running)
-    signal.signal(signal.SIGTERM, stop_running)
-
-    server.start()
-    logger.info("Started SDP Controller.")
-
     if manhole:
         manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
          # allow remote debug connections and expose server and opts
-    try:
-        while running:
-            try:
-                device = restart_queue.get(timeout=0.5)
-            except Queue.Empty:
-                device = None
-            if device is not None:
-                logger.info("Stopping...")
-                device.stop()
-                device.join()
-                logger.info("Restarting...")
-                device.start()
-                logger.info("Started.")
-    except KeyboardInterrupt:
-        pass
-     # handle all exit conditions, including keyboard interrupt, katcp halt and sigterm
-    server.handle_exit()
-    server.stop()
-    server.join()
+
+    logger.info("Starting SDP...")
+
+    if opts.prometheus:
+        start_http_server(8081)
+         # expose any prometheus metrics that we create
+
+    server.set_ioloop(ioloop)
+    signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
+    signal.signal(signal.SIGTERM, lambda sig, frame: ioloop.add_callback_from_signal(on_shutdown, ioloop, server))
+    ioloop.add_callback(server.start)
+    ioloop.start()

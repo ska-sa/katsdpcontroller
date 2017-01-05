@@ -36,7 +36,8 @@ EXPECTED_REQUEST_LIST = [
     'task-launch',
     'task-terminate',
     'telstate-endpoint',
-    'sdp-shutdown'
+    'sdp-shutdown',
+    'set-config-override'
 ]
 
 class TestSDPController(unittest.TestCase):

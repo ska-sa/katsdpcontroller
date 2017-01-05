@@ -13,13 +13,18 @@ import signal
 import socket
 import re
 
+import concurrent.futures
+from tornado import gen
+
 import netifaces
 import ipaddress
 import faulthandler
 
-from katcp import DeviceServer, Sensor, Message, BlockingClient
+from katcp import DeviceServer, Sensor, Message, BlockingClient, AsyncReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
+
+from prometheus_client import Gauge
 
 try:
     import docker
@@ -43,6 +48,11 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','output-rate']
+ # list of sensors to be exposed via prometheus
+ # some of these will match multiple nodes, which is fine since they get fully qualified names when
+ # created as a prometheus metric
+ # TODO: harmonise sodding -/_ convention
 
 INGEST_BASE_PORT = 2040
  # base port to use for ingest processes
@@ -439,7 +449,7 @@ class SDPNode(object):
             self.sdp_controller.remove_sensor(sensor_name)
         self.host.stop_container(self.container_id)
 
-    def _chained_read(self, base_name='', katcp_connection=None):
+    def _chained_read(self, base_name='', katcp_connection=None, prometheus_gauge=None):
          # used to chain a sensor in the master controller
          # to the actual sensor on the subordinate device
         if self.katcp_connection:
@@ -460,6 +470,11 @@ class SDPNode(object):
             except KeyError:
                 s_state = Sensor.UNKNOWN
             s_value = args[4]
+            if prometheus_gauge:
+                try:
+                    prometheus_gauge.set(s_value)
+                except ValueError:
+                    logger.warning("Failed to set prometheus gauge {} to {}".format(base_name, s_value))
             logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
             return (s_value, s_state, s_ts)
         else:
@@ -504,7 +519,17 @@ class SDPNode(object):
                              # sensor and thus will need conversion out of their string form 
                              # before use. They shouldn't really matter for this application.
                              # NOTE: Not true for discretes, hence the kludge above
-                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection)
+                        prometheus_gauge = None
+                        if args[0] in PROMETHEUS_SENSORS:
+                            logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
+                            prom_name = '{}_{}'.format(self.name, args[0]).replace(".","_").replace("-","_")
+                            try:
+                                prometheus_gauge = Gauge(prom_name, s_description)
+                            except ValueError as e:
+                                logger.info("Prometheus Gauge {} already exists - not adding again. ({})".format(prom_name, e))
+                                 # set to info as this only happens when the gauge already exists, and this only
+                                 # happens during a reconfigure.
+                        s.set_read_callback(self._chained_read, base_name=args[0], katcp_connection=self.katcp_connection, prometheus_gauge=prometheus_gauge)
                         self.add_sensor(s)
                         if self.name == 'sdp.ingest.1' and args[0] == 'status':
                             s.name = "data-product-status-{}".format(self.subarray_product_id)
@@ -621,7 +646,6 @@ class SDPGraph(object):
                     continue
 
         config.update(additional_config)
-
          # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.resources.get_host_ip('sdpmc'), self.resources.get_port('redis'))
         try:
@@ -656,14 +680,20 @@ class SDPGraph(object):
             last[key_parts[-1]] = v
         return d
 
-    def execute_graph(self):
+    def execute_graph(self, req):
          # traverse all nodes in the graph looking for those that
          # require docker containers to be launched.
+        nodes_to_launch = []
+        launch_count = 0
         for (node, data) in self.graph.nodes_iter(data=True):
             if node == self.telstate_node: continue
              # make sure we don't launch the telstate node again
-            if 'docker_image' in data:
-                self._launch(node, data)
+            if 'docker_image' in data: nodes_to_launch.append([node, data])
+
+        for (node, data) in nodes_to_launch:
+            self._launch(node, data)
+            launch_count += 1
+            req.inform("Launched node {} at {} ({} of {}).".format(node, time.time(), launch_count, len(nodes_to_launch)))
 
     def shutdown(self):
         for node in self.nodes.itervalues():
@@ -969,6 +999,8 @@ class SDPSubarrayProductBase(object):
         self.dump_rate = dump_rate
         self.n_beams = n_beams
         self._state = 0
+        self._async_busy = False
+         # protection used to avoid external state changes during async activity on this subarray
         self.state = SA_STATES[self._state]
         self.set_state(1)
         self.psb_id = 0
@@ -1107,13 +1139,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 rcode, rval = self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim')
                  # instruct the simulator to rebuild its local config from the values in telstate
                 if rcode == 'ok':
-                    rcode, rval = self._issue_req('configure-product-from-telstate', args=[self.subarray_product_id], node_type='sdp.sim')
-                    if rcode == 'ok':
-                        rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
-                    else:
-                        logger.error("SIMULATE: configure-product-from-telstate {} failed ({})".format(self.subarray_product_id,rval))
+                    rcode, rval = self._issue_req('capture-start', args=[self.subarray_product_id], node_type='sdp.sim')
                 else:
-                    logger.error("SIMULATE: configure-product-from-telstate failed ({})".format(rval))
+                    logger.error("SIMULATE: configure-subarray-from-telstate failed ({})".format(rval))
         if state_id == 5:
             if self.simulate:
                 logger.info("SIMULATE: Issuing a capture-stop to the simulator")
@@ -1154,6 +1182,8 @@ class SDPControllerServer(DeviceServer):
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.components = {}
          # dict of currently managed SDP components
+        self._conf_future = None
+         # track async product configure request to avoid handling more than one at a time
 
         self.graph_resolver = kwargs.get('graph_resolver',GraphResolver(simulate=self.simulate))
 
@@ -1167,10 +1197,12 @@ class SDPControllerServer(DeviceServer):
 
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
-        self.subarray_product_msg = {}
+        self.subarray_product_config = {}
          # store calling arguments used to create a specified subarray_product
          # this has either the current args or those most recently
          # configured for this subarray_product
+        self.override_dicts = {}
+         # per subarray product dictionaries used to override internal config
         self.ingest_ports = {}
         self.tasks = {}
          # dict of currently managed SDP tasks
@@ -1295,15 +1327,50 @@ class SDPControllerServer(DeviceServer):
         dp_handle = self.subarray_products[subarray_product_id]
         rcode, rval = dp_handle.deconfigure(force=force)
         if rcode == 'fail': return (rcode, rval)
-        self.subarray_products.pop(subarray_product_id)
         return (rcode, rval)
 
-    def handle_exit(self):
+    def deconfigure_on_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
-        logger.warning("SDP Master Controller interrupted.")
+        logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
         for subarray_product_id in self.subarray_products.keys():
-            rcode, rval = self.deregister_product(subarray_product_id,force=True)
-            logger.info("Deregistered subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+            try:
+                rcode, rval = self.deregister_product(subarray_product_id,force=True)
+                if rcode != 'fail':
+                    self.subarray_products.pop(subarray_product_id)
+                    logger.info("Deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+                else:
+                    logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+            except Exception as e:
+                logger.warning("Failed to deconfigure product {} during master controller exit ({}). Forging ahead...".format(subarray_product_id, e))
+
+    @request(Str(), Str())
+    @return_reply(Str())
+    def request_set_config_override(self, req, subarray_product_id, override_dict_json):
+        """Override internal configuration parameters for the next configure of the
+        specified subarray product.
+
+        An existing override for this subarry product will be completely overwritten.
+
+        The override will only persist until a successful configure has been called on the subarray product.
+
+        Request Arguments
+        ----------------
+        subarray_product_id : string
+            The ID of the subarray product to set overrides for in the form [<subarray_name>_]<data_product_name>.
+        override_dict_json : string
+            A json string containing a dict of config key:value overrides to use.
+        """
+        logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
+        try:
+            odict = json.loads(override_dict_json)
+            if type(odict) is not dict: raise ValueError
+            logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
+            self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
+        except ValueError as e:
+            msg = "The supplied override string {} does not appear to be a valid json string containing a dict. {}".format(override_dict_json, e)
+            logger.error(msg)
+            return ('fail', msg)
+        return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
     @request(Str(), include_msg=True)
     @return_reply(Str())
@@ -1326,15 +1393,62 @@ class SDPControllerServer(DeviceServer):
         if not subarray_product_id in self.subarray_products:
             return ('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
 
-        logger.info("Deconfiguring {}".format(subarray_product_id))
-        deconf_msg = Message.request('data-product-configure','{}'.format(subarray_product_id),'0')
-        self.request_data_product_configure(None, deconf_msg)
+        if self._conf_future:
+            return ('fail',"A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure.")
 
-        reconf_msg = self.subarray_product_msg[subarray_product_id]
-        logger.info("Calling configure from reconfigure with {}".format(reconf_msg))
-        self.request_data_product_configure(None, reconf_msg)
+        try:
+            config_args = self.subarray_product_config[subarray_product_id]
+        except KeyError:
+            return ('fail',"No pre-existing config found for subarray {}. Unable to reconfigure.".format(subarray_product_id))
 
-        return ('ok','')
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+         # we are only going to allow a single conf/deconf at a time
+        self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, "0", None, None, None, None, None)
+         # start with a deconfigure
+
+        @gen.coroutine
+        def delayed_cmd():
+            try:
+                logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
+                (retval, retmsg, product) = yield self._conf_future
+                if retval != 'ok':
+                    retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
+                else:
+                    del self.subarray_products[subarray_product_id]
+                    del self.subarray_product_config[subarray_product_id]
+                     # we already have a copy and if config now fails we don't want this lurking around anyway
+                    logger.info("Removing subarray product {} reference.".format(subarray_product_id))
+                    req.inform(retmsg)
+
+                    logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+                    self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, subarray_product_id, *config_args)
+                    (retval, retmsg, product) = yield self._conf_future
+                    if retval != 'fail' and product:
+                        self.subarray_products[subarray_product_id] = product
+                        self.subarray_product_config[subarray_product_id] = config_args
+                    else:
+                        retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
+                        self.subarray_product_config.pop(subarray_product_id)
+                         # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
+                    self.mass_inform(Message.inform("interface-changed"))
+                     # let CAM know that our interface has changed
+                req.reply(retval, retmsg)
+            except Exception as e:
+                retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
+                logger.error(retmsg, exc_info=True)
+                req.reply('fail', retmsg)
+            finally:
+                executor.shutdown(wait=False)
+                 # executor will shutdown when all existing futures have completed
+                try:
+                    dp_handle = self.subarray_products[subarray_product_id]
+                    dp_handle._async_busy = False
+                     # we must have failed to deconfigure, so lets clean up
+                except KeyError:
+                    pass
+                self._conf_future = None
+        self.ioloop.add_callback(delayed_cmd)
+        raise AsyncReply
 
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
@@ -1394,14 +1508,85 @@ class SDPControllerServer(DeviceServer):
                 return ('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id])))
             else: return ('fail',"This subarray product id has no current configuration.")
 
+         # we have either a configure or deconfigure, which may take time, so we proceed with async if allowed
+        if self._conf_future:
+            return ('fail',"A data product configure command is currently executing.")
+
+         # a configure is essentially thread safe since the array object is only exposed
+         # as a last step. deconf needs some protection since the object does exist, thus
+         # we first mark the product into a deconfiguring state before going async
         if antennas == "0" or antennas == "":
             try:
-                (rcode, rval) = self.deregister_product(subarray_product_id)
-                self.mass_inform(Message.inform("interface-changed"))
-                 # we have likely modified our sensor-list by deconfiguring - let CAM know
-                return (rcode, rval)
+                dp_handle = self.subarray_products[subarray_product_id]
+                dp_handle._async_busy = True
+                req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
             except KeyError:
-                return ('fail',"Deconfiguration of subarray product %s requested, but no configuration found." % subarray_product_id)
+                return ('fail',"Deconfiguration of subarray product {} requested, but no configuration found.".format(subarray_product_id))
+        else:
+            req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+         # we are only going to allow a single conf/deconf at a time
+        self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
+                            subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
+        executor.shutdown(wait=False)
+         # executor will shutdown when all existing futures have completed
+        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
+         # store our calling context for later use in the reconfigure command
+
+        @gen.coroutine
+        def delayed_cmd():
+            try:
+                (retval, retmsg, product) = yield self._conf_future
+                if retval != 'fail':
+                    if (antennas == "0" or antennas == ""):
+                        self.subarray_products.pop(subarray_product_id)
+                        self.subarray_product_config.pop(subarray_product_id)
+                        logger.info("Removing subarray product {} reference.".format(subarray_product_id))
+                    if product:
+                         # we can now safely expose this product for use in other katcp commands like ?capture-init
+                        self.subarray_products[subarray_product_id] = product
+                        self.subarray_product_config[subarray_product_id] = config_args
+                    self.mass_inform(Message.inform("interface-changed"))
+                     # let CAM know that our interface has changed
+                req.reply(retval, retmsg)
+            except Exception as e:
+                retmsg = "Exception during ?data_product_configure: {}".format(e)
+                logger.error(retmsg, exc_info=True)
+                req.reply('fail', retmsg)
+            finally:
+                try:
+                    dp_handle = self.subarray_products[subarray_product_id]
+                    dp_handle._async_busy = False
+                     # we may have failed to deconfigure, so make sure we clean up
+                except KeyError:
+                    pass 
+                self._conf_future = None
+        self.ioloop.add_callback(delayed_cmd)
+        raise AsyncReply
+
+
+    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+        """Asynchronous portion of data product configure. See docstring for request_data_product_configure above.
+
+        Returns
+        -------
+        success : ('ok'|'fail', message, product)
+            - Returns OK on either a successful configure or if the configuration already exists. 
+                - If a new subarray has been configured then product is a reference to newly created SDPSubarrayProduct, else None
+            - Returns fail on the following (product is always None):
+                - The specified subarray product id already exists, but the config differs from that specified
+                - If the antennas, channels, dump rate, beams and stream sources are not specified
+                - If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
+                - If the specified subarray_product_id cannot be parsed into suitable components
+                - If neither telstate nor docker python libraries are installed and we are not using interface mode
+                - If one or more nodes fail to launch (e.g. container not found)
+                - If one or more nodes fail to become alive (essentially a NOP for now)
+                - If we fail to establish katcp connection to all nodes requiring them.
+        """
+        if antennas == "0" or antennas == "":
+            (rcode, rval) = self.deregister_product(subarray_product_id)
+            return (rcode, rval, None)
 
         logger.info("Using '{}' as antenna mask".format(antennas))
         antennas = antennas.replace(" ",",")
@@ -1410,13 +1595,13 @@ class SDPControllerServer(DeviceServer):
         if subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
             if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
-                return ('ok',"Subarray product with this configuration already exists. Pass.")
+                return ('ok',"Subarray product with this configuration already exists. Pass.", None)
             else:
-                return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
+                return ('fail',"A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id), None)
 
          # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
+            return ('fail',"You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product", None)
 
         streams = {}
         urls = {}
@@ -1443,13 +1628,13 @@ class SDPControllerServer(DeviceServer):
                  # something is definitely wrong with these
                 retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
                 logger.error(retmsg)
-                return ('fail',retmsg)
+                return ('fail',retmsg,None)
 
         graph_name = self.graph_resolver(subarray_product_id)
         subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)
         if not subarray_numeric_id:
             retmsg = "Failed to parse numeric subarray identifier from specified subarray product string ({})".format(subarray_product_id)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         logger.info("Launching graph {}.".format(graph_name))
 
@@ -1483,46 +1668,51 @@ class SDPControllerServer(DeviceServer):
             'subarray_numeric_id':subarray_numeric_id
         }
          # holds additional config that must reside within the config dict in the telstate 
+        req.inform("Graph {} construction complete.".format(graph_name))
+        if subarray_product_id in self.override_dicts:
+            odict = self.override_dicts.pop(subarray_product_id)
+             # this is a use-once set of overrides
+            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            additional_config.update(odict)
 
         if self.interface_mode:
             logger.debug("Telstate configured. Base parameters {}".format(config))
             logger.warning("No components will be started - running in interface mode")
-            self.subarray_products[subarray_product_id] = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-            self.subarray_product_msg[subarray_product_id] = req_msg
-            return ('ok',"")
+            product = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            return ('ok',"", product)
 
         if docker is None:
              # from here onwards we require the docker module to be installed.
             retmsg = "You must have the docker python library installed to use the master controller in non interface only mode."
             logger.error(retmsg)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         if katsdptelstate is None:
              # from here onwards we require the katsdptelstate module to be installed.
             retmsg = "You must have the katsdptelstate library installed to use the master controller in non interface only mode."
             logger.error(retmsg)
-            return ('fail',retmsg)
+            return ('fail',retmsg,None)
 
         logger.debug("Launching telstate. Base parameters {}".format(config))
         graph.launch_telstate(additional_config=additional_config, base_params=config)
          # launch the telescope state for this graph
-
+        req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
         logger.debug("Executing graph {}".format(graph_name))
         try:
-            graph.execute_graph()
+            graph.execute_graph(req)
              # launch containers for those nodes that require them
-        except docker.errors.DockerException, e:
+        except docker.errors.DockerException as e:
             graph.shutdown()
-            return ('fail',e)
-
+            return ('fail',e,None)
+        req.inform("All nodes launched")
         alive = graph.check_nodes()
          # is everything we asked for alive
         if not alive:
             ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
             graph.shutdown()
             logger.error(ret_msg)
-            return ('fail', ret_msg)
-
+            return ('fail', ret_msg,None)
+        req.inform("Attempting to establish KATCP connections")
         logger.debug("Establishing katcp connections to appropriate nodes.")
         try:
             graph.establish_katcp_connections()
@@ -1531,19 +1721,18 @@ class SDPControllerServer(DeviceServer):
             ret_msg = "Failed to establish katcp connections as needed. Check error log for details."
             graph.shutdown()
             logger.error(ret_msg)
-            return ('fail', ret_msg)
-
-         # at this point telstate is up, nodes have been launched, katcp connections established
-         # TODO: The subarray product class will need to be reworked
-        self.subarray_products[subarray_product_id] = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
-        self.subarray_product_msg[subarray_product_id] = req_msg
+            return ('fail', ret_msg,None)
 
          # finally we insert detail on all running nodes into telstate
         if graph.telstate is not None:
             graph.telstate.add('sdp_node_detail',graph.node_details)
-        self.mass_inform(Message.inform("interface-changed"))
-         # let CAM know that our interface has changed (sensors have been added)
-        return ('ok',"")
+
+         # at this point telstate is up, nodes have been launched, katcp connections established
+         # we can now safely expose this product for use in other katcp commands like ?capture-init
+         # adding a product is also safe with regard to commands like ?capture-status
+        product = SDPSubarrayProduct(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+
+        return ('ok',"",product)
 
     @request(Str())
     @return_reply(Str())
@@ -1569,6 +1758,9 @@ class SDPControllerServer(DeviceServer):
         """
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
+        if self.subarray_products[subarray_product_id]._async_busy:
+            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
+
         sa = self.subarray_products[subarray_product_id]
 
         rcode, rval = sa.set_state(2)
@@ -1671,6 +1863,8 @@ class SDPControllerServer(DeviceServer):
         """
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
+        if self.subarray_products[subarray_product_id]._async_busy:
+            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
         rcode, rval = self.subarray_products[subarray_product_id].set_state(5)
         return (rcode, rval)
 
@@ -1687,9 +1881,9 @@ class SDPControllerServer(DeviceServer):
             Comma separated lists of hosts that have been shutdown (excl mc host)
         """
         logger.info("SDP Shutdown called.")
-        for subarray_product_id in self.subarray_products.keys():
-            rcode, rval = self.deregister_product(subarray_product_id,force=True)
-            logger.info("Terminated and deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
+        self.deconfigure_on_exit()
+         # attempt to deconfigure any existing subarrays
+         # will always succeed even if some deconfigure fails
 
         kibisis = SDPImage(self.resources.get_image_path('docker-base'), cmd='/sbin/poweroff', network='host', user='root')
          # prepare a docker image to halt remote hosts

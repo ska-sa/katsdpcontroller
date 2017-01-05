@@ -24,6 +24,7 @@ pbr
 pkginfo
 ply
 pymesos==0.2.9
+prometheus_client==0.0.18
 ProxyTypes
 redis
 requests==2.8.1
