@@ -194,7 +194,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
                                                         'cbf_speady':r.get_multicast('tied-array-channelised-voltage.0y_spead')})
     elif beamformer_mode != 'none':
         for i in range(2):
-            stream = 'beam_0{}_spead'.format('xy'[i])
+            stream = 'tied-array-channelised-voltage.0{}_spead'.format('xy'[i])
             G.add_edge('cbf.bf_output.{}'.format(i+1), 'sdp.bf_ingest.{}'.format(i+1), {
                 'cbf_spead': '{}:{}'.format(r.get_multicast_ip(stream), r.get_port(stream))
             })
