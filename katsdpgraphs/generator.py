@@ -37,7 +37,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         streams += ",{}:beamformer".format(beam)
      # we also include a reference to the fengine stream so
      # we can get n_samples_between_spectra
-    streams += ",fengine_stream:fengine"
+    streams += ",antenna-channelised-voltage:fengine"
 
     G = nx.DiGraph()
 
