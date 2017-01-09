@@ -92,9 +92,14 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     cam2telstate.command = ['cam2telstate.py']
     cam2telstate.cpus = 0.5
     cam2telstate.mem = 256
+    streams = {
+        'corr.baseline-correlation-products': 'visibility',
+        'corr.antenna-channelised-voltage': 'fengine'
+    }
+    streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
     g.add_node(cam2telstate, config=lambda resolver: {
         'url': resolver.resources.get_url('CAMDATA'),
-        'streams': 'corr.baseline-correlation-products:visibility',
+        'streams': streams_arg,
         'collapse_streams': True
     })
 
