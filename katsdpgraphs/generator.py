@@ -19,7 +19,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     if beamformer_mode not in ['none', 'ptuse', 'hdf5_ssd', 'hdf5_ram']:
         raise ValueError('Unrecognised beamformer_mode ' + beamformer_mode)
     r = resources
-    c_stream = 'corr.baseline-correlation-products'
+    c_stream = 'corr.baseline-correlation-products_spead'
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
     streams = "{}:visibility".format(c_stream[:-6].lower())
