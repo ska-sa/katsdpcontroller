@@ -1300,6 +1300,7 @@ class SDPControllerServer(AsyncDeviceServer):
                         # stream names. This code should be deleted once CAM is
                         # updated.
                         if (stream_name == 'baseline-correlation-products' or
+                                stream_name == 'antenna-channelised-voltage' or
                                 stream_name.startswith('tied-array-channelised-voltage.')):
                             stream_name = 'corr.' + stream_name
                         streams["{}_spead".format(stream_name)] = (host, port)

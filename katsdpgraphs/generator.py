@@ -67,8 +67,8 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     capture_transitions = {State.INIT_WAIT: 'capture-init', State.DONE: 'capture-done'}
 
     # Multicast groups
-    cbf_spead = LogicalMulticast('cbf')
-    g.add_node(cbf_spead)
+    bcp_spead = LogicalMulticast('corr.baseline-correlation-products_spead')
+    g.add_node(bcp_spead)
     l0_spectral = LogicalMulticast('l0_spectral')
     g.add_node(l0_spectral)
     l0_continuum = LogicalMulticast('l0_continuum')
@@ -94,7 +94,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     cam2telstate.mem = 256
     g.add_node(cam2telstate, config=lambda resolver: {
         'url': resolver.resources.get_url('CAMDATA'),
-        'streams': 'corr.c856M4k:visibility',
+        'streams': 'corr.baseline-correlation-products:visibility',
         'collapse_streams': True
     })
 
@@ -129,7 +129,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9    # local machine, so crank it up a bit (TODO: no longer necessarily true)
         })
-        g.add_edge(ingest, cbf_spead, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(ingest, bcp_spead, port='spead', config=lambda resolver, endpoint: {
             'cbf_spead': str(endpoint)})
         g.add_edge(ingest, l0_spectral, port='spead', config=lambda resolver, endpoint: {
             'l0_spectral_spead': str(endpoint)})
@@ -142,19 +142,20 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     # TODO: beamformer ingest
 
     # calibration node
-    cal = SDPLogicalTask('sdp.cal.1')
-    cal.image = 'katsdpcal'
-    cal.command = ['run_cal.py']
-    cal.cpus = 2          # TODO: uses more in reality
-    cal.mem = 65536.0     # TODO: how much does cal need?
-    cal.container.volumes = [data_vol]
-    g.add_node(cal, config=lambda resolver: {
-        'cbf_channels': cbf_channels
-    })
-    g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
-        'l0_spectral_spead': str(endpoint)})
-    g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
-        'l1_spectral_spead': str(endpoint)})
+    # TODO: disabled for now because it dies if there aren't enough antennas
+    #cal = SDPLogicalTask('sdp.cal.1')
+    #cal.image = 'katsdpcal'
+    #cal.command = ['run_cal.py']
+    #cal.cpus = 2          # TODO: uses more in reality
+    #cal.mem = 65536.0     # TODO: how much does cal need?
+    #cal.container.volumes = [data_vol]
+    #g.add_node(cal, config=lambda resolver: {
+    #    'cbf_channels': cbf_channels
+    #})
+    #g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+    #    'l0_spectral_spead': str(endpoint)})
+    #g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
+    #    'l1_spectral_spead': str(endpoint)})
 
     # filewriter node
     filewriter = SDPLogicalTask('sdp.filewriter.1')
@@ -175,7 +176,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         # for now due to SR-462.
         sim = SDPLogicalTask('sdp.sim.1')
         sim.image = 'katcbfsim'
-        sim.command = ['cbfsim.py', '--create-fx-stream', 'c856M4k']  # TODO: stream name
+        sim.command = ['cbfsim.py', '--create-fx-stream', 'baseline-correlation-products']  # TODO: stream name
         sim.cpus = 2
         sim.mem = 2048.0             # TODO
         sim.cores = [None, None]
@@ -238,7 +239,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
         streams += ",{}:beamformer".format(beam)
      # we also include a reference to the fengine stream so
      # we can get n_samples_between_spectra
-    streams += ",fengine_stream:fengine"
+    streams += ",corr.antenna-channelised-voltage:fengine"
 
     G = nx.DiGraph()
 
