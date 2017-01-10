@@ -28,7 +28,7 @@ import faulthandler
 from katcp import AsyncDeviceServer, Sensor, Message, AsyncClient, AsyncReply, FailReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
-from . import scheduler
+from . import scheduler, sensor_proxy
 
 from prometheus_client import Gauge
 
@@ -357,67 +357,21 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
             while True:
                 logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(
                     self.host, self.ports['port'], self.name))
-                self.katcp_connection = AsyncClient(self.host, self.ports['port'])
+                prefix = '{}.{}.'.format(self.subarray_name, self.logical_node.name)
+                self.katcp_connection = sensor_proxy.SensorProxyClient(
+                    self.sdp_controller, prefix, PROMETHEUS_SENSORS,
+                    host=self.host, port=self.ports['port'])
                 try:
-                    self.katcp_connection.set_ioloop(tornado.ioloop.IOLoop.current())
-                    self.katcp_connection.start()
-                    yield From(to_asyncio_future(self.katcp_connection.until_connected(timeout=20)))
+                    yield From(to_asyncio_future(self.katcp_connection.start()))
+                    yield From(to_asyncio_future(self.katcp_connection.until_synced(timeout=20)))
                      # some katcp connections, particularly to ingest can take a while to establish
-                    reply, informs = yield From(to_asyncio_future(
-                        self.katcp_connection.future_request(Message.request('sensor-list'), timeout=5)))
-                     # get available sensors
-                     # each inform as format: <name>,<description>,<units>,<type>[,<params>]
-                    for i in informs:
-                        args = i.arguments
-                        s_name = "{}.{}.{}".format(self.subarray_name,self.name,args[0])
-                        s_description = args[1]
-                        s_units = args[2]
-                        s_type = Sensor.parse_type(args[3])
-                        params = args[4:]
-                         # all trailing arguments (if any) are params
-                        try:
-                            if s_type == Sensor.DISCRETE:
-                                s = CallbackSensor(s_type, s_name, s_description, s_units, params=params)
-                            else:
-                                s = CallbackSensor(s_type, s_name, s_description, s_units)
-                                 # leaving out params for now as these are specific to each type of
-                                 # sensor and thus will need conversion out of their string form
-                                 # before use. They shouldn't really matter for this application.
-                                 # NOTE: Not true for discretes, hence the kludge above
-                            prometheus_gauge = None
-                            if args[0] in PROMETHEUS_SENSORS:
-                                logger.info("Exposing sensor {} as a prometheus metric.".format(s_name))
-                                prom_name = '{}_{}'.format(self.name, args[0]).replace(".","_").replace("-","_")
-                                try:
-                                    prometheus_gauge = Gauge(prom_name, s_description)
-                                except ValueError as e:
-                                    logger.info("Prometheus Gauge {} already exists - not adding again. ({})".format(prom_name, e))
-                                     # set to info as this only happens when the gauge already exists, and this only
-                                     # happens during a reconfigure.
-                            s.set_read_callback(self._chained_read, base_name=args[0], prometheus_gauge=prometheus_gauge)
-                            self.add_sensor(s)
-                            if self.logical_node.name == 'sdp.ingest.1' and args[0] == 'status':
-                                s.name = "data-product-status-{}".format(self.subarray_product_id)
-                                logger.info("Adding fake status sensor {}".format(s.name))
-                                self.add_sensor(s)
-                                 # unfortunately it is too hard to change a baselined ICD
-                                 # so we need to add a fake sensor to mirror the ingest status
-                                 # of a particular graph into a top level sensor
-                            logger.info("Added sensor {} of type {} for node {} (params: {})".format(s_name, args[3], self.name, params))
-                             # probably back off to DEBUG once stable
-                        except KeyError:
-                            logger.error("Failed to add sensor {} of type {} for node {}".format(s_name, args[3], self.name))
-                        except IndexError:
-                            logger.info("Failed to add sensor {} of type {} for node {} (args: {}) due to internal sensor init failure".format(s_name, args[3], self.name, args))
-                    for s in self.sensors.itervalues(): s.read()
-                     # refresh each added sensor so we have up to date values
                     return
                 except RuntimeError:
                     self.katcp_connection.stop()
                     self.katcp_connection = None
                      # no need for these to lurk around
                     logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
-                                 self.name, self.host, self.ports['port'])
+                                 self.name, self.host, self.ports['port'], exc_info=True)
                     yield From(trollius.sleep(1.0))
 
     def resolve(self, resolver, graph):
@@ -442,6 +396,9 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
         super(SDPPhysicalTask, self).set_state(state)
+        if self.state == scheduler.TaskState.DEAD and self.katcp_connection is not None:
+            self.katcp_connection.stop()
+            self.katcp_connection = None
 
     @trollius.coroutine
     def issue_req(self, req, args=[], **kwargs):
@@ -454,7 +411,7 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
             raise ValueError('Cannot issue request without a katcp connection')
         logger.info("Issued request {} {} to node {}".format(req, args, self.name))
         reply, informs = yield From(to_asyncio_future(
-            self.katcp_connection.future_request(Message.request(req, *args), **kwargs)))
+            self.katcp_connection.katcp_client.future_request(Message.request(req, *args), **kwargs)))
         if not reply.reply_ok():
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
             logger.warning(msg)
