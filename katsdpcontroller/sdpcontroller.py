@@ -75,13 +75,13 @@ PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','outp
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 
-def to_tornado_future(trollius_future):
+def to_tornado_future(trollius_future, loop=None):
     """Wrapper around :func:`tornado.platform.asyncio.to_tornado_future` that
     is a bit more robust: it allows taking a coroutine rather than a future,
     it passes through error tracebacks, and if a future is cancelled it
     properly propagates the CancelledError.
     """
-    f = trollius.ensure_future(trollius_future)
+    f = trollius.ensure_future(trollius_future, loop=loop)
     tf = tornado.concurrent.Future()
     def copy(future):
         assert future is f
@@ -1080,7 +1080,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
          # we are only going to allow a single conf/deconf at a time
         self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-            req, req_msg, subarray_product_id, "0", None, None, None, None, None))
+            req, req_msg, subarray_product_id, "0", None, None, None, None, None), self.loop)
          # start with a deconfigure
 
         @gen.coroutine
@@ -1099,7 +1099,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
                     logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
                     self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-                        req, req_msg, subarray_product_id, *config_args))
+                        req, req_msg, subarray_product_id, *config_args), loop=self.loop)
                     (retval, retmsg, product) = yield to_tornado_future(self._conf_future)
                     if retval != 'fail' and product:
                         self.subarray_products[subarray_product_id] = product
@@ -1205,7 +1205,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self._conf_future = trollius.ensure_future(
             self._async_data_product_configure(
                 req, req_msg, subarray_product_id, antennas, n_channels, dump_rate,
-                n_beams, stream_sources, deprecated_cam_source))
+                n_beams, stream_sources, deprecated_cam_source), loop=self.loop)
         config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
          # store our calling context for later use in the reconfigure command
 
@@ -1356,7 +1356,7 @@ class SDPControllerServer(AsyncDeviceServer):
             additional_config.update(odict)
 
         if self.interface_mode:
-            logger.debug("Telstate configured. Base parameters {}".format(config))
+            logger.debug("Telstate configured. Base parameters {}".format(base_params))
             logger.warning("No components will be started - running in interface mode")
             product = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
             raise Return(('ok',"", product))
@@ -1420,7 +1420,7 @@ class SDPControllerServer(AsyncDeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                rcode, rval = yield to_tornado_future(trollius.ensure_future(sa.set_state(State.INIT_WAIT)))
+                rcode, rval = yield to_tornado_future(sa.set_state(State.INIT_WAIT), loop=self.loop)
                  # attempt to set state to init
                 if rcode == 'fail':
                     req.reply(rcode, rval)
@@ -1535,8 +1535,9 @@ class SDPControllerServer(AsyncDeviceServer):
         @gen.coroutine
         def delayed_cmd():
             try:
-                rcode, rval = yield to_tornado_future(trollius.ensure_future(
-                    self.subarray_products[subarray_product_id].set_state(State.DONE)))
+                rcode, rval = yield to_tornado_future(
+                    self.subarray_products[subarray_product_id].set_state(State.DONE),
+                    loop=self.loop)
                 req.reply(rcode, rval)
             finally:
                 sa._async_busy = False
@@ -1561,7 +1562,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         @gen.coroutine
         def delayed_cmd():
-            yield to_tornado_future(trollius.ensure_future(self.deconfigure_on_exit()))
+            yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
              # attempt to deconfigure any existing subarrays
              # will always succeed even if some deconfigure fails
             # TODO: reimplement this
