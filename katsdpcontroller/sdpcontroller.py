@@ -25,12 +25,10 @@ import six
 import ipaddress
 import faulthandler
 
-from katcp import AsyncDeviceServer, Sensor, Message, AsyncClient, AsyncReply, FailReply
+from katcp import AsyncDeviceServer, Sensor, Message, AsyncReply, FailReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 from . import scheduler, sensor_proxy
-
-from prometheus_client import Gauge
 
 try:
     import katsdptelstate

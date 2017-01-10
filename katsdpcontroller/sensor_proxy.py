@@ -11,37 +11,15 @@ from prometheus_client import Gauge, REGISTRY
 logger = logging.getLogger(__name__)
 
 
-class PrometheusSensor(katcp.Sensor):
-    """Sensor that mirrors values into a Prometheus Gauge"""
-    def __init__(self, sensor_type, name, description=None, units='',
-                 params=None, default=None, initial_status=None,
-                 prometheus_name=None):
-        super(PrometheusSensor, self).__init__(sensor_type, name, description, units,
-                                               params, default, initial_status)
-        if prometheus_name is None:
-            prometheus_name = name
-        try:
-            self._gauge = Gauge(prometheus_name, description)
-        except ValueError as e:
-            logger.warn("Prometheus Gauge %s already exists - not adding again. (%s)", prom_name, e)
-            self._gauge = None
-
-    def set_formatted(self, timestamp, status, value, katcp_major):
-        super(PrometheusSensor, self).set_formatted(timestamp, status, value, katcp_major)
-        if self._gauge is not None:
-            timestamp, status, value = self.read()
-            if status in [self.NOMINAL, self.WARN, self.ERROR]:
-                self._gauge.set(value)
-
-
 class PrometheusObserver(object):
     """Watches a sensor and mirrors updates into a Prometheus Gauge"""
     def __init__(self, sensor, gauge_name):
         self._sensor = sensor
         try:
             self._gauge = Gauge(gauge_name, sensor.description)
-        except ValueError as e:
-            logger.warn("Prometheus Gauge %s already exists - not adding again. (%s)", gauge_name, e)
+        except ValueError as error:
+            logger.warn("Prometheus Gauge %s already exists - not adding again. (%s)",
+                        gauge_name, error)
             self._gauge = None
         sensor.attach(self)
 
@@ -90,7 +68,7 @@ class SensorProxyClient(InspectingClientAsync):
             sensor = yield self.future_get_sensor(name)
             self.server.add_sensor(sensor)
             if name in self.prometheus_sensors:
-                prom_name = sensor.name.replace(".","_").replace("-","_")
+                prom_name = sensor.name.replace(".", "_").replace("-", "_")
                 self._observers[name] = PrometheusObserver(sensor, prom_name)
         self.server.mass_inform(katcp.Message.inform('interface-changed', 'sensor-list'))
 
