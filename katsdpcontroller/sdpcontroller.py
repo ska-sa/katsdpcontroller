@@ -28,7 +28,7 @@ import six
 import ipaddress
 import faulthandler
 
-from katcp import AsyncDeviceServer, Sensor, Message, AsyncClient, AsyncReply
+from katcp import AsyncDeviceServer, Sensor, Message, AsyncClient, AsyncReply, FailReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 from . import scheduler
@@ -813,6 +813,38 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         raise Return((rcode, rval))
 
 
+def async_request(func):
+    """Decorator for requests that run asynchronously on the tornado ioloop
+    of :class:`SDPControllerServer`. This converts a handler that returns a
+    future to one that uses AsyncReply. The difference is that this allows
+    further commands to be immediately processed *on the same connection*.
+
+    The function itself must return a future that resolves to a reply. Thus,
+    a typical order of decorators is async_request, request, return_reply,
+    gen.coroutine.
+    """
+    @six.wraps(func)
+    def wrapper(self, req, msg):
+        # Note that this will run the coroutine until it first yields. The initial
+        # code until the first yield thus happens synchronously.
+        future = func(self, req, msg)
+        @gen.coroutine
+        def callback():
+            try:
+                reply = yield future
+                req.reply_with_message(reply)
+            except FailReply as error:
+                reason = str(error)
+                self._logger.error('Request %s FAIL: %s', msg.name, reason)
+                req.reply('fail', reason)
+            except Exception:
+                reply = self.create_exception_reply_and_log(msg, sys.exc_info())
+                req.reply_with_message(reply)
+        self.ioloop.add_callback(callback)
+        raise AsyncReply
+    return wrapper
+
+
 class SDPControllerServer(AsyncDeviceServer):
 
     VERSION_INFO = ("sdpcontroller", 0, 1)
@@ -1049,8 +1081,10 @@ class SDPControllerServer(AsyncDeviceServer):
             return ('fail', msg)
         return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
+    @async_request
     @request(Str(), include_msg=True)
     @return_reply(Str())
+    @gen.coroutine
     def request_data_product_reconfigure(self, req, req_msg, subarray_product_id):
         """Reconfigure the specified SDP subarray product instance.
 
@@ -1068,66 +1102,60 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         logger.info("?data-product-reconfigure called on {}".format(subarray_product_id))
         if not subarray_product_id in self.subarray_products:
-            return ('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
+            raise gen.Return(('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id)))
 
         if self._conf_future:
-            return ('fail',"A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure.")
+            raise gen.Return(('fail',"A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure."))
 
         try:
             config_args = self.subarray_product_config[subarray_product_id]
         except KeyError:
-            return ('fail',"No pre-existing config found for subarray {}. Unable to reconfigure.".format(subarray_product_id))
+            raise gen.Return(('fail',"No pre-existing config found for subarray {}. Unable to reconfigure.".format(subarray_product_id)))
 
          # we are only going to allow a single conf/deconf at a time
         self._conf_future = trollius.ensure_future(self._async_data_product_configure(
             req, req_msg, subarray_product_id, "0", None, None, None, None, None), self.loop)
          # start with a deconfigure
 
-        @gen.coroutine
-        def delayed_cmd():
-            try:
-                logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
-                (retval, retmsg, product) = yield to_tornado_future(self._conf_future)
-                if retval != 'ok':
-                    retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
+        try:
+            logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
+            (retval, retmsg, product) = yield self._conf_future
+            if retval != 'ok':
+                retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
+            else:
+                del self.subarray_products[subarray_product_id]
+                del self.subarray_product_config[subarray_product_id]
+                 # we already have a copy and if config now fails we don't want this lurking around anyway
+                logger.info("Removing subarray product {} reference.".format(subarray_product_id))
+                req.inform(retmsg)
+
+                logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+                self._conf_future = trollius.ensure_future(self._async_data_product_configure(
+                    req, req_msg, subarray_product_id, *config_args), loop=self.loop)
+                (retval, retmsg, product) = yield self._conf_future
+                if retval != 'fail' and product:
+                    self.subarray_products[subarray_product_id] = product
+                    self.subarray_product_config[subarray_product_id] = config_args
                 else:
-                    del self.subarray_products[subarray_product_id]
-                    del self.subarray_product_config[subarray_product_id]
-                     # we already have a copy and if config now fails we don't want this lurking around anyway
-                    logger.info("Removing subarray product {} reference.".format(subarray_product_id))
-                    req.inform(retmsg)
+                    retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
+                    self.subarray_product_config.pop(subarray_product_id)
+                     # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
+                self.mass_inform(Message.inform("interface-changed"))
+                 # let CAM know that our interface has changed
+            raise gen.Return((retval, retmsg))
+        finally:
+            try:
+                dp_handle = self.subarray_products[subarray_product_id]
+                dp_handle._async_busy = False
+                 # we must have failed to deconfigure, so lets clean up
+            except KeyError:
+                pass
+            self._conf_future = None
 
-                    logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
-                    self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-                        req, req_msg, subarray_product_id, *config_args), loop=self.loop)
-                    (retval, retmsg, product) = yield to_tornado_future(self._conf_future)
-                    if retval != 'fail' and product:
-                        self.subarray_products[subarray_product_id] = product
-                        self.subarray_product_config[subarray_product_id] = config_args
-                    else:
-                        retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
-                        self.subarray_product_config.pop(subarray_product_id)
-                         # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
-                    self.mass_inform(Message.inform("interface-changed"))
-                     # let CAM know that our interface has changed
-                req.reply(retval, retmsg)
-            except Exception as e:
-                retmsg = "Exception during ?data_product_reconfigure: {}".format(e)
-                logger.error(retmsg, exc_info=True)
-                req.reply('fail', retmsg)
-            finally:
-                try:
-                    dp_handle = self.subarray_products[subarray_product_id]
-                    dp_handle._async_busy = False
-                     # we must have failed to deconfigure, so lets clean up
-                except KeyError:
-                    pass
-                self._conf_future = None
-        self.ioloop.add_callback(delayed_cmd)
-        raise AsyncReply
-
+    @async_request
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
+    @gen.coroutine
     def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
         """Configure a SDP subarray product instance.
 
@@ -1177,16 +1205,17 @@ class SDPControllerServer(AsyncDeviceServer):
         if not subarray_product_id:
             for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
                 req.inform(subarray_product_id,subarray_product)
-            return ('ok',"%i" % len(self.subarray_products))
+            raise gen.Return(('ok',"%i" % len(self.subarray_products)))
 
         if antennas is None:
             if subarray_product_id in self.subarray_products:
-                return ('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id])))
-            else: return ('fail',"This subarray product id has no current configuration.")
+                raise gen.Return(('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id]))))
+            else:
+                raise gen.Return(('fail',"This subarray product id has no current configuration."))
 
          # we have either a configure or deconfigure, which may take time, so we proceed with async if allowed
         if self._conf_future:
-            return ('fail',"A data product configure command is currently executing.")
+            raise gen.Return(('fail',"A data product configure command is currently executing."))
 
          # a configure is essentially thread safe since the array object is only exposed
          # as a last step. deconf needs some protection since the object does exist, thus
@@ -1197,7 +1226,7 @@ class SDPControllerServer(AsyncDeviceServer):
                 dp_handle._async_busy = True
                 req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
             except KeyError:
-                return ('fail',"Deconfiguration of subarray product {} requested, but no configuration found.".format(subarray_product_id))
+                raise gen.Return(('fail',"Deconfiguration of subarray product {} requested, but no configuration found.".format(subarray_product_id)))
         else:
             req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
 
@@ -1209,36 +1238,28 @@ class SDPControllerServer(AsyncDeviceServer):
         config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
          # store our calling context for later use in the reconfigure command
 
-        @gen.coroutine
-        def delayed_cmd():
+        try:
+            (retval, retmsg, product) = yield self._conf_future
+            if retval != 'fail':
+                if (antennas == "0" or antennas == ""):
+                    self.subarray_products.pop(subarray_product_id)
+                    self.subarray_product_config.pop(subarray_product_id)
+                    logger.info("Removing subarray product {} reference.".format(subarray_product_id))
+                if product:
+                     # we can now safely expose this product for use in other katcp commands like ?capture-init
+                    self.subarray_products[subarray_product_id] = product
+                    self.subarray_product_config[subarray_product_id] = config_args
+                self.mass_inform(Message.inform("interface-changed"))
+                 # let CAM know that our interface has changed
+            raise gen.Return((retval, retmsg))
+        finally:
             try:
-                (retval, retmsg, product) = yield to_tornado_future(self._conf_future)
-                if retval != 'fail':
-                    if (antennas == "0" or antennas == ""):
-                        self.subarray_products.pop(subarray_product_id)
-                        self.subarray_product_config.pop(subarray_product_id)
-                        logger.info("Removing subarray product {} reference.".format(subarray_product_id))
-                    if product:
-                         # we can now safely expose this product for use in other katcp commands like ?capture-init
-                        self.subarray_products[subarray_product_id] = product
-                        self.subarray_product_config[subarray_product_id] = config_args
-                    self.mass_inform(Message.inform("interface-changed"))
-                     # let CAM know that our interface has changed
-                req.reply(retval, retmsg)
-            except Exception as e:
-                retmsg = "Exception during ?data_product_configure: {}".format(e)
-                logger.error(retmsg, exc_info=True)
-                req.reply('fail', retmsg)
-            finally:
-                try:
-                    dp_handle = self.subarray_products[subarray_product_id]
-                    dp_handle._async_busy = False
-                     # we may have failed to deconfigure, so make sure we clean up
-                except KeyError:
-                    pass
-                self._conf_future = None
-        self.ioloop.add_callback(delayed_cmd)
-        raise AsyncReply
+                dp_handle = self.subarray_products[subarray_product_id]
+                dp_handle._async_busy = False
+                 # we may have failed to deconfigure, so make sure we clean up
+            except KeyError:
+                pass
+            self._conf_future = None
 
     @trollius.coroutine
     def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
@@ -1389,8 +1410,10 @@ class SDPControllerServer(AsyncDeviceServer):
 
         raise Return(('ok',"",product))
 
+    @async_request
     @request(Str())
     @return_reply(Str())
+    @gen.coroutine
     def request_capture_init(self, req, subarray_product_id):
         """Request capture of the specified subarray product to start.
 
@@ -1412,26 +1435,20 @@ class SDPControllerServer(AsyncDeviceServer):
             Whether the system is ready to capture or not.
         """
         if subarray_product_id not in self.subarray_products:
-            return ('fail','No existing subarray product configuration with this id found')
+            raise gen.Return(('fail','No existing subarray product configuration with this id found'))
         sa = self.subarray_products[subarray_product_id]
         if sa._async_busy:
-            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
-
-        @gen.coroutine
-        def delayed_cmd():
-            try:
-                rcode, rval = yield to_tornado_future(sa.set_state(State.INIT_WAIT), loop=self.loop)
-                 # attempt to set state to init
-                if rcode == 'fail':
-                    req.reply(rcode, rval)
-                else:
-                    req.reply('ok','SDP ready')
-            finally:
-                sa._async_busy = False
-
+            raise gen.Return(('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id)))
         sa._async_busy = True
-        self.ioloop.add_callback(delayed_cmd)
-        raise AsyncReply
+        try:
+            rcode, rval = yield to_tornado_future(sa.set_state(State.INIT_WAIT), loop=self.loop)
+             # attempt to set state to init
+            if rcode == 'fail':
+                raise gen.Return((rcode, rval))
+            else:
+                raise gen.Return(('ok','SDP ready'))
+        finally:
+            sa._async_busy = False
 
     @request(Str(optional=True))
     @return_reply(Str())
@@ -1511,8 +1528,10 @@ class SDPControllerServer(AsyncDeviceServer):
         rcode, rval = sa.set_psb(psb_id)
         return (rcode, rval)
 
+    @async_request
     @request(Str())
     @return_reply(Str())
+    @gen.coroutine
     def request_capture_done(self, req, subarray_product_id):
         """Halts the currently specified subarray product
 
@@ -1527,27 +1546,23 @@ class SDPControllerServer(AsyncDeviceServer):
         state : str
         """
         if subarray_product_id not in self.subarray_products:
-            return ('fail','No existing subarray product configuration with this id found')
+            raise gen.Return(('fail','No existing subarray product configuration with this id found'))
         sa = self.subarray_products[subarray_product_id]
         if sa._async_busy:
-            return ('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id))
-
-        @gen.coroutine
-        def delayed_cmd():
-            try:
-                rcode, rval = yield to_tornado_future(
-                    self.subarray_products[subarray_product_id].set_state(State.DONE),
-                    loop=self.loop)
-                req.reply(rcode, rval)
-            finally:
-                sa._async_busy = False
-
+            raise gen.Return(('fail',"The specified subarray product id ({}) is busy with an asynchronous operation and cannot be manipulated at this time.".format(subarray_product_id)))
         sa._async_busy = True
-        self.ioloop.add_callback(delayed_cmd)
-        raise AsyncReply
+        try:
+            rcode, rval = yield to_tornado_future(
+                self.subarray_products[subarray_product_id].set_state(State.DONE),
+                loop=self.loop)
+            raise gen.Return((rcode, rval))
+        finally:
+            sa._async_busy = False
 
+    @async_request
     @request()
     @return_reply(Str())
+    @gen.coroutine
     def request_sdp_shutdown(self, req):
         """Shut down the SDP master controller and all controlled nodes.
 
@@ -1560,17 +1575,11 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         logger.info("SDP Shutdown called.")
 
-        @gen.coroutine
-        def delayed_cmd():
-            yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
-             # attempt to deconfigure any existing subarrays
-             # will always succeed even if some deconfigure fails
-            # TODO: reimplement this
-            req.reply('fail', 'sdp-shutdown not implemented')
-
-        # TODO: is this async-safe with concurrent configure calls?
-        self.ioloop.add_callback(delayed_cmd)
-        raise AsyncReply
+        yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
+         # attempt to deconfigure any existing subarrays
+         # will always succeed even if some deconfigure fails
+        # TODO: reimplement this
+        raise FailReply('sdp-shutdown not implemented')
 
     @request(include_msg=True)
     @return_reply(Int(min=0))
