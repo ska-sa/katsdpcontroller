@@ -1,13 +1,14 @@
 """Tests for the sdp controller module."""
 
+import threading
+import concurrent.futures
 import unittest2 as unittest
 
 from katcp.testutils import BlockingTestClient
 from katcp import Message
+from tornado.platform.asyncio import AsyncIOLoop
 
-from katsdpcontroller.sdpcontroller import SDPControllerServer, SDPResources
-
-SA_STATES = {0:'unconfigured',1:'idle',2:'init_wait',3:'capturing',4:'capture_complete',5:'done'}
+from katsdpcontroller.sdpcontroller import SDPControllerServer, SDPCommonResources, SDPResources
 
 ANTENNAS = 'm063,m064'
 
@@ -40,6 +41,31 @@ EXPECTED_REQUEST_LIST = [
     'set-config-override'
 ]
 
+
+class TestServerThread(threading.Thread):
+    """Runs an SDPControllerServer in interface mode on a separate thread"""
+    def __init__(self):
+        super(TestServerThread, self).__init__(name='SDPControllerServer')
+        self.controller_future = concurrent.futures.Future()
+
+    def _initialise(self):
+        self._controller = SDPControllerServer(
+            '127.0.0.1', 0, {}, '',
+            self._ioloop.asyncio_loop, simulate=True, interface_mode=True,
+            safe_multicast_cidr="225.100.0.0/16")
+        self._controller.start()
+        self.controller_future.set_result(self._controller)
+
+    def run(self):
+        self._ioloop = AsyncIOLoop()
+        self._ioloop.add_callback(self._initialise)
+        self._ioloop.start()
+
+    def stop(self):
+        self._ioloop.add_callback(self._controller.stop)
+        self._ioloop.add_callback(self._ioloop.stop)
+
+
 class TestSDPController(unittest.TestCase):
     """Testing of the SDP controller.
 
@@ -47,17 +73,23 @@ class TestSDPController(unittest.TestCase):
     this reason unique subarray_ids are used by each test to try and avoid clashes.
     """
     def setUp(self):
-        self.controller = SDPControllerServer('127.0.0.1',5001,simulate=True, interface_mode=True, safe_multicast_cidr="225.100.0.0/16")
-        self.controller.start()
-        self.client = BlockingTestClient(self,'127.0.0.1',5001)
-        self.client.start(timeout=1)
-        self.client.wait_connected(timeout=1)
+        self.thread = TestServerThread()
+        self.thread.start()
+        try:
+            self.controller = self.thread.controller_future.result()
+            bind_address = self.controller.bind_address
+            self.client = BlockingTestClient(self, *bind_address)
+            self.client.start(timeout=1)
+            self.client.wait_connected(timeout=1)
+        except Exception:
+            self.thread.stop()
+            raise
 
     def tearDown(self):
         self.client.stop()
         self.client.join()
-        self.controller.stop()
-        self.controller.join()
+        self.thread.stop()
+        self.thread.join()
 
     def test_task_launch(self):
         self.client.assert_request_fails("task-launch","task1")
@@ -72,7 +104,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
-        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok",SA_STATES[2])))
+        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","INIT_WAIT")))
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
@@ -112,34 +144,36 @@ class TestSDPController(unittest.TestCase):
 class TestSDPResources(unittest.TestCase):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPResources`."""
     def setUp(self):
-        self.r = SDPResources("225.100.0.0/16", interface_mode=True)
-        self.r.prefix = 'array_1_c856M4k'
+        self.r = SDPCommonResources("225.100.0.0/16")
+        self.r1 = SDPResources(self.r, 'array_1_c856M4k')
+        self.r2 = SDPResources(self.r, 'array_1_bc856M4k')
 
     def test_multicast_ip(self):
         # Get assigned IP's from known host classes
-        self.assertEqual('225.100.1.1', self.r.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.4.1', self.r.get_multicast_ip('l1_continuum_spead'))
+        self.assertEqual('225.100.1.1', self.r1.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead'))
         # Get assigned IP from unknown host class
-        self.assertEqual('225.100.0.1', self.r.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.0.1', self.r1.get_multicast_ip('unknown'))
         # Check that assignments are remembered
-        self.assertEqual('225.100.1.1', self.r.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.4.1', self.r.get_multicast_ip('l1_continuum_spead'))
-        self.assertEqual('225.100.0.1', self.r.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.1.1', self.r1.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead'))
+        self.assertEqual('225.100.0.1', self.r1.get_multicast_ip('unknown'))
         # Override an assignment, check that this is remembered
-        self.r.set_multicast_ip('l0_spectral_spead', '239.1.2.3')
-        self.assertEqual('239.1.2.3', self.r.get_multicast_ip('l0_spectral_spead'))
+        self.r1.set_multicast_ip('l0_spectral_spead', '239.1.2.3')
+        self.assertEqual('239.1.2.3', self.r1.get_multicast_ip('l0_spectral_spead'))
         # Assign a value not previously seen
-        self.r.set_multicast_ip('CAM_spead', '239.4.5.6')
-        self.assertEqual('239.4.5.6', self.r.get_multicast_ip('CAM_spead'))
+        self.r1.set_multicast_ip('CAM_spead', '239.4.5.6')
+        self.assertEqual('239.4.5.6', self.r1.get_multicast_ip('CAM_spead'))
 
-        # Now change the previous to a different subarray-product, check that
+        # Now change to a different subarray-product, check that
         # new values are used.
-        self.r.prefix = 'array_1_bc856M4k'
-        self.assertEqual('225.100.1.2', self.r.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.0.2', self.r.get_multicast_ip('CAM_spead'))
-        self.assertEqual('225.100.0.3', self.r.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.1.2', self.r2.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('225.100.0.2', self.r2.get_multicast_ip('CAM_spead'))
+        self.assertEqual('225.100.0.3', self.r2.get_multicast_ip('unknown'))
 
     def test_url(self):
-        self.assertEqual(None, self.r.get_url('CAM_ws'))
-        self.r.set_url('CAM_ws', 'ws://host.domain:port/path')
-        self.assertEqual('ws://host.domain:port/path', self.r.get_url('CAM_ws'))
+        self.assertEqual(None, self.r1.get_url('CAM_ws'))
+        self.r1.set_url('CAM_ws', 'ws://host.domain:port/path')
+        self.assertEqual('ws://host.domain:port/path', self.r1.get_url('CAM_ws'))
+        # URLs should be unique per subarray-product
+        self.assertIsNone(self.r2.get_url('CAM_ws'))
