@@ -122,7 +122,7 @@ if __name__ == "__main__":
     framework_info = addict.Dict()
     framework_info.user = 'root'
     framework_info.name = 'katsdpcontroller'
-    framework_info.checkpoint = True
+    framework_info.checkpoint = False
     framework_info.principal = opts.principal
     framework_info.role = opts.role
 
