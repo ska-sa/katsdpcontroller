@@ -416,7 +416,7 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
                     self.katcp_connection = None
                      # no need for these to lurk around
                     logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
-                                 self.name, self.host, self.data['port'])
+                                 self.name, self.host, self.ports['port'])
                     yield From(trollius.sleep(1.0))
 
     def resolve(self, resolver, graph):
