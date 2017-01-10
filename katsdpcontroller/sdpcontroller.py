@@ -62,7 +62,7 @@ PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','outp
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 
-def to_tornado_future(trollius_future, loop=None):
+def to_tornado_future(trollius_future, loop):
     """Wrapper around :func:`tornado.platform.asyncio.to_tornado_future` that
     is a bit more robust: it allows taking a coroutine rather than a future,
     it passes through error tracebacks, and if a future is cancelled it
@@ -1063,7 +1063,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         try:
             logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
-            (retval, retmsg, product) = yield self._conf_future
+            (retval, retmsg, product) = yield to_tornado_future(self._conf_future, loop=self.loop)
             if retval != 'ok':
                 retmsg = "Unable to deconfigure as part of reconfigure. {}".format(retmsg)
             else:
@@ -1076,7 +1076,7 @@ class SDPControllerServer(AsyncDeviceServer):
                 logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
                 self._conf_future = trollius.ensure_future(self._async_data_product_configure(
                     req, req_msg, subarray_product_id, *config_args), loop=self.loop)
-                (retval, retmsg, product) = yield self._conf_future
+                (retval, retmsg, product) = yield to_tornado_future(self._conf_future, loop=self.loop)
                 if retval != 'fail' and product:
                     self.subarray_products[subarray_product_id] = product
                     self.subarray_product_config[subarray_product_id] = config_args
@@ -1183,7 +1183,7 @@ class SDPControllerServer(AsyncDeviceServer):
          # store our calling context for later use in the reconfigure command
 
         try:
-            (retval, retmsg, product) = yield self._conf_future
+            (retval, retmsg, product) = yield to_tornado_future(self._conf_future, loop=self.loop)
             if retval != 'fail':
                 if (antennas == "0" or antennas == ""):
                     self.subarray_products.pop(subarray_product_id)
