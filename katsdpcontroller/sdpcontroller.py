@@ -36,16 +36,6 @@ from . import scheduler
 from prometheus_client import Gauge
 
 try:
-    import requests
-    requests.packages.urllib3.disable_warnings()
-     # disable HTTPS security warnings
-except ImportError:
-    pass
-     # docker is not needed when running in interface only mode.
-     # when not running in this mode we check to make sure that
-     # docker has been imported or we exit.
-
-try:
     import katsdptelstate
     from katsdptelstate.endpoint import Endpoint
 except ImportError:
