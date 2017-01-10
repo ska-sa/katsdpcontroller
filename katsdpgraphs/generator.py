@@ -185,14 +185,14 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         sim.cpus = 2
         sim.mem = 2048.0             # TODO
         sim.cores = [None, None]
-        sim.gpus = [GPURequest()]
+        sim.gpus = [scheduler.GPURequest()]
         sim.gpus[0].compute = 0.5
         sim.gpus[0].mem = 2048.0     # TODO
         sim.ports = ['port']
         g.add_node(sim, config=lambda resolver: {
             'cbf_channels': cbf_channels
         })
-        g.add_edge(sim, cbf_spead, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(sim, bcp_spead, port='spead', config=lambda resolver, endpoint: {
             'cbf_spead': str(endpoint)
         })
 
