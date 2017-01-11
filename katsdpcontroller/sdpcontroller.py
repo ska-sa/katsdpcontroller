@@ -306,41 +306,6 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
             self.katcp_connection = None
         super(SDPPhysicalTask, self).kill(driver)
 
-    def _chained_read(self, base_name='', prometheus_gauge=None):
-         # used to chain a sensor in the master controller
-         # to the actual sensor on the subordinate device
-        if self.katcp_connection:
-            # TODO: this will block up the ioloop any time a client requests a
-            # sensor. Unfortunately there is no way to avoid this without
-            # modifying katcp, because the Sensor API doesn't have an
-            # asynchronous way to read a sensor.
-            reply, informs = self.katcp_connection.blocking_request(Message.request('sensor-value',base_name),timeout=5)
-            if not reply.reply_ok():
-                return None
-            if len(informs) < 1: return None
-            args = informs[0].arguments
-             # sensor value inform has format: <ts>,<not sure>,<name>,<state>,<value>
-             # all strings
-            logger.debug("Chained read on sensor {}: {}".format(base_name,args))
-            try:
-                s_ts = float(args[0])
-            except ValueError:
-                s_ts = time.time()
-            try:
-                s_state = Sensor.STATUS_NAMES[args[3]]
-            except KeyError:
-                s_state = Sensor.UNKNOWN
-            s_value = args[4]
-            if prometheus_gauge:
-                try:
-                    prometheus_gauge.set(s_value)
-                except ValueError:
-                    logger.warning("Failed to set prometheus gauge {} to {}".format(base_name, s_value))
-            logger.debug("Returning ({},{},{})".format(s_value, s_state, s_ts))
-            return (s_value, s_state, s_ts)
-        else:
-            return ('',Sensor.UNREACHABLE,time.time())
-
     def add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
            track it locally.
