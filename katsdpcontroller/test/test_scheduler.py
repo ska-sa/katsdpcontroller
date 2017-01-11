@@ -240,6 +240,50 @@ class TestTaskState(object):
                 TaskState.RUNNING >= 3
 
 
+class TestImageResolver(object):
+    """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
+    def test_simple(self):
+        """Test the base case"""
+        resolver = scheduler.ImageResolver()
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        assert_equal('sdp/test1:latest', resolver('test1'))
+        assert_equal('sdp/test1:tagged', resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        assert_false(resolver.pullable('sdp/test1:latest'))
+        assert_false(resolver.pullable('my-registry:5000/bar:custom'))
+
+    def test_private_registry(self):
+        """Test with a private registry"""
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000')
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        assert_equal('my-registry:5000/test1:latest', resolver('test1'))
+        assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        assert_true(resolver.pullable('my-registry:5000/test1:latest'))
+        assert_false(resolver.pullable('other-registry:5000/test1:latest'))
+
+    @mock.patch('__builtin__.open', autospec=file)
+    def test_tag_file(self, open_mock):
+        """Test with a tag file"""
+        open_mock.return_value.__enter__.return_value.read.return_value = b'tag1\n'
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        open_mock.assert_called_once_with('tag_file', 'r')
+        assert_equal('my-registry:5000/test1:tag1', resolver('test1'))
+        assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        open_mock.return_value.__enter__.return_value.read.return_value = b'tag2\n'
+        resolver.reread_tag_file()
+        assert_equal('my-registry:5000/test1:tag2', resolver('test1'))
+
+    @mock.patch('__builtin__.open', autospec=file)
+    def test_bad_tag_file(self, open_mock):
+        """A ValueError is raised if the tag file contains illegal content"""
+        open_mock.return_value.__enter__.return_value.read.return_value = b'not a good :tag\n'
+        with assert_raises(ValueError):
+            scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+
+
 class TestTaskIDAllocator(object):
     """Tests for :class:`katsdpcontroller.scheduler.TaskIDAllocator`."""
     def test_singleton(self):
