@@ -19,6 +19,7 @@ import trollius
 from trollius import From
 from tornado.platform.asyncio import AsyncIOMainLoop
 from prometheus_client import start_http_server
+import pymesos
 from katsdpcontroller import scheduler, sdpcontroller
 
 try:
@@ -129,8 +130,14 @@ if __name__ == "__main__":
     loop = trollius.get_event_loop()
     ioloop = AsyncIOMainLoop()
     ioloop.install()
+    sched = scheduler.Scheduler(loop)
+    driver = pymesos.MesosSchedulerDriver(
+        sched, framework_info, opts.master, use_addict=True,
+        implicit_acknowledgements=False)
+    sched.set_driver(driver)
+    driver.start()
     server = sdpcontroller.SDPControllerServer(
-        opts.host, opts.port, framework_info, opts.master, loop,
+        opts.host, opts.port, sched, loop,
         simulate=opts.simulate,
         interface_mode=opts.interface_mode,
         image_resolver=image_resolver,

@@ -18,7 +18,6 @@ import tornado.ioloop
 import tornado.concurrent
 import trollius
 from trollius import From, Return
-import pymesos
 import networkx
 import six
 
@@ -792,7 +791,7 @@ class SDPControllerServer(AsyncDeviceServer):
     VERSION_INFO = ("sdpcontroller", 0, 1)
     BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
 
-    def __init__(self, host, port, framework_info, master, loop, safe_multicast_cidr,
+    def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, interface_mode=False,
                  graph_resolver=None, image_resolver=None, **kwargs):
          # setup sensors
@@ -810,15 +809,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self.interface_mode = interface_mode
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.loop = loop
-        if not self.interface_mode:
-            self.sched = scheduler.Scheduler(loop)
-            driver = pymesos.MesosSchedulerDriver(
-                self.sched, framework_info, master, use_addict=True,
-                implicit_acknowledgements=False)
-            self.sched.set_driver(driver)
-            driver.start()
-        else:
-            self.sched = None
+        self.sched = sched
         self.components = {}
          # dict of currently managed SDP components
         self._conf_future = None
