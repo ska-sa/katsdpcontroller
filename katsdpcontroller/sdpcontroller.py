@@ -13,7 +13,6 @@ import sys
 
 from tornado import gen
 import tornado.platform.asyncio
-from tornado.platform.asyncio import to_asyncio_future
 import tornado.ioloop
 import tornado.concurrent
 import trollius
@@ -82,6 +81,15 @@ def to_tornado_future(trollius_future, loop):
             tf.set_result(f.result())
     f.add_done_callback(copy)
     return tf
+
+
+def to_trollius_future(tornado_future, loop=None):
+    """Variant of :func:`tornado.platform.asyncio.to_asyncio_future` that
+    allows a custom event loop to be specified."""
+    tornado_future = gen.convert_yielded(tornado_future)
+    af = trollius.Future(loop=loop)
+    tornado.concurrent.chain_future(tornado_future, af)
+    return af
 
 
 class CallbackSensor(Sensor):
@@ -359,8 +367,8 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
                     self.sdp_controller, prefix, PROMETHEUS_SENSORS,
                     host=self.host, port=self.ports['port'])
                 try:
-                    yield From(to_asyncio_future(self.katcp_connection.start()))
-                    yield From(to_asyncio_future(self.katcp_connection.until_synced(timeout=20)))
+                    yield From(to_trollius_future(self.katcp_connection.start(), loop=self.loop))
+                    yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
                      # some katcp connections, particularly to ingest can take a while to establish
                     return
                 except RuntimeError:
@@ -369,7 +377,7 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
                      # no need for these to lurk around
                     logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
                                  self.name, self.host, self.ports['port'], exc_info=True)
-                    yield From(trollius.sleep(1.0))
+                    yield From(trollius.sleep(1.0, loop=self.loop))
 
     def resolve(self, resolver, graph):
         super(SDPPhysicalTask, self).resolve(resolver, graph)
@@ -407,8 +415,9 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
         logger.info("Issued request {} {} to node {}".format(req, args, self.name))
-        reply, informs = yield From(to_asyncio_future(
-            self.katcp_connection.katcp_client.future_request(Message.request(req, *args), **kwargs)))
+        reply, informs = yield From(to_trollius_future(
+            self.katcp_connection.katcp_client.future_request(Message.request(req, *args), **kwargs),
+            loop=self.loop))
         if not reply.reply_ok():
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
             logger.warning(msg)
