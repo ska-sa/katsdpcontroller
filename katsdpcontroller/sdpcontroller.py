@@ -365,6 +365,7 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
 
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
+        # TODO: remove sensors from device server
         super(SDPPhysicalTask, self).set_state(state)
         if self.state == scheduler.TaskState.DEAD and self.katcp_connection is not None:
             self.katcp_connection.stop()
