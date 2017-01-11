@@ -37,6 +37,23 @@ class PrometheusObserver(object):
 
 
 class SensorProxyClient(InspectingClientAsync):
+    """Inspecting client wrapper that mirrors sensors into a device server,
+    and optionally into Prometheus gauges as well.
+
+    Parameters
+    ----------
+    server : :class:`katcp.DeviceServer`
+        Server to which sensors will be added
+    prefix : str
+        String prepended to the remote server's sensor names to obtain names
+        used on `server`. These should be unique per `server` to avoid
+        collisions.
+    prometheus_sensors : iterable
+        Set of unprefixed sensor names which should be mapped to Prometheus
+        gauges. These should be integer or float sensors (TODO: enforce this).
+    args, kwargs
+        Passed to the base class
+    """
     def __init__(self, server, prefix, prometheus_sensors, *args, **kwargs):
         super(SensorProxyClient, self).__init__(*args, **kwargs)
         self.server = server
@@ -44,9 +61,11 @@ class SensorProxyClient(InspectingClientAsync):
         self.prometheus_sensors = set(prometheus_sensors)
         self.set_state_callback(self._sensor_state_cb)
         self.sensor_factory = self._sensor_factory_prefix
-        self._observers = {}   #: Dictionary indexed by unqualified sensor name
+        # Indexed by unqualified sensor name; None if no observer is needed
+        self._observers = {}
 
     def qualify_name(self, name):
+        """Map a remote server sensor name to a local name"""
         return self.prefix + name
 
     def _sensor_factory_prefix(self, sensor_type, name, description, units, params):
@@ -70,10 +89,15 @@ class SensorProxyClient(InspectingClientAsync):
             if name in self.prometheus_sensors:
                 prom_name = sensor.name.replace(".", "_").replace("-", "_")
                 self._observers[name] = PrometheusObserver(sensor, prom_name)
+            else:
+                self._observers[name] = None
         self.server.mass_inform(katcp.Message.inform('interface-changed', 'sensor-list'))
 
     def stop(self, timeout=None):
-        for observer in self._observers.itervalues():
-            observer.close()
+        for name, observer in self._observers.iteritems():
+            if observer is not None:
+                observer.close()
+            self.server.remove_sensor(self.qualify_name(name))
         self._observers = {}
+        self.server.mass_inform(katcp.Message.inform('interface-changed', 'sensor-list'))
         super(SensorProxyClient, self).stop(timeout)
