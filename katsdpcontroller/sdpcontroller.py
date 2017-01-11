@@ -491,14 +491,8 @@ class SDPGraph(object):
     @trollius.coroutine
     def execute_graph(self, req):
         """Launch the remainder of the graph after :meth:`launch_telstate` has completed."""
-        try:
-            yield From(self.sched.launch(self.physical_graph, self.resolver))
-        except Exception:
-            # Interrupting a launch can leave a graph half-configured. Make
-            # sure it is killed off completely.
-            yield From(self.sched.kill(self.physical_graph))
-            raise
         # TODO: issue progress reports as tasks start running
+        yield From(self.sched.launch(self.physical_graph, self.resolver))
 
     @trollius.coroutine
     def shutdown(self):
@@ -1330,25 +1324,30 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.error(retmsg)
             raise Return(('fail',retmsg,None))
 
-        yield From(graph.launch_telstate(additional_config, base_params))
-         # launch the telescope state for this graph
-        req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
-        logger.debug("Executing graph {}".format(graph_name))
-        yield From(graph.execute_graph(req))
-         # launch containers for those nodes that require them
-        req.inform("All nodes launched")
-        alive = graph.check_nodes()
-         # is everything we asked for alive
-        if not alive:
-            ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+        try:
+            yield From(graph.launch_telstate(additional_config, base_params))
+             # launch the telescope state for this graph
+            req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
+            logger.debug("Executing graph {}".format(graph_name))
+            yield From(graph.execute_graph(req))
+             # launch containers for those nodes that require them
+            req.inform("All nodes launched")
+            alive = graph.check_nodes()
+             # is everything we asked for alive
+            if not alive:
+                ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+                logger.error(ret_msg)
+                yield From(graph.shutdown())
+                raise Return(('fail', ret_msg,None))
+             # at this point telstate is up, nodes have been launched, katcp connections established
+             # we can now safely expose this product for use in other katcp commands like ?capture-init
+             # adding a product is also safe with regard to commands like ?capture-status
+            product = SDPSubarrayProduct(self.sched, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+        except Exception:
+            # If there was a problem the graph might be semi-running. Shut it all down.
+            exc_info = sys.exc_info()
             yield From(graph.shutdown())
-            logger.error(ret_msg)
-            raise Return(('fail', ret_msg,None))
-
-         # at this point telstate is up, nodes have been launched, katcp connections established
-         # we can now safely expose this product for use in other katcp commands like ?capture-init
-         # adding a product is also safe with regard to commands like ?capture-status
-        product = SDPSubarrayProduct(self.sched, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            six.reraise(*exc_info)
 
         raise Return(('ok',"",product))
 
