@@ -293,26 +293,33 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
          # if this node has a specified state transition action return it
         return self.logical_node.transitions.get(state,None)
 
-    def kill(self, driver):
-        # shutdown this task
+    def _disconnect(self):
+        """Close the katcp connection (if open) and remove the sensors."""
+        need_inform = False
         for sensor_name in self.sensors.iterkeys():
             logger.debug("Removing sensor {}".format(sensor_name))
             self.sdp_controller.remove_sensor(sensor_name)
+            need_inform = True
+        self.sensors = {}
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.stop()
+                need_inform = False  # katcp_connection.stop() sends an inform itself
             except RuntimeError:
-                pass # best effort
+                logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
+        if need_inform:
+            self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+
+    def kill(self, driver):
+        # shutdown this task
+        self._disconnect()
         super(SDPPhysicalTask, self).kill(driver)
 
     def add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
            track it locally.
         """
-        # TODO: reenable this code. It doesn't work because there is no way to have
-        # an asynchronous sensor read callback.
-        return
         self.sensors[sensor.name] = sensor
         if self.sdp_controller:
             self.sdp_controller.add_sensor(sensor)
@@ -367,9 +374,8 @@ class SDPPhysicalTask(scheduler.PhysicalTask):
         # TODO: extend this to set a sensor indicating the task state
         # TODO: remove sensors from device server
         super(SDPPhysicalTask, self).set_state(state)
-        if self.state == scheduler.TaskState.DEAD and self.katcp_connection is not None:
-            self.katcp_connection.stop()
-            self.katcp_connection = None
+        if self.state == scheduler.TaskState.DEAD:
+            self._disconnect()
 
     @trollius.coroutine
     def issue_req(self, req, args=[], **kwargs):
@@ -1042,8 +1048,6 @@ class SDPControllerServer(AsyncDeviceServer):
                     retmsg = "Unable to configure as part of reconfigure, original array deconfigured. {}".format(retmsg)
                     self.subarray_product_config.pop(subarray_product_id)
                      # deconf succeeded, but we kept the config around for the new configure which failed, so remove it
-                self.mass_inform(Message.inform("interface-changed"))
-                 # let CAM know that our interface has changed
             raise gen.Return((retval, retmsg))
         finally:
             try:
@@ -1151,8 +1155,6 @@ class SDPControllerServer(AsyncDeviceServer):
                      # we can now safely expose this product for use in other katcp commands like ?capture-init
                     self.subarray_products[subarray_product_id] = product
                     self.subarray_product_config[subarray_product_id] = config_args
-                self.mass_inform(Message.inform("interface-changed"))
-                 # let CAM know that our interface has changed
             raise gen.Return((retval, retmsg))
         finally:
             try:
