@@ -370,6 +370,10 @@ class TestAgent(unittest.TestCase):
         self.if_attr_bad_schema = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth1'}])
+        self.volume_attr = _make_json_attr(
+            'katsdpcontroller.volumes',
+            [{'name': 'vol1', 'host_path': '/host1'},
+             {'name': 'vol2', 'host_path': '/host2', 'numa_node': 1}])
         self.gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
             [{'device': '/dev/nvidia0', 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 1},
@@ -379,7 +383,7 @@ class TestAgent(unittest.TestCase):
 
     def test_construct(self):
         """Construct an agent from some offers"""
-        attrs = [self.if_attr, self.gpu_attr, self.numa_attr]
+        attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr]
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
                               'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
@@ -414,6 +418,9 @@ class TestAgent(unittest.TestCase):
                                           numa_node=1,
                                           speed=None)],
                      agent.interfaces)
+        assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
+                      scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
+                     agent.volumes)
         assert_equal([[0, 2, 4, 6], [1, 3, 5, 7]], agent.numa)
 
     def test_no_offers(self):
@@ -476,6 +483,14 @@ class TestAgent(unittest.TestCase):
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
+    def test_allocate_missing_volume(self):
+        """allocate raises if the task requires a volume that is not present"""
+        task = scheduler.LogicalTask('task')
+        task.volumes = [scheduler.VolumeRequest('vol-missing', '/container-path', 'RW')]
+        agent = scheduler.Agent([self._make_offer({}, [self.volume_attr])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
     def test_allocate_insufficient_gpu(self):
         """allocate raises if the task requires more GPU resources than available"""
         task = scheduler.LogicalTask('task')
@@ -530,11 +545,24 @@ class TestAgent(unittest.TestCase):
         task.cpus = 3.0
         task.mem = 128.0
         task.cores = ['a', 'b', None]
-        task.networks.append(scheduler.NetworkRequest('net0'))
-        task.networks[-1].affinity = True
+        task.networks.append(scheduler.NetworkRequest('net0', affinity=True))
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [self.if_attr, self.numa_attr])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
+    def test_allocate_no_numa_volume(self):
+        """allocate raises if no NUMA node has enough cores and volumes together,
+        and affinity is requested"""
+        task = scheduler.LogicalTask('task')
+        task.cpus = 3.0
+        task.mem = 128.0
+        task.cores = ['a', 'b', None]
+        task.volumes.append(scheduler.VolumeRequest('vol2', '/container-path', 'RW', affinity=True))
+        agent = scheduler.Agent([self._make_offer(
+            {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
+            [self.volume_attr, self.numa_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -545,6 +573,7 @@ class TestAgent(unittest.TestCase):
         task.mem = 128.0
         task.cores = ['a', 'b', 'c']
         task.networks = [scheduler.NetworkRequest('net0')]
+        task.volumes = [scheduler.VolumeRequest('vol2', '/container-path', 'RW')]
         task.gpus = [scheduler.GPURequest(), scheduler.GPURequest()]
         task.gpus[0].compute = 0.5
         task.gpus[0].mem = 1024.0
@@ -558,10 +587,18 @@ class TestAgent(unittest.TestCase):
                 'katsdpcontroller.gpu.0.mem': 2048.0,
                 'katsdpcontroller.gpu.1.compute': 0.75,
                 'katsdpcontroller.gpu.1.mem': 256.0
-            }, [self.if_attr, self.gpu_attr, self.numa_attr])])
+            }, [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr])])
         ra = agent.allocate(task)
         assert_equal(4.0, ra.cpus)
         assert_equal(128.0, ra.mem)
+        assert_equal([scheduler.Interface(name='eth0',
+                                          network='net0',
+                                          ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
+                                          numa_node=1,
+                                          speed=None)],
+                     ra.interfaces)
+        assert_equal([scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
+                     ra.volumes)
         assert_equal(2, len(ra.gpus))
         assert_equal(0.5, ra.gpus[0].compute)
         assert_equal(1024.0, ra.gpus[0].mem)
@@ -586,14 +623,20 @@ class TestPhysicalTask(object):
         self.logical_task.mem = 256.0
         self.logical_task.ports = ['port1', 'port2']
         self.logical_task.cores = ['core1', 'core2', 'core3']
-        self.logical_task.networks = ['net0', 'net1']
+        self.logical_task.networks = [
+            scheduler.NetworkRequest('net0'),
+            scheduler.NetworkRequest('net1')]
+        self.logical_task.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
         self.eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None, None)
         self.eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None, None)
+        self.vol0 = scheduler.Volume('vol0', '/host0', numa_node=1)
         attributes = [
             _make_json_attr('katsdpcontroller.interfaces', [
                 {"name": "eth0", "network": "net0", "ipv4_address": "192.168.1.1"},
                 {"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}
-            ])
+            ]),
+            _make_json_attr('katsdpcontroller.volumes',
+                [{"name": "vol0", "host_path": "/host0", "numa_node": 1}])
         ]
         offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
@@ -606,6 +649,7 @@ class TestPhysicalTask(object):
         self.allocation.ports = [30000, 30001]
         self.allocation.cores = [1, 2, 3]
         self.allocation.interfaces = [self.eth0, self.eth1]
+        self.allocation.volumes = [self.vol0]
 
     def test_properties_init(self):
         """Resolved properties are ``None`` on construction"""
@@ -662,6 +706,7 @@ class TestScheduler(object):
         node0.gpus.append(scheduler.GPURequest())
         node0.gpus[-1].compute = 0.5
         node0.gpus[-1].mem = 256.0
+        node0.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
         node1 = scheduler.LogicalTask('node1')
         node1.cpus = 0.5
         node1.command = ['test', '--host={host}', '--remote={endpoints[node0_port]}',
@@ -674,6 +719,19 @@ class TestScheduler(object):
         self.logical_graph.add_nodes_from([node0, node1, node2])
         self.logical_graph.add_edge(node1, node0, port='port', order='strong')
         self.logical_graph.add_edge(node1, node2, port='foo', order='strong')
+        self.numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.agent0_attrs = [
+            _make_json_attr('katsdpcontroller.gpus', [
+                {'driver_version': '123.45', 'device': '/dev/nvidia0',
+                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
+                {'driver_version': '123.45', 'device': '/dev/nvidia1',
+                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
+            ]),
+            _make_json_attr('katsdpcontroller.volumes', [
+                {'name': 'vol0', 'host_path': '/host0'}
+            ]),
+            self.numa_attr
+        ]
         self.loop = trollius.new_event_loop()
         try:
             self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
@@ -762,19 +820,11 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 1024.0
-        }, 0, [
-            _make_json_attr('katsdpcontroller.gpus', [
-                {'driver_version': '123.45', 'device': '/dev/nvidia0',
-                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
-                {'driver_version': '123.45', 'device': '/dev/nvidia1',
-                 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
-            ]),
-            numa_attr
-        ])
+        }, 0, self.agent0_attrs)
         offer1 = self._make_offer({
             'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
             'cores': [(0, 8)]
-        }, 1, [numa_attr])
+        }, 1, [self.numa_attr])
         expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
         expected_taskinfo0.task_id.value = 'test-00000000'
@@ -791,13 +841,17 @@ class TestScheduler(object):
             Dict(key='device', value='/dev/nvidia-uvm'),
             Dict(key='device', value='/dev/nvidia-uvm-tools')
         ])
+        volume_gpu = Dict()
+        volume_gpu.mode = 'RO'
+        volume_gpu.container_path = '/usr/local/nvidia'
+        volume_gpu.source.type = 'DOCKER_VOLUME'
+        volume_gpu.source.docker_volume.driver = 'nvidia-docker'
+        volume_gpu.source.docker_volume.name = 'nvidia_driver_123.45'
         volume = Dict()
-        volume.mode = 'RO'
-        volume.container_path = '/usr/local/nvidia'
-        volume.source.type = 'DOCKER_VOLUME'
-        volume.source.docker_volume.driver = 'nvidia-docker'
-        volume.source.docker_volume.name = 'nvidia_driver_123.45'
-        expected_taskinfo0.container.volumes = [volume]
+        volume.mode = 'RW'
+        volume.host_path = '/host0'
+        volume.container_path = '/container-path'
+        expected_taskinfo0.container.volumes = AnyOrderList([volume_gpu, volume])
         expected_taskinfo0.resources = _make_resources({
             'cpus': 1.0, 'ports': [(30000, 30001)],
             'katsdpcontroller.gpu.1.compute': 0.5,
@@ -923,12 +977,7 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 1024.0
-        }, 0, [_make_json_attr('katsdpcontroller.gpus', [
-            {'driver_version': '123.45', 'device': '/dev/nvidia0',
-             'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
-            {'driver_version': '123.45', 'device': '/dev/nvidia1',
-             'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
-        ])])
+        }, 0, self.agent0_attrs)
         launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                 loop=self.loop)
         kill = None

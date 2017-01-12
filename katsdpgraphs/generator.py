@@ -54,15 +54,8 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         'cal_k_chan_sample': 10
     })
 
-    data_vol = addict.Dict()
-    data_vol.mode = 'RW'
-    data_vol.container_path = '/var/kat/data'
-    data_vol.host_path = '/tmp'
-
-    config_vol = addict.Dict()
-    config_vol.mode = 'RW'
-    config_vol.container_path = '/var/kat/config'
-    config_vol.host_path = '/var/kat/config'
+    data_vol = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
+    config_vol = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 
     capture_transitions = {State.INIT_WAIT: 'capture-init', State.DONE: 'capture-done'}
 
@@ -112,7 +105,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
-    timeplot.container.volumes = [config_vol]
+    timeplot.volumes = [config_vol]
 
     # ingest nodes
     n_ingest = 1
@@ -152,7 +145,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     cal.command = ['run_cal.py']
     cal.cpus = 2          # TODO: uses more in reality
     cal.mem = 65536.0     # TODO: how much does cal need?
-    cal.container.volumes = [data_vol]
+    cal.volumes = [data_vol]
     g.add_node(cal, config=lambda resolver: {
         'cbf_channels': cbf_channels
     })
@@ -168,7 +161,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     filewriter.cpus = 2
     filewriter.mem = 2048.0   # TODO: Too small for real system
     filewriter.ports = ['port']
-    filewriter.container.volumes = [data_vol]
+    filewriter.volumes = [data_vol]
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda resolver: {'file_base': '/var/kat/data'})
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda resolver, endpoint: {

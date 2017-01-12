@@ -167,6 +167,28 @@ def attributes_resources(args):
         interfaces.append(config)
     attributes['katsdpcontroller.interfaces'] = interfaces
 
+    volumes = []
+    for volume_spec in args.volumes:
+        try:
+            fields = volume_spec.split(':', 2)
+            name = fields[0]
+            path = fields[1]
+            if len(fields) >= 3:
+                numa_node = int(fields[2])
+            else:
+                numa_node = None
+        except ValueError, IndexError:
+            raise RuntimeError(
+                'Error: --volume argument {} does not have the format NAME:PATH'
+                .format(volume_spec))
+        if not os.path.exists(path):
+            raise RuntimeError('Path {} does not exist'.format(path))
+        config = {'name': name, 'host_path': path}
+        if numa_node is not None:
+            config['numa_node'] = numa_node
+        volumes.append(config)
+    attributes['katsdpcontroller.volumes'] = volumes
+
     gpus = []
     for i, gpu in enumerate(hwloc.gpus()):
         config = {
@@ -232,6 +254,9 @@ def main():
     parser.add_argument('--network', dest='networks', action='append', default=[],
                         metavar='INTERFACE:NETWORK',
                         help='Map network interface to a logical network')
+    parser.add_argument('--volume', dest='volumes', action='append', default=[],
+                        metavar='NAME:PATH[:NUMA]',
+                        help='Map host directory to a logical volume name')
     args = parser.parse_args()
 
     attributes, resources = attributes_resources(args)
