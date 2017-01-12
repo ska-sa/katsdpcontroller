@@ -26,6 +26,8 @@ class PrometheusObserver(object):
     def update(self, sensor, reading):
         if self._gauge is not None:
             if reading.status in [katcp.Sensor.NOMINAL, katcp.Sensor.WARN, katcp.Sensor.ERROR]:
+                # TODO: should something be done if the value is unknown?
+                # Unregister the gauge? Set to 0 or NaN?
                 self._gauge.set(reading.value)
 
     def close(self):
