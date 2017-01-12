@@ -147,20 +147,19 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     # TODO: beamformer ingest
 
     # calibration node
-    # TODO: disabled for now because it dies if there aren't enough antennas
-    #cal = SDPLogicalTask('sdp.cal.1')
-    #cal.image = 'katsdpcal'
-    #cal.command = ['run_cal.py']
-    #cal.cpus = 2          # TODO: uses more in reality
-    #cal.mem = 65536.0     # TODO: how much does cal need?
-    #cal.container.volumes = [data_vol]
-    #g.add_node(cal, config=lambda resolver: {
-    #    'cbf_channels': cbf_channels
-    #})
-    #g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
-    #    'l0_spectral_spead': str(endpoint)})
-    #g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
-    #    'l1_spectral_spead': str(endpoint)})
+    cal = SDPLogicalTask('sdp.cal.1')
+    cal.image = 'katsdpcal'
+    cal.command = ['run_cal.py']
+    cal.cpus = 2          # TODO: uses more in reality
+    cal.mem = 65536.0     # TODO: how much does cal need?
+    cal.container.volumes = [data_vol]
+    g.add_node(cal, config=lambda resolver: {
+        'cbf_channels': cbf_channels
+    })
+    g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+        'l0_spectral_spead': str(endpoint)})
+    g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
+        'l1_spectral_spead': str(endpoint)})
 
     # filewriter node
     filewriter = SDPLogicalTask('sdp.filewriter.1')
