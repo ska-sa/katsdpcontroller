@@ -91,6 +91,7 @@ class TestSDPControllerInterface(unittest.TestCase):
         bind_address = self.controller.bind_address
         self.client = BlockingTestClient(self, *bind_address)
         self.client.start(timeout=1)
+        self.client.wait_connected(timeout=1)
         self.addCleanup(self.client.join)
         self.addCleanup(self.client.stop)
 
@@ -184,6 +185,7 @@ class TestSDPController(unittest.TestCase):
         bind_address = self.controller.bind_address
         self.client = BlockingTestClient(self, *bind_address)
         self.client.start(timeout=1)
+        self.client.wait_connected(timeout=1)
         self.addCleanup(self.client.join)
         self.addCleanup(self.client.stop)
         self.loop = self.thread.loop
