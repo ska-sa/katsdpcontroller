@@ -363,7 +363,8 @@ class TestAgent(unittest.TestCase):
         self.framework_id = 'framework'
         self.if_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
-            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254', 'numa_node': 1}])
+            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
+                'numa_node': 1, 'infiniband_devices': ['/dev/infiniband/foo']}])
         self.if_attr_bad_json = _make_text_attr(
             'katsdpcontroller.interfaces',
             base64.urlsafe_b64encode('{not valid json'))
@@ -416,7 +417,8 @@ class TestAgent(unittest.TestCase):
                                           network='net0',
                                           ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
                                           numa_node=1,
-                                          speed=None)],
+                                          speed=None,
+                                          infiniband_devices=['/dev/infiniband/foo'])],
                      agent.interfaces)
         assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
                       scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
@@ -552,6 +554,23 @@ class TestAgent(unittest.TestCase):
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
+    def test_allocate_no_infiniband_interface(self):
+        """allocate raises if no interface is Infiniband-capable and Infiniband
+        was requested"""
+        task = scheduler.LogicalTask('task')
+        task.cpus = 1.0
+        task.mem = 128.0
+        task.networks.append(scheduler.NetworkRequest('net0', infiniband=True))
+        if_attr = _make_json_attr(
+            'katsdpcontroller.interfaces',
+            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
+                'numa_node': 1, 'infiniband_devices': []}])
+        agent = scheduler.Agent([self._make_offer(
+            {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
+            [if_attr])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
     def test_allocate_no_numa_volume(self):
         """allocate raises if no NUMA node has enough cores and volumes together,
         and affinity is requested"""
@@ -595,7 +614,8 @@ class TestAgent(unittest.TestCase):
                                           network='net0',
                                           ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
                                           numa_node=1,
-                                          speed=None)],
+                                          speed=None,
+                                          infiniband_devices=['/dev/infiniband/foo'])],
                      ra.interfaces)
         assert_equal([scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      ra.volumes)
@@ -627,8 +647,10 @@ class TestPhysicalTask(object):
             scheduler.NetworkRequest('net0'),
             scheduler.NetworkRequest('net1')]
         self.logical_task.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
-        self.eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'), None, None)
-        self.eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'), None, None)
+        self.eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'),
+                                        None, None, [])
+        self.eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'),
+                                        None, None, [])
         self.vol0 = scheduler.Volume('vol0', '/host0', numa_node=1)
         attributes = [
             _make_json_attr('katsdpcontroller.interfaces', [
@@ -706,6 +728,7 @@ class TestScheduler(object):
         node0.gpus.append(scheduler.GPURequest())
         node0.gpus[-1].compute = 0.5
         node0.gpus[-1].mem = 256.0
+        node0.networks = [scheduler.NetworkRequest('net0', infiniband=True)]
         node0.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
         node1 = scheduler.LogicalTask('node1')
         node1.cpus = 0.5
@@ -730,6 +753,9 @@ class TestScheduler(object):
             _make_json_attr('katsdpcontroller.volumes', [
                 {'name': 'vol0', 'host_path': '/host0'}
             ]),
+            _make_json_attr('katsdpcontroller.interfaces', [
+                {'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
+                 'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
             self.numa_attr
         ]
         self.loop = trollius.new_event_loop()
@@ -839,7 +865,10 @@ class TestScheduler(object):
             Dict(key='device', value='/dev/nvidia1'),
             Dict(key='device', value='/dev/nvidiactl'),
             Dict(key='device', value='/dev/nvidia-uvm'),
-            Dict(key='device', value='/dev/nvidia-uvm-tools')
+            Dict(key='device', value='/dev/nvidia-uvm-tools'),
+            Dict(key='ulimit', value='memlock=-1'),
+            Dict(key='device', value='/dev/infiniband/rdma_cm'),
+            Dict(key='device', value='/dev/infiniband/uverbs0')
         ])
         volume_gpu = Dict()
         volume_gpu.mode = 'RO'

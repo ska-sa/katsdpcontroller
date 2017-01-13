@@ -41,24 +41,6 @@ class TelstateTask(scheduler.PhysicalTask):
         self.taskinfo.container.docker.port_mappings = [portmap]
 
 
-def _uses_ibverbs(task):
-    """Configure a logical task that uses ibverbs.
-
-    .. todo::
-
-        Move this into scheduler as part of NetworkRequest.
-
-    .. todo::
-
-        Instead of using privileged mode, have the slave advertise its device
-        nodes and pass them through Docker.
-    """
-    task.container.docker.privileged = True
-    # RLimitInfo not available in Mesos 1.1.0, so pass it via parameters
-    task.container.docker.setdefault('parameters', [])
-    task.container.docker.parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
-
-
 def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     # TODO: refactor to avoid circular imports
     from katsdpcontroller.sdpcontroller import SDPLogicalTask, SDPPhysicalTask, State
@@ -173,10 +155,9 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         bf_ingest.gpus[0].mem = 4096.0
         bf_ingest.cpus = 2
         bf_ingest.mem = 16384.0
+        bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
         bf_ingest.volumes = [scratch_vol]
-        _uses_ibverbs(bf_ingest)
-        bf_ingest.container.docker.setdefault('parameters', [])
-        bf_ingest.container.docker.parameters.append({'key': 'ipc', 'value': 'host'})
+        bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
         g.add_node(bf_ingest, config=lambda resolver: {
             'cbf_channels': cbf_channels
@@ -196,13 +177,12 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
             bf_ingest.cpus = 2
             bf_ingest.cores = ['disk', 'network']
             bf_ingest.mem = 4096.0
-            bf_ingest.networks = [scheduler.NetworkRequest('cbf')]
+            bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
             bf_ingest.ports = ['port']
             bf_ingest.transitions = capture_transitions
-            _uses_ibverbs(bf_ingest)
             g.add_node(bf_ingest, config=lambda resolver: {
                 'file_base': '/data',
                 'ibv': True,

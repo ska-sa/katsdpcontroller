@@ -120,6 +120,34 @@ class HWLocParser(object):
         return out
 
 
+def infiniband_devices(interface):
+    """Return a list of device paths associated with a kernel network
+    interface, or an empty list if not an Infiniband device.
+
+    This is based on
+    https://github.com/amaumene/mlnx-en-dkms/blob/master/ofed_scripts/ibdev2netdev
+    plus inspection of /sys.
+    """
+    try:
+        with open('/sys/class/net/{}/device/resource'.format(interface)) as f:
+            resource = f.read()
+        for ibdev in os.listdir('/sys/class/infiniband'):
+            with open('/sys/class/infiniband/{}/device/resource'.format(ibdev)) as f:
+                ib_resource = f.read()
+            if ib_resource == resource:
+                # Found the matching device. Identify device inodes
+                devices = ['/dev/infiniband/rdma_cm']
+                for sub in ['infiniband_cm', 'infiniband_mad', 'infiniband_verbs']:
+                    path = '/sys/class/infiniband/{}/device/{}'.format(ibdev, sub)
+                    for item in os.listdir(path):
+                        device = '/dev/infiniband/' + item
+                        if os.path.exists(device):
+                            devices.append(device)
+                return devices
+    except IOError:
+        return []
+
+
 def collapse_ranges(values):
     values = sorted(values)
     out = []
@@ -150,7 +178,8 @@ def attributes_resources(args):
             raise RuntimeError(
                 'Error: --network argument {} does not have the format INTERFACE:NETWORK'
                 .format(network_spec))
-        config = {'name': interface, 'network': network}
+        config = {'name': interface, 'network': network,
+                  'infiniband_devices': infiniband_devices(interface)}
         try:
             config['ipv4_address'] = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
         except (KeyError, IndexError):
