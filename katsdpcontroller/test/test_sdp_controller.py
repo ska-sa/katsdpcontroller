@@ -1,5 +1,6 @@
 """Tests for the sdp controller module."""
 
+import time
 import threading
 import concurrent.futures
 import unittest2 as unittest
@@ -322,6 +323,49 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         self.assertEqual(State.INIT_WAIT, sa.state)
+
+    def test_deconfigure_on_exit_cancel(self):
+        """Calling deconfigure_on_exit while a configure is in process cancels
+        that configure and kills off the graph."""
+        never_future = tornado.gen.Future()
+        # Set when data-product-configure is in progress
+        started_future = concurrent.futures.Future()
+        # Set when the callback request is answered
+        reply_future = concurrent.futures.Future()
+        # Called when deconfigure_on_exit returns
+        deconfigured_future = concurrent.futures.Future()
+
+        # Prevent data-product-configure from completing by knobbling the
+        # katcp connection to the children
+        def until_synced(*args, **kwargs):
+            started_future.set_result(None)
+            return never_future
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        sensor_proxy_client.until_synced.side_effect = until_synced
+        # Start data-product-configure, wait for it to be partway
+        self.client.callback_request(katcp.Message.request(
+            "data-product-configure", SUBARRAY_PRODUCT1, ANTENNAS,
+            "4096", "2.1", "0", STREAM_SOURCES),
+            reply_cb=lambda msg: reply_future.set_result(msg))
+        started_future.result()
+
+        # Call deconfigure_on_exit from the IOLoop
+        @trollius.coroutine
+        def shutdown():
+            yield From(self.controller.deconfigure_on_exit())
+            deconfigured_future.set_result(None)
+        self.controller.loop.call_soon_threadsafe(
+            trollius.ensure_future, shutdown(), self.controller.loop)
+        deconfigured_future.result()
+
+        # Get the reply, check that it failed
+        reply = reply_future.result()
+        self.assertEqual("fail", reply.arguments[0])
+        # We must have killed off the partially-launched graph
+        self.sched.kill.assert_called_with(mock.ANY)
+
+        # Unblock the never_future, just in case it's blocking something
+        never_future.set_result(None)
 
 
 class TestSDPResources(unittest.TestCase):

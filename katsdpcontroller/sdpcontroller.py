@@ -766,6 +766,9 @@ def async_request(func):
                 reason = str(error)
                 self._logger.error('Request %s FAIL: %s', msg.name, reason)
                 req.reply('fail', reason)
+            except trollius.CancelledError:
+                self._logger.error('Request %s CANCELLED', msg.name)
+                req.reply('fail', 'request was cancelled')
             except Exception:
                 reply = self.create_exception_reply_and_log(msg, sys.exc_info())
                 req.reply_with_message(reply)
@@ -952,9 +955,10 @@ class SDPControllerServer(AsyncDeviceServer):
         """Try to shutdown as gracefully as possible when interrupted."""
         logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
         if self._conf_future and not self._conf_future.done():
+            logger.warning("Cancelling pending ?data-product-configure command")
             self._conf_future.cancel()
             # Give it a bit of time to finish any cleanup
-            yield From(trollius.wait([self._conf_future], 1.0))
+            yield From(trollius.wait([self._conf_future], timeout=1.0, loop=self.loop))
             self._conf_future = None
         for subarray_product_id in self.subarray_products.keys():
             try:
