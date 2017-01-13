@@ -210,7 +210,7 @@ class TestSDPController(unittest.TestCase):
                             node.ports[port] = port_num
                             port_num += 1
                 node.allocation = mock.MagicMock()
-                node.allocation.agent.host = 'host.' + node.name
+                node.allocation.agent.host = 'host.' + node.logical_node.name
         for node in nodes:
             if node.state < scheduler.TaskState.RUNNING:
                 node.resolve(resolver, graph)

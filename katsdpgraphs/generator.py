@@ -3,6 +3,7 @@ import networkx as nx
 import re
 import addict
 from katsdpcontroller import scheduler
+from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
@@ -29,7 +30,7 @@ class GPURequestByName(scheduler.GPURequest):
         return super(GPURequestByName, self).matches(agent_gpu, numa_node)
 
 
-class TelstateTask(scheduler.PhysicalTask):
+class TelstateTask(SDPPhysicalTaskBase):
     def resolve(self, resolver, graph):
         super(TelstateTask, self).resolve(resolver, graph)
         # Add a port mapping
@@ -42,9 +43,7 @@ class TelstateTask(scheduler.PhysicalTask):
 
 
 def build_logical_graph(beamformer_mode, cbf_channels, simulate):
-    # TODO: refactor to avoid circular imports
-    from katsdpcontroller.sdpcontroller import SDPLogicalTask, SDPPhysicalTask, State
-
+    from katsdpcontroller.sdpcontroller import State
     # TODO: missing network requests
     # TODO: all resources allocations are just guesses
 
@@ -79,7 +78,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     g.add_node(l1_spectral)
 
     # telstate node
-    telstate = scheduler.LogicalTask('sdp.telstate')
+    telstate = SDPLogicalTask('sdp.telstate')
     telstate.cpus = 0.1
     telstate.mem = 1024
     telstate.image = 'redis'
