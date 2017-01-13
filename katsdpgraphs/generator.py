@@ -41,9 +41,30 @@ class TelstateTask(scheduler.PhysicalTask):
         self.taskinfo.container.docker.port_mappings = [portmap]
 
 
+def _uses_ibverbs(task):
+    """Configure a logical task that uses ibverbs.
+
+    .. todo::
+
+        Move this into scheduler as part of NetworkRequest.
+
+    .. todo::
+
+        Instead of using privileged mode, have the slave advertise its device
+        nodes and pass them through Docker.
+    """
+    task.container.docker.privileged = True
+    # RLimitInfo not available in Mesos 1.1.0, so pass it via parameters
+    task.container.docker.setdefault('parameters', [])
+    task.container.docker.parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
+
+
 def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     # TODO: refactor to avoid circular imports
     from katsdpcontroller.sdpcontroller import SDPLogicalTask, SDPPhysicalTask, State
+
+    # TODO: missing network requests
+    # TODO: all resources allocations are just guesses
 
     g = nx.MultiDiGraph(config=lambda resolver: {
         'sdp_cbf_channels': cbf_channels,
@@ -56,12 +77,18 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
 
     data_vol = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
     config_vol = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
+    scratch_vol = scheduler.VolumeRequest('scratch', '/data', 'RW')
 
     capture_transitions = {State.INIT_WAIT: 'capture-init', State.DONE: 'capture-done'}
 
     # Multicast groups
     bcp_spead = LogicalMulticast('corr.baseline-correlation-products_spead')
     g.add_node(bcp_spead)
+    if beamformer_mode != 'none':
+        beams_spead = {}
+        for beam in ['0x', '0y']:
+            beams_spead[beam] = LogicalMulticast('corr.tied-array-channelised-voltage.{}_spead'.format(beam))
+            g.add_node(beams_spead[beam])
     l0_spectral = LogicalMulticast('l0_spectral')
     g.add_node(l0_spectral)
     l0_continuum = LogicalMulticast('l0_continuum')
@@ -83,7 +110,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     cam2telstate = SDPLogicalTask('sdp.cam2telstate.1')
     cam2telstate.image = 'katsdpingest'
     cam2telstate.command = ['cam2telstate.py']
-    cam2telstate.cpus = 0.5
+    cam2telstate.cpus = 0.2
     cam2telstate.mem = 256
     streams = {
         'corr.baseline-correlation-products': 'visibility',
@@ -100,7 +127,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     timeplot = SDPLogicalTask('sdp.timeplot.1')
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
-    timeplot.cpus = 2
+    timeplot.cpus = 0.2          # TODO: uses more in reality
     timeplot.mem = 16384.0       # TODO: tie in with timeplot's memory allocation logic
     timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
@@ -117,9 +144,9 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         ingest.cores = [None] * 2
         ingest.gpus = [GPURequestByName('GeForce GTX TITAN X')]
         ingest.gpus[0].compute = 0.5
-        ingest.gpus[0].mem = 4096.0      # TODO: compute from channels and antennas
+        ingest.gpus[0].mem = 4096.0
         ingest.cpus = 2
-        ingest.mem = 16384.0             # TODO: compute
+        ingest.mem = 16384.0
         ingest.transitions = capture_transitions
         g.add_node(ingest, config=lambda resolver: {
             'continuum_factor': 32,
@@ -135,16 +162,62 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
             'l0_continuum_spead': str(endpoint)})
         g.add_edge(ingest, timeplot, port='spead_port', config=lambda resolver, endpoint: {
             'sdisp_spead': str(endpoint)})
-        # TODO: network interfaces
 
-    # TODO: beamformer ingest
+    if beamformer_mode == 'ptuse':
+        bf_ingest = SDPLogicalTask('sdp.bf_ingest.1')
+        bf_ingest.image = 'beamform'
+        bf_ingest.command = ['ptuse_ingest.py']
+        bf_ingest.ports = ['port']
+        bf_ingest.gpus = [scheduler.GPURequest()]
+        bf_ingest.gpus[0].compute = 0.4
+        bf_ingest.gpus[0].mem = 4096.0
+        bf_ingest.cpus = 2
+        bf_ingest.mem = 16384.0
+        bf_ingest.volumes = [scratch_vol]
+        _uses_ibverbs(bf_ingest)
+        bf_ingest.container.docker.setdefault('parameters', [])
+        bf_ingest.container.docker.parameters.append({'key': 'ipc', 'value': 'host'})
+        bf_ingest.transitions = capture_transitions
+        g.add_node(bf_ingest, config=lambda resolver: {
+            'cbf_channels': cbf_channels
+        })
+        g.add_edge(bf_ingest, beams_spead['0x'], port='spead', config=lambda resolver, endpoint: {
+            'cbf_speadx': str(endpoint)})
+        g.add_edge(bf_ingest, beams_spead['0y'], port='spead', config=lambda resolver, endpoint: {
+            'cbf_speady': str(endpoint)})
+    elif beamformer_mode != 'none':
+        ram = beamformer_mode == 'hdf5_ram'
+        for i, beam in enumerate(['0x', '0y']):
+            bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
+            bf_ingest.image = 'katsdpingest'
+            bf_ingest.command = ['bf_ingest.py',
+                                 '--affinity={cores[disk]},{cores[network]}',
+                                 '--interface={interfaces[cbf].name}']
+            bf_ingest.cpus = 2
+            bf_ingest.cores = ['disk', 'network']
+            bf_ingest.mem = 4096.0
+            bf_ingest.networks = [scheduler.NetworkRequest('cbf')]
+            volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
+            bf_ingest.volumes = [
+                scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
+            bf_ingest.ports = ['port']
+            bf_ingest.transitions = capture_transitions
+            _uses_ibverbs(bf_ingest)
+            g.add_node(bf_ingest, config=lambda resolver: {
+                'file_base': '/data',
+                'ibv': True,
+                'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
+                'stream_name': 'corr.tied-array-channelised-voltage.' + beam
+            })
+            g.add_edge(bf_ingest, beams_spead[beam], port='spead', config=lambda resolver, endpoint: {
+                'cbf_spead': str(endpoint)})
 
     # calibration node
     cal = SDPLogicalTask('sdp.cal.1')
     cal.image = 'katsdpcal'
     cal.command = ['run_cal.py']
-    cal.cpus = 2          # TODO: uses more in reality
-    cal.mem = 65536.0     # TODO: how much does cal need?
+    cal.cpus = 0.2          # TODO: uses more in reality
+    cal.mem = 65536.0
     cal.volumes = [data_vol]
     g.add_node(cal, config=lambda resolver: {
         'cbf_channels': cbf_channels
@@ -158,8 +231,8 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     filewriter = SDPLogicalTask('sdp.filewriter.1')
     filewriter.image = 'katsdpfilewriter'
     filewriter.command = ['file_writer.py']
-    filewriter.cpus = 2
-    filewriter.mem = 2048.0   # TODO: Too small for real system
+    filewriter.cpus = 0.2     # TODO: uses more in reality
+    filewriter.mem = 2048.0
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
     filewriter.transitions = capture_transitions
