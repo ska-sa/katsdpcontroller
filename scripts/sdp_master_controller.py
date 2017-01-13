@@ -18,6 +18,7 @@ import addict
 import trollius
 from trollius import From
 from tornado.platform.asyncio import AsyncIOMainLoop
+import tornado.netutil
 from prometheus_client import start_http_server
 import pymesos
 from katsdpcontroller import scheduler, sdpcontroller
@@ -94,16 +95,17 @@ if __name__ == "__main__":
     sh = logging.StreamHandler()
     sh.setFormatter(formatter)
     logging.root.addHandler(sh)
-
     if isinstance(opts.loglevel, basestring):
         opts.loglevel = getattr(logging, opts.loglevel.upper())
-
     logging.root.setLevel(opts.loglevel)
     logging.captureWarnings(True)
-
     logger = logging.getLogger('sdpcontroller')
-
     logger.info("Starting SDP Controller...")
+
+    # Use an asynchronous resolver, so that DNS lookups for katcp connections
+    # does not block the IOLoop.
+    tornado.netutil.Resolver.configure('tornado.netutil.ThreadedResolver')
+
     image_resolver = scheduler.ImageResolver(
             private_registry=opts.private_registry or None,
             tag_file=opts.image_tag_file,
