@@ -486,7 +486,6 @@ class SDPGraph(object):
         """
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                print(node.status)
                 if node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
                     continue
                 logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
