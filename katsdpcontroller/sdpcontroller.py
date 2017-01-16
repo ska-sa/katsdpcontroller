@@ -1607,10 +1607,9 @@ class SDPControllerServer(DeviceServer):
         urls = {}
          # local dict to hold streams associated with the specified data product
         try:
-            streams['c856M4k_spead'] = stream_sources.split(":",2)
-             # for DEPRECATED usage we can only support c856M4k graphs
+            streams['baseline-correlation-products_spead'] = stream_sources.split(":",2)
             streams['CAM_spead'] = deprecated_cam_source.split(":",2)
-            logger.info("Adding DEPRECATED endpoints for c856M4k_spead ({}) and CAM_spead ({})".format(streams['c856M4k_spead'],streams['CAM_spead']))
+            logger.info("Adding DEPRECATED endpoints for baseline-correlation-products_spead ({}) and CAM_spead ({})".format(streams['baseline-correlation-products_spead'],streams['CAM_spead']))
         except (AttributeError, ValueError):
              # check to see if we are using the new stream_sources specifier
             try:
@@ -1622,6 +1621,13 @@ class SDPControllerServer(DeviceServer):
                     else:
                         (host, port) = value.split(":", 2)
                          # just to make it explicit what we are expecting
+                        # Hack to handle CAM not yet passing us fully-qualified
+                        # stream names. This code should be deleted once CAM is
+                        # updated.
+                        if (stream_name == 'baseline-correlation-products' or
+                                stream_name == 'antenna-channelised-voltage' or
+                                stream_name.startswith('tied-array-channelised-voltage.')):
+                            stream_name = 'corr.' + stream_name
                         streams["{}_spead".format(stream_name)] = (host, port)
                         logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
             except ValueError:
