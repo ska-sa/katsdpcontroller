@@ -248,6 +248,9 @@ class GPURequest(object):
             setattr(self, r, 0.0)
         self.affinity = False
 
+    def matches(self, agent_gpu, numa_node):
+        return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
+
 
 class NetworkRequest(object):
     """Request for resources on a network interface. At the moment only
@@ -335,8 +338,8 @@ def poll_ports(host, ports, loop):
                 sock.setblocking(False)
                 try:
                     yield From(loop.sock_connect(sock, (sockaddr[0], port)))
-                except OSError as e:
-                    logger.debug('Port %d on %s not ready: %s', port, host, e)
+                except OSError as error:
+                    logger.debug('Port %d on %s not ready: %s', port, host, error)
                     yield From(trollius.sleep(1, loop=loop))
                 else:
                     break
@@ -387,7 +390,6 @@ class RangeResource(object):
                     self._ranges.rotate(i + 1)
                 return
         raise ValueError('item not in list')
-
 
     def popleft(self):
         if not self._ranges:
@@ -648,6 +650,7 @@ class LogicalTask(LogicalNode):
         - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
         - `endpoints` : dictionary of remote endpoints. Keys are of the form
           :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
+        - `resolver` : resolver object
     """
     def __init__(self, name):
         super(LogicalTask, self).__init__(name)
@@ -799,7 +802,7 @@ class Agent(ResourceCollector):
             for j, gpu in enumerate(self.gpus):
                 if gpu_map[j] is not None:
                     continue     # Already been used for a request in this task
-                if numa_node is not None and request.affinity and gpu.numa_node != numa_node:
+                if not request.matches(gpu, numa_node):
                     continue
                 good = True
                 for r in GPU_SCALAR_RESOURCES:
@@ -815,7 +818,7 @@ class Agent(ResourceCollector):
                     break
             if use_gpu is None:
                 raise InsufficientResourcesError('No suitable GPU found for request {}'.format(i))
-            gpu_map[j] = request
+            gpu_map[use_gpu] = request
 
         # Have now verified that the task fits. Create the resources for it
         alloc = ResourceAllocation(self)
@@ -986,7 +989,7 @@ class PhysicalNode(object):
         except trollius.CancelledError:
             pass
         except Exception:
-            logger.error('exception while waiting for task {} to be ready'.format(self.name),
+            logger.error('exception while waiting for task %s to be ready', self.name,
                          exc_info=True)
 
     def set_state(self, state):
@@ -1152,7 +1155,7 @@ class PhysicalTask(PhysicalNode):
         taskinfo = Dict()
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
-        args = self.subst_args()
+        args = self.subst_args(resolver)
         command = [x.format(**args) for x in self.logical_node.command]
         if self.allocation.cores:
             # TODO: see if this can be done through Docker instead of with taskset
@@ -1227,7 +1230,7 @@ class PhysicalTask(PhysicalNode):
                      protocol='tcp'))
         self.taskinfo = taskinfo
 
-    def subst_args(self):
+    def subst_args(self, resolver):
         """Returns a dictionary that is passed when formatting the command
         from the logical task.
         """
@@ -1237,6 +1240,7 @@ class PhysicalTask(PhysicalNode):
         args['interfaces'] = self.interfaces
         args['endpoints'] = self.endpoints
         args['host'] = self.host
+        args['resolver'] = resolver
         return args
 
     def kill(self, driver):
@@ -1329,9 +1333,9 @@ class Scheduler(pymesos.Scheduler):
                             try:
                                 allocation = agent.allocate(node.logical_node)
                                 break
-                            except InsufficientResourcesError as e:
+                            except InsufficientResourcesError as error:
                                 logger.debug('Cannot add %s to %s: %s',
-                                             node.name, agent.agent_id, e)
+                                             node.name, agent.agent_id, error)
                         else:
                             raise InsufficientResourcesError(
                                 'No agent found for {}'.format(node.name))
