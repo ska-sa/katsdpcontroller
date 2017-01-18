@@ -6,6 +6,7 @@ import concurrent.futures
 import unittest2 as unittest
 import mock
 
+from addict import Dict
 from katcp.testutils import BlockingTestClient
 from katcp import Message
 import tornado.concurrent
@@ -134,6 +135,8 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.2","0",STREAM_SOURCES)
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4)
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
@@ -153,25 +156,54 @@ class TestSDPController(unittest.TestCase):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
     mocking of the scheduler.
     """
-    def create_patch(self, *args, **kwargs):
+    def _create_patch(self, *args, **kwargs):
         patcher = mock.patch(*args, **kwargs)
         mock_obj = patcher.start()
         self.addCleanup(patcher.stop)
         return mock_obj
 
+    def _delay_mock(self, mock):
+        """Modify a callable mock so that we can make it block and run code
+        while it is blocked. When run, it will set an empty result on one
+        future, while returning another one to the caller.
+
+        Parameters
+        ----------
+        mock : `mock.MagicMock`
+            Callable mock
+
+        Returns
+        -------
+        started : `concurrent.futures.Future`
+            Future signalled when the mock is called
+        release : callable
+            Call with result to set on future returned from the mock
+        """
+        started = concurrent.futures.Future()
+        result = tornado.gen.Future()
+        def side_effect(*args, **kwargs):
+            started.set_result(None)
+            return result
+        def release(value):
+            self.controller.loop.call_soon_threadsafe(result.set_result, value)
+        mock.side_effect = side_effect
+        return started, release
+
     def setUp(self):
+        # Future that is already resolved with no return value
         done_future = tornado.concurrent.Future()
         done_future.set_result(None)
+        # Future that is already resolved with a katcp ok reply
         ok_future = tornado.concurrent.Future()
-        ok_future.set_result((katcp.Message.reply('dummy', 'ok'), []))
-        self.telstate_class = self.create_patch('katsdptelstate.TelescopeState', autospec=True)
-        self.sensor_proxy_client_class = self.create_patch('katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
+        ok_future.set_result((Message.reply('dummy', 'ok'), []))
+        self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
+        self.sensor_proxy_client_class = self._create_patch('katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.start.return_value = done_future
         sensor_proxy_client.until_synced.return_value = done_future
         sensor_proxy_client.katcp_client = mock.create_autospec(katcp.AsyncClient, instance=True)
         sensor_proxy_client.katcp_client.future_request.return_value = ok_future
-        self.create_patch(
+        self._create_patch(
             'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=None)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
@@ -216,6 +248,9 @@ class TestSDPController(unittest.TestCase):
                 node.resolve(resolver, graph)
                 if node.logical_node.name in self.fail_launches:
                     node.set_state(scheduler.TaskState.DEAD)
+                    # This may need to be fleshed out if sdp_controller looks
+                    # at other fields.
+                    node.status = Dict(state='TASK_FAILED')
                 else:
                     node.set_state(scheduler.TaskState.RUNNING)
         futures = []
@@ -236,11 +271,19 @@ class TestSDPController(unittest.TestCase):
 
     @trollius.coroutine
     def _poll_ports(self, host, ports, loop):
+        """Mock implementation of :func:`katsdpcontroller.scheduler.poll_ports`."""
         pass
+
+    def _configure_args(self, subarray_product):
+        return ("data-product-configure", subarray_product, ANTENNAS, "4096",
+                "2.1", "0", STREAM_SOURCES)
+
+    def _configure_subarray(self, subarray_product):
+        self.client.assert_request_succeeds(*self._configure_args(subarray_product))
 
     def test_data_product_configure_success(self):
         """A ?data-product-configure request must wait for the tasks to come up, then indicate success."""
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self._configure_subarray(SUBARRAY_PRODUCT4)
         self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
 
         # Verify the telescope state
@@ -273,15 +316,86 @@ class TestSDPController(unittest.TestCase):
         """If the telstate task fails, data-product-configure must fail"""
         self.fail_launches.append('sdp.telstate')
         self.telstate_class.side_effect = redis.ConnectionError
-        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY)
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.controller.subarray_product_config)
+
+    def test_data_product_configure_task_fail(self):
+        """If a task other than telstate fails, data-product-configure must fail"""
+        self.fail_launches.append('sdp.ingest.1')
+        self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
+        self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
+        self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY)
+        # Must not have created the subarray product internally
+        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.controller.subarray_product_config)
+
+    def test_data_product_configure_busy(self):
+        """Cannot have concurrent data-product-configure commands"""
+        reply_future = concurrent.futures.Future()
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        started_future, release = self._delay_mock(sensor_proxy_client.until_synced)
+        self.client.callback_request(
+            Message.request(*self._configure_args(SUBARRAY_PRODUCT1)),
+            reply_cb=lambda msg: reply_future.set_result(msg))
+        # Wait until the first command gets blocked
+        started_future.result()
+        # Do the test. We use a different subarray product, which would
+        # otherwise be legal.
+        self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT2))
+        # Unblock and wait for things to wind up
+        release(None)
+        self.assertTrue(reply_future.result().reply_ok())
+        # Check that no state leaked through
+        self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_products)
+        self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_product_config)
+        self.assertIsNone(self.controller._conf_future)
+
+    def test_data_product_deconfigure(self):
+        """Checks success path of data-product-configure for deconfiguration"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds("data-product-configure", SUBARRAY_PRODUCT1, "0")
+        # Check that the graph was shut down
+        self.sched.kill.assert_called_with(mock.ANY)
+        # Verify the state
+        self.assertIsNone(self.controller._conf_future)
+        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.controller.subarray_product_config)
+
+    def test_data_product_deconfigure_capturing(self):
+        """data-product-configure for deconfigure must fail while capturing"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT1)
+        self.client.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT1, "0")
+
+    def test_data_product_deconfigure_busy(self):
+        """data-product-configure for deconfigure cannot happen concurrently with capture-init"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        reply_future = concurrent.futures.Future()
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        started_future, release = self._delay_mock(sensor_proxy_client.katcp_client.future_request)
+        self.client.callback_request(
+            Message.request('capture-init', SUBARRAY_PRODUCT1),
+            reply_cb=lambda msg: reply_future.set_result(msg))
+        # Wait until the first command gets blocked
+        started_future.result()
+        # Do the test
+        self.client.assert_request_fails('data-product-configure', SUBARRAY_PRODUCT1, '0')
+        # Unblock things
+        release((Message.reply('capture-init', 'ok'), []))
+        self.assertTrue(reply_future.result().reply_ok())
+        # Check that the subarray still exists and has the right state
+        sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
+        self.assertFalse(sa._async_busy)
+        self.assertEqual(State.INIT_WAIT, sa.state)
 
     def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self._configure_subarray(SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
@@ -290,22 +404,44 @@ class TestSDPController(unittest.TestCase):
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         katcp_client.future_request.assert_called_with(
-            katcp.Message.request('capture-init'), timeout=mock.ANY)
+            Message.request('capture-init'), timeout=mock.ANY)
 
     def test_capture_init_failed_req(self):
         """Capture-init bumbles on even if a child request fails.
 
         TODO: that's probably not really the behaviour we want.
         """
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self._configure_subarray(SUBARRAY_PRODUCT4)
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         fail_future = tornado.gen.Future()
-        fail_future.set_result((katcp.Message.reply('fail', 'dummy failure'), []))
+        fail_future.set_result((Message.reply('fail', 'dummy failure'), []))
         katcp_client.future_request.return_value = fail_future
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(State.INIT_WAIT, sa.state)
+
+    def _test_capture_busy(self, command, *args):
+        """Test that a command fails if issued while a ?capture-init is in progress"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        # Prevent the katcp request from completing, so that first capture-init blocks
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        started_future, release = self._delay_mock(sensor_proxy_client.katcp_client.future_request)
+        reply_future = concurrent.futures.Future()  # Reply for the slow request
+        self.client.callback_request(Message.request("capture-init", SUBARRAY_PRODUCT1),
+            reply_cb=lambda msg: reply_future.set_result(msg))
+        # Wait until capture-init blocks
+        started_future.result()
+        # Do the actual test
+        self.client.assert_request_fails(command, *args)
+        # Unblock the initial request to allow proper cleanup
+        release((Message.reply('capture-init', 'ok'), []))
+        # Wait for the callback to happen
+        self.assertTrue(reply_future.result().reply_ok())
+
+    def test_capture_init_busy(self):
+        """Capture-init fails if an asynchronous operation is already in progress"""
+        self._test_capture_busy("capture-init", SUBARRAY_PRODUCT1)
 
     def test_capture_init_dead_process(self):
         """Capture-init bumbles on even if a child process is dead.
@@ -317,6 +453,7 @@ class TestSDPController(unittest.TestCase):
         for node in sa.graph.physical_graph:
             if node.logical_node.name == 'sdp.ingest.1':
                 node.set_state(scheduler.TaskState.DEAD)
+                node.status = Dict(state='TASK_FAILED')
                 break
         else:
             raise ValueError('Could not find ingest node')
@@ -324,48 +461,76 @@ class TestSDPController(unittest.TestCase):
         # check that the subarray is in an appropriate state
         self.assertEqual(State.INIT_WAIT, sa.state)
 
+    def test_capture_done(self):
+        """Checks that capture-done succeeds and sets appropriate state"""
+        self._configure_subarray(SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("capture-done", SUBARRAY_PRODUCT4)
+        # check that the subarray is in an appropriate state
+        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        self.assertFalse(sa._async_busy)
+        self.assertEqual(State.IDLE, sa.state)
+        # Check that the graph transitions succeeded
+        katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
+        katcp_client.future_request.assert_called_with(
+            Message.request('capture-done'), timeout=mock.ANY)
+
+    def test_capture_done_busy(self):
+        """Capture-done fails if an asynchronous operation is already in progress"""
+        self._test_capture_busy("capture-done", SUBARRAY_PRODUCT1)
+
+    def _async_deconfigure_on_exit(self):
+        """Call deconfigure_on_exit from the IOLoop"""
+        @trollius.coroutine
+        def shutdown(future):
+            yield From(self.controller.deconfigure_on_exit())
+            future.set_result(None)
+        deconfigured_future = concurrent.futures.Future()
+        self.controller.loop.call_soon_threadsafe(
+            trollius.ensure_future, shutdown(deconfigured_future), self.controller.loop)
+        deconfigured_future.result()
+
+    def test_deconfigure_on_exit(self):
+        """Calling deconfigure_on_exit will force-deconfigure existing
+        subarrays, even if capturing."""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds('capture-init', SUBARRAY_PRODUCT1)
+        self._async_deconfigure_on_exit()
+
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        sensor_proxy_client.katcp_client.future_request.assert_called_with(
+            Message.request('capture-done'), timeout=mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY)
+        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.controller.subarray_product_config)
+
     def test_deconfigure_on_exit_cancel(self):
         """Calling deconfigure_on_exit while a configure is in process cancels
         that configure and kills off the graph."""
-        never_future = tornado.gen.Future()
         # Set when data-product-configure is in progress
         started_future = concurrent.futures.Future()
         # Set when the callback request is answered
         reply_future = concurrent.futures.Future()
-        # Called when deconfigure_on_exit returns
-        deconfigured_future = concurrent.futures.Future()
 
         # Prevent data-product-configure from completing by knobbling the
         # katcp connection to the children
-        def until_synced(*args, **kwargs):
-            started_future.set_result(None)
-            return never_future
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        sensor_proxy_client.until_synced.side_effect = until_synced
+        started_future, release = self._delay_mock(sensor_proxy_client.until_synced)
         # Start data-product-configure, wait for it to be partway
-        self.client.callback_request(katcp.Message.request(
-            "data-product-configure", SUBARRAY_PRODUCT1, ANTENNAS,
-            "4096", "2.1", "0", STREAM_SOURCES),
+        self.client.callback_request(Message.request(
+            *self._configure_args(SUBARRAY_PRODUCT1)),
             reply_cb=lambda msg: reply_future.set_result(msg))
         started_future.result()
 
-        # Call deconfigure_on_exit from the IOLoop
-        @trollius.coroutine
-        def shutdown():
-            yield From(self.controller.deconfigure_on_exit())
-            deconfigured_future.set_result(None)
-        self.controller.loop.call_soon_threadsafe(
-            trollius.ensure_future, shutdown(), self.controller.loop)
-        deconfigured_future.result()
+        self._async_deconfigure_on_exit()
 
         # Get the reply, check that it failed
         reply = reply_future.result()
         self.assertEqual("fail", reply.arguments[0])
         # We must have killed off the partially-launched graph
         self.sched.kill.assert_called_with(mock.ANY)
-
         # Unblock the never_future, just in case it's blocking something
-        never_future.set_result(None)
+        release(None)
 
 
 class TestSDPResources(unittest.TestCase):
