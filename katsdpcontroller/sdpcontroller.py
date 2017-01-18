@@ -999,6 +999,8 @@ class SDPControllerServer(AsyncDeviceServer):
         if antennas == "0" or antennas == "":
             try:
                 dp_handle = self.subarray_products[subarray_product_id]
+                if dp_handle._async_busy:
+                    raise gen.Return(('fail', 'An asynchronous operation is currently executing on {}'.format(subarray_product_id)))
                 dp_handle._async_busy = True
                 req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
             except KeyError:
