@@ -817,7 +817,8 @@ class SDPControllerServer(AsyncDeviceServer):
             try:
                 rcode, rval = yield From(self.deregister_product(subarray_product_id,force=True))
                 if rcode != 'fail':
-                    self.subarray_products.pop(subarray_product_id)
+                    del self.subarray_products[subarray_product_id]
+                    del self.subarray_product_config[subarray_product_id]
                     logger.info("Deconfigured subarray product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
                 else:
                     logger.warning("Failed to deconfigure product {0} ({1},{2})".format(subarray_product_id, rcode, rval))
