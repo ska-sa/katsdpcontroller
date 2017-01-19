@@ -16,6 +16,7 @@ import trollius
 from trollius import From
 import katcp
 import redis
+import pymesos
 
 from katsdpcontroller.sdpcontroller import (
         SDPControllerServer, SDPCommonResources, SDPResources, State)
@@ -145,6 +146,13 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,"")
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
 
+    def test_reconfigure_subarray_product(self):
+        self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_succeeds("data-product-reconfigure", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
+        self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
+
     def test_sensor_list(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
 
@@ -208,6 +216,7 @@ class TestSDPController(unittest.TestCase):
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill
+        self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         self.thread = TestServerThread(
             '127.0.0.1', 0, self.sched,
             safe_multicast_cidr="225.100.0.0/16")
@@ -267,6 +276,7 @@ class TestSDPController(unittest.TestCase):
         else:
             kill_graph = graph
         for node in kill_graph:
+            node.kill(self.driver)
             node.set_state(scheduler.TaskState.DEAD)
 
     @trollius.coroutine
@@ -283,6 +293,8 @@ class TestSDPController(unittest.TestCase):
 
     def test_data_product_configure_success(self):
         """A ?data-product-configure request must wait for the tasks to come up, then indicate success."""
+        self.client.assert_request_succeeds(
+            'set-config-override', SUBARRAY_PRODUCT4, '{"override_key": ["override_value"]}')
         self._configure_subarray(SUBARRAY_PRODUCT4)
         self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
 
@@ -291,13 +303,14 @@ class TestSDPController(unittest.TestCase):
         # Print the list so assist in debugging if the assert fails
         print(ts.add.call_args_list)
         # This is not a complete list of calls. It check that each category of stuff
-        # is covered: additional_config, base_params, per node, per edge
+        # is covered: overrides, additional_config, base_params, per node, per edge
         ts.add.assert_any_call('config', {
             'antenna_mask': ANTENNAS,
             'subarray_numeric_id': 4,
             'sd_int_time': 1.0 / 2.1,
             'output_int_time': 1.0 / 2.1,
-            'stream_sources': STREAM_SOURCES
+            'stream_sources': STREAM_SOURCES,
+            'override_key': ['override_value']
         }, immutable=True)
         ts.add.assert_any_call('sdp_cbf_channels', 4096, immutable=True)
         ts.add.assert_any_call('config.sdp.filewriter.1', {
@@ -308,6 +321,7 @@ class TestSDPController(unittest.TestCase):
 
         # Verify the state of the subarray
         self.assertIsNone(self.controller._conf_future)
+        self.assertEqual({}, self.controller.override_dicts)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa._async_busy)
         self.assertEqual(State.IDLE, sa.state)
@@ -392,6 +406,38 @@ class TestSDPController(unittest.TestCase):
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa._async_busy)
         self.assertEqual(State.INIT_WAIT, sa.state)
+
+    def test_data_product_reconfigure(self):
+        """Checks success path of data_product_reconfigure"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.sched.launch.reset_mock()
+        self.sched.kill.reset_mock()
+
+        self.controller.image_resolver.reread_tag_file = mock.create_autospec(
+            spec=self.controller.image_resolver.reread_tag_file)
+        self.client.assert_request_succeeds('data-product-reconfigure', SUBARRAY_PRODUCT1)
+        # Check that the graph was killed and restarted
+        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
+        # Check that the tag file was re-read
+        self.controller.image_resolver.reread_tag_file.assert_called_with()
+
+    def test_data_product_reconfigure_configure_fails(self):
+        """Tests data-product-reconfigure when the new graph fails"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.fail_launches.append('sdp.telstate')
+        self.client.assert_request_fails('data-product-reconfigure', SUBARRAY_PRODUCT1)
+        # Check that the subarray was deconfigured cleanly
+        self.assertIsNone(self.controller._conf_future)
+        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.controller.subarray_product_config)
+
+    def test_data_product_reconfigure_capturing(self):
+        """data-product-reconfigure must fail when capturing"""
+        self._test_capture_busy('data-product-reconfigure', SUBARRAY_PRODUCT1)
+
+    # TODO: test that reconfigure with override dict picks up the override dict
+    # TODO: test that reconfigure fails if another configuration is happening
 
     def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
