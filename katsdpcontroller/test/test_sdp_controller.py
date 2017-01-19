@@ -201,16 +201,13 @@ class TestSDPController(unittest.TestCase):
         # Future that is already resolved with no return value
         done_future = tornado.concurrent.Future()
         done_future.set_result(None)
-        # Future that is already resolved with a katcp ok reply
-        ok_future = tornado.concurrent.Future()
-        ok_future.set_result((Message.reply('dummy', 'ok'), []))
         self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
         self.sensor_proxy_client_class = self._create_patch('katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.start.return_value = done_future
         sensor_proxy_client.until_synced.return_value = done_future
         sensor_proxy_client.katcp_client = mock.create_autospec(katcp.AsyncClient, instance=True)
-        sensor_proxy_client.katcp_client.future_request.return_value = ok_future
+        sensor_proxy_client.katcp_client.future_request.side_effect = self._future_request
         self._create_patch(
             'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=None)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
@@ -218,7 +215,7 @@ class TestSDPController(unittest.TestCase):
         self.sched.kill.side_effect = self._kill
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         self.thread = TestServerThread(
-            '127.0.0.1', 0, self.sched,
+            '127.0.0.1', 0, self.sched, simulate=True,
             safe_multicast_cidr="225.100.0.0/16")
         self.thread.start()
         self.addCleanup(self.thread.join)
@@ -233,6 +230,8 @@ class TestSDPController(unittest.TestCase):
         self.loop = self.thread.loop
         # List of tasks which should be set to DEAD on launch
         self.fail_launches = []
+        # List of katcp requests to return failures for
+        self.fail_requests = []
 
     @trollius.coroutine
     def _launch(self, graph, resolver, nodes=None):
@@ -267,7 +266,6 @@ class TestSDPController(unittest.TestCase):
             futures.append(node.ready_event.wait())
         yield From(trollius.gather(*futures, loop=self.loop))
 
-
     @trollius.coroutine
     def _kill(self, graph, nodes=None):
         """Mock implementation of Scheduler.kill."""
@@ -283,6 +281,15 @@ class TestSDPController(unittest.TestCase):
     def _poll_ports(self, host, ports, loop):
         """Mock implementation of :func:`katsdpcontroller.scheduler.poll_ports`."""
         pass
+
+    def _future_request(self, msg, *args, **kwargs):
+        if msg.name in self.fail_requests:
+            reply = Message.reply(msg.name, 'fail', 'dummy failure')
+        else:
+            reply = Message.reply(msg.name, 'ok')
+        future = tornado.concurrent.Future()
+        future.set_result((reply, []))
+        return future
 
     def _configure_args(self, subarray_product):
         return ("data-product-configure", subarray_product, ANTENNAS, "4096",
@@ -449,8 +456,11 @@ class TestSDPController(unittest.TestCase):
         self.assertEqual(State.INIT_WAIT, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        katcp_client.future_request.assert_called_with(
-            Message.request('capture-init'), timeout=mock.ANY)
+        katcp_client.future_request.assert_has_calls([
+            mock.call(Message.request('capture-init'), timeout=mock.ANY),
+            mock.call(Message.request('configure-subarray-from-telstate')),
+            mock.call(Message.request('capture-start', SUBARRAY_PRODUCT4))
+        ])
 
     def test_capture_init_failed_req(self):
         """Capture-init bumbles on even if a child request fails.
@@ -459,9 +469,7 @@ class TestSDPController(unittest.TestCase):
         """
         self._configure_subarray(SUBARRAY_PRODUCT4)
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        fail_future = tornado.gen.Future()
-        fail_future.set_result((Message.reply('fail', 'dummy failure'), []))
-        katcp_client.future_request.return_value = fail_future
+        self.fail_requests.append('capture-init')
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
