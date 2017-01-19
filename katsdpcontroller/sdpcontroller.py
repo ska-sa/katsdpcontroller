@@ -243,11 +243,6 @@ class SDPResources(object):
     def set_url(self, service, url):
         self._urls[service] = url
 
-    def get_multicast(self, group):
-        """For the specified multicast group, return a multicast endpoint in
-        the form ``ipaddress:port``"""
-        return '{}:{}'.format(self.get_multicast_ip(group), self.get_port(group))
-
 
 class SDPGraph(object):
     def _instantiate(self, logical_node):
