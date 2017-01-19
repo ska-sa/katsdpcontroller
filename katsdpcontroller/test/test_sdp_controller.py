@@ -498,7 +498,7 @@ class TestSDPController(unittest.TestCase):
         katcp_client.future_request.assert_has_calls([
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-start', SUBARRAY_PRODUCT4))
+            mock.call(Message.request('capture-start', 'baseline-correlation-products'))
         ])
 
     def test_capture_init_failed_req(self):
