@@ -88,21 +88,22 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     g.add_node(telstate)
 
     # cam2telstate node
-    cam2telstate = SDPLogicalTask('sdp.cam2telstate.1')
-    cam2telstate.image = 'katsdpingest'
-    cam2telstate.command = ['cam2telstate.py']
-    cam2telstate.cpus = 0.2
-    cam2telstate.mem = 256
-    streams = {
-        'corr.baseline-correlation-products': 'visibility',
-        'corr.antenna-channelised-voltage': 'fengine'
-    }
-    streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
-    g.add_node(cam2telstate, config=lambda resolver: {
-        'url': resolver.resources.get_url('CAMDATA'),
-        'streams': streams_arg,
-        'collapse_streams': True
-    })
+    if not simulate:
+        cam2telstate = SDPLogicalTask('sdp.cam2telstate.1')
+        cam2telstate.image = 'katsdpingest'
+        cam2telstate.command = ['cam2telstate.py']
+        cam2telstate.cpus = 0.2
+        cam2telstate.mem = 256
+        streams = {
+            'corr.baseline-correlation-products': 'visibility',
+            'corr.antenna-channelised-voltage': 'fengine'
+        }
+        streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
+        g.add_node(cam2telstate, config=lambda resolver: {
+            'url': resolver.resources.get_url('CAMDATA'),
+            'streams': streams_arg,
+            'collapse_streams': True
+        })
 
     # signal display node
     timeplot = SDPLogicalTask('sdp.timeplot.1')
