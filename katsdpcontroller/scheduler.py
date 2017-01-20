@@ -1431,6 +1431,21 @@ class Scheduler(pymesos.Scheduler):
         self._offers = {}
         self._driver.suppressOffers()
 
+    @classmethod
+    def _node_sort_key(cls, physical_node):
+        """Sort key for nodes when launching.
+
+        Sort nodes. Those requiring core affinity are put first,
+        since they tend to be the trickiest to pack. Then order by
+        CPUs, GPUs, memory. Finally sort by name so that results
+        are more reproducible.
+        """
+        node = physical_node.logical_node
+        if isinstance(node, LogicalTask):
+            return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
+        else:
+            return (node.name,)
+
     def _try_launch(self):
         """Check whether it is possible to launch the next task group."""
         if self._offers:
@@ -1450,6 +1465,7 @@ class Scheduler(pymesos.Scheduler):
                 # algorithms e.g. Dominant Resource Fairness
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
                 agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
+                nodes.sort(key=self._node_sort_key, reverse=True)
                 allocations = []
                 for node in nodes:
                     allocation = None
