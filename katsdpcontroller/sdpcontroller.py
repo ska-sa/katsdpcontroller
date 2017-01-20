@@ -1042,6 +1042,9 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
         if antennas == "0" or antennas == "":
+            if subarray_product_id not in self.subarray_products:
+                raise FailReply("Deconfiguration of subarray product {} requested, "
+                                "but no configuration found.".format(subarray_product_id))
             yield From(self.deregister_product(subarray_product_id))
             return
 
