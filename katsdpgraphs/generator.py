@@ -42,10 +42,38 @@ class TelstateTask(SDPPhysicalTaskBase):
         self.taskinfo.container.docker.port_mappings = [portmap]
 
 
-def build_logical_graph(beamformer_mode, cbf_channels, simulate):
+def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, dump_rate):
     from katsdpcontroller.sdpcontroller import State
-    # TODO: missing network requests
-    # TODO: all resources allocations are just guesses
+    # TODO: missing network requests (other than for CBF network)
+
+    # CBF only does power-of-two numbers of antennas, with 4 being the minimum
+    cbf_antennas = 4
+    while cbf_antennas < l0_antennas:
+        cbf_antennas *= 2
+
+    cbf_baselines = cbf_antennas * (cbf_antennas + 1) * 2
+    cbf_vis = cbf_baselines * cbf_channels    # visibilities per frame
+    cbf_vis_size = cbf_vis * 8                # 8 is size of complex64
+    cbf_vis_mb = cbf_vis_size / 1024**2
+    cbf_gains_mb = cbf_channels * cbf_antennas * 4 * 8 / 1024**2
+
+    l0_channels = cbf_channels                # could differ in future
+    l0_baselines = l0_antennas * (l0_antennas + 1) * 2
+    l0_vis = l0_baselines * l0_channels
+    # vis, flags, weights, plus per-channel float32 weight
+    l0_size = l0_vis * 10 + l0_channels * 4
+    l0_mb = l0_size / 1024**2
+    l0_gains_mb = l0_channels * l0_antennas * 4 * 8 / 1024**2
+    # Extra memory allocation for tasks that deal with bandpass calibration
+    # solutions in telescope state. The exact size of these depends on how
+    # often bandpass calibrators are visited, so the scale factor is a
+    # thumb-suck. The scale factors are
+    # - 2 pols per antenna
+    # - 8 bytes per value (complex64)
+    # - 200 solutions
+    # - 3: conservative estimate of bloat from text-based pickling
+    # - /1024**2 to convert to megabytes
+    bp_mb = l0_channels * (2 * l0_antennas) * 8 * 3 * 200 / 1024**2
 
     g = nx.MultiDiGraph(config=lambda resolver: {
         'sdp_cbf_channels': cbf_channels,
@@ -80,7 +108,8 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     # telstate node
     telstate = SDPLogicalTask('sdp.telstate')
     telstate.cpus = 0.1
-    telstate.mem = 1024
+    telstate.mem = 1024 + bp_mb
+    telstate.disk = telstate.mem
     telstate.image = 'redis'
     telstate.ports = ['telstate']
     telstate.physical_factory = TelstateTask
@@ -109,8 +138,12 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     timeplot = SDPLogicalTask('sdp.timeplot.1')
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
-    timeplot.cpus = 0.2          # TODO: uses more in reality
-    timeplot.mem = 16384.0       # TODO: tie in with timeplot's memory allocation logic
+    # Exact requirement not known (also depends on number of users). Give it
+    # 2 CPUs (max it can use) for 32 antennas, 32K channels and scale from there.
+    timeplot.cpus = 2 * min(1.0, l0_vis / (32 * 33 * 2 * 32768))
+    # TODO: update once SR-697 is fixed. For now assume timeplot won't run on a
+    # machine with more than 64GB, and it defaults to 10% of total RAM.
+    timeplot.mem = 8192
     timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
@@ -123,12 +156,21 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
         ingest.ports = ['port']
-        ingest.cores = [None] * 2
         ingest.gpus = [GPURequestByName('GeForce GTX TITAN X')]
-        ingest.gpus[0].compute = 0.5
-        ingest.gpus[0].mem = 4096.0
-        ingest.cpus = 2
-        ingest.mem = 16384.0
+        # Scale for a full GPU for 32 antennas, 32K channels
+        scale = cbf_vis / (32 * 33 * 2 * 32768)
+        ingest.gpus[0].compute = scale
+        # Refer to https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
+        # We use slightly higher multipliers to be safe, as well as
+        # conservatively using cbf_* instead of l0_*.
+        ingest.gpus[0].mem = (70 * cbf_vis + 168 * cbf_channels) // 1024**2 + 128
+        # Actual requirements haven't been measured. Scale things so that
+        # 32 antennas, 32K channels uses a bit less than 8 CPUs (the number
+        # in an ingest machine).
+        ingest.cpus = 7.5 * scale
+        # Scale factor of 32 may be overly conservative: actual usage may be
+        # only half this.
+        ingest.mem = 32 * cbf_vis_mb + 256
         ingest.transitions = capture_transitions
         g.add_node(ingest, config=lambda resolver: {
             'continuum_factor': 32,
@@ -151,11 +193,16 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
         bf_ingest.command = ['ptuse_ingest.py']
         bf_ingest.ports = ['port']
         bf_ingest.gpus = [scheduler.GPURequest()]
-        bf_ingest.gpus[0].compute = 0.4
-        bf_ingest.gpus[0].mem = 4096.0
-        bf_ingest.cpus = 2
-        bf_ingest.mem = 16384.0
-        bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
+        # TODO: revisit once coherent dedispersion is in use, when multiple
+        # GPUs may be needed.
+        bf_ingest.gpus[0].compute = 1.0
+        bf_ingest.gpus[0].mem = 7 * 1024    # TODO: guess, untested
+        bf_ingest.cpus = 4
+        bf_ingest.cores = ['capture0', 'capture1', 'processing', 'python']
+        # 32GB of psrdada buffers, regardless of channels
+        # 4GB to handle general process stuff
+        bf_ingest.mem = 36 * 1024
+        bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True, affinity=True)]
         bf_ingest.volumes = [scratch_vol]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
@@ -176,7 +223,11 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
                                  '--interface={interfaces[cbf].name}']
             bf_ingest.cpus = 2
             bf_ingest.cores = ['disk', 'network']
-            bf_ingest.mem = 4096.0
+            # CBF sends 256 time samples per heap, and bf_ingest accumulates
+            # 128 of these in the ring buffer. It's not a lot of memory, so
+            # to be on the safe side we double everything. Values are int8*2.
+            # Allow 512MB for various buffers.
+            bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
             bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
@@ -192,27 +243,49 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
             g.add_edge(bf_ingest, beams_spead[beam], port='spead', config=lambda resolver, endpoint: {
                 'cbf_spead': str(endpoint)})
 
-    # calibration node
-    cal = SDPLogicalTask('sdp.cal.1')
-    cal.image = 'katsdpcal'
-    cal.command = ['run_cal.py']
-    cal.cpus = 0.2          # TODO: uses more in reality
-    cal.mem = 65536.0
-    cal.volumes = [data_vol]
-    g.add_node(cal, config=lambda resolver: {
-        'cbf_channels': cbf_channels
-    })
-    g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
-        'l0_spectral_spead': str(endpoint)})
-    g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
-        'l1_spectral_spead': str(endpoint)})
+    # Calibration node (only possible to calibrate with at least 4 antennas)
+    if l0_antennas >= 4:
+        cal = SDPLogicalTask('sdp.cal.1')
+        cal.image = 'katsdpcal'
+        cal.command = ['run_cal.py']
+        # TODO: not clear exactly how much CPU cal needs, although currently
+        # it doesn't make full use of multi-core. Assume 2 CPUs for 16
+        # antennas, 32K channels, and assume linear scale in antennas and
+        # channels.
+        cal.cpus = max(0.1, 2 * (l0_antennas * l0_channels) / (16 * 32768))
+        # Main memory consumer is buffers for
+        # - visibilities (complex64)
+        # - flags (uint8)
+        # - weights (float32)
+        # There are also timestamps, but they're insignificant compared to the rest.
+        # We want ~30 min of data per buffer
+        slots = 30 * 60 * dump_rate
+        buffer_size = slots * l0_vis * 13
+        # There are two buffers, and also some arrays that are reduced versions
+        # of the main buffers. The reduction factors are variable, but 10%
+        # overhead should be enough. Finally, allow 256MB for general use.
+        cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
+        cal.volumes = [data_vol]
+        g.add_node(cal, config=lambda resolver: {
+            'cbf_channels': cbf_channels,
+            'buffer_maxsize': buffer_size
+        })
+        g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+            'l0_spectral_spead': str(endpoint)})
+        g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
+            'l1_spectral_spead': str(endpoint)})
 
     # filewriter node
     filewriter = SDPLogicalTask('sdp.filewriter.1')
     filewriter.image = 'katsdpfilewriter'
     filewriter.command = ['file_writer.py']
-    filewriter.cpus = 0.2     # TODO: uses more in reality
-    filewriter.mem = 2048.0
+    # Don't yet have a good idea of real CPU usage. For now assume that 16
+    # antennas, 32K channels requires two CPUs (one for capture, one for
+    # writing) and scale from there.
+    filewriter.cpus = 2 * l0_vis / (16 * 17 * 2 * 32768)
+    # Memory pool has 8 entries, but allocate 16 to be safe.
+    # Filewriter also uses this (incorrect) formula for heap size.
+    filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
     filewriter.transitions = capture_transitions
@@ -222,17 +295,24 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
 
     # Simulator node
     if simulate:
-        # create-fx-stream is passed on the command-line instead of telstate
-        # for now due to SR-462.
         sim = SDPLogicalTask('sdp.sim.1')
         sim.image = 'katcbfsim'
-        sim.command = ['cbfsim.py', '--create-fx-stream', 'baseline-correlation-products']  # TODO: stream name
-        sim.cpus = 2
-        sim.mem = 2048.0             # TODO
+        # create-fx-stream is passed on the command-line instead of telstate
+        # for now due to SR-462.
+        sim.command = ['cbfsim.py', '--create-fx-stream', 'baseline-correlation-products']
+        # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
+        # 16 antennas, 32K, and cap it there (threads for compute and network).
+        # cbf_vis is an overestimate since the simulator is not constrained to
+        # power-of-two antennas counts like the real CBF.
+        scale = cbf_vis / (16 * 17 * 2 * 32768)
+        sim.cpus = 2 * min(1.0, scale)
+        # Factor of 4 is conservative; only actually double-buffered
+        sim.mem = 4 * cbf_vis_mb + cbf_gains_mb + 512
         sim.cores = [None, None]
         sim.gpus = [scheduler.GPURequest()]
-        sim.gpus[0].compute = 0.5
-        sim.gpus[0].mem = 2048.0     # TODO
+        # Scale for 20% at 16 ant, 32K channels
+        sim.gpus[0].compute = min(1.0, 0.2 * scale)
+        sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
         g.add_node(sim, config=lambda resolver: {
             'cbf_channels': cbf_channels
