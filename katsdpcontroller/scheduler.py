@@ -104,7 +104,9 @@ import copy
 from collections import namedtuple, deque
 from enum import Enum
 import ipaddress
+import requests
 import six
+from six.moves import urllib
 import networkx
 import jsonschema
 from katsdptelstate.endpoint import Endpoint
@@ -717,7 +719,7 @@ class LogicalTask(LogicalNode):
         List of :class:`GPURequest` objects, one per GPU needed
     image : str
         Base name of the Docker image (without registry or tag).
-    container : `mesos_pb2.ContainerInfo`
+    container : :class:`addict.Dict`
         Modify this to override properties of the container. The `image` and
         `force_pull_image` fields are set by the :class:`ImageResolver`,
         overriding anything set here.
@@ -747,7 +749,7 @@ class LogicalTask(LogicalNode):
         self.container.type = 'DOCKER'
         self.physical_factory = PhysicalTask
 
-    def valid_agent(self, attributes):
+    def valid_agent(self, agent):
         """Checks whether the attributes of an agent are suitable for running
         this task. Subclasses may override this to enforce constraints e.g.,
         requiring a special type of hardware."""
@@ -963,7 +965,7 @@ class Agent(ResourceCollector):
         InsufficientResourcesError
             if there are not enough resources to add the task
         """
-        if not logical_task.valid_agent(self.attributes):
+        if not logical_task.valid_agent(self):
             raise InsufficientResourcesError('Task does not match this agent')
         for r in SCALAR_RESOURCES:
             need = getattr(logical_task, r)
@@ -1731,6 +1733,56 @@ class Scheduler(pymesos.Scheduler):
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
+
+    def _get_master_and_slaves(self, master, timeout):
+        """Implementation of :meth:`get_master_slaves`, which is run on a separate
+        thread since the requests library is blocking.
+        """
+        url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
+        r = requests.get(url, timeout=timeout)
+        r.raise_for_status()
+        try:
+            slaves = r.json()['slaves']
+            master_host = urllib.parse.urlsplit(url).hostname
+            return master_host, [slave['hostname'] for slave in slaves]
+        except (KeyError, TypeError) as error:
+            six.raise_from(ValueError('Malformed response'), error)
+
+    @trollius.coroutine
+    def get_master_and_slaves(self, timeout=None):
+        """Obtain a list of slave hostnames from the master.
+
+        Parameters
+        ----------
+        timeout : float, optional
+            Timeout for HTTP connection to the master
+
+        Raises
+        ------
+        requests.exceptions.RequestException
+            If there was an HTTP connection problem (including timeout)
+        ValueError
+            If the HTTP response from the master was malformed
+        ValueError
+            If there is no current master
+
+        Returns
+        -------
+        master : list of str
+            Hostname of the master
+        slaves : list of str
+            Hostnames of slaves
+        """
+        if self._driver is None:
+            raise ValueError('No driver is set')
+        # Need to copy, because the driver runs in a separate thread
+        # (self.master is a property that takes a lock).
+        master = self._driver.master
+        if master is None:
+            raise ValueError('No master is set')
+        result = yield From(self._loop.run_in_executor(
+            None, self._get_master_and_slaves, master, timeout))
+        raise Return(result)
 
 
 __all__ = [
