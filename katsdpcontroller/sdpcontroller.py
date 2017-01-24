@@ -330,19 +330,10 @@ class SDPGraph(object):
 
         .. todo::
 
-           For now tasks that exit cleanly are considered to be healthy,
-           because they might not be needed/useful depending on the number of
-           antennas. This should be removed once the graph is specialised to
-           the antenna count.
-
-        .. todo::
-
            Also check health state sensors
         """
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                if node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
-                    continue
                 logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
                 return False
         return True

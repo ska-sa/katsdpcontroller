@@ -391,14 +391,6 @@ class TestSDPController(unittest.TestCase):
         self.assertEqual({}, self.controller.subarray_products)
         self.assertEqual({}, self.controller.subarray_product_config)
 
-    def test_data_product_configure_task_exit(self):
-        """If a task exits cleanly, data-product-configure succeeds"""
-        self.fail_launches['sdp.ingest.1'] = 'TASK_FINISHED'
-        self.client.assert_request_succeeds(*self._configure_args(SUBARRAY_PRODUCT4))
-        self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
-        self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
-        self.sched.kill.assert_not_called()
-
     def test_data_product_configure_busy(self):
         """Cannot have concurrent data-product-configure commands"""
         with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
