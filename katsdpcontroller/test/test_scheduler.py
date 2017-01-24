@@ -5,12 +5,16 @@ import socket
 import contextlib
 import logging
 import uuid
+import threading
+import BaseHTTPServer
 import mock
+import requests_mock
 from nose.tools import *
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
 import ipaddress
 import six
+import requests
 import trollius
 import networkx
 import pymesos
@@ -1243,3 +1247,43 @@ class TestScheduler(object):
     def test_status_unknown_task_id(self):
         """statusUpdate must correctly handle an unknown task ID"""
         self._status_update('test-01234567', 'TASK_LOST')
+
+    @run_with_self_event_loop
+    def test_get_master_and_slaves(self):
+        with requests_mock.mock(case_sensitive=True) as rmock:
+            # An actual response scraped from a real Mesos server
+            rmock.get('http://master.invalid:5050/slaves',
+                      text=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')
+            self.driver.master = 'master.invalid:5050'
+            master, slaves = yield From(self.sched.get_master_and_slaves())
+            assert_equal('master.invalid', master)
+            assert_equal(AnyOrderList(['192.168.6.198', '192.168.6.188', '192.168.6.206']), slaves)
+
+    @run_with_self_event_loop
+    def test_get_master_and_slaves_connect_failed(self):
+        # Guaranteed not to be a valid domain name (RFC2606)
+        self.driver.master = 'example.invalid:5050'
+        with assert_raises(requests.exceptions.RequestException):
+            yield From(self.sched.get_master_and_slaves())
+
+    @run_with_self_event_loop
+    def test_get_master_and_slaves_bad_response(self):
+        with requests_mock.mock(case_sensitive=True) as rmock:
+            rmock.get('http://master.invalid:5050/slaves', text='', status_code=404)
+            self.driver.master = 'master.invalid:5050'
+            with assert_raises(requests.exceptions.RequestException):
+                yield From(self.sched.get_master_and_slaves())
+
+    @run_with_self_event_loop
+    def test_get_master_and_slaves_bad_json(self):
+        responses = [
+            '{not valid json',
+            '["not a dict"]',
+            '{"no_slaves": 4}',
+            '{"slaves": "not an array"}']
+        for response in responses:
+            with requests_mock.mock(case_sensitive=True) as rmock:
+                rmock.get('http://master.invalid:5050/slaves', text=response)
+                self.driver.master = 'master.invalid:5050'
+                with assert_raises(ValueError):
+                    yield From(self.sched.get_master_and_slaves())
