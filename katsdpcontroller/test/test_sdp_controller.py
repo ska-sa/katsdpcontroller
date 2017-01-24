@@ -18,6 +18,8 @@ from trollius import From
 import katcp
 import redis
 import pymesos
+import netifaces
+import requests
 
 from katsdpcontroller.sdpcontroller import (
         SDPControllerServer, SDPCommonResources, SDPResources, State)
@@ -212,9 +214,11 @@ class TestSDPController(unittest.TestCase):
         # Wait until the first command gets blocked
         started_future.result()
         # Do the test
-        yield
-        # Unblock things
-        release((Message.reply('capture-init', 'ok'), []))
+        try:
+            yield
+        finally:
+            # Unblock things
+            release((Message.reply('capture-init', 'ok'), []))
         self.assertTrue(reply_future.result().reply_ok())
 
     @contextlib.contextmanager
@@ -229,8 +233,10 @@ class TestSDPController(unittest.TestCase):
             Message.request(*self._configure_args(subarray_product)),
             reply_cb=lambda msg: reply_future.set_result(msg))
         started_future.result()
-        yield
-        release(None)
+        try:
+            yield
+        finally:
+            release(None)
         self.assertEqual(expect_ok, reply_future.result().reply_ok())
 
     def setUp(self):
@@ -246,6 +252,8 @@ class TestSDPController(unittest.TestCase):
         sensor_proxy_client.katcp_client.future_request.side_effect = self._future_request
         self._create_patch(
             'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=None)
+        self._create_patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
+        self._create_patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill
@@ -264,6 +272,9 @@ class TestSDPController(unittest.TestCase):
         self.addCleanup(self.client.join)
         self.addCleanup(self.client.stop)
         self.loop = self.thread.loop
+        master_and_slaves_future = trollius.Future(loop=self.loop)
+        master_and_slaves_future.set_result(('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
+        self.sched.get_master_and_slaves.return_value = master_and_slaves_future
         # Dict mapping task name to Mesos task status string
         self.fail_launches = {}
         # Set of katcp requests to return failures for
@@ -313,12 +324,8 @@ class TestSDPController(unittest.TestCase):
             node.kill(self.driver)
             node.set_state(scheduler.TaskState.DEAD)
 
-    @trollius.coroutine
-    def _poll_ports(self, host, ports, loop):
-        """Mock implementation of :func:`katsdpcontroller.scheduler.poll_ports`."""
-        pass
-
     def _future_request(self, msg, *args, **kwargs):
+        """Mock implementation of katcp.DeviceClient.future_request"""
         if msg.name in self.fail_requests:
             reply = Message.reply(msg.name, 'fail', 'dummy failure')
         else:
@@ -326,6 +333,19 @@ class TestSDPController(unittest.TestCase):
         future = tornado.concurrent.Future()
         future.set_result((reply, []))
         return future
+
+    def _ifaddresses(self, interface):
+        if interface == 'lo':
+            return {
+                netifaces.AF_INET: [{'addr': '127.0.0.1', 'netmask': '255.0.0.0', 'peer': '127.0.0.1'}],
+                netifaces.AF_INET6: [{'addr': '::1', 'netmask': 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128'}],
+            }
+        elif interface == 'em1':
+            return {
+                netifaces.AF_INET: [{'addr': '10.0.0.2', 'broadcast': '10.255.255.255', 'netmask': '255.0.0.0'}],
+            }
+        else:
+            raise ValueError('You must specify a valid interface name')
 
     def _configure_args(self, subarray_product):
         return ("data-product-configure", subarray_product, ANTENNAS, "4096",
@@ -651,6 +671,33 @@ class TestSDPController(unittest.TestCase):
     def test_capture_status_not_found(self):
         """Test capture_status with a subarray_product_id that does not exist"""
         self.client.assert_request_fails('capture-status', SUBARRAY_PRODUCT2)
+
+    def test_sdp_shutdown(self):
+        """Tests success path of sdp-shutdown"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds('capture-init', SUBARRAY_PRODUCT1)
+        self.sched.launch.reset_mock()
+        self.client.assert_request_succeeds('sdp-shutdown')
+        # Check that the subarray was stopped then shut down
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        sensor_proxy_client.katcp_client.future_request.assert_called_with(
+            Message.request('capture-done'), timeout=mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY)
+        # Check that the shutdown was launched in two phases, non-masters
+        # first.
+        calls = self.sched.launch.call_args_list
+        self.assertEqual(2, len(calls))
+        nodes = calls[0][0][2]   # First call, positional args, 3rd argument
+        hosts = [node.logical_node.host for node in nodes]
+        # 10.0.0.1-10.0.0.4 are slaves, but 10.0.0.1 is master and 10.0.0.2 is us
+        self.assertEqual(AnyOrderList(['10.0.0.3', '10.0.0.4']), hosts)
+
+    def test_sdp_shutdown_slaves_error(self):
+        """Test sdp-shutdown when get_master_and_slaves fails"""
+        future = trollius.Future(loop=self.loop)
+        future.set_exception(requests.exceptions.Timeout())
+        self.sched.get_master_and_slaves.return_value = future
+        self.client.assert_request_fails('sdp-shutdown')
 
 
 class TestSDPResources(unittest.TestCase):
