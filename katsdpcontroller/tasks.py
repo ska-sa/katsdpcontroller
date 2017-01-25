@@ -7,6 +7,7 @@ from trollius import From, Return
 import tornado.concurrent
 from tornado import gen
 from addict import Dict
+import six
 from katcp import Sensor, Message
 from prometheus_client import Gauge, Counter
 from katsdptelstate.endpoint import Endpoint
@@ -95,10 +96,15 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
     def resolve(self, resolver, graph):
         super(SDPPhysicalTaskBase, self).resolve(resolver, graph)
-        s_name = "{}.version".format(self.name)
-        version_sensor = Sensor(Sensor.STRING, s_name, "Image of executing container.", "")
+        # Add some useful sensors
+        version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
         self._add_sensor(version_sensor)
+        for key, value in six.iteritems(self.ports):
+            endpoint_sensor = Sensor.address(
+                '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
+            endpoint_sensor.set_value((self.host, value))
+            self._add_sensor(endpoint_sensor)
         # Provide info about which container this is for logspout to collect
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
             {'key': 'label',
