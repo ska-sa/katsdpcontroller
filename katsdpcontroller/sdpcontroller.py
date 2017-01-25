@@ -1042,6 +1042,8 @@ class SDPControllerServer(AsyncDeviceServer):
         try:
             yield to_tornado_future(self._conf_future, loop=self.loop)
             raise gen.Return(('ok', ''))
+        except scheduler.InsufficientResourcesError as error:
+            raise FailReply('Insufficient resources to launch {}: {}'.format(subarray_product_id, error))
         finally:
             self._conf_future = None
 
