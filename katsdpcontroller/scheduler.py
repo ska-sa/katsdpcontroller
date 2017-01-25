@@ -496,6 +496,21 @@ class RangeResource(object):
         self._len -= 1
         return ans
 
+    def popleft_min(self, bound):
+        """Remove the first element greater than or equal to `bound`.
+
+        Raises
+        ------
+        IndexError
+            If no such element exists
+        """
+        for i, (start, stop) in enumerate(self._ranges):
+            if stop > bound:
+                value = max(start, bound)
+                self.remove(value)
+                return value
+        raise IndexError('no element greater than or equal to bound')
+
     def __str__(self):
         def format_range(rng):
             start, stop = rng
@@ -791,8 +806,16 @@ def _decode_json_base64(text):
 class Agent(ResourceCollector):
     """Collects multiple offers for a single Mesos agent and allows
     :class:`ResourceAllocation`s to be made from it.
+
+    Parameters
+    ----------
+    offers : list
+        List of Mesos offer dicts
+    min_port : int
+        A soft lower bound on port numbers to allocate. If higher numbers are
+        exhausted, this will be ignored.
     """
-    def __init__(self, offers):
+    def __init__(self, offers, min_port=0):
         if not offers:
             raise ValueError('At least one offer must be specified')
         self.offers = offers
@@ -803,6 +826,7 @@ class Agent(ResourceCollector):
         self.volumes = []
         self.gpus = []
         self.numa = []
+        self._min_port = min_port
         for attribute in offers[0].attributes:
             try:
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
@@ -931,15 +955,22 @@ class Agent(ResourceCollector):
             self.inc_attr(r, -need)
             setattr(alloc, r, need)
         for r in RANGE_RESOURCES:
-            if r != 'cores':
-                for name in getattr(logical_task, r):
-                    value = getattr(self, r).popleft()
-                    getattr(alloc, r).append(value)
-            else:
+            if r == 'cores':
                 for name in logical_task.cores:
                     value = cores.popleft()
                     alloc.cores.append(value)
                     self.cores.remove(value)
+            elif r == 'ports':
+                for name in logical_task.ports:
+                    try:
+                        value = self.ports.popleft_min(self._min_port)
+                    except IndexError:
+                        value = self.ports.popleft()
+                    alloc.ports.append(value)
+            else:
+                for name in getattr(logical_task, r):
+                    value = getattr(self, r).popleft()
+                    getattr(alloc, r).append(value)
         for request in logical_task.networks:
             alloc.interfaces.append(next(interface for interface in self.interfaces
                                          if request.matches(interface, numa_node)))
@@ -1454,6 +1485,7 @@ class Scheduler(pymesos.Scheduler):
         self._pending = deque()     #: node groups for which we do not yet have resources
         self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False       #: set to ``True`` when :meth:`close` is called
+        self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         self.resources_timeout = 10.0
 
     @classmethod
@@ -1573,7 +1605,7 @@ class Scheduler(pymesos.Scheduler):
                     # the state of the tasks since they were put onto the
                     # pending list (e.g. by killing them). Filter those out.
                     nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                    agents = [Agent(list(six.itervalues(offers)))
+                    agents = [Agent(list(six.itervalues(offers)), self._min_ports.get(agent_id, 0))
                               for agent_id, offers in six.iteritems(self._offers)]
                     # Sort agents by GPUs then free memory. This makes it less likely that a
                     # low-memory process will hog all the other resources on a high-memory
@@ -1613,9 +1645,14 @@ class Scheduler(pymesos.Scheduler):
                     for node in nodes:
                         node.resolve(group.resolver, group.graph)
                     # Launch the tasks
+                    new_min_ports = {}
                     taskinfos = {agent: [] for agent in agents}
-                    for (node, _) in allocations:
+                    for (node, allocation) in allocations:
                         taskinfos[node.agent].append(node.taskinfo)
+                        for port in allocation.ports:
+                            prev = new_min_ports.get(node.agent_id, 0)
+                            new_min_ports[node.agent_id] = max(prev, port + 1)
+                    self._min_ports.update(new_min_ports)
                     for agent in agents:
                         offer_ids = [offer.id for offer in agent.offers]
                         # TODO: does this need to use run_in_executor? Is it
