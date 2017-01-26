@@ -1056,6 +1056,7 @@ class SDPControllerServer(AsyncDeviceServer):
             dp = self.subarray_products[subarray_product_id]
             if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
                 logger.info("Subarray product with this configuration already exists. Pass.")
+                return
             else:
                 raise FailReply("A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
 
