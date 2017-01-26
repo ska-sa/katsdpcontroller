@@ -263,24 +263,67 @@ class TestImageResolver(object):
         assert_equal('sdp/test1:latest', resolver('test1'))
         assert_equal('sdp/test1:tagged', resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', resolver('foo'))
-        assert_false(resolver.pullable('sdp/test1:latest'))
-        assert_false(resolver.pullable('my-registry:5000/bar:custom'))
 
     def test_private_registry(self):
         """Test with a private registry"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000')
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         assert_equal('my-registry:5000/test1:latest', resolver('test1'))
         assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', resolver('foo'))
-        assert_true(resolver.pullable('my-registry:5000/test1:latest'))
-        assert_false(resolver.pullable('other-registry:5000/test1:latest'))
+
+    @mock.patch('docker.auth.load_config', autospec=True)
+    def test_private_registry_digests(self, load_config_mock):
+        """Test with a private registry, looking up a digest"""
+        digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
+        # Based on an actual registry response
+        headers = {
+            '/v2/myimage/manifests/latest': {
+                'Content-Length': '1234',
+                'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
+                'Docker-Content-Digest': digest,
+                'Docker-Distribution-Api-Version': 'registry/2.0',
+                'Etag': '"{}"'.format(digest),
+                'X-Content-Type-Options': 'nosniff',
+                'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
+            }
+        }
+        # Response headers are modelled on an actual registry response
+        with requests_mock.mock(case_sensitive=True) as rmock:
+            rmock.head(
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                request_headers={
+                    'Authorization': 'Basic ' + base64.urlsafe_b64encode('myuser:mypassword'),
+                    'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
+                },
+                headers={
+                    'Content-Length': '1234',
+                    'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
+                    'Docker-Content-Digest': digest,
+                    'Docker-Distribution-Api-Version': 'registry/2.0',
+                    'Etag': '"{}"'.format(digest),
+                    'X-Content-Type-Options': 'nosniff',
+                    'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
+                })
+            # This format isn't documented, but inferred from examining the real value
+            load_config_mock.return_value = {
+                u'registry.invalid:5000' : {
+                    'email': None,
+                    'username': u'myuser',
+                    'password': u'mypassword',
+                    'serveraddress': u'registry.invalid:5000'
+                }
+            }
+            resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
+            image = resolver('myimage')
+        assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
     @mock.patch('__builtin__.open', autospec=file)
     def test_tag_file(self, open_mock):
         """Test with a tag file"""
         open_mock.return_value.__enter__.return_value.read.return_value = b'tag1\n'
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                           tag_file='tag_file', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         open_mock.assert_called_once_with('tag_file', 'r')
         assert_equal('my-registry:5000/test1:tag1', resolver('test1'))
@@ -288,6 +331,7 @@ class TestImageResolver(object):
         assert_equal('my-registry:5000/bar:custom', resolver('foo'))
         open_mock.return_value.__enter__.return_value.read.return_value = b'tag2\n'
         resolver.reread_tag_file()
+        resolver.clear_cache()
         assert_equal('my-registry:5000/test1:tag2', resolver('test1'))
 
     @mock.patch('__builtin__.open', autospec=file)
@@ -876,7 +920,6 @@ class TestScheduler(object):
         expected_taskinfo0.command.arguments = ['--port=30000']
         expected_taskinfo0.container.type = 'DOCKER'
         expected_taskinfo0.container.docker.image = 'sdp/image0:latest'
-        expected_taskinfo0.container.docker.force_pull_image = False
         expected_taskinfo0.container.docker.parameters = AnyOrderList([
             Dict(key='device', value='/dev/nvidia1'),
             Dict(key='device', value='/dev/nvidiactl'),
@@ -916,7 +959,6 @@ class TestScheduler(object):
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
-        expected_taskinfo1.container.docker.force_pull_image = False
         expected_taskinfo1.resources = _make_resources({'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
         expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'

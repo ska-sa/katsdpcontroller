@@ -22,6 +22,7 @@ setup (
         'addict',
         'trollius',
         'decorator',
+        'docker',
         'jsonschema',
         'networkx',
         'netifaces',

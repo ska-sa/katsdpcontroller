@@ -109,7 +109,7 @@ if __name__ == "__main__":
     image_resolver = scheduler.ImageResolver(
             private_registry=opts.private_registry or None,
             tag_file=opts.image_tag_file,
-            pull=not opts.no_pull)
+            use_digests=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:

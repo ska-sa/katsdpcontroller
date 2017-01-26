@@ -276,7 +276,8 @@ class SDPGraph(object):
         graph_kwargs['dump_rate'] = dump_rate
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         resolver.image_resolver.reread_tag_file()
-         # pick up any updates to the tag file
+        resolver.image_resolver.clear_cache()
+         # pick up any updates to the tag file or new images
         # generate physical nodes
         mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
         self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
@@ -1044,6 +1045,8 @@ class SDPControllerServer(AsyncDeviceServer):
             raise gen.Return(('ok', ''))
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(subarray_product_id, error))
+        except scheduler.ImageError as error:
+            raise FailReply(str(error))
         finally:
             self._conf_future = None
 

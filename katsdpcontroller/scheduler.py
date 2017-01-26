@@ -93,6 +93,7 @@ loaded.
 
 
 from __future__ import print_function, division, absolute_import
+import os.path
 import logging
 import json
 import itertools
@@ -105,6 +106,7 @@ from collections import namedtuple, deque
 from enum import Enum
 import ipaddress
 import requests
+import docker
 import six
 from six.moves import urllib
 import networkx
@@ -556,20 +558,27 @@ class ImageResolver(object):
         If specified, the file will be read to determine the image tag to use.
         It can be re-read by calling :meth:`reread_tag_file`.
         It does not affect overrides, to allow them to specify their own tags.
-    pull : bool, optional
-        Whether to pull images from the `private_registry`.
+    use_digests : bool, optional
+        Whether to look up the latest digests from the `registry`. If this is
+        not specified, old versions of images on the agents could be used.
     """
-    def __init__(self, private_registry=None, tag_file=None, pull=True):
-        if private_registry is None:
-            self._prefix = 'sdp/'
-        else:
-            self._prefix = private_registry + '/'
+    def __init__(self, private_registry=None, tag_file=None, use_digests=True):
         self._tag_file = tag_file
         self._tag = None
         self._private_registry = private_registry
         self._overrides = {}
-        self.pull = pull
+        self._cache = {}
+        self._use_digests = use_digests
         self.reread_tag_file()
+        if use_digests and private_registry is not None:
+            authconfig = docker.auth.load_config()
+            authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
+            if authdata is None:
+                self._auth = None
+            else:
+                self._auth = (authdata['username'], authdata['password'])
+        else:
+            self._auth = None
 
     def reread_tag_file(self):
         if self._tag_file is None:
@@ -588,27 +597,62 @@ class ImageResolver(object):
                     logger.warn("Image tag changed: %s -> %s", self._tag, tag)
                 self._tag = tag
 
+    def clear_cache(self):
+        self._cache = {}
+
     def override(self, name, path):
         self._overrides[name] = path
 
-    def pullable(self, image):
-        """Determine whether a fully-qualified image name should be pulled. At
-        present, this is done for images in the explicitly specified private
-        registry, but images in other registries and specified by override are
-        not pulled.
-        """
-        return self._private_registry is not None and image.startswith(self._prefix) and self.pull
-
     def __call__(self, name):
-        try:
+        if name in self._overrides:
             return self._overrides[name]
-        except KeyError:
-            if ':' in name:
-                # A tag was already specified in the graph
-                logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
-                return self._prefix + name
-            else:
-                return self._prefix + name + ':' + self._tag
+        elif name in self._cache:
+            return self._cache[name]
+
+        orig_name = name
+        colon = name.rfind(':')
+        if colon != -1:
+            # A tag was already specified in the graph
+            logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
+            tag = name[colon + 1:]
+            name = name[:colon]
+        else:
+            tag = self._tag
+
+        if self._private_registry is None:
+            resolved = 'sdp/{}:{}'.format(name, tag)
+        elif self._use_digests:
+            # TODO: see if it's possible to do some connection pooling
+            # here. That probably requires the caller to initiate a
+            # Session and close it when done.
+            url = '{}/v2/{}/manifests/{}'.format(self._private_registry, name, tag)
+            if not url.startswith('http'):
+                # If no scheme is specified, assume https
+                url = 'https://' + url
+            # Use a low timeout, because we're likely to be running in the
+            # asyncio event loop.
+            kwargs = dict(
+                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
+                auth=self._auth,
+                timeout=5)
+            if os.path.exists('/etc/ssl/certs/ca-certificates.crt'):
+                kwargs['verify'] = '/etc/ssl/certs/ca-certificates.crt'
+            response = requests.head(url, **kwargs)
+            try:
+                response.raise_for_status()
+                digest = response.headers['Docker-Content-Digest']
+                resolved = '{}/{}@{}'.format(self._private_registry, name, digest)
+            except requests.exceptions.RequestException as error:
+                six.raise_from(ImageError('Failed to get digest from {}'.format(url)), error)
+            except KeyError:
+                raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+            finally:
+                response.close()
+        else:
+            resolved = '{}/{}:{}'.format(self._private_registry, name, tag)
+        logger.debug('ImageResolver resolved %s to %s', name, resolved)
+        self._cache[name] = resolved
+        return resolved
 
 
 class TaskIDAllocator(object):
@@ -665,6 +709,13 @@ class CycleError(ValueError):
 
 class DependencyError(ValueError):
     """Raised if a launch is impossible due to an unsatisfied dependency"""
+    pass
+
+
+class ImageError(RuntimeError):
+    """Indicates that the Docker image could not be resolved due to a problem
+    while contacting the registry.
+    """
     pass
 
 
@@ -737,8 +788,8 @@ class LogicalTask(LogicalNode):
         Base name of the Docker image (without registry or tag).
     container : :class:`addict.Dict`
         Modify this to override properties of the container. The `image` and
-        `force_pull_image` fields are set by the :class:`ImageResolver`,
-        overriding anything set here.
+        field is set by the :class:`ImageResolver`, overriding anything set
+        here.
     command : list of str
         Command to run inside the image. Each element is passed through
         :meth:`str.format` to generate a command for the physical node. The
@@ -1305,8 +1356,6 @@ class PhysicalTask(PhysicalNode):
         taskinfo.container = copy.deepcopy(self.logical_node.container)
         image_path = resolver.image_resolver(self.logical_node.image)
         taskinfo.container.docker.image = image_path
-        taskinfo.container.docker.force_pull_image = \
-            resolver.image_resolver.pullable(image_path)
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
         for r in SCALAR_RESOURCES:
