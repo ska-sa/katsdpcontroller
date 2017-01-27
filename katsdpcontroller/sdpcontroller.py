@@ -1607,34 +1607,50 @@ class SDPControllerServer(DeviceServer):
         urls = {}
          # local dict to hold streams associated with the specified data product
         try:
-            streams['baseline-correlation-products_spead'] = stream_sources.split(":",2)
-            streams['CAM_spead'] = deprecated_cam_source.split(":",2)
-            logger.info("Adding DEPRECATED endpoints for baseline-correlation-products_spead ({}) and CAM_spead ({})".format(streams['baseline-correlation-products_spead'],streams['CAM_spead']))
-        except (AttributeError, ValueError):
-             # check to see if we are using the new stream_sources specifier
+            # First try to parse the supplied string as a JSON encoded dict of stream urls
+            streams_dict = json.loads(stream_sources)
+            for (stream_type, stream_spec_dict) in streams_dict.iteritems():
+                # each stream type has a dict of stream specifiers of the form
+                # stream_name:stream_url
+                # e.g. {u'i0.baseline-correlation-products': u'spead://239.9.3.1+15:7148'}
+                # The fully qualified stream name is used directly, and in the future the leading term
+                # will be used to disambiguate multiple streams of the same type
+                for (stream_name, stream_url) in stream_spec_dict.iteritems():
+                    streams[stream_name] = stream_url
+                     # we could of course reuse the dictionary, but we expect some fu to be needed here in the future
+                    logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
+        except ValueError:
+            # We must be in a pure string mode
             try:
-                for stream in stream_sources.split(","):
-                    (stream_name, value) = stream.split(":", 1)
-                    if re.match(r'^\w+://', value):
-                        urls[stream_name] = value
-                        logger.info("Adding stream {} with URL {}".format(stream_name, value))
-                    else:
-                        (host, port) = value.split(":", 2)
-                         # just to make it explicit what we are expecting
-                        # Hack to handle CAM not yet passing us fully-qualified
-                        # stream names. This code should be deleted once CAM is
-                        # updated.
-                        if (stream_name == 'baseline-correlation-products' or
-                                stream_name == 'antenna-channelised-voltage' or
-                                stream_name.startswith('tied-array-channelised-voltage.')):
-                            stream_name = 'corr.' + stream_name
-                        streams["{}_spead".format(stream_name)] = (host, port)
-                        logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
-            except ValueError:
-                 # something is definitely wrong with these
-                retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
-                logger.error(retmsg)
-                return ('fail',retmsg,None)
+                streams['baseline-correlation-products_spead'] = stream_sources.split(":",2)
+                streams['CAM_spead'] = deprecated_cam_source.split(":",2)
+                logger.info("Adding DEPRECATED endpoints for baseline-correlation-products_spead ({}) and CAM_spead ({})".format(streams['baseline-correlation-products_spead'],streams['CAM_spead']))
+            except (AttributeError, ValueError):
+                 # check to see if we are using the new stream_sources specifier
+                try:
+                    for stream in stream_sources.split(","):
+                        (stream_name, value) = stream.split(":", 1)
+                        if re.match(r'^\w+://', value):
+                            urls[stream_name] = value
+                            logger.info("Adding stream {} with URL {}".format(stream_name, value))
+                        else:
+                            (host, port) = value.split(":", 2)
+                             # just to make it explicit what we are expecting
+                            # Hack to handle CAM not yet passing us fully-qualified
+                            # stream names. This code should be deleted once CAM is
+                            # updated.
+                            if (stream_name == 'baseline-correlation-products' or
+                                    stream_name == 'antenna-channelised-voltage' or
+                                    stream_name.startswith('tied-array-channelised-voltage.')):
+                                stream_name = 'i0.' + stream_name
+                                 # hardcoded instrument name for older systems
+                            streams[stream_name] = (host, port)
+                            logger.info("Adding stream {} with endpoint ({},{})".format(stream_name, host, port))
+                except ValueError:
+                     # something is definitely wrong with these
+                    retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
+                    logger.error(retmsg)
+                    return ('fail',retmsg,None)
 
         graph_name = self.graph_resolver(subarray_product_id)
         subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)
