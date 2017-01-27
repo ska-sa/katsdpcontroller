@@ -23,6 +23,8 @@ import six
 import ipaddress
 import faulthandler
 
+from prometheus_client import Histogram
+
 from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
@@ -48,6 +50,9 @@ class State(scheduler.OrderedEnum):
     DONE = 3
 
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+REQUEST_TIME = Histogram(
+    'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
+    buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 
@@ -637,21 +642,38 @@ def async_request(func):
         future = func(self, req, msg)
         @gen.coroutine
         def callback():
-            try:
-                reply = yield future
-                req.reply_with_message(reply)
-            except FailReply as error:
-                reason = str(error)
-                self._logger.error('Request %s FAIL: %s', msg.name, reason)
-                req.reply('fail', reason)
-            except trollius.CancelledError:
-                self._logger.error('Request %s CANCELLED', msg.name)
-                req.reply('fail', 'request was cancelled')
-            except Exception:
-                reply = self.create_exception_reply_and_log(msg, sys.exc_info())
-                req.reply_with_message(reply)
+            with REQUEST_TIME.labels(msg.name).time():
+                try:
+                    reply = yield future
+                    req.reply_with_message(reply)
+                except FailReply as error:
+                    reason = str(error)
+                    self._logger.error('Request %s FAIL: %s', msg.name, reason)
+                    req.reply('fail', reason)
+                except trollius.CancelledError:
+                    self._logger.error('Request %s CANCELLED', msg.name)
+                    req.reply('fail', 'request was cancelled')
+                except Exception:
+                    reply = self.create_exception_reply_and_log(msg, sys.exc_info())
+                    req.reply_with_message(reply)
         self.ioloop.add_callback(callback)
         raise AsyncReply
+    return wrapper
+
+
+def time_request(func):
+    """Decorator to record request servicing time as a Prometheus histogram.
+
+    Use this on the outside of ``@request``.
+
+    .. note::
+        Only suitable for use on synchronous request handlers. Asynchronous
+        handlers get the functionality as part of :func:`async_request`.
+    """
+    @six.wraps(func)
+    def wrapper(self, req, msg):
+        with REQUEST_TIME.labels(msg.name).time():
+            return func(self, req, msg)
     return wrapper
 
 
@@ -732,6 +754,7 @@ class SDPControllerServer(AsyncDeviceServer):
         except OSError:
             return ('0', Sensor.NOMINAL, time.time())
 
+    @time_request
     def request_halt(self, req, msg):
         """Halt the device server.
 
@@ -754,6 +777,7 @@ class SDPControllerServer(AsyncDeviceServer):
         # has been sent.
         return req.make_reply("ok")
 
+    @time_request
     @request(Str())
     @return_reply(Str())
     def request_task_terminate(self, req, task_id):
@@ -774,6 +798,7 @@ class SDPControllerServer(AsyncDeviceServer):
         return (rcode, rval)
 
 
+    @time_request
     @request(Str(optional=True),Str(optional=True),Str(optional=True))
     @return_reply(Str())
     def request_task_launch(self, req, task_id, task_cmd, host):
@@ -852,6 +877,7 @@ class SDPControllerServer(AsyncDeviceServer):
         yield From(self.deconfigure_on_exit())
         yield From(self.sched.close())
 
+    @time_request
     @request(Str(), Str())
     @return_reply(Str())
     def request_set_config_override(self, req, subarray_product_id, override_dict_json):
@@ -1212,6 +1238,7 @@ class SDPControllerServer(AsyncDeviceServer):
         yield to_tornado_future(sa.set_state(State.INITIALISED), loop=self.loop)
         raise gen.Return(('ok','SDP ready'))
 
+    @time_request
     @request(Str(optional=True))
     @return_reply(Str())
     def request_telstate_endpoint(self, req, subarray_product_id):
@@ -1237,6 +1264,7 @@ class SDPControllerServer(AsyncDeviceServer):
             return ('fail','No existing subarray product configuration with this id found')
         return ('ok',self.subarray_products[subarray_product_id].graph.telstate_endpoint)
 
+    @time_request
     @request(Str(optional=True))
     @return_reply(Str())
     def request_capture_status(self, req, subarray_product_id):
@@ -1261,6 +1289,7 @@ class SDPControllerServer(AsyncDeviceServer):
             return ('fail','No existing subarray product configuration with this id found')
         return ('ok',self.subarray_products[subarray_product_id].state.name)
 
+    @time_request
     @request(Str(),Int(optional=True))
     @return_reply(Str())
     def request_postproc_init(self, req, subarray_product_id, psb_id):
@@ -1337,6 +1366,7 @@ class SDPControllerServer(AsyncDeviceServer):
         # TODO: reimplement this
         raise FailReply('sdp-shutdown not implemented')
 
+    @time_request
     @request(include_msg=True)
     @return_reply(Int(min=0))
     def request_sdp_status(self, req, reqmsg):
