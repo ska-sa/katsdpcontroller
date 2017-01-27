@@ -7,16 +7,28 @@ from trollius import From, Return
 import tornado.concurrent
 from tornado import gen
 from katcp import Sensor, Message
+from prometheus_client import Gauge, Counter
 from katsdptelstate.endpoint import Endpoint
 from . import scheduler, sensor_proxy
 
 
+def _add_prometheus_sensor(name, description, class_):
+    PROMETHEUS_SENSORS[name] = (
+        class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
+        Gauge('katsdpcontroller_' + name + '_status', 'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
+    )
+
+
 logger = logging.getLogger(__name__)
-PROMETHEUS_SENSORS = ['input_rate','input-rate','dumps','packets_captured','output-rate']
- # list of sensors to be exposed via prometheus
- # some of these will match multiple nodes, which is fine since they get fully qualified names when
- # created as a prometheus metric
- # TODO: harmonise sodding -/_ convention
+PROMETHEUS_LABELS = ('subarray', 'service')
+# Dictionary of sensors to be exposed via Prometheus.
+# Some of these will match multiple nodes, which is fine since they get labels
+# in Prometheus.
+PROMETHEUS_SENSORS = {}
+_add_prometheus_sensor('input_rate', 'Current input data rate in Bps', Gauge)
+_add_prometheus_sensor('output_rate', 'Current output data rate in Bps', Gauge)
+_add_prometheus_sensor('packets_captured', 'Total number of data dumps received', Counter)
+_add_prometheus_sensor('dumps', 'Total number of data dumps received', Counter)
 
 
 def to_trollius_future(tornado_future, loop=None):
@@ -151,8 +163,10 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                 logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(
                     self.host, self.ports['port'], self.name))
                 prefix = '{}.{}.'.format(self.subarray_name, self.logical_node.name)
+                labels = (self.subarray_name, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
-                    self.sdp_controller, prefix, PROMETHEUS_SENSORS,
+                    self.sdp_controller, prefix,
+                    PROMETHEUS_SENSORS, labels,
                     host=self.host, port=self.ports['port'])
                 try:
                     yield From(to_trollius_future(self.katcp_connection.start(), loop=self.loop))
