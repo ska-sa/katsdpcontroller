@@ -19,25 +19,24 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
     if beamformer_mode not in ['none', 'ptuse', 'hdf5_ssd', 'hdf5_ram']:
         raise ValueError('Unrecognised beamformer_mode ' + beamformer_mode)
     r = resources
-    c_stream = 'corr.baseline-correlation-products_spead'
+    c_stream = 'i0.baseline-correlation-products'
     telstate = '{}:{}'.format(r.get_host_ip('sdpmc'), r.get_port('redis'))
 
-    streams = "{}:visibility".format(c_stream[:-6].lower())
+    streams = "{}:visibility".format(c_stream.lower())
      # string containing a mapping from stream_name to stream_type.
      # This is temporary for AR1/1.5 and should be replaced by a
      # per stream sensor indicating type directly from the CBF
      # The .lower() is needed because CBF uses lower case in stream
      # specific sensor names, but reports stream names to CAM in mixed case.
-     # The [:-6] strips off the _spead suffix that sdpcontroller.py added.
     if beamformer_mode != 'none':
-        beams = ['corr.tied-array-channelised-voltage.0x', 'corr.tied-array-channelised-voltage.0y']
+        beams = ['i0.tied-array-channelised-voltage.0x', 'i0.tied-array-channelised-voltage.0y']
     else:
         beams = []
     for beam in beams:
         streams += ",{}:beamformer".format(beam)
      # we also include a reference to the fengine stream so
      # we can get n_samples_between_spectra
-    streams += ",antenna-channelised-voltage:fengine"
+    streams += ",i0.antenna-channelised-voltage:fengine"
 
     G = nx.DiGraph()
 
@@ -190,11 +189,11 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
      # spead data from camtospead to ingest node. For simulation this is hardcoded, as we have no control over camtospead
 
     if beamformer_mode == 'ptuse':
-        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('corr.tied-array-channelised-voltage.0x_spead'),
-                                                        'cbf_speady':r.get_multicast('corr.tied-array-channelised-voltage.0y_spead')})
+        G.add_edge('cbf.bf_output.1','sdp.bf_ingest.1',{'cbf_speadx':r.get_multicast('i0.tied-array-channelised-voltage.0x'),
+                                                        'cbf_speady':r.get_multicast('i0.tied-array-channelised-voltage.0y')})
     elif beamformer_mode != 'none':
         for i in range(2):
-            stream = 'corr.tied-array-channelised-voltage.0{}_spead'.format('xy'[i])
+            stream = 'i0.tied-array-channelised-voltage.0{}'.format('xy'[i])
             G.add_edge('cbf.bf_output.{}'.format(i+1), 'sdp.bf_ingest.{}'.format(i+1), {
                 'cbf_spead': '{}:{}'.format(r.get_multicast_ip(stream), r.get_port(stream))
             })
