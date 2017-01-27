@@ -79,7 +79,7 @@ if __name__ == "__main__":
     parser.add_argument('-v', '--verbose', dest='verbose', default=False,
                         action='store_true',
                         help='print verbose output (default: %(default)s)')
-    parser.add_argument('master', help='Zookeeper URL for discovering Mesos master')
+    parser.add_argument('master', help='Zookeeper URL for discovering Mesos master e.g. zk://server.domain:2181/mesos')
     opts = parser.parse_args()
 
     def die(msg=None):

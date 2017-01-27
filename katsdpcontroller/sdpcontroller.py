@@ -44,19 +44,17 @@ faulthandler.register(signal.SIGUSR2, all_threads=True)
 class State(scheduler.OrderedEnum):
     UNCONFIGURED = 0
     IDLE = 1
-    INIT_WAIT = 2
-    CAPTURING = 3
-    CAPTURE_COMPLETE = 4
-    DONE = 5
+    INITIALISED = 2
+    DONE = 3
 
 TASK_STATES = {0:'init',1:'running',2:'killed'}
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 
 
 def to_tornado_future(trollius_future, loop):
-    """Wrapper around :func:`tornado.platform.asyncio.to_tornado_future` that
-    is a bit more robust: it allows taking a coroutine rather than a future,
-    it passes through error tracebacks, and if a future is cancelled it
+    """Modified version of :func:`tornado.platform.asyncio.to_tornado_future`
+    that is a bit more robust: it allows taking a coroutine rather than a
+    future, it passes through error tracebacks, and if a future is cancelled it
     properly propagates the CancelledError.
     """
     f = trollius.ensure_future(trollius_future, loop=loop)
@@ -265,8 +263,8 @@ class SDPGraph(object):
         self.subarray_name = name_parts[:-1] and "_".join(name_parts[:-1]) or "unknown"
          # make sure we have some subarray name even if not specified
         self.sdp_controller = sdp_controller
-        kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
-        self.logical_graph = katsdpgraphs.generator.build_logical_graph(**kwargs)
+        graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
+        self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         resolver.image_resolver.reread_tag_file()
          # pick up any updates to the tag file
         # generate physical nodes
@@ -424,8 +422,8 @@ class SDPSubarrayProductBase(object):
     def set_psb(self, psb_id):
         if self.psb_id > 0:
             return ('fail', 'An existing processing schedule block is already active. Please stop the subarray product before adding a new one.')
-        if self.state < State.INIT_WAIT:
-            return ('fail','The subarray product specified has not yet be inited. Please do this before init post processing.')
+        if self.state < State.INITIALISED:
+            return ('fail','The subarray product specified has not yet been inited. Please do this before init post processing.')
         self.psb_id = psb_id
         time.sleep(2) # simulation
         return ('ok','Post processing has been initialised')
@@ -471,16 +469,16 @@ class SDPSubarrayProductBase(object):
         protection against concurrent state changes. The operations needed to
         actually change the state are implemented in :meth:`_set_state`.
 
-        This can only be used to set state INIT_WAIT and DONE.
+        This can only be used to set state INITIALISED and DONE.
         """
         if self._async_busy:
             raise FailReply('Subarray product is busy with an operation. '
                             'Please wait for it to complete')
         # TODO: check that state change is allowed.
         if state == State.DONE:
-            if self.state < State.INIT_WAIT:
+            if self.state < State.INITIALISED:
                 raise FailReply('Can only halt subarray_products that have been inited')
-        elif state == State.INIT_WAIT:
+        elif state == State.INITIALISED:
             if self.state != State.IDLE:
                 raise FailReply('Subarray product is currently in state {}, not IDLE as expected. '
                                 'Cannot be inited.'.format(self.state.name))
@@ -575,7 +573,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _start(self):
         """Move to capturing state"""
-        yield From(self.exec_transitions(State.INIT_WAIT))
+        yield From(self.exec_transitions(State.INITIALISED))
         if self.simulate:
             logger.info("SIMULATE: Issuing a capture-start to the simulator")
             try:
@@ -606,12 +604,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     def _set_state(self, state):
         """The meat of the problem. Handles starting and stopping processes and echo'ing requests."""
         logger.info("Switching state to {} from state {}".format(state.name, self.state.name))
-        if state == State.INIT_WAIT:
+        if state == State.INITIALISED:
             yield From(self._start())
         elif state == State.DONE:
             yield From(self._stop())
         elif state == State.UNCONFIGURED:
-            if self.state == State.INIT_WAIT:
+            if self.state == State.INITIALISED:
                 try:
                     yield From(self._stop())
                 except Exception as error:
@@ -909,7 +907,9 @@ class SDPControllerServer(AsyncDeviceServer):
             raise gen.Return(('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id)))
 
         if self._conf_future:
-            raise gen.Return(('fail',"A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure."))
+            msg = "A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure."
+            logger.warn(msg)
+            raise gen.Return(('fail',msg))
          # we are only going to allow a single conf/deconf at a time
 
         try:
@@ -1140,9 +1140,9 @@ class SDPControllerServer(AsyncDeviceServer):
              # this is a use-once set of overrides
             logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
             additional_config.update(odict)
+        logger.debug("Telstate configured. Base parameters {}".format(base_params))
 
         if self.interface_mode:
-            logger.debug("Telstate configured. Base parameters {}".format(base_params))
             logger.warning("No components will be started - running in interface mode")
             product = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
             self.subarray_products[subarray_product_id] = product
@@ -1209,7 +1209,7 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        yield to_tornado_future(sa.set_state(State.INIT_WAIT), loop=self.loop)
+        yield to_tornado_future(sa.set_state(State.INITIALISED), loop=self.loop)
         raise gen.Return(('ok','SDP ready'))
 
     @request(Str(optional=True))

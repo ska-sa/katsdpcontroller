@@ -60,7 +60,7 @@ def build_logical_graph(beamformer_mode, cbf_channels, simulate):
     config_vol = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
     scratch_vol = scheduler.VolumeRequest('scratch', '/data', 'RW')
 
-    capture_transitions = {State.INIT_WAIT: 'capture-init', State.DONE: 'capture-done'}
+    capture_transitions = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 
     # Multicast groups
     bcp_spead = LogicalMulticast('corr.baseline-correlation-products_spead')

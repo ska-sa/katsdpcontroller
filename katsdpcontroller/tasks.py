@@ -45,7 +45,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self.sensors = {}
          # list of exposed KATCP sensors
 
-    def add_sensor(self, sensor):
+    def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
            track it locally.
         """
@@ -56,7 +56,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             logger.warning("Attempted to add sensor {} to node {}, but the node has "
                            "no SDP controller available.".format(sensor.name, self.name))
 
-    def remove_sensors(self):
+    def _remove_sensors(self):
         """Removes all attached sensors. It does *not* send an
         ``interface-changed`` inform; that is left to the caller.
         """
@@ -72,7 +72,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         killed and again when it actually dies.
         """
         if self.sensors:
-            self.remove_sensors()
+            self._remove_sensors()
             self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
 
     def kill(self, driver):
@@ -85,7 +85,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         s_name = "{}.{}.version".format(self.subarray_name, self.logical_node.name)
         version_sensor = Sensor(Sensor.STRING, s_name, "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
-        self.add_sensor(version_sensor)
+        self._add_sensor(version_sensor)
         # Provide info about which container this is for logspout to collect
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
             {'key': 'label',
@@ -130,7 +130,7 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
         # could lead to extra interface-changed informs.
         need_inform = False
         if self.sensors:
-            self.remove_sensors()
+            self._remove_sensors()
             need_inform = True
         if self.katcp_connection is not None:
             try:
@@ -156,6 +156,18 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                     host=self.host, port=self.ports['port'])
                 try:
                     yield From(to_trollius_future(self.katcp_connection.start(), loop=self.loop))
+                    # The design of wait_ready is that it shouldn't time out,
+                    # instead relying on higher-level timeouts to decide
+                    # whether to cancel it. We use a timeout here, together
+                    # with the while True loop, rather than letting
+                    # until_synced run forever, because Tornado futures have no
+                    # concept of cancellation. If wait_ready is called, then it will
+                    # stop the connection immediately, but the Tornado future
+                    # will hang around until it times out.
+                    #
+                    # Timing out also allows recovery if the TCP connection
+                    # some gets wedged badly enough that katcp can't recover
+                    # itself.
                     yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
                      # some katcp connections, particularly to ingest can take a while to establish
                     return
@@ -165,6 +177,8 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                      # no need for these to lurk around
                     logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
                                  self.name, self.host, self.ports['port'], exc_info=True)
+                    # Sleep for a bit to avoid hammering the port if there
+                    # is a quick failure, before trying again.
                     yield From(trollius.sleep(1.0, loop=self.loop))
 
     def resolve(self, resolver, graph):

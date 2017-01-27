@@ -112,7 +112,7 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
-        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","INIT_WAIT")))
+        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","INITIALISED")))
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
 
     def test_capture_done(self):
@@ -435,7 +435,7 @@ class TestSDPController(unittest.TestCase):
         # Check that the subarray still exists and has the right state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa._async_busy)
-        self.assertEqual(State.INIT_WAIT, sa.state)
+        self.assertEqual(State.INITIALISED, sa.state)
 
     def test_data_product_reconfigure(self):
         """Checks success path of data_product_reconfigure"""
@@ -492,7 +492,7 @@ class TestSDPController(unittest.TestCase):
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa._async_busy)
-        self.assertEqual(State.INIT_WAIT, sa.state)
+        self.assertEqual(State.INITIALISED, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         katcp_client.future_request.assert_has_calls([
@@ -512,7 +512,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(State.INIT_WAIT, sa.state)
+        self.assertEqual(State.INITIALISED, sa.state)
 
     def _test_capture_busy(self, command, *args):
         """Test that a command fails if issued while a ?capture-init is in progress"""
@@ -540,7 +540,7 @@ class TestSDPController(unittest.TestCase):
             raise ValueError('Could not find ingest node')
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        self.assertEqual(State.INIT_WAIT, sa.state)
+        self.assertEqual(State.INITIALISED, sa.state)
 
     def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -637,7 +637,7 @@ class TestSDPController(unittest.TestCase):
         informs = [tuple(msg.arguments) for msg in informs]
         self.assertEqual(AnyOrderList([
             (SUBARRAY_PRODUCT1, 'IDLE'),
-            (SUBARRAY_PRODUCT2, 'INIT_WAIT')
+            (SUBARRAY_PRODUCT2, 'INITIALISED')
         ]), informs)
 
     def test_capture_status_one(self):
@@ -650,7 +650,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds('capture-init', SUBARRAY_PRODUCT1)
         reply, informs = self.client.blocking_request(
             Message.request('capture-status', SUBARRAY_PRODUCT1))
-        self.assertEqual(reply.arguments, ['ok', 'INIT_WAIT'])
+        self.assertEqual(reply.arguments, ['ok', 'INITIALISED'])
         self.client.assert_request_succeeds('capture-done', SUBARRAY_PRODUCT1)
         reply, informs = self.client.blocking_request(
             Message.request('capture-status', SUBARRAY_PRODUCT1))
