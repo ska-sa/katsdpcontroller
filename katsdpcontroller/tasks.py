@@ -50,7 +50,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_name, subarray_product_id):
         super(SDPPhysicalTaskBase, self).__init__(logical_task, loop)
-        self.name = logical_task.name + '-' + subarray_name
+        self.name = '{}.{}'.format(subarray_name, logical_task.name)
         self.sdp_controller = sdp_controller
         self.subarray_name = subarray_name
         self.subarray_product_id = subarray_product_id
@@ -94,7 +94,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
     def resolve(self, resolver, graph):
         super(SDPPhysicalTaskBase, self).resolve(resolver, graph)
-        s_name = "{}.{}.version".format(self.subarray_name, self.logical_node.name)
+        s_name = "{}.version".format(self.name)
         version_sensor = Sensor(Sensor.STRING, s_name, "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
         self._add_sensor(version_sensor)
@@ -162,7 +162,7 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
             while True:
                 logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(
                     self.host, self.ports['port'], self.name))
-                prefix = '{}.{}.'.format(self.subarray_name, self.logical_node.name)
+                prefix = self.name + '.'
                 labels = (self.subarray_name, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
