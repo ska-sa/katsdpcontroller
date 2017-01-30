@@ -39,7 +39,7 @@ class PrometheusObserver(object):
             self._old_value = value
 
     def close(self):
-        """Shut down observing and deregister the gauge"""
+        """Shut down observing"""
         self._sensor.detach(self)
         self._status_metric.set(katcp.Sensor.UNREACHABLE)
 
