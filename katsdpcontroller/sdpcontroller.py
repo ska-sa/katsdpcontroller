@@ -678,11 +678,13 @@ class SDPControllerServer(AsyncDeviceServer):
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, interface_mode=False,
-                 graph_resolver=None, image_resolver_factory=None, **kwargs):
+                 graph_resolver=None, image_resolver_factory=None,
+                 gui_urls=None, **kwargs):
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
         self._device_status_sensor = Sensor(Sensor.DISCRETE, "device-status", "Devices status of the SDP Master Controller", "", ["ok", "degraded", "fail"])
+        self._gui_urls_sensor = Sensor(Sensor.STRING, "gui-urls", "Links to associated GUIs", "")
         self._fmeca_sensors = {}
         self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
          # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
@@ -697,6 +699,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self.sched = sched
         self.components = {}
          # dict of currently managed SDP components
+        self.gui_urls = gui_urls if gui_urls is not None else []
         self._conf_future = None
          # track async product configure request to avoid handling more than one at a time
 
@@ -732,6 +735,8 @@ class SDPControllerServer(AsyncDeviceServer):
         self.add_sensor(self._api_version_sensor)
         self._device_status_sensor.set_value('ok')
         self.add_sensor(self._device_status_sensor)
+        self._gui_urls_sensor.set_value(json.dumps(self.gui_urls))
+        self.add_sensor(self._gui_urls_sensor)
 
         self._ntp_sensor.set_value('0')
         self._ntp_sensor.set_read_callback(self._check_ntp_status)
