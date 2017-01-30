@@ -256,24 +256,27 @@ class TestTaskState(object):
 
 class TestImageResolver(object):
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
-    def test_simple(self):
+    @run_with_event_loop
+    def test_simple(self, loop):
         """Test the base case"""
         resolver = scheduler.ImageResolver()
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('sdp/test1:latest', resolver('test1'))
-        assert_equal('sdp/test1:tagged', resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        assert_equal('sdp/test1:latest', (yield From(resolver('test1', loop))))
+        assert_equal('sdp/test1:tagged', (yield From(resolver('test1:tagged', loop))))
+        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
 
-    def test_private_registry(self):
+    @run_with_event_loop
+    def test_private_registry(self, loop):
         """Test with a private registry"""
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:latest', resolver('test1'))
-        assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        assert_equal('my-registry:5000/test1:latest', (yield From(resolver('test1', loop))))
+        assert_equal('my-registry:5000/test1:tagged', (yield From(resolver('test1:tagged', loop))))
+        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
 
     @mock.patch('docker.auth.load_config', autospec=True)
-    def test_private_registry_digests(self, load_config_mock):
+    @run_with_event_loop
+    def test_private_registry_digests(self, load_config_mock, loop):
         """Test with a private registry, looking up a digest"""
         digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
         # Based on an actual registry response
@@ -315,20 +318,21 @@ class TestImageResolver(object):
                 }
             }
             resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
-            image = resolver('myimage')
+            image = yield From(resolver('myimage', loop))
         assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
     @mock.patch('__builtin__.open', autospec=file)
-    def test_tag_file(self, open_mock):
+    @run_with_event_loop
+    def test_tag_file(self, open_mock, loop):
         """Test with a tag file"""
         open_mock.return_value.__enter__.return_value.read.return_value = b'tag1\n'
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
                                            tag_file='tag_file', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         open_mock.assert_called_once_with('tag_file', 'r')
-        assert_equal('my-registry:5000/test1:tag1', resolver('test1'))
-        assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', resolver('foo'))
+        assert_equal('my-registry:5000/test1:tag1', (yield From(resolver('test1', loop))))
+        assert_equal('my-registry:5000/test1:tagged', (yield From(resolver('test1:tagged', loop))))
+        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
 
     @mock.patch('__builtin__.open', autospec=file)
     def test_bad_tag_file(self, open_mock):

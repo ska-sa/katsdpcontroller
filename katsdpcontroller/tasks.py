@@ -94,8 +94,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self._disconnect()
         super(SDPPhysicalTaskBase, self).kill(driver)
 
-    def resolve(self, resolver, graph):
-        super(SDPPhysicalTaskBase, self).resolve(resolver, graph)
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop))
         # Add some useful sensors
         version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
@@ -202,8 +203,9 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                     # is a quick failure, before trying again.
                     yield From(trollius.sleep(1.0, loop=self.loop))
 
-    def resolve(self, resolver, graph):
-        super(SDPPhysicalTask, self).resolve(resolver, graph)
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(SDPPhysicalTask, self).resolve(resolver, graph, loop))
         config = graph.node[self].get('config', lambda resolver_: {})(resolver)
         for r in scheduler.RANGE_RESOURCES:
             for name, value in six.iteritems(getattr(self, r)):

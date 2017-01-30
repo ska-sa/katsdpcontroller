@@ -592,11 +592,12 @@ class ImageResolver(object):
     def override(self, name, path):
         self._overrides[name] = path
 
-    def __call__(self, name):
+    @trollius.coroutine
+    def __call__(self, name, loop):
         if name in self._overrides:
-            return self._overrides[name]
+            raise Return(self._overrides[name])
         elif name in self._cache:
-            return self._cache[name]
+            raise Return(self._cache[name])
 
         orig_name = name
         colon = name.rfind(':')
@@ -604,44 +605,58 @@ class ImageResolver(object):
             # A tag was already specified in the graph
             logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
             tag = name[colon + 1:]
-            name = name[:colon]
+            repo = name[:colon]
         else:
             tag = self._tag
+            repo = name
 
         if self._private_registry is None:
-            resolved = 'sdp/{}:{}'.format(name, tag)
+            resolved = 'sdp/{}:{}'.format(repo, tag)
         elif self._use_digests:
             # TODO: see if it's possible to do some connection pooling
             # here. That probably requires the caller to initiate a
             # Session and close it when done.
-            url = '{}/v2/{}/manifests/{}'.format(self._private_registry, name, tag)
+            url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
             if not url.startswith('http'):
                 # If no scheme is specified, assume https
                 url = 'https://' + url
-            # Use a low timeout, because we're likely to be running in the
-            # asyncio event loop.
+            # Use a low timeout, so that we don't wedge the entire launch if
+            # there is a connection problem.
             kwargs = dict(
                 headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
                 auth=self._auth,
                 timeout=5)
             if os.path.exists('/etc/ssl/certs/ca-certificates.crt'):
                 kwargs['verify'] = '/etc/ssl/certs/ca-certificates.crt'
-            response = requests.head(url, **kwargs)
-            try:
-                response.raise_for_status()
-                digest = response.headers['Docker-Content-Digest']
-                resolved = '{}/{}@{}'.format(self._private_registry, name, digest)
-            except requests.exceptions.RequestException as error:
-                six.raise_from(ImageError('Failed to get digest from {}'.format(url)), error)
-            except KeyError:
-                raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-            finally:
-                response.close()
+
+            def do_request():
+                response = None
+                try:
+                    response = requests.head(url, **kwargs)
+                    response.raise_for_status()
+                    return response.headers['Docker-Content-Digest']
+                except requests.exceptions.RequestException as error:
+                    six.raise_from(ImageError('Failed to get digest from {}'.format(url)), error)
+                except KeyError:
+                    raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+                finally:
+                    if response is not None:
+                        response.close()
+
+            digest = yield From(loop.run_in_executor(None, do_request))
+            resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
         else:
-            resolved = '{}/{}:{}'.format(self._private_registry, name, tag)
-        logger.debug('ImageResolver resolved %s to %s', name, resolved)
-        self._cache[name] = resolved
-        return resolved
+            resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
+        if name in self._cache:
+            # Another asynchronous caller beat us to it. Use the value
+            # that caller put in the cache so that calls with the same
+            # name always return the same value.
+            resolved = self._cache[name]
+            logger.debug('ImageResolver race detected resolving %s to %s', name, resolved)
+        else:
+            logger.debug('ImageResolver resolved %s to %s', name, resolved)
+            self._cache[name] = resolved
+        raise Return(resolved)
 
 
 class ImageResolverFactory(object):
@@ -1151,7 +1166,8 @@ class PhysicalNode(object):
         self.loop = loop
         self._ready_waiter = None
 
-    def resolve(self, resolver, graph):
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
         """Make final preparations immediately before starting.
 
         Parameters
@@ -1160,6 +1176,8 @@ class PhysicalNode(object):
             Resolver for images etc.
         graph : :class:`networkx.MultiDiGraph`
             Physical graph containing the task
+        loop : :class:`trollius.BaseEventLoop`
+            Current event loop
         """
         pass
 
@@ -1337,7 +1355,8 @@ class PhysicalTask(PhysicalNode):
                     d[name] = value
             setattr(self, r, d)
 
-    def resolve(self, resolver, graph):
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
@@ -1367,7 +1386,7 @@ class PhysicalTask(PhysicalNode):
             taskinfo.command.arguments = command[1:]
         taskinfo.command.shell = False
         taskinfo.container = copy.deepcopy(self.logical_node.container)
-        image_path = resolver.image_resolver(self.logical_node.image)
+        image_path = yield From(resolver.image_resolver(self.logical_node.image, loop))
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
@@ -1705,7 +1724,7 @@ class Scheduler(pymesos.Scheduler):
                         node.allocate(allocation)
                     logger.debug('Performing resolution')
                     for node in nodes:
-                        node.resolve(group.resolver, group.graph)
+                        yield From(node.resolve(group.resolver, group.graph, self._loop))
                     # Launch the tasks
                     new_min_ports = {}
                     taskinfos = {agent: [] for agent in agents}

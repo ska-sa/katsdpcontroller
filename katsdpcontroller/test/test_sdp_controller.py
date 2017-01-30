@@ -300,7 +300,7 @@ class TestSDPController(unittest.TestCase):
                 node.allocation.agent.host = 'host.' + node.logical_node.name
         for node in nodes:
             if node.state < scheduler.TaskState.RUNNING:
-                node.resolve(resolver, graph)
+                yield From(node.resolve(resolver, graph, self.loop))
                 if node.logical_node.name in self.fail_launches:
                     node.set_state(scheduler.TaskState.DEAD)
                     # This may need to be fleshed out if sdp_controller looks
@@ -321,7 +321,8 @@ class TestSDPController(unittest.TestCase):
         else:
             kill_graph = graph
         for node in kill_graph:
-            node.kill(self.driver)
+            if scheduler.TaskState.STARTED <= node.state < scheduler.TaskState.KILLED:
+                node.kill(self.driver)
             node.set_state(scheduler.TaskState.DEAD)
 
     def _future_request(self, msg, *args, **kwargs):
