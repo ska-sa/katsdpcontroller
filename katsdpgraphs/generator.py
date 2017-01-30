@@ -152,6 +152,11 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
+    timeplot.gui_urls = [{
+        'label': 'Signal Display',
+        'description': 'Signal displays for {0.subarray_name}',
+        'href': 'http://{0.host}:{0.ports[html_port]}/'
+    }]
 
     # ingest nodes
     n_ingest = 1
