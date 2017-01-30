@@ -106,15 +106,15 @@ if __name__ == "__main__":
     # does not block the IOLoop.
     tornado.netutil.Resolver.configure('tornado.netutil.ThreadedResolver')
 
-    image_resolver = scheduler.ImageResolver(
-            private_registry=opts.private_registry or None,
-            tag_file=opts.image_tag_file,
-            use_digests=not opts.no_pull)
+    image_resolver_factory = scheduler.ImageResolverFactory(
+        private_registry=opts.private_registry or None,
+        tag_file=opts.image_tag_file,
+        use_digests=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:
             die("--image-override option must have a colon")
-        image_resolver.override(fields[0], fields[1])
+        image_resolver_factory.override(fields[0], fields[1])
 
     for override in opts.graph_override:
         if len(override.split(':', 1)) < 2:
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         opts.host, opts.port, sched, loop,
         simulate=opts.simulate,
         interface_mode=opts.interface_mode,
-        image_resolver=image_resolver,
+        image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr)
 

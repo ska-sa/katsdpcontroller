@@ -329,10 +329,6 @@ class TestImageResolver(object):
         assert_equal('my-registry:5000/test1:tag1', resolver('test1'))
         assert_equal('my-registry:5000/test1:tagged', resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', resolver('foo'))
-        open_mock.return_value.__enter__.return_value.read.return_value = b'tag2\n'
-        resolver.reread_tag_file()
-        resolver.clear_cache()
-        assert_equal('my-registry:5000/test1:tag2', resolver('test1'))
 
     @mock.patch('__builtin__.open', autospec=file)
     def test_bad_tag_file(self, open_mock):

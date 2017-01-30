@@ -556,7 +556,6 @@ class ImageResolver(object):
         Address (hostname and port) for a private registry
     tag_file : str, optional
         If specified, the file will be read to determine the image tag to use.
-        It can be re-read by calling :meth:`reread_tag_file`.
         It does not affect overrides, to allow them to specify their own tags.
     use_digests : bool, optional
         Whether to look up the latest digests from the `registry`. If this is
@@ -564,12 +563,22 @@ class ImageResolver(object):
     """
     def __init__(self, private_registry=None, tag_file=None, use_digests=True):
         self._tag_file = tag_file
-        self._tag = None
         self._private_registry = private_registry
         self._overrides = {}
         self._cache = {}
         self._use_digests = use_digests
-        self.reread_tag_file()
+        if self._tag_file is None:
+            self._tag = 'latest'
+        else:
+            with open(self._tag_file, 'r') as f:
+                self._tag = f.read().strip()
+                # This is a regex that appeared in older versions of Docker
+                # (see https://github.com/docker/docker/pull/8447/files).
+                # It's probably a reasonable constraint so that we don't allow
+                # whitespace, / and other nonsense, even if Docker itself no
+                # longer enforces it.
+                if not re.match(r'^[\w][\w.-]{0,127}$', self._tag):
+                    raise ValueError('Invalid tag {} in {}'.format(repr(self._tag), self._tag_file))
         if use_digests and private_registry is not None:
             authconfig = docker.auth.load_config()
             authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
@@ -579,26 +588,6 @@ class ImageResolver(object):
                 self._auth = (authdata['username'], authdata['password'])
         else:
             self._auth = None
-
-    def reread_tag_file(self):
-        if self._tag_file is None:
-            self._tag = 'latest'
-        else:
-            with open(self._tag_file, 'r') as f:
-                tag = f.read().strip()
-                # This is a regex that appeared in older versions of Docker
-                # (see https://github.com/docker/docker/pull/8447/files).
-                # It's probably a reasonable constraint so that we don't allow
-                # whitespace, / and other nonsense, even if Docker itself no
-                # longer enforces it.
-                if not re.match(r'^[\w][\w.-]{0,127}$', tag):
-                    raise ValueError('Invalid tag {} in {}'.format(repr(tag), self._tag_file))
-                if self._tag is not None and tag != self._tag:
-                    logger.warn("Image tag changed: %s -> %s", self._tag, tag)
-                self._tag = tag
-
-    def clear_cache(self):
-        self._cache = {}
 
     def override(self, name, path):
         self._overrides[name] = path
@@ -653,6 +642,30 @@ class ImageResolver(object):
         logger.debug('ImageResolver resolved %s to %s', name, resolved)
         self._cache[name] = resolved
         return resolved
+
+
+class ImageResolverFactory(object):
+    """Factory for generating image resolvers. An :class:`ImageResolver`
+    caches lookups, so it is useful to be able to generate a new one to
+    receive fresh information.
+
+    See :class:`ImageResolver` for an explanation of the constructor
+    arguments and :meth:`~ImageResolver.override`.
+    """
+    def __init__(self, private_registry=None, tag_file=None, use_digests=True):
+        self._tag_file = tag_file
+        self._private_registry = private_registry
+        self._use_digests = use_digests
+        self._overrides = {}
+
+    def override(self, name, path):
+        self._overrides[name] = path
+
+    def __call__(self):
+        image_resolver = ImageResolver(self._private_registry, self._tag_file, self._use_digests)
+        for name, path in six.iteritems(self._overrides):
+            image_resolver.override(name, path)
+        return image_resolver
 
 
 class TaskIDAllocator(object):
