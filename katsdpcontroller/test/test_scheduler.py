@@ -1243,13 +1243,19 @@ class TestScheduler(object):
             assert_equal(TaskState.DEAD, node.state)
         for node in physical_graph2:
             assert_equal(TaskState.DEAD, node.state)
+        # The timing of suppressOffers is undefined, because it depends on the
+        # order in which the graphs are killed. However, it must occur
+        # after the initial reviveOffers and before stopping the driver.
+        assert_in(mock.call.suppressOffers(), self.driver.mock_calls)
+        pos = self.driver.mock_calls.index(mock.call.suppressOffers())
+        assert_true(1 <= pos < len(self.driver.mock_calls) - 2)
+        del self.driver.mock_calls[pos]
         assert_equal([
             mock.call.reviveOffers(),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status1),
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status0),
-            mock.call.suppressOffers(),
             mock.call.stop(),
             mock.call.join()
             ], self.driver.mock_calls)
