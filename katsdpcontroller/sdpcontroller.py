@@ -1342,7 +1342,7 @@ class SDPControllerServer(AsyncDeviceServer):
         yield to_tornado_future(
             self.subarray_products[subarray_product_id].set_state(State.DONE),
             loop=self.loop)
-        raise Return(('ok', 'capture complete'))
+        raise gen.Return(('ok', 'capture complete'))
 
     @async_request
     @request()
