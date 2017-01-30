@@ -164,9 +164,37 @@ INTERFACES_SCHEMA = {
                 'type': 'number',
                 'minimum': 0.0,
                 'exclusiveMinimum': True
+            },
+            'infiniband_devices': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                    'minLength': 1
+                }
             }
         },
         'required': ['name', 'network', 'ipv4_address']
+    }
+}
+VOLUMES_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'object',
+        'properties': {
+            'name': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'host_path': {
+                'type': 'string',
+                'minLength': 1
+            },
+            'numa_node': {
+                'type': 'integer',
+                'minimum': 0
+            }
+        },
+        'required': ['name', 'host_path']
     }
 }
 GPUS_SCHEMA = {
@@ -206,7 +234,7 @@ GPUS_SCHEMA = {
 logger = logging.getLogger(__name__)
 
 
-Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node', 'speed'])
+Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node', 'speed', 'infiniband_devices'])
 """Abstraction of a network interface on a machine.
 
 Interfaces are defined by setting the Mesos attribute
@@ -225,8 +253,26 @@ numa_node : int, optional
     Index of the NUMA socket to which the NIC is connected
 speed : float, optional
     Speed (in bits per second) of the interface
+infiniband_devices : list of str
+    Device inodes that should be passed into Docker containers to use Infiniband libraries
 """
 
+Volume = namedtuple('Volume', ['name', 'host_path', 'numa_node'])
+"""Abstraction of a host path offered by an agent.
+
+Volumes are defined by setting the Mesos attribute
+:code:`katsdpcontroller.volumes`, whose value is a JSON string that adheres
+to the schema in :const:`VOLUMES_SCHEMA`.
+
+Attributes
+----------
+name : str
+    A logical name that indicates the purpose of the path
+host_path : str
+    Path on the host machine
+numa_node : int, optional
+    Index of the NUMA socket to which the storage is connected
+"""
 
 class GPURequest(object):
     """Request for resources on a single GPU. These resources are not isolated,
@@ -261,18 +307,51 @@ class NetworkRequest(object):
     ----------
     network : str
         Logical network name
+    infiniband : bool
+        If true, the device must support Infiniband APIs (e.g. ibverbs), and
+        the corresponding devices will be passed through.
     affinity : bool
         If true, the network device must be on the same NUMA node as the chosen
         CPU cores (ignored if no CPU cores are reserved).
     """
-    def __init__(self, network):
+    def __init__(self, network, infiniband=False, affinity=False):
         self.network = network
-        self.affinity = False
+        self.infiniband = infiniband
+        self.affinity = affinity
 
     def matches(self, interface, numa_node):
         if self.affinity and numa_node is not None and interface.numa_node != numa_node:
             return False
+        if self.infiniband and not interface.infiniband_devices:
+            return False
         return self.network == interface.network
+
+
+class VolumeRequest(object):
+    """Request to mount a host directory on the agent.
+
+    Attributes
+    ----------
+    name : str
+        Logical name advertised by the agent
+    container_path : str
+        Mount point inside the container
+    mode : {'RW', 'RO'}
+        Read-write or Read-Only mode
+    affinity : bool
+        If true, the storage must be on the same NUMA node as the chosen
+        CPU cores (ignored if no CPU cores are reserved).
+    """
+    def __init__(self, name, container_path, mode, affinity=False):
+        self.name = name
+        self.container_path = container_path
+        self.mode = mode
+        self.affinity = affinity
+
+    def matches(self, volume, numa_node):
+        if self.affinity and numa_node is not None and volume.numa_node != numa_node:
+            return False
+        return volume.name == self.name
 
 
 class OrderedEnum(Enum):
@@ -443,6 +522,7 @@ class ResourceAllocation(object):
             setattr(self, r, [])
         self.gpus = [GPUResourceAllocation() for gpu in agent.gpus]
         self.interfaces = []
+        self.volumes = []
 
 
 class ImageResolver(object):
@@ -660,6 +740,7 @@ class LogicalTask(LogicalNode):
             setattr(self, r, [])
         self.gpus = []
         self.networks = []
+        self.volumes = []
         self.image = None
         self.command = []
         self.container = Dict()
@@ -716,6 +797,7 @@ class Agent(ResourceCollector):
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
+        self.volumes = []
         self.gpus = []
         self.numa = []
         for attribute in offers[0].attributes:
@@ -730,8 +812,19 @@ class Agent(ResourceCollector):
                             network=item['network'],
                             ipv4_address=ipaddress.IPv4Address(item['ipv4_address']),
                             numa_node=item.get('numa_node'),
-                            speed=item.get('speed')))
+                            speed=item.get('speed'),
+                            infiniband_devices=item.get('infiniband_devices', [])))
                     self.interfaces = interfaces
+                elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    jsonschema.validate(value, VOLUMES_SCHEMA)
+                    volumes = []
+                    for item in value:
+                        volumes.append(Volume(
+                            name=item['name'],
+                            host_path=item['host_path'],
+                            numa_node=item.get('numa_node')))
+                    self.volumes = volumes
                 elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     jsonschema.validate(value, GPUS_SCHEMA)
@@ -792,6 +885,14 @@ class Agent(ResourceCollector):
                 else:
                     raise InsufficientResourcesError(
                         'Network {} not present on NUMA node {}'.format(request.network, numa_node))
+        # Match volume requests to volumes
+        for request in logical_task.volumes:
+            if not any(request.matches(volume, numa_node) for volume in self.volumes):
+                if not any(request.matches(volume, None) for volume in self.volumes):
+                    raise InsufficientResourcesError('Volume {} not present'.format(request.name))
+                else:
+                    raise InsufficientResourcesError(
+                        'Volume {} not present on NUMA node {}'.format(request.name, numa_node))
 
         # Match GPU requests to GPUs. At the moment this is very dumb,
         # assigning any GPU that will fit without any packing optimisation.
@@ -839,6 +940,9 @@ class Agent(ResourceCollector):
         for request in logical_task.networks:
             alloc.interfaces.append(next(interface for interface in self.interfaces
                                          if request.matches(interface, numa_node)))
+        for request in logical_task.volumes:
+            alloc.volumes.append(next(volume for volume in self.volumes
+                                      if request.matches(volume, numa_node)))
         for i, gpu in enumerate(self.gpus):
             if gpu_map[i] is not None:
                 for r in GPU_SCALAR_RESOURCES:
@@ -1126,8 +1230,8 @@ class PhysicalTask(PhysicalNode):
             Specific resources assigned to the task
         """
         self.allocation = allocation
-        for name, value in zip(self.logical_node.networks, self.allocation.interfaces):
-            self.interfaces[name] = value
+        for request, value in zip(self.logical_node.networks, self.allocation.interfaces):
+            self.interfaces[request.network] = value
         for r in RANGE_RESOURCES:
             d = {}
             for name, value in zip(getattr(self.logical_node, r), getattr(self.allocation, r)):
@@ -1190,8 +1294,20 @@ class PhysicalTask(PhysicalNode):
                     resource.ranges.range.append(Dict(begin=item, end=item))
                 taskinfo.resources.append(resource)
 
+        docker_devices = set()
+        docker_parameters = []
+
+        any_infiniband = False
+        for request, value in zip(self.logical_node.networks, self.allocation.interfaces):
+            if request.infiniband:
+                docker_devices.update(value.infiniband_devices)
+                any_infiniband = True
+        if any_infiniband:
+            # ibverbs uses memory mapping for DMA. Take away the default rlimit
+            # maximum since Docker tends to set a very low limit.
+            docker_parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
+
         gpu_driver_version = None
-        gpu_parameters = []
         for i, gpu_alloc in enumerate(self.allocation.gpus):
             for r in GPU_SCALAR_RESOURCES:
                 value = getattr(gpu_alloc, r)
@@ -1202,13 +1318,12 @@ class PhysicalTask(PhysicalNode):
                     resource.scalar.value = value
                     taskinfo.resources.append(resource)
             if gpu_alloc.compute > 0:
-                gpu_parameters.append({'key': 'device', 'value': self.agent.gpus[i].device})
+                docker_parameters.append({'key': 'device', 'value': self.agent.gpus[i].device})
                 # We assume all GPUs on an agent have the same driver version.
                 # This is reflected in the NVML API, so should be safe.
                 gpu_driver_version = self.agent.gpus[i].driver_version
         if gpu_driver_version is not None:
-            for device in ['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools']:
-                gpu_parameters.append({'key': 'device', 'value': device})
+            docker_devices.update(['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools'])
             volume = Dict()
             volume.mode = 'RO'
             volume.container_path = '/usr/local/nvidia'
@@ -1216,8 +1331,18 @@ class PhysicalTask(PhysicalNode):
             volume.source.docker_volume.driver = 'nvidia-docker'
             volume.source.docker_volume.name = 'nvidia_driver_' + gpu_driver_version
             taskinfo.container.setdefault('volumes', []).append(volume)
-        if gpu_parameters:
-            taskinfo.container.docker.setdefault('parameters', []).extend(gpu_parameters)
+
+        for device in docker_devices:
+            docker_parameters.append({'key': 'device', 'value': device})
+        if docker_parameters:
+            taskinfo.container.docker.setdefault('parameters', []).extend(docker_parameters)
+
+        for rvolume, avolume in zip(self.logical_node.volumes, self.allocation.volumes):
+            volume = Dict()
+            volume.mode = rvolume.mode
+            volume.container_path = rvolume.container_path
+            volume.host_path = avolume.host_path
+            taskinfo.container.setdefault('volumes', []).append(volume)
 
         taskinfo.discovery.visibility = 'EXTERNAL'
         taskinfo.discovery.name = self.name
@@ -1306,6 +1431,21 @@ class Scheduler(pymesos.Scheduler):
         self._offers = {}
         self._driver.suppressOffers()
 
+    @classmethod
+    def _node_sort_key(cls, physical_node):
+        """Sort key for nodes when launching.
+
+        Sort nodes. Those requiring core affinity are put first,
+        since they tend to be the trickiest to pack. Then order by
+        CPUs, GPUs, memory. Finally sort by name so that results
+        are more reproducible.
+        """
+        node = physical_node.logical_node
+        if isinstance(node, LogicalTask):
+            return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
+        else:
+            return (node.name,)
+
     def _try_launch(self):
         """Check whether it is possible to launch the next task group."""
         if self._offers:
@@ -1325,6 +1465,7 @@ class Scheduler(pymesos.Scheduler):
                 # algorithms e.g. Dominant Resource Fairness
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
                 agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
+                nodes.sort(key=self._node_sort_key, reverse=True)
                 allocations = []
                 for node in nodes:
                     allocation = None

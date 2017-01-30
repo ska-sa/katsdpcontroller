@@ -31,7 +31,9 @@ setup (
         'tornado',
         'katsdptelstate',
         'faulthandler',
-        'kazoo'
+        'kazoo',
+        'tornado>=4.3',
+        'prometheus_client'
     ],
     tests_require = tests_require,
     extras_require = {

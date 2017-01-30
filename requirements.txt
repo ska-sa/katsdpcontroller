@@ -3,7 +3,6 @@ backports-abc
 backports.ssl-match-hostname
 certifi
 decorator
-docker-py==1.8.1
 enum34
 faulthandler==2.4
 futures
@@ -24,6 +23,7 @@ pbr
 pkginfo
 ply
 pymesos==0.2.9
+prometheus_client==0.0.18
 ProxyTypes
 redis
 requests==2.8.1

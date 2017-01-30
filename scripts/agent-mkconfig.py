@@ -120,6 +120,34 @@ class HWLocParser(object):
         return out
 
 
+def infiniband_devices(interface):
+    """Return a list of device paths associated with a kernel network
+    interface, or an empty list if not an Infiniband device.
+
+    This is based on
+    https://github.com/amaumene/mlnx-en-dkms/blob/master/ofed_scripts/ibdev2netdev
+    plus inspection of /sys.
+    """
+    try:
+        with open('/sys/class/net/{}/device/resource'.format(interface)) as f:
+            resource = f.read()
+        for ibdev in os.listdir('/sys/class/infiniband'):
+            with open('/sys/class/infiniband/{}/device/resource'.format(ibdev)) as f:
+                ib_resource = f.read()
+            if ib_resource == resource:
+                # Found the matching device. Identify device inodes
+                devices = ['/dev/infiniband/rdma_cm']
+                for sub in ['infiniband_cm', 'infiniband_mad', 'infiniband_verbs']:
+                    path = '/sys/class/infiniband/{}/device/{}'.format(ibdev, sub)
+                    for item in os.listdir(path):
+                        device = '/dev/infiniband/' + item
+                        if os.path.exists(device):
+                            devices.append(device)
+                return devices
+    except IOError:
+        return []
+
+
 def collapse_ranges(values):
     values = sorted(values)
     out = []
@@ -150,7 +178,8 @@ def attributes_resources(args):
             raise RuntimeError(
                 'Error: --network argument {} does not have the format INTERFACE:NETWORK'
                 .format(network_spec))
-        config = {'name': interface, 'network': network}
+        config = {'name': interface, 'network': network,
+                  'infiniband_devices': infiniband_devices(interface)}
         try:
             config['ipv4_address'] = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
         except (KeyError, IndexError):
@@ -166,6 +195,28 @@ def attributes_resources(args):
             pass
         interfaces.append(config)
     attributes['katsdpcontroller.interfaces'] = interfaces
+
+    volumes = []
+    for volume_spec in args.volumes:
+        try:
+            fields = volume_spec.split(':', 2)
+            name = fields[0]
+            path = fields[1]
+            if len(fields) >= 3:
+                numa_node = int(fields[2])
+            else:
+                numa_node = None
+        except ValueError, IndexError:
+            raise RuntimeError(
+                'Error: --volume argument {} does not have the format NAME:PATH'
+                .format(volume_spec))
+        if not os.path.exists(path):
+            raise RuntimeError('Path {} does not exist'.format(path))
+        config = {'name': name, 'host_path': path}
+        if numa_node is not None:
+            config['numa_node'] = numa_node
+        volumes.append(config)
+    attributes['katsdpcontroller.volumes'] = volumes
 
     gpus = []
     for i, gpu in enumerate(hwloc.gpus()):
@@ -232,6 +283,9 @@ def main():
     parser.add_argument('--network', dest='networks', action='append', default=[],
                         metavar='INTERFACE:NETWORK',
                         help='Map network interface to a logical network')
+    parser.add_argument('--volume', dest='volumes', action='append', default=[],
+                        metavar='NAME:PATH[:NUMA]',
+                        help='Map host directory to a logical volume name')
     args = parser.parse_args()
 
     attributes, resources = attributes_resources(args)
