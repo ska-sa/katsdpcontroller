@@ -45,6 +45,7 @@ def to_trollius_future(tornado_future, loop=None):
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
         super(SDPLogicalTask, self).__init__(*args, **kwargs)
+        self.physical_factory = SDPPhysicalTask
         self.transitions = {}
 
 

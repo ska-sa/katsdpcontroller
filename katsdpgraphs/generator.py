@@ -330,7 +330,6 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
-            node.physical_factory = SDPPhysicalTask
             g.add_edge(node, telstate, port='telstate', order='strong')
     return g
 
