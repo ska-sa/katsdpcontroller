@@ -1362,12 +1362,11 @@ class SDPControllerServer(AsyncDeviceServer):
         yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
          # attempt to deconfigure any existing subarrays
          # will always succeed even if some deconfigure fails
-        # TODO: reimplement this
         try:
             master, slaves = yield to_tornado_future(
                 self.sched.get_master_and_slaves(timeout=5), loop=self.loop)
         except Exception as error:
-            logger.warning('Failed to get list of slaves, so not powering them off.', exc_info=True)
+            logger.error('Failed to get list of slaves, so not powering them off.', exc_info=True)
             raise FailReply('could not get a list of slaves to power off')
         # If for some reason two slaves are running on the same machine, do
         # not kill it twice.
