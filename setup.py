@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['mock', 'unittest2', 'nose']
+tests_require = ['mock', 'unittest2', 'nose', 'requests_mock']
 
 setup (
     name = "katsdpcontroller",
@@ -24,8 +24,10 @@ setup (
         'decorator',
         'jsonschema',
         'networkx',
+        'netifaces',
         'enum34',
         'ipaddress',
+        'requests',
         'six',
         'katcp',
         'tornado',

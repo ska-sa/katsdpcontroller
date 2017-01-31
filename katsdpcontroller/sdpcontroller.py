@@ -21,6 +21,7 @@ import networkx
 import six
 
 import ipaddress
+import netifaces
 import faulthandler
 
 from prometheus_client import Histogram
@@ -1361,8 +1362,68 @@ class SDPControllerServer(AsyncDeviceServer):
         yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
          # attempt to deconfigure any existing subarrays
          # will always succeed even if some deconfigure fails
-        # TODO: reimplement this
-        raise FailReply('sdp-shutdown not implemented')
+        try:
+            master, slaves = yield to_tornado_future(
+                self.sched.get_master_and_slaves(timeout=5), loop=self.loop)
+        except Exception as error:
+            logger.error('Failed to get list of slaves, so not powering them off.', exc_info=True)
+            raise FailReply('could not get a list of slaves to power off')
+        # If for some reason two slaves are running on the same machine, do
+        # not kill it twice.
+        slaves = list(set(slaves))
+        logger.info('Preparing to kill slaves: %s', ','.join(slaves))
+        # Build a graph to power off each slave
+        logical_graph = networkx.MultiDiGraph()
+        for slave in slaves:
+            logical_graph.add_node(tasks.PoweroffLogicalTask(slave))
+        physical_graph = scheduler.instantiate(logical_graph, self.loop)
+
+        # We want to avoid killing either the Mesos master or ourselves too
+        # early (usually but not always the same machine). Make a list of IP
+        # addresses for which we want to delay powering off.
+        master_addresses = set()
+        for interface in netifaces.interfaces():
+            ifaddresses = netifaces.ifaddresses(interface)
+            addresses = ifaddresses.get(netifaces.AF_INET, []) + \
+                        ifaddresses.get(netifaces.AF_INET6, [])
+            for entry in addresses:
+                address = entry.get('addr', '')
+                if address:
+                    master_addresses.add(address)
+        for (family, (address, port)) in (yield tornado.netutil.Resolver().resolve(master, 0)):
+            master_addresses.add(address)
+        logger.debug('Master IP addresses: %s', ','.join(master_addresses))
+        non_master = []
+        for node in physical_graph:
+            is_master = False
+            addresses = yield tornado.netutil.Resolver().resolve(node.logical_node.host, 0)
+            for (family, (address, port)) in addresses:
+                if address in master_addresses:
+                    is_master = True
+                    break
+            if not is_master:
+                non_master.append(node)
+
+        resolver = scheduler.Resolver(self.image_resolver, scheduler.TaskIDAllocator('poweroff-'))
+        # Shut down everything except the master/self
+        yield to_tornado_future(
+            self.sched.launch(physical_graph, resolver, non_master), loop=self.loop)
+        # Shut down the rest
+        yield to_tornado_future(
+            self.sched.launch(physical_graph, resolver), loop=self.loop)
+        # Check for failures. This won't detect everything (it's possible that
+        # the task will start running then fail), but handles cases like the
+        # agent having disappeared under us or failing to pull the image.
+        response = []
+        for node in physical_graph:
+            status = '(failed)'
+            if node.state >= scheduler.TaskState.RUNNING and \
+                    node.state <= scheduler.TaskState.READY:
+                status = '(shutting down)'
+            elif node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
+                status = ''
+            response.append(node.logical_node.host + status)
+        raise gen.Return(('ok', ','.join(response)))
 
     @time_request
     @request(include_msg=True)

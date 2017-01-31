@@ -6,6 +6,7 @@ import trollius
 from trollius import From, Return
 import tornado.concurrent
 from tornado import gen
+from addict import Dict
 from katcp import Sensor, Message
 from prometheus_client import Gauge, Counter
 from katsdptelstate.endpoint import Endpoint
@@ -227,3 +228,31 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
             logger.warning(msg)
         raise Return((reply, informs))
+
+
+class PoweroffLogicalTask(scheduler.LogicalTask):
+    """Logical task for powering off a machine."""
+    def __init__(self, host):
+        super(PoweroffLogicalTask, self).__init__('kibisis')
+        self.host = host
+        # Use minimal resources, to reduce chance it that it won't fit
+        self.cpus = 0.001
+        self.mem = 64
+        self.image = 'docker-base'
+        self.command = ['/sbin/poweroff']
+
+        # See https://groups.google.com/forum/#!topic/coreos-dev/AXCs_2_J6Mc
+        self.container.volumes = []
+        for path in ['/var/run/dbus', '/run/systemd']:
+            volume = Dict()
+            volume.mode = 'RW'
+            volume.container_path = path
+            volume.host_path = path
+            self.container.volumes.append(volume)
+        self.container.docker.parameters = []
+        self.container.docker.parameters.append({'key': 'user', 'value': 'root'})
+
+    def valid_agent(self, agent):
+        if not super(PoweroffLogicalTask, self).valid_agent(agent):
+            return False
+        return agent.host == self.host
