@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import logging
+import json
 import six
 import trollius
 from trollius import From, Return
@@ -45,7 +46,11 @@ def to_trollius_future(tornado_future, loop=None):
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
         super(SDPLogicalTask, self).__init__(*args, **kwargs)
+        self.physical_factory = SDPPhysicalTask
         self.transitions = {}
+        # List of dictionaries for a .gui-urls sensor. The fields are expanded
+        # using str.format(self).
+        self.gui_urls = []
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -101,6 +106,20 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
         self._add_sensor(version_sensor)
+
+        gui_urls = []
+        for entry in self.logical_node.gui_urls:
+            gui_urls.append({})
+            for key, value in six.iteritems(entry):
+                if isinstance(value, six.string_types):
+                    gui_urls[-1][key] = value.format(self)
+                else:
+                    gui_urls[-1][key] = value
+        if gui_urls:
+            gui_urls_sensor = Sensor.string(self.name + '.gui-urls', 'URLs for GUIs')
+            gui_urls_sensor.set_value(json.dumps(gui_urls))
+            self._add_sensor(gui_urls_sensor)
+
         for key, value in six.iteritems(self.ports):
             endpoint_sensor = Sensor.address(
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))

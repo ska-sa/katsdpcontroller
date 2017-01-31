@@ -7,7 +7,7 @@
 
 import sys
 import os
-import Queue
+import json
 import signal
 import tornado
 import tornado.gen
@@ -70,6 +70,8 @@ if __name__ == "__main__":
     parser.add_argument('--graph-override', dest='graph_override', action='append',
                         default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
                         help='Override the graph to be used for the specified subarray product id (default: none)')
+    parser.add_argument('--gui-urls', metavar='FILE',
+                        help='File containing JSON describing related GUIs (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--role', default='katsdpcontroller',
@@ -119,8 +121,17 @@ if __name__ == "__main__":
     for override in opts.graph_override:
         if len(override.split(':', 1)) < 2:
             die("--graph-override option must be in the form <subarray_product_id>:<graph_name>")
-
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
+
+    gui_urls = None
+    if opts.gui_urls is not None:
+        try:
+            with open(opts.gui_urls) as gui_urls_file:
+                gui_urls = json.load(gui_urls_file)
+        except IOError as error:
+            die('Cannot read {}: {}'.format(opts.gui_urls, error))
+        except ValueError as error:
+            die('Invalid JSON in {}: {}'.format(opts.gui_urls, error))
 
     framework_info = addict.Dict()
     framework_info.user = 'root'
@@ -144,7 +155,8 @@ if __name__ == "__main__":
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,
-        safe_multicast_cidr=opts.safe_multicast_cidr)
+        safe_multicast_cidr=opts.safe_multicast_cidr,
+        gui_urls=gui_urls)
 
     if manhole:
         manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})

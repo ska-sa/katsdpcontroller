@@ -41,6 +41,7 @@ EXPECTED_SENSOR_LIST = [
     ('device-status', '', '', 'discrete', 'ok', 'degraded', 'fail'),
     ('fmeca.FD0001', '', '', 'boolean'),
     ('time-synchronised', '', '', 'boolean'),
+    ('gui-urls', '', '', 'string')
 ]
 
 EXPECTED_REQUEST_LIST = [
