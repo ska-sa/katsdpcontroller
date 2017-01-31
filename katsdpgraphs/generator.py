@@ -55,7 +55,7 @@ def build_physical_graph(beamformer_mode, cbf_channels, simulate, resources):
 
     # cam2telstate node
     G.add_node('sdp.cam2telstate.1', {
-        'url': r.get_url('CAMDATA'),
+        'url': r.get_url('camdata'),
         'streams': streams,
         'collapse_streams': True,
         'docker_image': r.get_image_path('katsdpingest'),
