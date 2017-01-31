@@ -163,6 +163,16 @@ class TestRangeResource(object):
         assert_equal([7, 6, 5, 9], out)
         assert_raises(IndexError, rr.pop)
 
+    def test_popleft_min(self):
+        rr = scheduler.RangeResource()
+        rr.add_range(4, 7)
+        rr.add_range(9, 10)
+        rr.add_range(17, 20)
+        assert_raises(IndexError, rr.popleft_min, 20)
+        assert_equal(9, rr.popleft_min(8))
+        assert_equal(18, rr.popleft_min(18))
+        assert_equal([4, 5, 6, 17, 19], list(rr))
+
     def test_str(self):
         rr = scheduler.RangeResource()
         assert_equal('', str(rr))
@@ -714,6 +724,15 @@ class TestScheduler(object):
         self.sched.statusUpdate(self.driver, status)
         return status
 
+    def _make_physical(self):
+        self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
+        self.nodes = []
+        for i in range(3):
+            self.nodes.append(next(node for node in self.physical_graph
+                                   if node.name == 'node{}'.format(i)))
+        self.nodes[2].host = 'remotehost'
+        self.nodes[2].ports['foo'] = 10000
+
     def setup(self):
         self.framework_id = 'frameworkid'
         # Normally TaskIDAllocator's constructor returns a singleton to keep
@@ -764,13 +783,7 @@ class TestScheduler(object):
         ]
         self.loop = trollius.new_event_loop()
         try:
-            self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
-            self.nodes = []
-            for i in range(3):
-                self.nodes.append(next(node for node in self.physical_graph
-                                       if node.name == 'node{}'.format(i)))
-            self.nodes[2].host = 'remotehost'
-            self.nodes[2].ports['foo'] = 10000
+            self._make_physical()
             self.sched = scheduler.Scheduler(self.loop)
             self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
                                                spec_set=True, instance=True)
@@ -841,7 +854,6 @@ class TestScheduler(object):
     def test_launch_serial(self):
         """Test launch on the success path, with no concurrent calls."""
         # TODO: still need to extend this to test:
-        # - network interfaces
         # - custom wait_ports
         numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         offer0 = self._make_offer({
@@ -988,7 +1000,7 @@ class TestScheduler(object):
         yield From(launch)
 
     @trollius.coroutine
-    def _transition_node0(self, target_state, nodes=None):
+    def _transition_node0(self, target_state, nodes=None, ports=None, task_id='test-00000000'):
         """Launch the graph and proceed until node0 is in `target_state`.
 
         This is intended to be used in test setup. It is assumed that this
@@ -1003,8 +1015,10 @@ class TestScheduler(object):
             :const:`TaskState.DEAD`, then `kill` is ``None``
         """
         assert target_state > TaskState.NOT_READY
+        if ports is None:
+            ports = [(30000, 31000)]
         offer = self._make_offer({
-            'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)],
+            'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
             'katsdpcontroller.gpu.0.compute': 0.25,
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
@@ -1023,7 +1037,7 @@ class TestScheduler(object):
                 yield From(defer(loop=self.loop))
                 assert_equal(TaskState.STARTED, self.nodes[0].state)
                 if target_state > TaskState.STARTED:
-                    self._status_update('test-00000000', 'TASK_RUNNING')
+                    self._status_update(task_id, 'TASK_RUNNING')
                     yield From(defer(loop=self.loop))
                     assert_equal(TaskState.RUNNING, self.nodes[0].state)
                     if target_state > TaskState.RUNNING:
@@ -1036,7 +1050,7 @@ class TestScheduler(object):
                             yield From(defer(loop=self.loop))
                             assert_equal(TaskState.KILLED, self.nodes[0].state)
                             if target_state > TaskState.KILLED:
-                                self._status_update('test-00000000', 'TASK_KILLED')
+                                self._status_update(task_id, 'TASK_KILLED')
                             yield From(defer(loop=self.loop))
         self.driver.reset_mock()
         assert_equal(target_state, self.nodes[0].state)
@@ -1056,6 +1070,23 @@ class TestScheduler(object):
         assert_true(launch.done())  # Ensures the next line won't hang the test
         yield From(launch)
         self.driver.reset_mock()
+
+    @run_with_self_event_loop
+    def test_launch_port_recycle(self):
+        """Tests that ports are recycled only when necessary"""
+        ports = [(30000, 30002)]
+        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
+        assert_equal(30000, self.nodes[0].ports['port'])
+        # Build a new physical graph
+        self._make_physical()
+        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports,
+                                          task_id='test-00000001'))
+        assert_equal(30001, self.nodes[0].ports['port'])
+        # Do it again, check that it cycles back to the start
+        self._make_physical()
+        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports,
+                                          task_id='test-00000002'))
+        assert_equal(30000, self.nodes[0].ports['port'])
 
     @trollius.coroutine
     def _test_launch_cancel(self, target_state):
