@@ -1419,7 +1419,7 @@ class SDPControllerServer(AsyncDeviceServer):
             status = '(failed)'
             if node.state >= scheduler.TaskState.RUNNING and \
                     node.state <= scheduler.TaskState.READY:
-                status = ''
+                status = '(shutting down)'
             elif node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
                 status = ''
             response.append(node.logical_node.host + status)
