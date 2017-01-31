@@ -275,8 +275,6 @@ class SDPGraph(object):
         graph_kwargs['l0_antennas'] = n_antennas
         graph_kwargs['dump_rate'] = dump_rate
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
-        resolver.image_resolver.reread_tag_file()
-         # pick up any updates to the tag file
         # generate physical nodes
         mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
         self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
@@ -680,7 +678,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, interface_mode=False,
-                 graph_resolver=None, image_resolver=None, **kwargs):
+                 graph_resolver=None, image_resolver_factory=None, **kwargs):
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
@@ -705,9 +703,9 @@ class SDPControllerServer(AsyncDeviceServer):
         if graph_resolver is None:
             graph_resolver = GraphResolver(simulate=self.simulate)
         self.graph_resolver = graph_resolver
-        if image_resolver is None:
-            image_resolver = scheduler.ImageResolver()
-        self.image_resolver = image_resolver
+        if image_resolver_factory is None:
+            image_resolver_factory = scheduler.ImageResolver
+        self.image_resolver_factory = image_resolver_factory
 
         logger.debug("Building initial resource pool")
         self.resources = SDPCommonResources(safe_multicast_cidr)
@@ -1044,6 +1042,8 @@ class SDPControllerServer(AsyncDeviceServer):
             raise gen.Return(('ok', ''))
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(subarray_product_id, error))
+        except scheduler.ImageError as error:
+            raise FailReply(str(error))
         finally:
             self._conf_future = None
 
@@ -1129,7 +1129,8 @@ class SDPControllerServer(AsyncDeviceServer):
 
         logger.info("Launching graph {}.".format(graph_name))
 
-        resolver = scheduler.Resolver(self.image_resolver, scheduler.TaskIDAllocator(subarray_product_id + '-'))
+        resolver = scheduler.Resolver(self.image_resolver_factory(),
+                                      scheduler.TaskIDAllocator(subarray_product_id + '-'))
         resolver.resources = SDPResources(self.resources, subarray_product_id)
         resolver.telstate = None
 
@@ -1406,7 +1407,8 @@ class SDPControllerServer(AsyncDeviceServer):
             if not is_master:
                 non_master.append(node)
 
-        resolver = scheduler.Resolver(self.image_resolver, scheduler.TaskIDAllocator('poweroff-'))
+        resolver = scheduler.Resolver(self.image_resolver_factory(),
+                                      scheduler.TaskIDAllocator('poweroff-'))
         # Shut down everything except the master/self
         yield to_tornado_future(
             self.sched.launch(physical_graph, resolver, non_master), loop=self.loop)

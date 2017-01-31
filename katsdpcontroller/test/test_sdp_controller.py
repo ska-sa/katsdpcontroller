@@ -300,7 +300,7 @@ class TestSDPController(unittest.TestCase):
                 node.allocation.agent.host = 'host.' + node.logical_node.name
         for node in nodes:
             if node.state < scheduler.TaskState.RUNNING:
-                node.resolve(resolver, graph)
+                yield From(node.resolve(resolver, graph, self.loop))
                 if node.logical_node.name in self.fail_launches:
                     node.set_state(scheduler.TaskState.DEAD)
                     # This may need to be fleshed out if sdp_controller looks
@@ -321,7 +321,8 @@ class TestSDPController(unittest.TestCase):
         else:
             kill_graph = graph
         for node in kill_graph:
-            node.kill(self.driver)
+            if scheduler.TaskState.STARTED <= node.state < scheduler.TaskState.KILLED:
+                node.kill(self.driver)
             node.set_state(scheduler.TaskState.DEAD)
 
     def _future_request(self, msg, *args, **kwargs):
@@ -455,16 +456,12 @@ class TestSDPController(unittest.TestCase):
         self.sched.launch.reset_mock()
         self.sched.kill.reset_mock()
 
-        self.controller.image_resolver.reread_tag_file = mock.create_autospec(
-            spec=self.controller.image_resolver.reread_tag_file)
         self.client.assert_request_succeeds(
             'set-config-override', SUBARRAY_PRODUCT1, '{"override_key": ["override_value2"]}')
         self.client.assert_request_succeeds('data-product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
         self.sched.kill.assert_called_with(mock.ANY)
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
-        # Check that the tag file was re-read
-        self.controller.image_resolver.reread_tag_file.assert_called_with()
         # Check that the override took effect
         ts = self.telstate_class.return_value
         print(ts.add.call_args_list)

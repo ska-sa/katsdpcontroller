@@ -1,6 +1,8 @@
 from __future__ import print_function, division, absolute_import
 import networkx as nx
 import re
+import trollius
+from trollius import From
 import addict
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase
@@ -13,8 +15,9 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
-    def resolve(self, resolver, graph):
-        super(PhysicalMulticast, self).resolve(resolver, graph)
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(PhysicalMulticast, self).resolve(resolver, graph, loop))
         self.host = resolver.resources.get_multicast_ip(self.logical_node.name)
         self.ports = {'spead': resolver.resources.get_port(self.logical_node.name)}
 
@@ -31,8 +34,9 @@ class GPURequestByName(scheduler.GPURequest):
 
 
 class TelstateTask(SDPPhysicalTaskBase):
-    def resolve(self, resolver, graph):
-        super(TelstateTask, self).resolve(resolver, graph)
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(TelstateTask, self).resolve(resolver, graph, loop))
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
         portmap = addict.Dict()
