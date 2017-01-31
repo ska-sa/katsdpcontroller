@@ -636,8 +636,9 @@ class Resolver(object):
 
 
 class InsufficientResourcesError(RuntimeError):
-    """Internal error used when there are currently insufficient resources for
-    an operation. Exceptions of this class do not escape this module.
+    """Indicates that there are insufficient resources to launch a task. This
+    is also used for internal operations when trying to allocate a specific
+    task to a specific agent.
     """
     pass
 
@@ -1397,6 +1398,29 @@ def instantiate(logical_graph, loop):
     return networkx.relabel_nodes(logical_graph, mapping)
 
 
+class _LaunchGroup(object):
+    """Set of tasks that are in state STARTING and waiting for Mesos
+    resources.
+
+    Attributes
+    ----------
+    graph : :class:`networkx.MultiDiGraph`
+        Graph from which the nodes originated
+    nodes : list
+        List of :class:`PhysicalNode`s to launch
+    resolver : :class:`Resolver`
+        Resolver which will be used to launch the nodes
+    started_event : :class:`trollius.Event`
+        An event that is marked ready when the launch group has been removed
+        from the pending list (either because the tasks were launched or
+        because the launch failed in some way).
+    """
+    def __init__(self, graph, nodes, resolver, loop):
+        self.nodes = nodes
+        self.graph = graph
+        self.resolver = resolver
+        self.started_event = trollius.Event(loop=loop)
+
 @decorator
 def run_in_event_loop(func, *args, **kw):
     args[0]._loop.call_soon_threadsafe(func, *args, **kw)
@@ -1415,23 +1439,23 @@ class Scheduler(pymesos.Scheduler):
       are active (this is not true in the initial state, but becomes true as
       soon as an offer is received).
     - each dictionary within :attr:`_offers` is non-empty
+
+    Attributes
+    ----------
+    resources_timeout : float
+        Time limit for resources to become available one a task is ready to
+        launch.
     """
     def __init__(self, loop):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
+        self._retry_launch = trollius.Event(loop=self._loop)  #: set when it's time to retry a launch
         self._pending = deque()     #: node groups for which we do not yet have resources
         self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False       #: set to ``True`` when :meth:`close` is called
-
-    def _clear_offers(self):
-        """Declines all current offers and suppresses future offers. This is
-        called when there are no more pending task groups.
-        """
-        for offers in six.itervalues(self._offers):
-            self._driver.acceptOffers([offer.id for offer in six.itervalues(offers)], [])
-        self._offers = {}
-        self._driver.suppressOffers()
+        # If offers come at 5s intervals, then 11s gives two chances.
+        self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
 
     @classmethod
     def _node_sort_key(cls, physical_node):
@@ -1448,71 +1472,23 @@ class Scheduler(pymesos.Scheduler):
         else:
             return (node.name,)
 
-    def _try_launch(self):
-        """Check whether it is possible to launch the next task group."""
-        if self._offers:
-            assert self._pending
-            try:
-                (graph, nodes, resolver) = self._pending[0]
-                # Due to concurrency, another coroutine may have altered
-                # the state of the tasks since they were put onto the
-                # pending list (e.g. by killing them). Filter those out.
-                nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                agents = [Agent(list(six.itervalues(offers)))
-                          for offers in six.itervalues(self._offers)]
-                # Sort agents by GPUs then free memory. This makes it less likely that a
-                # low-memory process will hog all the other resources on a high-memory
-                # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
-                # there is no other choice. Should eventually look into smarter
-                # algorithms e.g. Dominant Resource Fairness
-                # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
-                nodes.sort(key=self._node_sort_key, reverse=True)
-                allocations = []
-                for node in nodes:
-                    allocation = None
-                    if isinstance(node, PhysicalTask):
-                        for agent in agents:
-                            try:
-                                allocation = agent.allocate(node.logical_node)
-                                break
-                            except InsufficientResourcesError as error:
-                                logger.debug('Cannot add %s to %s: %s',
-                                             node.name, agent.agent_id, error)
-                        else:
-                            raise InsufficientResourcesError(
-                                'No agent found for {}'.format(node.name))
-                        allocations.append((node, allocation))
-            except InsufficientResourcesError:
-                # TODO: if the resources never become available, it would be
-                # useful for the caller to know what the bottleneck is.
-                logger.debug('Could not yet launch graph due to insufficient resources')
-            else:
-                # Two-phase resolving
-                logger.debug('Allocating resources to tasks')
-                for (node, allocation) in allocations:
-                    node.allocate(allocation)
-                logger.debug('Performing resolution')
-                for node in nodes:
-                    node.resolve(resolver, graph)
-                # Launch the tasks
-                taskinfos = {agent: [] for agent in agents}
-                for (node, _) in allocations:
-                    taskinfos[node.agent].append(node.taskinfo)
-                for agent in agents:
-                    offer_ids = [offer.id for offer in agent.offers]
-                    # TODO: does this need to use run_in_executor? Is it
-                    # thread-safe to do so?
-                    self._driver.launchTasks(offer_ids, taskinfos[agent])
-                    logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.agent_id)
-                self._offers = {}
-                self._pending.popleft()
-                if not self._pending:
-                    self._clear_offers()
-                for node in nodes:
-                    node.set_state(TaskState.STARTED)
-                for (node, _) in allocations:
-                    self._active[node.taskinfo.task_id.value] = (node, graph)
+    def _clear_offers(self):
+        for offers in six.itervalues(self._offers):
+            self._driver.acceptOffers([offer.id for offer in six.itervalues(offers)], [])
+        self._offers = {}
+        self._driver.suppressOffers()
+
+    def _remove_offer(self, agent_id, offer_id):
+        try:
+            del self._offers[agent_id][offer_id]
+            if not self._offers[agent_id]:
+                del self._offers[agent_id]
+        except KeyError:
+            # There are various race conditions that mean an offer could be
+            # removed twice (e.g. if we launch a task with an offer at the
+            # same time it is rescinded - the task will be lost but we won't
+            # crash).
+            pass
 
     def set_driver(self, driver):
         self._driver = driver
@@ -1524,21 +1500,16 @@ class Scheduler(pymesos.Scheduler):
     def resourceOffers(self, driver, offers):
         for offer in offers:
             self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
-        if self._pending:
-            self._try_launch()
-        else:
+        if not self._pending:
             self._clear_offers()
+        elif offers:
+            self._retry_launch.set()
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
         for agent_id, offers in six.iteritems(self._offers):
-            try:
-                del offers[offer_id.value]
-                if not offers:
-                    del self._offers[agent_id]
-                break
-            except KeyError:
-                pass
+            if offer_id.value in offers:
+                self._remove_offer(agent_id, offer_id.value)
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
@@ -1562,6 +1533,117 @@ class Scheduler(pymesos.Scheduler):
         self._driver.acknowledgeStatusUpdate(status)
 
     @trollius.coroutine
+    def _launch_group(self, group):
+        try:
+            empty = not self._pending
+            self._pending.append(group)
+            if empty:
+                # TODO: use requestResources to ask the allocator for resources?
+                self._driver.reviveOffers()
+            else:
+                # Wait for the previous entry in the queue to be done
+                yield From(self._pending[-2].started_event.wait())
+            assert self._pending[0] is group
+
+            deadline = self._loop.time() + self.resources_timeout
+            last_insufficient = InsufficientResourcesError('No resource offers received')
+            nodes = group.nodes
+            while True:
+                # Wait until we have offers, but time out if we cross the
+                # deadline.  If one of the tasks is killed, that can also
+                # unblock us since we no longer require resources for that,
+                # so wait for that too.
+                remaining = max(0.0, deadline - self._loop.time())
+                futures = [node.dead_event.wait() for node in nodes]
+                futures.append(self._retry_launch.wait())
+                # Make sure these are real futures, not coroutines
+                futures = [trollius.ensure_future(future, loop=self._loop)
+                           for future in futures]
+                done_futures, pending_futures = yield From(trollius.wait(
+                    futures, loop=self._loop, timeout=remaining,
+                    return_when=trollius.FIRST_COMPLETED))
+                for future in pending_futures:
+                    future.cancel()
+                if not done_futures:
+                    # We hit the timeout (trollius.wait does not throw TimeoutError)
+                    raise last_insufficient
+                self._retry_launch.clear()
+                try:
+                    # Due to concurrency, another coroutine may have altered
+                    # the state of the tasks since they were put onto the
+                    # pending list (e.g. by killing them). Filter those out.
+                    nodes = [node for node in nodes if node.state == TaskState.STARTING]
+                    agents = [Agent(list(six.itervalues(offers)))
+                              for agent_id, offers in six.iteritems(self._offers)]
+                    # Sort agents by GPUs then free memory. This makes it less likely that a
+                    # low-memory process will hog all the other resources on a high-memory
+                    # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
+                    # there is no other choice. Should eventually look into smarter
+                    # algorithms e.g. Dominant Resource Fairness
+                    # (http://mesos.apache.org/documentation/latest/allocation-module/)
+                    agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
+                    nodes.sort(key=self._node_sort_key, reverse=True)
+                    allocations = []
+                    for node in nodes:
+                        allocation = None
+                        if isinstance(node, PhysicalTask):
+                            for agent in agents:
+                                try:
+                                    allocation = agent.allocate(node.logical_node)
+                                    break
+                                except InsufficientResourcesError as error:
+                                    logger.debug('Cannot add %s to %s: %s',
+                                                 node.name, agent.agent_id, error)
+                            else:
+                                raise InsufficientResourcesError(
+                                    'Could not find a suitable agent for {}'.format(node.name))
+                            allocations.append((node, allocation))
+                except InsufficientResourcesError as error:
+                    # TODO: if the resources never become available, it would be
+                    # useful for the caller to get a better idea of the bottleneck.
+                    logger.debug('Could not yet launch graph due to insufficient resources')
+                    last_insufficient = error
+                else:
+                    # At this point we have a sufficient set of offers.
+                    # Two-phase resolving
+                    logger.debug('Allocating resources to tasks')
+                    for (node, allocation) in allocations:
+                        node.allocate(allocation)
+                    logger.debug('Performing resolution')
+                    for node in nodes:
+                        node.resolve(group.resolver, group.graph)
+                    # Launch the tasks
+                    taskinfos = {agent: [] for agent in agents}
+                    for (node, _) in allocations:
+                        taskinfos[node.agent].append(node.taskinfo)
+                    for agent in agents:
+                        offer_ids = [offer.id for offer in agent.offers]
+                        # TODO: does this need to use run_in_executor? Is it
+                        # thread-safe to do so?
+                        # TODO: if there are more pending in the queue then we
+                        # should use a filter to be re-offered resources more
+                        # quickly.
+                        self._driver.launchTasks(offer_ids, taskinfos[agent])
+                        for offer_id in offer_ids:
+                            self._remove_offer(agent.agent_id, offer_id.value)
+                        logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.agent_id)
+                    for node in nodes:
+                        node.set_state(TaskState.STARTED)
+                    for (node, _) in allocations:
+                        self._active[node.taskinfo.task_id.value] = (node, group.graph)
+                    break
+        finally:
+            self._pending.remove(group)
+            if not self._pending:
+                # Nothing that can use the offers, so get rid of them
+                self._clear_offers()
+            group.started_event.set()
+
+        # Note: don't use "nodes" here: we have to wait for everything to start
+        ready_futures = [node.ready_event.wait() for node in group.nodes]
+        yield From(trollius.gather(*ready_futures, loop=self._loop))
+
+    @trollius.coroutine
     def launch(self, graph, resolver, nodes=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
         a coroutine that returns only once the nodes are ready.
@@ -1579,6 +1661,9 @@ class Scheduler(pymesos.Scheduler):
         not recommended. In particular, cancelling the first launch can cause
         the second to stall indefinitely if it was waiting for nodes from the
         first launch to be ready.
+
+        If an exception occurs, the state of nodes is undefined. In particular,
+        it is possible that some nodes were successfully launched.
 
         .. note::
 
@@ -1600,6 +1685,12 @@ class Scheduler(pymesos.Scheduler):
         ------
         trollius.InvalidStateError
             If :meth:`close` has been called.
+        InsufficientResourcesError
+            If, once a launch request reached the head of the queue, no
+            sufficient resource offers were received within the timeout. Note
+            that a call to :meth:`launch` can be split into several phases,
+            each with its own timeout, so it is possible for there to be a
+            long delay and still receive this error.
         CycleError
             If it is impossible to launch the nodes due to a cyclic dependency.
         DependencyError
@@ -1638,33 +1729,25 @@ class Scheduler(pymesos.Scheduler):
             remaining = blocked
 
         while groups:
-            pending = (graph, groups[0], resolver)
-            # TODO: use requestResources to ask the allocator for resources?
-            # TODO: check if any dependencies have died, and if so, bail out?
-            if not self._pending:
-                self._driver.reviveOffers()
-            self._pending.append(pending)
-            self._try_launch()
-            futures = []
-            for node in groups[0]:
-                futures.append(node.ready_event.wait())
-            try:
-                yield From(trollius.gather(*futures, loop=self._loop))
-            except trollius.CancelledError:
-                # It's important that pending is unambiguous relative to other
-                # concurrent launches. This is the case because groups[0]
-                # contains only nodes that we set to TaskState.STARTING, and
-                # thus the elements of self._pending have disjoint sets of
-                # nodes.
-                if pending in self._pending:
-                    self._pending.remove(pending)
-                    if not self._pending:
-                        self._clear_offers()
-                while groups:
-                    for node in groups.popleft():
-                        if node.state == TaskState.STARTING:
-                            node.set_state(TaskState.NOT_READY)
-                raise
+            # Filter out nodes that have asynchronously changed state. This
+            # is particularly necessary so that we don't try to revive
+            # offers after close().
+            group_nodes = [node for node in groups[0] if node.state == TaskState.STARTING]
+            if group_nodes:
+                pending = _LaunchGroup(graph, group_nodes, resolver, self._loop)
+                # TODO: check if any dependencies have died, and if so, bail out?
+                try:
+                    yield From(self._launch_group(pending))
+                except Exception:
+                    logger.debug('Exception in launching group', exc_info=True)
+                    # Could be either an InsufficientResourcesError from
+                    # the yield or a CancelledError if this function was
+                    # cancelled.
+                    while groups:
+                        for node in groups.popleft():
+                            if node.state == TaskState.STARTING:
+                                node.set_state(TaskState.NOT_READY)
+                    raise
             groups.popleft()
 
     @trollius.coroutine
@@ -1725,11 +1808,13 @@ class Scheduler(pymesos.Scheduler):
         graphs = set()
         for (task, graph) in six.itervalues(self._active):
             graphs.add(graph)
-        for (graph, nodes, resolver) in self._pending:
-            graphs.add(graph)
+        for group in self._pending:
+            graphs.add(group.graph)
         for graph in graphs:
             yield From(self.kill(graph))
-        self._pending = []
+        if self._pending:
+            yield From(self._pending[-1].started_event.wait())
+        assert not self._pending
         self._driver.stop()
         status = yield From(self._loop.run_in_executor(None, self._driver.join))
         raise Return(status)
@@ -1790,6 +1875,7 @@ __all__ = [
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
     'Interface', 'ResourceAllocation', 'GPUResourceAllocation',
+    'InsufficientResourcesError',
     'NetworkRequest', 'GPURequest',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Scheduler', 'instantiate']

@@ -964,7 +964,6 @@ class TestScheduler(object):
         poll_future.set_result(None)
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.READY, self.nodes[0].state)
-        assert_equal([mock.call.reviveOffers()], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer suitable for node 1.
         self.sched.resourceOffers(self.driver, [offer1])
@@ -1086,6 +1085,19 @@ class TestScheduler(object):
         yield From(self._test_launch_cancel(TaskState.READY))
 
     @run_with_self_event_loop
+    def test_launch_resources_timeout(self):
+        """Test a launch failing due to insufficient resources within the timeout"""
+        self.sched.resources_timeout = 0.001
+        launch, kill = yield From(self._transition_node0(TaskState.STARTING))
+        with assert_raises(scheduler.InsufficientResourcesError):
+            yield From(launch)
+        assert_equal(TaskState.NOT_READY, self.nodes[0].state)
+        assert_equal(TaskState.NOT_READY, self.nodes[1].state)
+        assert_equal(TaskState.NOT_READY, self.nodes[2].state)
+        # Once we abort, we should no longer be interested in offers
+        assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+
+    @run_with_self_event_loop
     def test_offer_rescinded(self):
         """Test offerRescinded"""
         launch, kill = yield From(self._transition_node0(TaskState.STARTING, [self.nodes[0]]))
@@ -1134,7 +1146,7 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_kill_while_started(self):
         """Test killing a node while in state STARTED"""
-        yield From(self._test_kill_in_state(TaskState.STARTING))
+        yield From(self._test_kill_in_state(TaskState.STARTED))
 
     @run_with_self_event_loop
     def test_kill_while_running(self):
@@ -1231,6 +1243,13 @@ class TestScheduler(object):
             assert_equal(TaskState.DEAD, node.state)
         for node in physical_graph2:
             assert_equal(TaskState.DEAD, node.state)
+        # The timing of suppressOffers is undefined, because it depends on the
+        # order in which the graphs are killed. However, it must occur
+        # after the initial reviveOffers and before stopping the driver.
+        assert_in(mock.call.suppressOffers(), self.driver.mock_calls)
+        pos = self.driver.mock_calls.index(mock.call.suppressOffers())
+        assert_true(1 <= pos < len(self.driver.mock_calls) - 2)
+        del self.driver.mock_calls[pos]
         assert_equal([
             mock.call.reviveOffers(),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
