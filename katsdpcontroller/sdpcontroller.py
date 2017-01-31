@@ -391,11 +391,11 @@ class SDPResources(object):
 
     def get_url(self, host_class):
         if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
-        return self.urls.get(host_class)
+        return self.urls.get(host_class.lower())
 
     def set_url(self, host_class, url):
         if self.prefix: host_class = "{}_{}".format(self.prefix, host_class)
-        self.urls[host_class] = url
+        self.urls[host_class.lower()] = url
 
     def get_multicast(self, host_class):
         """For the specified host class, return a multicast endpoint in the form
@@ -1956,6 +1956,3 @@ class SDPControllerServer(DeviceServer):
         for (component_name,component) in self.components:
             req.inform("%s:%s",component_name,component.status)
         return ("ok", len(self.components))
-
-
-

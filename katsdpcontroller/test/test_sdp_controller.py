@@ -143,3 +143,4 @@ class TestSDPResources(unittest.TestCase):
         self.assertEqual(None, self.r.get_url('CAM_ws'))
         self.r.set_url('CAM_ws', 'ws://host.domain:port/path')
         self.assertEqual('ws://host.domain:port/path', self.r.get_url('CAM_ws'))
+        self.assertEqual('ws://host.domain:port/path', self.r.get_url('cam_ws'))
