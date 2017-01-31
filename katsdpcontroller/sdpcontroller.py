@@ -1616,7 +1616,15 @@ class SDPControllerServer(DeviceServer):
                 # The fully qualified stream name is used directly, and in the future the leading term
                 # will be used to disambiguate multiple streams of the same type
                 for (stream_name, stream_url) in stream_spec_dict.iteritems():
-                    streams[stream_name] = stream_url
+                    # Segregate into SPEAD streams and the rest (stored as URLs)
+                    try:
+                        stream_transport, stream_address = stream_url.split('://')
+                    except ValueError:
+                        stream_transport, stream_address = 'spead', stream_url
+                    if stream_transport == 'spead':
+                        streams[stream_name] = stream_address
+                    else:
+                        urls[stream_name] = stream_url
                      # we could of course reuse the dictionary, but we expect some fu to be needed here in the future
                     logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
         except ValueError:
