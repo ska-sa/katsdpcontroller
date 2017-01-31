@@ -1454,7 +1454,8 @@ class Scheduler(pymesos.Scheduler):
         self._pending = deque()     #: node groups for which we do not yet have resources
         self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
         self._closing = False       #: set to ``True`` when :meth:`close` is called
-        self.resources_timeout = 10.0
+        # If offers come at 5s intervals, then 11s gives two chances.
+        self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
 
     @classmethod
     def _node_sort_key(cls, physical_node):
@@ -1533,7 +1534,6 @@ class Scheduler(pymesos.Scheduler):
 
     @trollius.coroutine
     def _launch_group(self, group):
-        last_insufficient = InsufficientResourcesError('Cancelled while queued behind other launches')
         try:
             empty = not self._pending
             self._pending.append(group)
@@ -1554,7 +1554,7 @@ class Scheduler(pymesos.Scheduler):
                 # unblock us since we no longer require resources for that,
                 # so wait for that too.
                 remaining = max(0.0, deadline - self._loop.time())
-                futures = [node.ready_event.wait() for node in nodes]
+                futures = [node.dead_event.wait() for node in nodes]
                 futures.append(self._retry_launch.wait())
                 # Make sure these are real futures, not coroutines
                 futures = [trollius.ensure_future(future, loop=self._loop)
