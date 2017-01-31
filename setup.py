@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['mock', 'unittest2', 'nose', 'requests_mock']
+tests_require = ['mock', 'unittest2', 'nose', 'futures', 'requests_mock']
 
 setup (
     name = "katsdpcontroller",
@@ -40,7 +40,7 @@ setup (
     ],
     tests_require = tests_require,
     extras_require = {
-        'agent': ['netifaces', 'psutil', 'nvidia-ml-py', 'pycuda'],
+        'agent': ['psutil', 'nvidia-ml-py', 'pycuda'],
         'test': tests_require
     },
     use_katversion = True,
