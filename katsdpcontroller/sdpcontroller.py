@@ -258,7 +258,9 @@ class SDPGraph(object):
 
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, sched, graph_name, resolver, subarray_product_id, loop, sdp_controller=None, telstate_name='sdp.telstate'):
+    def __init__(self, sched, graph_name, n_antennas, dump_rate,
+                 resolver, subarray_product_id, loop,
+                 sdp_controller=None, telstate_name='sdp.telstate'):
         self.sched = sched
         self.resolver = resolver
         self.loop = loop
@@ -269,6 +271,8 @@ class SDPGraph(object):
          # make sure we have some subarray name even if not specified
         self.sdp_controller = sdp_controller
         graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
+        graph_kwargs['l0_antennas'] = n_antennas
+        graph_kwargs['dump_rate'] = dump_rate
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         resolver.image_resolver.reread_tag_file()
          # pick up any updates to the tag file
@@ -326,19 +330,10 @@ class SDPGraph(object):
 
         .. todo::
 
-           For now tasks that exit cleanly are considered to be healthy,
-           because they might not be needed/useful depending on the number of
-           antennas. This should be removed once the graph is specialised to
-           the antenna count.
-
-        .. todo::
-
            Also check health state sensors
         """
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                if node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
-                    continue
                 logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
                 return False
         return True
@@ -1143,7 +1138,10 @@ class SDPControllerServer(AsyncDeviceServer):
          # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
          # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
 
-        graph = SDPGraph(self.sched, graph_name, resolver, subarray_product_id, self.loop, sdp_controller=self)
+        n_antennas = len(antennas.split(','))
+        graph = SDPGraph(self.sched, graph_name, n_antennas, dump_rate,
+                         resolver, subarray_product_id,
+                         self.loop, sdp_controller=self)
          # create graph object and build physical graph from specified resources
 
         logger.debug(graph.get_json())

@@ -16,11 +16,16 @@ def find_images():
     images.add('docker-base')
     for beamformer_mode in ["none", "hdf5_ram", "hdf5_ssd", "ptuse"]:
         for channels in [4096, 32768]:
-            for simulate in [False, True]:
-                graph = katsdpgraphs.generator.build_logical_graph(beamformer_mode, channels, simulate)
-                for node in graph:
-                    if hasattr(node, 'image'):
-                        images.add(node.image)
+            # There is a special case for small numbers of antennas
+            for antennas in [1, 2, 3, 4, 16]:
+                for simulate in [False, True]:
+                    # Unlike antennas, dump rate doesn't affect the set of
+                    # images used
+                    graph = katsdpgraphs.generator.build_logical_graph(
+                        beamformer_mode, simulate, channels, antennas, 1.0)
+                    for node in graph:
+                        if hasattr(node, 'image'):
+                            images.add(node.image)
     return images
 
 
