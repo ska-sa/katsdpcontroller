@@ -258,7 +258,7 @@ class SDPGraph(object):
 
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, sched, graph_name, antennas, dump_rate,
+    def __init__(self, sched, graph_name, n_antennas, dump_rate,
                  resolver, subarray_product_id, loop,
                  sdp_controller=None, telstate_name='sdp.telstate'):
         self.sched = sched
@@ -271,7 +271,7 @@ class SDPGraph(object):
          # make sure we have some subarray name even if not specified
         self.sdp_controller = sdp_controller
         graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
-        graph_kwargs['l0_antennas'] = antennas
+        graph_kwargs['l0_antennas'] = n_antennas
         graph_kwargs['dump_rate'] = dump_rate
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         resolver.image_resolver.reread_tag_file()
