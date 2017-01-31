@@ -1622,11 +1622,13 @@ class SDPControllerServer(DeviceServer):
                     except ValueError:
                         stream_transport, stream_address = 'spead', stream_url
                     if stream_transport == 'spead':
-                        streams[stream_name] = stream_address
+                        (host, port) = stream_address.split(":", 2)
+                        streams[stream_name] = (host, port)
+                        logger.info("Adding stream {} with endpoint ({},{})".format(stream_name, host, port))
                     else:
                         urls[stream_name] = stream_url
+                        logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
                      # we could of course reuse the dictionary, but we expect some fu to be needed here in the future
-                    logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
         except ValueError:
             # We must be in a pure string mode
             try:
@@ -1964,6 +1966,3 @@ class SDPControllerServer(DeviceServer):
         for (component_name,component) in self.components:
             req.inform("%s:%s",component_name,component.status)
         return ("ok", len(self.components))
-
-
-
