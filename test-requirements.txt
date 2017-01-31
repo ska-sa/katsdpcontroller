@@ -1,5 +1,8 @@
 coverage
+funcsigs
 mock
 nose
+pbr
+traceback2
 unittest2
 requests-mock==1.2.0
