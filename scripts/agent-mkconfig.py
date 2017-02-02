@@ -256,6 +256,28 @@ def encode(d):
 
 
 def write_dict(name, path, args, d, do_encode=False):
+    """For each key in `d`, write the value to `path`/`key`.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable description of what is being written
+    path : str
+        Base directory (created if it does not exist)
+    args : argparse.Namespace
+        Command-line arguments
+    d : dict
+        Values to write
+    do_encode : bool, optional
+        If true, values are first encoded with :func:`encode`
+
+    Returns
+    -------
+    changed : bool
+        Whether any files were modified
+    """
+    changed = False
+
     if args.dry_run:
         print(name + ':')
         if do_encode:
@@ -268,16 +290,39 @@ def write_dict(name, path, args, d, do_encode=False):
         try:
             os.makedirs(path)
         except OSError:
+            # makedirs raises an error if the path already exists.
             if not os.path.exists(path):
                 raise
+        else:
+            # The path didn't exist
+            changed = True
         for key, value in d.iteritems():
-            with open(os.path.join(path, key), 'w') as f:
-                print(encode(value) if do_encode else value, file=f)
+            filename = os.path.join(path, key)
+            content = encode(value) if do_encode else value
+            content = '{}\n'.format(content)
+            try:
+                with open(filename, 'r') as f:
+                    orig_content = f.read()
+            except OSError:
+                orig_content = None
+            if content != orig_content:
+                with open(os.path.join(path, key), 'w') as f:
+                    f.write(content)
+                changed = True
+        # Delete any katsdpcontroller-specific entries that we didn't
+        # ask for (e.g. because a GPU was removed).
+        for item in os.listdir(path):
+            if item.startswith('katsdpcontroller.') and item not in d:
+                os.remove(os.path.join(path, item))
+                changed = True
+    return changed
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dry-run', action='store_true', help='Report what would be done, without doing it')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--dry-run', action='store_true', help='Report what would be done, without doing it')
+    group.add_argument('--exit-code', action='store_true', help='Use exit code 100 if there are no changes')
     parser.add_argument('--attributes-dir', default='/etc/mesos-slave/attributes', help='Directory for attributes [%(default)s]')
     parser.add_argument('--resources-dir', default='/etc/mesos-slave/resources', help='Directory for resources [%(default)s]')
     parser.add_argument('--network', dest='networks', action='append', default=[],
@@ -289,8 +334,13 @@ def main():
     args = parser.parse_args()
 
     attributes, resources = attributes_resources(args)
-    write_dict('attributes', args.attributes_dir, args, attributes, do_encode=True)
-    write_dict('resources', args.resources_dir, args, resources)
+    changed = False
+    if write_dict('attributes', args.attributes_dir, args, attributes, do_encode=True):
+        changed = True
+    if write_dict('resources', args.resources_dir, args, resources):
+        changed = True
+    if args.exit_code and not changed:
+        sys.exit(100)
 
 
 if __name__ == '__main__':
