@@ -303,7 +303,7 @@ def write_dict(name, path, args, d, do_encode=False):
             try:
                 with open(filename, 'r') as f:
                     orig_content = f.read()
-            except OSError:
+            except IOError:
                 orig_content = None
             if content != orig_content:
                 with open(os.path.join(path, key), 'w') as f:
