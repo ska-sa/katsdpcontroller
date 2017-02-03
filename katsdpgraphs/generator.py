@@ -117,7 +117,6 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     telstate.image = 'redis'
     telstate.ports = ['telstate']
     telstate.physical_factory = TelstateTask
-
     g.add_node(telstate)
 
     # cam2telstate node
@@ -145,9 +144,17 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     # Exact requirement not known (also depends on number of users). Give it
     # 2 CPUs (max it can use) for 32 antennas, 32K channels and scale from there.
     timeplot.cpus = 2 * min(1.0, l0_vis / (32 * 33 * 2 * 32768))
-    # TODO: update once SR-697 is fixed. For now assume timeplot won't run on a
-    # machine with more than 64GB, and it defaults to 10% of total RAM.
-    timeplot.mem = 8192
+    # Give timeplot enough memory for 256 time samples, but capped at 16GB.
+    # This formula is based on data.py in katsdpdisp.
+    percentiles = 5 * 8
+    timeplot_slot = cbf_channels * (l0_baselines + percentiles) * 256 * 8
+    timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
+    timeplot_buffer_mb = timeplot_buffer / 1024**2
+    # timeplot_buffer covers only the visibilities, but there are also flags
+    # and various auxiliary buffers. Add 20% to give some headroom, and also
+    # add a fixed amount since in very small arrays the 20% might not cover
+    # the fixed-sized overheads.
+    timeplot.mem = timeplot_buffer_mb * 1.2 + 256
     timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
@@ -157,6 +164,11 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         'description': 'Signal displays for {0.subarray_name}',
         'href': 'http://{0.host}:{0.ports[html_port]}/'
     }]
+    g.add_node(timeplot, config=lambda resolver: {
+        'cbf_channels': cbf_channels,
+        'config_base': '/var/kat/config/.katsdpdisp',
+        'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
+    })
 
     # ingest nodes
     n_ingest = 1
