@@ -215,7 +215,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
         bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True, affinity=True)]
-        bf_ingest.volumes = [scratch_vol]
+        bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
         g.add_node(bf_ingest, config=lambda resolver: {
