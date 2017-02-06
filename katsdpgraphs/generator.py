@@ -147,7 +147,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
-    timeplot_slot = cbf_channels * (l0_baselines + percentiles) * 256 * 8
+    timeplot_slot = cbf_channels * (l0_baselines + percentiles) * 8
     timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
     timeplot_buffer_mb = timeplot_buffer / 1024**2
     # timeplot_buffer covers only the visibilities, but there are also flags
