@@ -866,9 +866,10 @@ class SDPControllerServer(AsyncDeviceServer):
             self._conf_future = None
         for subarray_product_id in self.subarray_products.keys():
             try:
-                rcode, rval = yield From(self.deregister_product(subarray_product_id,force=True))
+                yield From(self.deregister_product(subarray_product_id,force=True))
             except Exception as e:
-                logger.warning("Failed to deconfigure product %s during master controller exit. Forging ahead...", subarray_product_id)
+                logger.warning("Failed to deconfigure product %s during master controller exit. "
+                               "Forging ahead...", subarray_product_id, exc_info=True)
 
     @trollius.coroutine
     def async_stop(self):
