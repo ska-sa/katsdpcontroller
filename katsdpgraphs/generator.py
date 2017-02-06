@@ -183,6 +183,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # only half this.
         ingest.mem = 32 * cbf_vis_mb + 256
         ingest.transitions = capture_transitions
+        ingest.networks = [scheduler.NetworkRequest('cbf')]
         g.add_node(ingest, config=lambda resolver: {
             'continuum_factor': 32,
             'sd_continuum_factor': cbf_channels // 256,
