@@ -1618,11 +1618,11 @@ class SDPControllerServer(DeviceServer):
                 for (stream_name, stream_url) in stream_spec_dict.iteritems():
                     # Segregate into SPEAD streams and the rest (stored as URLs)
                     try:
-                        stream_transport, stream_address = stream_url.split('://')
+                        stream_transport, stream_address = stream_url.split('://', 1)
                     except ValueError:
                         stream_transport, stream_address = 'spead', stream_url
                     if stream_transport == 'spead':
-                        (host, port) = stream_address.split(":", 2)
+                        (host, port) = stream_address.split(":", 1)
                         streams[stream_name] = (host, port)
                         logger.info("Adding stream {} with endpoint ({},{})".format(stream_name, host, port))
                     else:
@@ -1644,7 +1644,7 @@ class SDPControllerServer(DeviceServer):
                             urls[stream_name] = value
                             logger.info("Adding stream {} with URL {}".format(stream_name, value))
                         else:
-                            (host, port) = value.split(":", 2)
+                            (host, port) = value.split(":", 1)
                              # just to make it explicit what we are expecting
                             # Hack to handle CAM not yet passing us fully-qualified
                             # stream names. This code should be deleted once CAM is
