@@ -22,17 +22,6 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         self.ports = {'spead': resolver.resources.get_port(self.logical_node.name)}
 
 
-class GPURequestByName(scheduler.GPURequest):
-    def __init__(self, name):
-        super(GPURequestByName, self).__init__()
-        self.name = name
-
-    def matches(self, agent_gpu, numa_node):
-        if agent_gpu.name != self.name:
-            return False
-        return super(GPURequestByName, self).matches(agent_gpu, numa_node)
-
-
 class TelstateTask(SDPPhysicalTaskBase):
     @trollius.coroutine
     def resolve(self, resolver, graph, loop):
@@ -177,7 +166,8 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
         ingest.ports = ['port']
-        ingest.gpus = [GPURequestByName('GeForce GTX TITAN X')]
+        ingest.gpus = [scheduler.GPURequest()]
+        ingest.gpus[-1].name = 'GeForce GTX TITAN X'
         # Scale for a full GPU for 32 antennas, 32K channels
         scale = cbf_vis / (32 * 33 * 2 * 32768)
         ingest.gpus[0].compute = scale

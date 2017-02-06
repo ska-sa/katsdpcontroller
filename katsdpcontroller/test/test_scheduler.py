@@ -757,6 +757,211 @@ class TestPhysicalTask(object):
         assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
 
 
+class TestDiagnoseInsufficient(unittest.TestCase):
+    """Test :class:`katsdpcontroller.scheduler.Scheduler._diagnose_insufficient.
+
+    This is split out from TestScheduler to make it easier to set up fixtures.
+    """
+    def _make_offer(self, resources, agent_num=0, attrs=()):
+        return _make_offer('frameworkid', 'agentid{}'.format(agent_num),
+                           'agenthost{}'.format(agent_num), resources, attrs)
+
+    def setUp(self):
+        # Create a number of agents, each of which has a large quantity of
+        # some resource but not much of others. This makes it easier to
+        # control which resources are plentiful in the simulated cluster.
+        framework_id = 'frameworkid'
+        numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
+        gpu_attr = _make_json_attr(
+            'katsdpcontroller.gpus',
+            [{'device': '/dev/nvidia0', 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 1}])
+        interface_attr = _make_json_attr(
+            'katsdpcontroller.interfaces',
+            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
+              'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}])
+        volume_attr = _make_json_attr(
+            'katsdpcontroller.volumes',
+            [{'name': 'vol0', 'host_path': '/host0'}])
+
+        self.cpus_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 32, 'mem': 2, 'disk': 7}, 0)])
+        self.mem_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.25, 'mem': 256, 'disk': 8}, 1)])
+        self.disk_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.5, 'mem': 3, 'disk': 1024}, 2)])
+        self.ports_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.75, 'mem': 4, 'disk': 9, 'ports': [(30000, 30005)]}, 3)])
+        self.cores_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 6, 'mem': 5, 'disk': 10, 'cores': [(0, 6)]}, 4, [numa_attr])])
+        self.gpu_compute_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 0.75, 'mem': 6, 'disk': 11,
+             'katsdpcontroller.gpu.0.compute': 1.0,
+             'katsdpcontroller.gpu.0.mem': 2.25}, 5,
+            [numa_attr, gpu_attr])])
+        self.gpu_mem_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.0, 'mem': 7, 'disk': 11,
+             'katsdpcontroller.gpu.0.compute': 0.125,
+             'katsdpcontroller.gpu.0.mem': 256.0}, 6,
+            [numa_attr, gpu_attr])])
+        self.interface_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.0, 'mem': 1, 'disk': 1}, 7,
+            [interface_attr])])
+        self.volume_agent = scheduler.Agent([self._make_offer(
+            {'cpus': 1.0, 'mem': 1, 'disk': 1}, 8,
+            [volume_attr])])
+        # Create a template logical and physical task
+        self.logical_task = scheduler.LogicalTask('logical')
+        self.physical_task = self.logical_task.physical_factory(
+            self.logical_task, mock.sentinel.loop)
+        self.logical_task2 = scheduler.LogicalTask('logical2')
+        self.physical_task2 = self.logical_task2.physical_factory(
+            self.logical_task2, mock.sentinel.loop)
+
+    def test_task_insufficient_scalar_resource(self):
+        """A task requests more of a scalar resource than any agent has"""
+        self.logical_task.cpus = 4
+        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.disk_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertEqual('cpus', cm.exception.resource)
+        self.assertEqual(4, cm.exception.needed)
+        self.assertEqual(1.5, cm.exception.available)
+
+    def test_task_insufficient_range_resource(self):
+        """A task requests more of a range resource than any agent has"""
+        self.logical_task.ports = ['a', 'b', 'c']
+        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.disk_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertEqual('ports', cm.exception.resource)
+        self.assertEqual(3, cm.exception.needed)
+        self.assertEqual(0, cm.exception.available)
+
+    def test_task_insufficient_cores(self):
+        """A task requests more cores than are available on a single NUMA node"""
+        self.logical_task.cores = ['a', 'b', 'c', 'd']
+        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.cores_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertEqual('cores', cm.exception.resource)
+        self.assertEqual(4, cm.exception.needed)
+        self.assertEqual(3, cm.exception.available)
+
+    def test_task_insufficient_gpu_scalar_resource(self):
+        """A task requests more of a GPU scalar resource than any agent has"""
+        req = scheduler.GPURequest()
+        req.mem = 2048
+        self.logical_task.gpus = [req]
+        with self.assertRaises(scheduler.TaskInsufficientGPUResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.gpu_compute_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertEqual(0, cm.exception.request_index)
+        self.assertEqual('mem', cm.exception.resource)
+        self.assertEqual(2048, cm.exception.needed)
+        self.assertEqual(2.25, cm.exception.available)
+
+    def test_task_no_network(self):
+        """A task requests a network interface that is not available on any agent"""
+        self.logical_task.networks = [
+            scheduler.NetworkRequest('net0'),
+            scheduler.NetworkRequest('badnet')
+        ]
+        with self.assertRaises(scheduler.TaskNoNetworkError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.interface_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertIs(self.logical_task.networks[1], cm.exception.request)
+
+    def test_task_no_volume(self):
+        """A task requests a volume that is not available on any agent"""
+        self.logical_task.volumes = [
+            scheduler.VolumeRequest('vol0', '/vol0', 'RW'),
+            scheduler.VolumeRequest('badvol', '/badvol', 'RO')
+        ]
+        with self.assertRaises(scheduler.TaskNoVolumeError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.volume_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertIs(self.logical_task.volumes[1], cm.exception.request)
+
+    def test_task_no_gpu(self):
+        """A task requests a GPU that is not available on any agent"""
+        req = scheduler.GPURequest()
+        req.name = 'GPU that does not exist'
+        self.logical_task.gpus = [req]
+        with self.assertRaises(scheduler.TaskNoGPUError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.gpu_compute_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertEqual(0, cm.exception.request_index)
+
+    def test_task_no_agent(self):
+        """A task does not fit on any agent, but not due to a single reason"""
+        # Ask for more combined cpu+ports than is available on one agent
+        self.logical_task.cpus = 8
+        self.logical_task.ports = ['a', 'b', 'c']
+        with self.assertRaises(scheduler.TaskNoAgentError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.cpus_agent, self.ports_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        # Make sure that it didn't incorrectly return a subclass
+        self.assertEqual(scheduler.TaskNoAgentError, type(cm.exception))
+
+    def test_group_insufficient_scalar_resource(self):
+        """A group of tasks require more of a scalar resource than available"""
+        self.logical_task.cpus = 24
+        self.logical_task2.cpus = 16
+        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.cpus_agent, self.mem_agent], [self.physical_task, self.physical_task2])
+        self.assertEqual('cpus', cm.exception.resource)
+        self.assertEqual(40, cm.exception.needed)
+        self.assertEqual(33.25, cm.exception.available)
+
+    def test_group_insufficient_range_resource(self):
+        """A group of tasks require more of a range resource than available"""
+        self.logical_task.ports = ['a', 'b', 'c']
+        self.logical_task2.ports = ['d', 'e', 'f']
+        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.ports_agent], [self.physical_task, self.physical_task2])
+        self.assertEqual('ports', cm.exception.resource)
+        self.assertEqual(6, cm.exception.needed)
+        self.assertEqual(5, cm.exception.available)
+
+    def test_group_insufficient_gpu_scalar_resources(self):
+        """A group of tasks require more of a GPU scalar resource than available"""
+        self.logical_task.gpus = [scheduler.GPURequest()]
+        self.logical_task.gpus[-1].compute = 0.75
+        self.logical_task2.gpus = [scheduler.GPURequest()]
+        self.logical_task2.gpus[-1].compute = 0.5
+        with self.assertRaises(scheduler.GroupInsufficientGPUResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.gpu_compute_agent, self.gpu_mem_agent],
+                [self.physical_task, self.physical_task2])
+        self.assertEqual('compute', cm.exception.resource)
+        self.assertEqual(1.25, cm.exception.needed)
+        self.assertEqual(1.125, cm.exception.available)
+
+    def test_generic(self):
+        """A group of tasks can't fit, but on simpler explanation is available"""
+        # Create a tasks that uses just too much memory for the
+        # low-memory agents, forcing them to consume memory from the
+        # big-memory agent and not leaving enough for the big-memory task.
+        self.logical_task.mem = 5
+        self.logical_task2.mem = 251
+        with self.assertRaises(scheduler.InsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.cpus_agent, self.mem_agent, self.disk_agent],
+                [self.physical_task, self.physical_task2])
+        # Check that it wasn't a subclass raised
+        self.assertEqual(scheduler.InsufficientResourcesError, type(cm.exception))
+
+
 class TestScheduler(object):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
     def _make_offer(self, resources, agent_num=0, attrs=()):

@@ -292,13 +292,18 @@ class GPURequest(object):
     affinity : bool
         If true, the GPU must be on the same NUMA node as the chosen CPU
         cores (ignored if no CPU cores are reserved).
+    name : str, optional
+        If specified, the name of the GPU must match this.
     """
     def __init__(self):
         for r in GPU_SCALAR_RESOURCES:
             setattr(self, r, 0.0)
         self.affinity = False
+        self.name = None
 
     def matches(self, agent_gpu, numa_node):
+        if self.name is not None and self.name != agent_gpu.name:
+            return False
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
 
@@ -730,6 +735,112 @@ class InsufficientResourcesError(RuntimeError):
     pass
 
 
+class NoOffersError(InsufficientResourcesError):
+    """Indicates that resources were insufficient because no offers were
+    received before the timeout.
+    """
+    def __init__(self):
+        super(NoOffersError, self).__init__("No offers were received")
+
+
+class TaskNoAgentError(InsufficientResourcesError):
+    """Indicates that no agent was suitable for a task. Where possible, a
+    sub-class is used to indicate a more specific error.
+    """
+    def __init__(self, node):
+        self.node = node
+
+    def __str__(self):
+        return "No agent was found suitable for {0.node.name}".format(self)
+
+
+class TaskInsufficientResourcesError(TaskNoAgentError):
+    """Indicates that a specific task required more of some resource than
+    were available on any agent."""
+    def __init__(self, node, resource, needed, available):
+        super(TaskInsufficientResourcesError, self).__init__(node)
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Not enough {0.resource} for {0.node.name} on any agent "
+                "({0.needed} > {0.available})".format(self))
+
+
+class TaskInsufficientGPUResourcesError(TaskNoAgentError):
+    """Indicates that a specific task GPU request needed more of some resource
+    than were available on any agent GPU."""
+    def __init__(self, node, request_index, resource, needed, available):
+        super(TaskInsufficientGPUResourcesError, self).__init__(node)
+        self.request_index = request_index
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Not enough GPU {0.resource} for {0.node.name} (request #{0.request_index}) "
+                "on any agent ({0.needed} > {0.available})".format(self))
+
+
+class TaskNoNetworkError(TaskNoAgentError):
+    """Indicates that a task required a network interface that was not present on any agent."""
+    def __init__(self, node, request):
+        super(TaskNoNetworkError, self).__init__(node)
+        self.request = request
+
+    def __str__(self):
+        return ("No agent matches {1}network request for {0.request.network} from "
+                "task {0.node.name}".format(self, "Infiniband " if self.request.infiniband else ""))
+
+
+class TaskNoVolumeError(TaskNoAgentError):
+    """Indicates that a task required a volume that was not present on any agent."""
+    def __init__(self, node, request):
+        super(TaskNoVolumeError, self).__init__(node)
+        self.request = request
+
+    def __str__(self):
+        return ("No agent matches volume request for {0.request.name} "
+                "from {0.node.name}".format(self))
+
+
+class TaskNoGPUError(TaskNoAgentError):
+    """Indicates that a task required a GPU that did not match any agent"""
+    def __init__(self, node, request_index):
+        super(TaskNoGPUError, self).__init__(node)
+        self.request_index = request_index
+
+    def __str__(self):
+        return "No agent matches GPU request #{0.request_index} from {0.node.name}".format(self)
+
+
+class GroupInsufficientResourcesError(InsufficientResourcesError):
+    """Indicates that a group of tasks collectively required more of some
+    resource than were available between all the agents."""
+    def __init__(self, resource, needed, available):
+        super(GroupInsufficientResourcesError, self).__init__()
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Insufficient total {0.resource} to launch all tasks "
+                "({0.needed} > {0.available})".format(self))
+
+
+class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
+    def __init__(self, resource, needed, available):
+        super(GroupInsufficientGPUResourcesError, self).__init__()
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Insufficient total GPU {0.resource} to launch all tasks "
+                "({0.needed} > {0.available})".format(self))
+
+
 class CycleError(ValueError):
     """Raised for a graph that contains a cycle with a strong ordering dependency"""
     pass
@@ -1100,6 +1211,17 @@ class Agent(ResourceCollector):
             raise InsufficientResourcesError('No suitable NUMA node found')
         else:
             return self._allocate_numa_node(None, logical_task)
+
+    def can_allocate(self, logical_task):
+        """Check whether :meth:`allocate` will succeed, without modifying
+        the resources.
+        """
+        dup = copy.deepcopy(self)
+        try:
+            dup.allocate(logical_task)
+            return True
+        except InsufficientResourcesError:
+            return False
 
 
 class TaskState(OrderedEnum):
@@ -1645,6 +1767,106 @@ class Scheduler(pymesos.Scheduler):
             task.status = status
         self._driver.acknowledgeStatusUpdate(status)
 
+    @classmethod
+    def _diagnose_insufficient(cls, agents, nodes):
+        """Try to determine *why* offers are insufficient.
+
+        This function does not return, instead raising an instance of
+        :exc:`InsufficientResourcesError` or a subclass.
+
+        Parameters
+        ----------
+        agents : list
+            :class:`Agent`s from which allocation was attempted
+        nodes : list
+            :class:`PhysicalNode`s for which allocation failed. This may
+            include non-tasks, which will be ignored.
+        """
+        # Non-tasks aren't relevant, so filter them out.
+        nodes = [node for node in nodes if isinstance(node, PhysicalTask)]
+        # Pre-compute the maximum resources of each type on any agent,
+        # and the total amount of each resource.
+        max_resources = {}
+        max_gpu_resources = {}
+        total_resources = {}
+        total_gpu_resources = {}
+        for r in SCALAR_RESOURCES:
+            available = [getattr(agent, r) for agent in agents]
+            max_resources[r] = max(available) if available else 0.0
+            total_resources[r] = sum(available)
+        for r in RANGE_RESOURCES:
+            # Cores are special because only the cores on a single NUMA node
+            # can be allocated together
+            if r == 'cores':
+                available = []
+                for agent in agents:
+                    for numa_node in agent.numa:
+                        available.append(len([core for core in numa_node if core in agent.cores]))
+            else:
+                available = [len(getattr(agent, r)) for agent in agents]
+            max_resources[r] = max(available) if available else 0.0
+            total_resources[r] = sum(available)
+        for r in GPU_SCALAR_RESOURCES:
+            available = [getattr(gpu, r) for agent in agents for gpu in agent.gpus]
+            max_gpu_resources[r] = max(available) if available else 0.0
+            total_gpu_resources[r] = sum(available)
+
+        # Check if there is a single node that won't run anywhere
+        for node in nodes:
+            logical_task = node.logical_node
+            if not any(agent.can_allocate(logical_task) for agent in agents):
+                # Check if there is some specific resource that is lacking.
+                for r in SCALAR_RESOURCES:
+                    need = getattr(logical_task, r)
+                    if need > max_resources[r]:
+                        raise TaskInsufficientResourcesError(node, r, need, max_resources[r])
+                for r in RANGE_RESOURCES:
+                    need = len(getattr(logical_task, r))
+                    if need > max_resources[r]:
+                        raise TaskInsufficientResourcesError(node, r, need, max_resources[r])
+                for i, request in enumerate(logical_task.gpus):
+                    for r in GPU_SCALAR_RESOURCES:
+                        need = getattr(request, r)
+                        if need > max_gpu_resources[r]:
+                            raise TaskInsufficientGPUResourcesError(
+                                node, i, r, need, max_gpu_resources[r])
+                # Check if there is an interface/volume/GPU request that
+                # doesn't match anywhere.
+                for request in logical_task.networks:
+                    if not any(request.matches(interface, None)
+                               for agent in agents for interface in agent.interfaces):
+                        raise TaskNoNetworkError(node, request)
+                for request in logical_task.volumes:
+                    if not any(request.matches(volume, None)
+                               for agent in agents for volume in agent.volumes):
+                        raise TaskNoVolumeError(node, request)
+                for i, request in enumerate(logical_task.gpus):
+                    if not any(request.matches(gpu, None)
+                               for agent in agents for gpu in agent.gpus):
+                        raise TaskNoGPUError(node, i)
+                # This node doesn't fit but the reason is more complex e.g.
+                # there is enough of each resource individually but not all on
+                # the same agent or NUMA node.
+                raise TaskNoAgentError(node)
+
+        # Nodes are all individually launchable, but we weren't able to launch
+        # all of them due to some contention. Check if any one resource is
+        # over-subscribed.
+        for r in SCALAR_RESOURCES:
+            need = sum(getattr(node.logical_node, r) for node in nodes)
+            if need > total_resources[r]:
+                raise GroupInsufficientResourcesError(r, need, total_resources[r])
+        for r in RANGE_RESOURCES:
+            need = sum(len(getattr(node.logical_node, r)) for node in nodes)
+            if need > total_resources[r]:
+                raise GroupInsufficientResourcesError(r, need, total_resources[r])
+        for r in GPU_SCALAR_RESOURCES:
+            need = sum(getattr(gpu, r) for node in nodes for gpu in node.logical_node.gpus)
+            if need > total_gpu_resources[r]:
+                raise GroupInsufficientGPUResourcesError(r, need, total_gpu_resources[r])
+        # Not a simple error e.g. due to packing problems
+        raise InsufficientResourcesError("Insufficient resources to launch all tasks")
+
     @trollius.coroutine
     def _launch_group(self, group):
         try:
@@ -1688,6 +1910,9 @@ class Scheduler(pymesos.Scheduler):
                     nodes = [node for node in nodes if node.state == TaskState.STARTING]
                     agents = [Agent(list(six.itervalues(offers)), self._min_ports.get(agent_id, 0))
                               for agent_id, offers in six.iteritems(self._offers)]
+                    # Back up the original agents so that if allocation fails we can
+                    # diagnose it.
+                    orig_agents = copy.deepcopy(agents)
                     # Sort agents by GPUs then free memory. This makes it less likely that a
                     # low-memory process will hog all the other resources on a high-memory
                     # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
@@ -1708,13 +1933,11 @@ class Scheduler(pymesos.Scheduler):
                                     logger.debug('Cannot add %s to %s: %s',
                                                  node.name, agent.agent_id, error)
                             else:
-                                raise InsufficientResourcesError(
-                                    'Could not find a suitable agent for {}'.format(node.name))
+                                # Raises an InsufficientResourcesError
+                                self._diagnose_insufficient(orig_agents, nodes)
                             allocations.append((node, allocation))
                 except InsufficientResourcesError as error:
-                    # TODO: if the resources never become available, it would be
-                    # useful for the caller to get a better idea of the bottleneck.
-                    logger.debug('Could not yet launch graph due to insufficient resources')
+                    logger.debug('Could not yet launch graph: %s', error)
                     last_insufficient = error
                 else:
                     # At this point we have a sufficient set of offers.
@@ -1994,6 +2217,15 @@ __all__ = [
     'LogicalTask', 'PhysicalTask', 'TaskState',
     'Interface', 'ResourceAllocation', 'GPUResourceAllocation',
     'InsufficientResourcesError',
+    'NoOffersError',
+    'TaskNoAgentError',
+    'TaskInsufficientResourcesError',
+    'TaskInsufficientGPUResourcesError',
+    'TaskNoNetworkError',
+    'TaskNoVolumeError',
+    'TaskNoGPUError',
+    'GroupInsufficientResourcesError',
+    'GroupInsufficientGPUResourcesError',
     'NetworkRequest', 'GPURequest',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Scheduler', 'instantiate']
