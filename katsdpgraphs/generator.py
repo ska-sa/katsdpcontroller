@@ -151,7 +151,8 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     timeplot.gui_urls = [{
         'title': 'Signal Display',
         'description': 'Signal displays for {0.subarray_name}',
-        'href': 'http://{0.host}:{0.ports[html_port]}/'
+        'href': 'http://{0.host}:{0.ports[html_port]}/',
+        'category': 'Plot'
     }]
     g.add_node(timeplot, config=lambda resolver: {
         'cbf_channels': cbf_channels,
