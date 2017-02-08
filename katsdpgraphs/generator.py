@@ -214,7 +214,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # 32GB of psrdada buffers, regardless of channels
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
-        bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True, affinity=True)]
+        bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
         bf_ingest.volumes = [scratch_vol]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
@@ -240,7 +240,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             # to be on the safe side we double everything. Values are int8*2.
             # Allow 512MB for various buffers.
             bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
-            bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
+            bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
