@@ -77,9 +77,13 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         'cal_k_chan_sample': 10
     })
 
+    # Volume serviced by katsdptransfer to transfer results to the archive
     data_vol = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
+    # Volume for persisting user configuration
     config_vol = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
-    scratch_vol = scheduler.VolumeRequest('scratch', '/data', 'RW')
+    # Volume for writing results that are not archived, but do not have
+    # strong requirements on performance or capacity.
+    local_data_vol = scheduler.VolumeRequest('local_data', '/var/kat/data', 'RW')
 
     capture_transitions = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 
@@ -148,6 +152,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
+    timeplot.interfaces = [scheduler.NetworkRequest('sdp_10g')]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
         'description': 'Signal displays for {0.subarray_name}',
@@ -184,6 +189,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # only half this.
         ingest.mem = 32 * cbf_vis_mb + 256
         ingest.transitions = capture_transitions
+        ingest.networks = [scheduler.NetworkRequest('cbf'), scheduler.NetworkRequest('sdp_10g')]
         g.add_node(ingest, config=lambda resolver: {
             'continuum_factor': 32,
             'sd_continuum_factor': cbf_channels // 256,
@@ -215,7 +221,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
         bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True, affinity=True)]
-        bf_ingest.volumes = [scratch_vol]
+        bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
         g.add_node(bf_ingest, config=lambda resolver: {
@@ -278,6 +284,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # overhead should be enough. Finally, allow 256MB for general use.
         cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
         cal.volumes = [data_vol]
+        cal.interfaces = [scheduler.NetworkRequest('sdp_10g')]
         g.add_node(cal, config=lambda resolver: {
             'cbf_channels': cbf_channels,
             'buffer_maxsize': buffer_size
@@ -300,6 +307,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
+    filewriter.networks = [scheduler.NetworkRequest('sdp_10g')]
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda resolver: {'file_base': '/var/kat/data'})
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda resolver, endpoint: {
@@ -326,6 +334,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         sim.gpus[0].compute = min(1.0, 0.2 * scale)
         sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
+        sim.interfaces = [scheduler.NetworkRequest('cbf')]
         g.add_node(sim, config=lambda resolver: {
             'cbf_channels': cbf_channels
         })
