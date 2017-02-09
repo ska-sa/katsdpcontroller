@@ -214,7 +214,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # TODO: revisit once coherent dedispersion is in use, when multiple
         # GPUs may be needed.
         bf_ingest.gpus[0].compute = 1.0
-        bf_ingest.gpus[0].mem = 7 * 1024    # TODO: guess, untested
+        bf_ingest.gpus[0].mem = 7 * 1024  # Overkill for now, but may be needed for dedispersion
         bf_ingest.cpus = 4
         bf_ingest.cores = ['capture0', 'capture1', 'processing', 'python']
         # 32GB of psrdada buffers, regardless of channels
