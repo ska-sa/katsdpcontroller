@@ -14,13 +14,10 @@ RUN install-requirements.py --default-versions ~/docker-base/base-requirements.t
 # Install the current package
 COPY . /tmp/install/katsdpcontroller
 WORKDIR /tmp/install/katsdpcontroller
-RUN python ./setup.py clean && pip install --no-index .
+RUN python ./setup.py clean && pip install --no-deps . && pip check
 
 # Network setup
-EXPOSE 5000
+EXPOSE 5001
 
-# Launch configuration
-WORKDIR /home/kat
-
+# Create directory into which config.json can be volume-mounted
 RUN mkdir /home/kat/.docker
-COPY ./conf/docker_keys /home/kat/.docker/
