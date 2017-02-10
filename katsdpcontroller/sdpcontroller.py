@@ -1450,9 +1450,9 @@ class SDPControllerServer(DeviceServer):
         self.ioloop.add_callback(delayed_cmd)
         raise AsyncReply
 
-    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
+    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
-    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
         """Configure a SDP subarray product instance.
 
         A subarray product instance is comprised of a telescope state, a
@@ -1489,16 +1489,11 @@ class SDPControllerServer(DeviceServer):
             A JSON dict of the form {<type>: {<name>: <url>, ...}, ...}
             These stream specifiers are used directly by the graph to configure
             the SDP system and thus rely on the stream_name as a key
-        deprecated_cam_source : string
-            DEPRECATED (only used when stream_source is in DEPRECATED use):
-            A specification of the multicast/unicast sources from which to
-            receive the CAM spead stream in the form <ip>[+<count>]:<port>
 
         Returns
         -------
         success : {'ok', 'fail'}
             If ok, returns the port on which the ingest process for this product is running.
-
         """
         logger.info("?data-product-configure called with: {}".format(req_msg))
          # INFO for now, but should be DEBUG post integration
