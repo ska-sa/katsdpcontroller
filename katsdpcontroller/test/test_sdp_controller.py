@@ -17,6 +17,9 @@ SUBARRAY_PRODUCT2 = 'array_2_' + PRODUCT
 SUBARRAY_PRODUCT3 = 'array_3_' + PRODUCT
 SUBARRAY_PRODUCT4 = 'array_4_' + PRODUCT
 
+STREAMS = '{"cbf.baseline_correlation_products": {"i0.baseline-correlation-products": "spead://127.0.0.1:9000"}, \
+            "cbf.antenna_channelised_voltage": {"i0.antenna-channelised-voltage": "spead://127.0.0.1:9001"}}'
+
 EXPECTED_SENSOR_LIST = [
     ('api-version', '', '', 'string'),
     ('build-state', '', '', 'string'),
@@ -68,7 +71,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"16384","2.1","0",STREAMS)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
@@ -76,7 +79,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"16384","2.1","0",STREAMS)
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
 
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT2)
@@ -84,7 +87,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_deconfigure_subarray_product(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"16384","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"16384","2.1","0",STREAMS)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT3)
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
          # should not be able to deconfigure when not in idle state
@@ -94,7 +97,7 @@ class TestSDPController(unittest.TestCase):
     def test_configure_subarray_product(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"16384","2.1","0","baseline-correlation-products:127.0.0.1:9000,CAM:127.0.0.1:9001,CAM_ws:ws://host.domain:port/path")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"16384","2.1","0",STREAMS)
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4)
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
