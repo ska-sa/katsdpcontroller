@@ -1455,13 +1455,15 @@ class SDPControllerServer(DeviceServer):
     def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
         """Configure a SDP subarray product instance.
 
-        A subarray product instance is comprised of a telescope state, a collection of
-        containers running required SDP services, and a networking configuration 
-        appropriate for the required data movement.
+        A subarray product instance is comprised of a telescope state, a
+        collection of containers running required SDP services, and a
+        networking configuration appropriate for the required data movement.
 
         On configuring a new product, several steps occur:
-         * Build initial static configuration. Includes elements such as IP addresses of deployment machines, multicast subscription details, etc...
-         * Launch a new Telescope State Repository (redis instance) for this product and copy in static config.
+         * Build initial static configuration. Includes elements such as IP
+           addresses of deployment machines, multicast subscription details etc
+         * Launch a new Telescope State Repository (redis instance) for this
+           product and copy in static config.
          * Launch service containers as described in the static configuration.
          * Verify all services are running and reachable.
 
@@ -1469,32 +1471,34 @@ class SDPControllerServer(DeviceServer):
         Inform Arguments
         ----------------
         subarray_product_id : string
-            The ID to use for this subarray product, in the form [<subarray_name>_]<data_product_name>.
+            The ID to use for this subarray product, in the form
+            [<subarray_name>_]<data_product_name>.
         antennas : string
-            A comma-separated list of antenna names to use in this subarray product.
-            These will be matched to the CBF output and used to pull only the specific
-            data. If antennas is "0" or "", then this subarray product is de-configured.
-            Trailing arguments can be omitted.
+            A comma-separated list of antenna names to use in this subarray
+            product. These will be matched to the CBF output and used to pull
+            only the specific data. If antennas is "0" or "", then this subarray
+            product is de-configured. Trailing arguments can be omitted.
         n_channels : int
             Number of channels used in this subarray product (based on CBF config)
         dump_rate : float
             Dump rate of subarray product in Hz
         n_beams : int
-            Number of beams in the subarray product (0 = Correlator output, 1+ = Beamformer)
+            Number of beams in the subarray product
+            (0 = Correlator output, 1+ = Beamformer)
         stream_sources: string
-            Either:
-              DEPRECATED: A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
-            Or:
-              A comma-separated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
-              These are used directly by the graph to configure the SDP system and thus rely on the stream_name as a key
+            A JSON dict of the form {<type>: {<name>: <url>, ...}, ...}
+            These stream specifiers are used directly by the graph to configure
+            the SDP system and thus rely on the stream_name as a key
         deprecated_cam_source : string
             DEPRECATED (only used when stream_source is in DEPRECATED use):
-              A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
-        
+            A specification of the multicast/unicast sources from which to
+            receive the CAM spead stream in the form <ip>[+<count>]:<port>
+
         Returns
         -------
         success : {'ok', 'fail'}
             If ok, returns the port on which the ingest process for this product is running.
+
         """
         logger.info("?data-product-configure called with: {}".format(req_msg))
          # INFO for now, but should be DEBUG post integration
@@ -1607,7 +1611,7 @@ class SDPControllerServer(DeviceServer):
         urls = {}
          # local dict to hold streams associated with the specified data product
         try:
-            # First try to parse the supplied string as a JSON encoded dict of stream urls
+            # Try to parse the supplied string as a JSON encoded dict of stream urls
             streams_dict = json.loads(stream_sources)
             for (stream_type, stream_spec_dict) in streams_dict.iteritems():
                 # each stream type has a dict of stream specifiers of the form
@@ -1631,7 +1635,7 @@ class SDPControllerServer(DeviceServer):
                      # we could of course reuse the dictionary, but we expect some fu to be needed here in the future
         except ValueError:
              # something is definitely wrong with these
-            retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
+            retmsg = "Failed to parse source stream specifiers. You must supply a JSON dict of the form {<type>: {<name>: <url>, ...}, ...}"
             logger.error(retmsg)
             return ('fail',retmsg,None)
 
