@@ -1527,10 +1527,10 @@ class SDPControllerServer(DeviceServer):
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
          # we are only going to allow a single conf/deconf at a time
         self._conf_future = executor.submit(self._async_data_product_configure, req, req_msg, \
-                            subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source)
+                            subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources)
         executor.shutdown(wait=False)
          # executor will shutdown when all existing futures have completed
-        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
+        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources]
          # store our calling context for later use in the reconfigure command
 
         @gen.coroutine
@@ -1565,7 +1565,7 @@ class SDPControllerServer(DeviceServer):
         raise AsyncReply
 
 
-    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
         """Asynchronous portion of data product configure. See docstring for request_data_product_configure above.
 
         Returns
