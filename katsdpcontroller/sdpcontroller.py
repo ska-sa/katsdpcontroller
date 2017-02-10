@@ -940,7 +940,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         try:
             self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-                req, req_msg, subarray_product_id, "0", None, None, None, None, None), self.loop)
+                req, req_msg, subarray_product_id, "0", None, None, None, None), self.loop)
              # start with a deconfigure
 
             logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
@@ -965,19 +965,21 @@ class SDPControllerServer(AsyncDeviceServer):
             self._conf_future = None
 
     @async_request
-    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),Str(optional=True),include_msg=True)
+    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
     @gen.coroutine
-    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
         """Configure a SDP subarray product instance.
 
-        A subarray product instance is comprised of a telescope state, a collection of
-        containers running required SDP services, and a networking configuration
-        appropriate for the required data movement.
+        A subarray product instance is comprised of a telescope state, a
+        collection of containers running required SDP services, and a
+        networking configuration appropriate for the required data movement.
 
         On configuring a new product, several steps occur:
-         * Build initial static configuration. Includes elements such as IP addresses of deployment machines, multicast subscription details, etc...
-         * Launch a new Telescope State Repository (redis instance) for this product and copy in static config.
+         * Build initial static configuration. Includes elements such as IP
+           addresses of deployment machines, multicast subscription details etc
+         * Launch a new Telescope State Repository (redis instance) for this
+           product and copy in static config.
          * Launch service containers as described in the static configuration.
          * Verify all services are running and reachable.
 
@@ -985,27 +987,24 @@ class SDPControllerServer(AsyncDeviceServer):
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID to use for this subarray product, in the form [<subarray_name>_]<data_product_name>.
+            The ID to use for this subarray product, in the form
+            [<subarray_name>_]<data_product_name>.
         antennas : string
-            A comma-separated list of antenna names to use in this subarray product.
-            These will be matched to the CBF output and used to pull only the specific
-            data. If antennas is "0" or "", then this subarray product is de-configured.
-            Trailing arguments can be omitted.
+            A comma-separated list of antenna names to use in this subarray
+            product. These will be matched to the CBF output and used to pull
+            only the specific data. If antennas is "0" or "", then this subarray
+            product is de-configured. Trailing arguments can be omitted.
         n_channels : int
             Number of channels used in this subarray product (based on CBF config)
         dump_rate : float
             Dump rate of subarray product in Hz
         n_beams : int
-            Number of beams in the subarray product (0 = Correlator output, 1+ = Beamformer)
+            Number of beams in the subarray product
+            (0 = Correlator output, 1+ = Beamformer)
         stream_sources: string
-            Either:
-              DEPRECATED: A specification of the multicast/unicast sources from which to receive the CBF spead stream in the form <ip>[+<count>]:<port>
-            Or:
-              A comma-separated list of stream identifiers in the form <stream_name>:<ip>[+<count>]:<port>
-              These are used directly by the graph to configure the SDP system and thus rely on the stream_name as a key
-        deprecated_cam_source : string
-            DEPRECATED (only used when stream_source is in DEPRECATED use):
-              A specification of the multicast/unicast sources from which to receive the CAM spead stream in the form <ip>[+<count>]:<port>
+            A JSON dict of the form {<type>: {<name>: <url>, ...}, ...}
+            These stream specifiers are used directly by the graph to configure
+            the SDP system and thus rely on the stream_name as a key
 
         Returns
         -------
@@ -1040,7 +1039,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self._conf_future = trollius.ensure_future(
             self._async_data_product_configure(
                 req, req_msg, subarray_product_id, antennas, n_channels, dump_rate,
-                n_beams, stream_sources, deprecated_cam_source), loop=self.loop)
+                n_beams, stream_sources), loop=self.loop)
          # store our calling context for later use in the reconfigure command
 
         try:
@@ -1054,7 +1053,7 @@ class SDPControllerServer(AsyncDeviceServer):
             self._conf_future = None
 
     @trollius.coroutine
-    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source):
+    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
         """Asynchronous portion of data product configure. See docstring for request_data_product_configure above.
 
         Raises
@@ -1070,7 +1069,7 @@ class SDPControllerServer(AsyncDeviceServer):
             - If one or more nodes fail to become alive (essentially a NOP for now)
             - If we fail to establish katcp connection to all nodes requiring them.
         """
-        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources, deprecated_cam_source]
+        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources]
         if antennas == "0" or antennas == "":
             if subarray_product_id not in self.subarray_products:
                 raise FailReply("Deconfiguration of subarray product {} requested, "
@@ -1098,34 +1097,32 @@ class SDPControllerServer(AsyncDeviceServer):
         urls = {}
          # local dict to hold streams associated with the specified data product
         try:
-            streams['baseline-correlation-products_spead'] = stream_sources.split(":",2)
-            streams['CAM_spead'] = deprecated_cam_source.split(":",2)
-            logger.info("Adding DEPRECATED endpoints for baseline-correlation-products_spead ({}) and CAM_spead ({})".format(streams['baseline-correlation-products_spead'],streams['CAM_spead']))
-        except (AttributeError, ValueError):
-             # check to see if we are using the new stream_sources specifier
-            try:
-                for stream in stream_sources.split(","):
-                    (stream_name, value) = stream.split(":", 1)
-                    if re.match(r'^\w+://', value):
-                        urls[stream_name] = value
-                        logger.info("Adding stream {} with URL {}".format(stream_name, value))
+            # Try to parse the supplied string as a JSON encoded dict of stream urls
+            streams_dict = json.loads(stream_sources)
+            for (stream_type, stream_spec_dict) in streams_dict.iteritems():
+                # each stream type has a dict of stream specifiers of the form
+                # stream_name:stream_url
+                # e.g. {u'i0.baseline-correlation-products': u'spead://239.9.3.1+15:7148'}
+                # The fully qualified stream name is used directly, and in the future the leading term
+                # will be used to disambiguate multiple streams of the same type
+                for (stream_name, stream_url) in stream_spec_dict.iteritems():
+                    # Segregate into SPEAD streams and the rest (stored as URLs)
+                    try:
+                        stream_transport, stream_address = stream_url.split('://', 1)
+                    except ValueError:
+                        stream_transport, stream_address = 'spead', stream_url
+                    if stream_transport == 'spead':
+                        (host, port) = stream_address.split(":", 1)
+                        streams[stream_name] = (host, port)
+                        logger.info("Adding stream {} with endpoint ({},{})".format(stream_name, host, port))
                     else:
-                        (host, port) = value.split(":", 2)
-                         # just to make it explicit what we are expecting
-                        # Hack to handle CAM not yet passing us fully-qualified
-                        # stream names. This code should be deleted once CAM is
-                        # updated.
-                        if (stream_name == 'baseline-correlation-products' or
-                                stream_name == 'antenna-channelised-voltage' or
-                                stream_name.startswith('tied-array-channelised-voltage.')):
-                            stream_name = 'corr.' + stream_name
-                        streams["{}_spead".format(stream_name)] = (host, port)
-                        logger.info("Adding stream {}_spead with endpoint ({},{})".format(stream_name, host, port))
-            except ValueError:
-                 # something is definitely wrong with these
-                retmsg = "Failed to parse source stream specifiers. You must either supply cbf and cam sources in the form <ip>[+<count>]:port or a single stream_sources string that contains a comma-separated list of streams in the form <stream_name>:<ip>[+<count>]:<port> or <stream_name>:url"
-                logger.error(retmsg)
-                raise FailReply(retmsg)
+                        urls[stream_name] = stream_url
+                        logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
+        except ValueError:
+             # something is definitely wrong with these
+            retmsg = "Failed to parse source stream specifiers. You must supply a JSON dict of the form {<type>: {<name>: <url>, ...}, ...}"
+            logger.error(retmsg)
+            raise FailReply(retmsg)
 
         graph_name = self.graph_resolver(subarray_product_id)
         subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)

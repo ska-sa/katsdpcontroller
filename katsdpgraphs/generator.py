@@ -88,12 +88,12 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     capture_transitions = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 
     # Multicast groups
-    bcp_spead = LogicalMulticast('corr.baseline-correlation-products_spead')
+    bcp_spead = LogicalMulticast('i0.baseline-correlation-products_spead')
     g.add_node(bcp_spead)
     if beamformer_mode != 'none':
         beams_spead = {}
         for beam in ['0x', '0y']:
-            beams_spead[beam] = LogicalMulticast('corr.tied-array-channelised-voltage.{}_spead'.format(beam))
+            beams_spead[beam] = LogicalMulticast('i0.tied-array-channelised-voltage.{}_spead'.format(beam))
             g.add_node(beams_spead[beam])
     l0_spectral = LogicalMulticast('l0_spectral')
     g.add_node(l0_spectral)
@@ -120,12 +120,12 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         cam2telstate.cpus = 0.2
         cam2telstate.mem = 256
         streams = {
-            'corr.baseline-correlation-products': 'visibility',
-            'corr.antenna-channelised-voltage': 'fengine'
+            'i0.baseline-correlation-products': 'visibility',
+            'i0.antenna-channelised-voltage': 'fengine'
         }
         streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
         g.add_node(cam2telstate, config=lambda resolver: {
-            'url': resolver.resources.get_url('CAMDATA'),
+            'url': resolver.resources.get_url('camdata'),
             'streams': streams_arg,
             'collapse_streams': True
         })
@@ -256,7 +256,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
                 'file_base': '/data',
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
-                'stream_name': 'corr.tied-array-channelised-voltage.' + beam
+                'stream_name': 'i0.tied-array-channelised-voltage.' + beam
             })
             g.add_edge(bf_ingest, beams_spead[beam], port='spead', config=lambda resolver, endpoint: {
                 'cbf_spead': str(endpoint)})

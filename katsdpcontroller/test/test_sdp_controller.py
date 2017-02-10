@@ -33,7 +33,10 @@ SUBARRAY_PRODUCT1 = 'array_1_' + PRODUCT
 SUBARRAY_PRODUCT2 = 'array_2_' + PRODUCT
 SUBARRAY_PRODUCT3 = 'array_3_' + PRODUCT
 SUBARRAY_PRODUCT4 = 'array_4_' + PRODUCT
-STREAM_SOURCES = "baseline-correlation-products:127.0.0.1:9000,CAM:127.0.0.1:9001,CAMDATA:ws://host.domain:port/path"
+
+STREAMS = '{"cam.http": {"camdata": "http://127.0.0.1:8999"}, \
+            "cbf.baseline_correlation_products": {"i0.baseline-correlation-products": "spead://127.0.0.1:9000"}, \
+            "cbf.antenna_channelised_voltage": {"i0.antenna-channelised-voltage": "spead://127.0.0.1:9001"}}'
 
 EXPECTED_SENSOR_LIST = [
     ('api-version', '', '', 'string'),
@@ -111,7 +114,7 @@ class TestSDPControllerInterface(unittest.TestCase):
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"4096","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
@@ -120,7 +123,7 @@ class TestSDPControllerInterface(unittest.TestCase):
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"4096","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
 
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT2)
@@ -129,7 +132,7 @@ class TestSDPControllerInterface(unittest.TestCase):
 
     def test_deconfigure_subarray_product(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"4096","2.1","0","127.0.0.1:9000","127.0.0.1:9001")
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT3)
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
          # should not be able to deconfigure when not in idle state
@@ -139,9 +142,9 @@ class TestSDPControllerInterface(unittest.TestCase):
     def test_configure_subarray_product(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
-        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.2","0",STREAM_SOURCES)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
+        self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.2","0",STREAMS)
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4)
 
         reply, informs = self.client.blocking_request(Message.request("data-product-configure"))
@@ -152,7 +155,7 @@ class TestSDPControllerInterface(unittest.TestCase):
 
     def test_reconfigure_subarray_product(self):
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_succeeds("data-product-reconfigure", SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
@@ -351,7 +354,7 @@ class TestSDPController(unittest.TestCase):
 
     def _configure_args(self, subarray_product):
         return ("data-product-configure", subarray_product, ANTENNAS, "4096",
-                "2.1", "0", STREAM_SOURCES)
+                "2.1", "0", STREAMS)
 
     def _configure_subarray(self, subarray_product):
         self.client.assert_request_succeeds(*self._configure_args(subarray_product))
@@ -374,7 +377,7 @@ class TestSDPController(unittest.TestCase):
             'subarray_numeric_id': 4,
             'sd_int_time': 1.0 / 2.1,
             'output_int_time': 1.0 / 2.1,
-            'stream_sources': STREAM_SOURCES,
+            'stream_sources': STREAMS,
             'override_key': ['override_value']
         }, immutable=True)
         ts.add.assert_any_call('sdp_cbf_channels', 4096, immutable=True)
@@ -471,7 +474,7 @@ class TestSDPController(unittest.TestCase):
             'subarray_numeric_id': 1,
             'sd_int_time': 1.0 / 2.1,
             'output_int_time': 1.0 / 2.1,
-            'stream_sources': STREAM_SOURCES,
+            'stream_sources': STREAMS,
             'override_key': ['override_value2']
         }, immutable=True)
 
@@ -539,7 +542,7 @@ class TestSDPController(unittest.TestCase):
 
         TODO: that's probably not really the behaviour we want.
         """
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAM_SOURCES)
+        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         for node in sa.graph.physical_graph:
             if node.logical_node.name == 'sdp.ingest.1':
