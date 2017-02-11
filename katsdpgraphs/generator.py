@@ -237,7 +237,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
                 'cbf_spead{}'.format(stream.name[-1]): str(endpoint)})
     elif beamformer_mode != 'none':
         ram = beamformer_mode == 'hdf5_ram'
-        for i, stream in enumerate(six.itervalues(beam_spead)):
+        for i, stream in enumerate(six.itervalues(beams_spead)):
             bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
             bf_ingest.image = 'katsdpingest'
             bf_ingest.command = ['bf_ingest.py',
