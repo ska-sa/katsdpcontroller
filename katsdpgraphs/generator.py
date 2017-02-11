@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 import networkx as nx
 import re
+from collections import OrderedDict
 import trollius
 from trollius import From
 import addict
@@ -88,12 +89,13 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     capture_transitions = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 
     # Multicast groups
-    bcp_spead = LogicalMulticast('i0.baseline-correlation-products_spead')
+    bcp_spead = LogicalMulticast('i0.baseline-correlation-products')
     g.add_node(bcp_spead)
+    beams_spead = OrderedDict()
     if beamformer_mode != 'none':
-        beams_spead = {}
-        for beam in ['0x', '0y']:
-            beams_spead[beam] = LogicalMulticast('i0.tied-array-channelised-voltage.{}_spead'.format(beam))
+        for suffix in ['0x', '0y']:
+            beam = 'i0.tied-array-channelised-voltage.{}'.format(suffix)
+            beams_spead[beam] = LogicalMulticast(beam)
             g.add_node(beams_spead[beam])
     l0_spectral = LogicalMulticast('l0_spectral')
     g.add_node(l0_spectral)
@@ -123,6 +125,8 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             'i0.baseline-correlation-products': 'visibility',
             'i0.antenna-channelised-voltage': 'fengine'
         }
+        for beam in six.iterkeys(beams_spead):
+            streams[beam] = 'beamformer'
         streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
         g.add_node(cam2telstate, config=lambda resolver: {
             'url': resolver.resources.get_url('camdata'),
@@ -227,13 +231,12 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         g.add_node(bf_ingest, config=lambda resolver: {
             'cbf_channels': cbf_channels
         })
-        g.add_edge(bf_ingest, beams_spead['0x'], port='spead', config=lambda resolver, endpoint: {
-            'cbf_speadx': str(endpoint)})
-        g.add_edge(bf_ingest, beams_spead['0y'], port='spead', config=lambda resolver, endpoint: {
-            'cbf_speady': str(endpoint)})
+        for stream in six.itervalues(beams_spead):
+            g.add_edge(bf_ingest, stream, port='spead', config=lambda resolver, endpoint: {
+                'cbf_spead{}'.format(stream.name[-1]): str(endpoint)})
     elif beamformer_mode != 'none':
         ram = beamformer_mode == 'hdf5_ram'
-        for i, beam in enumerate(['0x', '0y']):
+        for i, stream in enumerate(six.itervalues(beam_spead)):
             bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
             bf_ingest.image = 'katsdpingest'
             bf_ingest.command = ['bf_ingest.py',
@@ -256,9 +259,9 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
                 'file_base': '/data',
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
-                'stream_name': 'i0.tied-array-channelised-voltage.' + beam
+                'stream_name': stream.name
             })
-            g.add_edge(bf_ingest, beams_spead[beam], port='spead', config=lambda resolver, endpoint: {
+            g.add_edge(bf_ingest, stream, port='spead', config=lambda resolver, endpoint: {
                 'cbf_spead': str(endpoint)})
 
     # Calibration node (only possible to calibrate with at least 4 antennas)
@@ -319,11 +322,11 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         sim.image = 'katcbfsim'
         # create-fx-stream is passed on the command-line instead of telstate
         # for now due to SR-462.
-        sim.command = ['cbfsim.py', '--create-fx-stream', 'baseline-correlation-products']
+        sim.command = ['cbfsim.py', '--create-fx-stream', 'i0.baseline-correlation-products']
         # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
         # 16 antennas, 32K, and cap it there (threads for compute and network).
         # cbf_vis is an overestimate since the simulator is not constrained to
-        # power-of-two antennas counts like the real CBF.
+        # power-of-two antenna counts like the real CBF.
         scale = cbf_vis / (16 * 17 * 2 * 32768)
         sim.cpus = 2 * min(1.0, scale)
         # Factor of 4 is conservative; only actually double-buffered
