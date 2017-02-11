@@ -593,7 +593,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if self.simulate:
             logger.info("SIMULATE: Issuing a capture-stop to the simulator")
             yield From(self._issue_req(
-                'capture-stop', args=['baseline-correlation-products'], node_type='sdp.sim', timeout=120))
+                'capture-stop', args=['i0.baseline-correlation-products'], node_type='sdp.sim', timeout=120))
         yield From(self.exec_transitions(State.DONE))
          # called in an explicit fashion (above as well) so we can manage
          # execution order correctly when dealing with a simulator
