@@ -144,8 +144,9 @@ def infiniband_devices(interface):
                         if os.path.exists(device):
                             devices.append(device)
                 return devices
-    except IOError:
-        return []
+    except (IOError, OSError) as error:
+        pass
+    return None
 
 
 def collapse_ranges(values):
@@ -171,29 +172,34 @@ def attributes_resources(args):
 
     interface_nodes = hwloc.interface_nodes()
     interfaces = []
-    for network_spec in args.networks:
+    for i, network_spec in enumerate(args.networks):
         try:
             interface, network = network_spec.split(':', 1)
         except ValueError:
             raise RuntimeError(
                 'Error: --network argument {} does not have the format INTERFACE:NETWORK'
                 .format(network_spec))
-        config = {'name': interface, 'network': network,
-                  'infiniband_devices': infiniband_devices(interface)}
+        config = {'name': interface, 'network': network}
+        ibdevs = infiniband_devices(interface)
+        if ibdevs:
+            config['infiniband_devices'] = ibdevs
         try:
             config['ipv4_address'] = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
         except (KeyError, IndexError):
             raise RuntimeError('Could not obtain IPv4 address for interface {}'.format(interface))
         try:
-            with open('/sys/class/net/{}/speed'.format(interface)) as f:
-                config['speed'] = float(f.read().strip()) * 1e6  # /sys/class/net has speed in Mbps
-        except (IOError, OSError, ValueError):
-            pass
-        try:
             config['numa_node'] = interface_nodes[interface]
         except KeyError:
             pass
         interfaces.append(config)
+        try:
+            with open('/sys/class/net/{}/speed'.format(interface)) as f:
+                speed = float(f.read().strip()) * 1e6  # /sys/class/net has speed in Mbps
+        except (IOError, OSError, ValueError) as error:
+            raise RuntimeError('Could not determine speed of interface {}: {}'.format(
+                interface, error))
+        resources['katsdpcontroller.interface.{}.bandwidth_in'.format(i)] = speed
+        resources['katsdpcontroller.interface.{}.bandwidth_out'.format(i)] = speed
     attributes['katsdpcontroller.interfaces'] = interfaces
 
     volumes = []
@@ -206,7 +212,7 @@ def attributes_resources(args):
                 numa_node = int(fields[2])
             else:
                 numa_node = None
-        except ValueError, IndexError:
+        except (ValueError, IndexError):
             raise RuntimeError(
                 'Error: --volume argument {} does not have the format NAME:PATH'
                 .format(volume_spec))
