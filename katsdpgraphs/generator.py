@@ -4,6 +4,7 @@ import re
 from collections import OrderedDict
 import trollius
 from trollius import From
+import six
 import addict
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase
