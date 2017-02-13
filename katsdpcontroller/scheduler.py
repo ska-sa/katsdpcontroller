@@ -121,6 +121,7 @@ import pymesos
 
 SCALAR_RESOURCES = ['cpus', 'mem', 'disk']
 GPU_SCALAR_RESOURCES = ['compute', 'mem']
+INTERFACE_SCALAR_RESOURCES = ['bandwidth_in', 'bandwidth_out']
 RANGE_RESOURCES = ['ports', 'cores']
 #: Mesos task states that indicate that the task is dead (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset([
@@ -163,11 +164,6 @@ INTERFACES_SCHEMA = {
             'numa_node': {
                 'type': 'integer',
                 'minimum': 0
-            },
-            'speed': {
-                'type': 'number',
-                'minimum': 0.0,
-                'exclusiveMinimum': True
             },
             'infiniband_devices': {
                 'type': 'array',
@@ -238,29 +234,6 @@ GPUS_SCHEMA = {
 logger = logging.getLogger(__name__)
 
 
-Interface = namedtuple('Interface', ['name', 'network', 'ipv4_address', 'numa_node', 'speed', 'infiniband_devices'])
-"""Abstraction of a network interface on a machine.
-
-Interfaces are defined by setting the Mesos attribute
-:code:`katsdpcontroller.interfaces`, whose value is a JSON string that adheres
-to the schema in :const:`INTERFACES_SCHEMA`.
-
-Attributes
-----------
-name : str
-    Kernel interface name
-network : str
-    Logical name for the network to which the interface is attached
-ipv4_address : :class:`ipaddress.IPv4Address`
-    IPv4 local address of the interface
-numa_node : int, optional
-    Index of the NUMA socket to which the NIC is connected
-speed : float, optional
-    Speed (in bits per second) of the interface
-infiniband_devices : list of str
-    Device inodes that should be passed into Docker containers to use Infiniband libraries
-"""
-
 Volume = namedtuple('Volume', ['name', 'host_path', 'numa_node'])
 """Abstraction of a host path offered by an agent.
 
@@ -307,7 +280,7 @@ class GPURequest(object):
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
 
-class NetworkRequest(object):
+class InterfaceRequest(object):
     """Request for resources on a network interface. At the moment only
     a logical network name can be specified, but this may be augmented in
     future to allocate bandwidth.
@@ -322,11 +295,17 @@ class NetworkRequest(object):
     affinity : bool
         If true, the network device must be on the same NUMA node as the chosen
         CPU cores (ignored if no CPU cores are reserved).
+    bandwidth_in : float
+        Ingress bandwidth, in bps
+    bandwidth_out : float
+        Egress bandwidth, in bps
     """
     def __init__(self, network, infiniband=False, affinity=False):
         self.network = network
         self.infiniband = infiniband
         self.affinity = affinity
+        for r in INTERFACE_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
 
     def matches(self, interface, numa_node):
         if self.affinity and numa_node is not None and interface.numa_node != numa_node:
@@ -529,14 +508,40 @@ class RangeResource(object):
 
 
 class GPUResourceAllocation(object):
-    """Collection of specific resources allocated from a single agent GPU."""
-    def __init__(self):
+    """Collection of specific resources allocated from a single agent GPU.
+
+    Attributes
+    ----------
+    index : int
+        Index into the agent's list of GPUs
+    """
+    def __init__(self, index):
+        self.index = index
         for r in GPU_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+
+
+class InterfaceResourceAllocation(object):
+    """Collection of specific resources allocated from a single agent network interface.
+
+    Attributes
+    ----------
+    index : int
+        Index into the agent's list of interfaces
+    """
+    def __init__(self, index):
+        self.index = index
+        for r in INTERFACE_SCALAR_RESOURCES:
             setattr(self, r, 0.0)
 
 
 class ResourceAllocation(object):
     """Collection of specific resources allocated from a collection of offers.
+
+    Attributes
+    ----------
+    agent : :class:`Agent`
+        Agent from which the resources are allocated
     """
     def __init__(self, agent):
         self.agent = agent
@@ -544,7 +549,7 @@ class ResourceAllocation(object):
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
-        self.gpus = [GPUResourceAllocation() for gpu in agent.gpus]
+        self.gpus = []
         self.interfaces = []
         self.volumes = []
 
@@ -771,7 +776,7 @@ class TaskInsufficientResourcesError(TaskNoAgentError):
 
 class TaskInsufficientGPUResourcesError(TaskNoAgentError):
     """Indicates that a specific task GPU request needed more of some resource
-    than were available on any agent GPU."""
+    than was available on any agent GPU."""
     def __init__(self, node, request_index, resource, needed, available):
         super(TaskInsufficientGPUResourcesError, self).__init__(node)
         self.request_index = request_index
@@ -784,10 +789,25 @@ class TaskInsufficientGPUResourcesError(TaskNoAgentError):
                 "on any agent ({0.needed} > {0.available})".format(self))
 
 
-class TaskNoNetworkError(TaskNoAgentError):
+class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
+    """Indicates that a specific task interface request needed more of some
+    resource than was available on any agent interface."""
+    def __init__(self, node, request, resource, needed, available):
+        super(TaskInsufficientInterfaceResourcesError, self).__init__(node)
+        self.request = request
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Not enough interface {0.resource} on {0.request.network} for "
+                "{0.node.name} on any agent ({0.needed} > {0.available})".format(self))
+
+
+class TaskNoInterfaceError(TaskNoAgentError):
     """Indicates that a task required a network interface that was not present on any agent."""
     def __init__(self, node, request):
-        super(TaskNoNetworkError, self).__init__(node)
+        super(TaskNoInterfaceError, self).__init__(node)
         self.request = request
 
     def __str__(self):
@@ -831,6 +851,8 @@ class GroupInsufficientResourcesError(InsufficientResourcesError):
 
 
 class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
+    """Indicates that a group of tasks collectively required more of some
+    GPU resource than were available between all the agents."""
     def __init__(self, resource, needed, available):
         super(GroupInsufficientGPUResourcesError, self).__init__()
         self.resource = resource
@@ -840,6 +862,21 @@ class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
     def __str__(self):
         return ("Insufficient total GPU {0.resource} to launch all tasks "
                 "({0.needed} > {0.available})".format(self))
+
+
+class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
+    """Indicates that a group of tasks collectively required more of some
+    interface resource than were available between all the agents."""
+    def __init__(self, network, resource, needed, available):
+        super(GroupInsufficientInterfaceResourcesError, self).__init__()
+        self.network = network
+        self.resource = resource
+        self.needed = needed
+        self.available = available
+
+    def __str__(self):
+        return ("Insufficient total interface {0.resource} on network {0.network} "
+                "to launch all tasks ({0.needed} > {0.available})".format(self))
 
 
 class CycleError(ValueError):
@@ -913,15 +950,15 @@ class LogicalTask(LogicalNode):
         If it is non-empty, then the task will be pinned to the assigned cores,
         and no other tasks will be pinned to those cores. In addition, the
         cores will all be taken from the same NUMA socket, and network
-        interfaces in :attr:`networks` will also come from the same socket.
+        interfaces in :attr:`interfaces` will also come from the same socket.
         The strings in the list become keys in :attr:`Task.cores`. You can use
         ``None`` if you don't need to use the core numbers in the command to
         pin individual threads.
     ports : list of str
         Network service ports. Each element in the list is a logical name for
         the port.
-    networks : list
-        List of :class:`NetworkRequest` objects, one per network requested
+    interfaces : list
+        List of :class:`InterfaceRequest` objects, one per interface requested
     gpus : list
         List of :class:`GPURequest` objects, one per GPU needed
     image : str
@@ -948,7 +985,7 @@ class LogicalTask(LogicalNode):
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
         self.gpus = []
-        self.networks = []
+        self.interfaces = []
         self.volumes = []
         self.image = None
         self.command = []
@@ -982,6 +1019,32 @@ class AgentGPU(ResourceCollector):
         self.device_attributes = spec['device_attributes']
         self.numa_node = spec.get('numa_node')
         for r in GPU_SCALAR_RESOURCES:
+            setattr(self, r, 0.0)
+
+
+class AgentInterface(ResourceCollector):
+    """A single interface on an agent machine, trackign both attributes and free resources.
+
+    Attributes
+    ----------
+    name : str
+        Kernel interface name
+    network : str
+        Logical name for the network to which the interface is attached
+    ipv4_address : :class:`ipaddress.IPv4Address`
+        IPv4 local address of the interface
+    numa_node : int, optional
+        Index of the NUMA socket to which the NIC is connected
+    infiniband_devices : list of str
+        Device inodes that should be passed into Docker containers to use Infiniband libraries
+    """
+    def __init__(self, spec):
+        self.name = spec['name']
+        self.network = spec['network']
+        self.ipv4_address = ipaddress.IPv4Address(spec['ipv4_address'])
+        self.numa_node = spec.get('numa_node')
+        self.infiniband_devices = spec.get('infiniband_devices', [])
+        for r in INTERFACE_SCALAR_RESOURCES:
             setattr(self, r, 0.0)
 
 
@@ -1023,16 +1086,7 @@ class Agent(ResourceCollector):
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     jsonschema.validate(value, INTERFACES_SCHEMA)
-                    interfaces = []
-                    for item in value:
-                        interfaces.append(Interface(
-                            name=item['name'],
-                            network=item['network'],
-                            ipv4_address=ipaddress.IPv4Address(item['ipv4_address']),
-                            numa_node=item.get('numa_node'),
-                            speed=item.get('speed'),
-                            infiniband_devices=item.get('infiniband_devices', [])))
-                    self.interfaces = interfaces
+                    self.interfaces = [AgentInterface(item) for item in value]
                 elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     jsonschema.validate(value, VOLUMES_SCHEMA)
@@ -1080,6 +1134,70 @@ class Agent(ResourceCollector):
                     resource_name = parts[3]
                     if resource_name in GPU_SCALAR_RESOURCES:
                         self.gpus[index].inc_attr(resource_name, resource.scalar.value)
+                elif resource.name.startswith('katsdpcontroller.interface.'):
+                    parts = resource.name.split('.', 3)
+                    # TODO: catch exceptions here
+                    index = int(parts[2])
+                    resource_name = parts[3]
+                    if resource_name in INTERFACE_SCALAR_RESOURCES:
+                        self.interfaces[index].inc_attr(resource_name, resource.scalar.value)
+
+    @classmethod
+    def _match_children(cls, numa_node, requested, actual, scalar_resources, msg):
+        """Match requests for child devices (e.g. GPUs) against actual supply.
+
+        This uses a very simple first-come-first-served algorithm which could
+        be improved.
+
+        Parameters
+        ----------
+        numa_node : int, optional
+            NUMA node on which the logical task will be assigned
+        requested : list
+            List of request objects (e.g. :class:`GPURequest`)
+        actual : list
+            List of objects representing available resources (e.g. :class:`AgentGPU`)
+        scalar_resources : list
+            Names of scalar resource types to match between `requested` and `actual`
+        msg : str
+            Name for the children e.g. "GPU" (used only for debug messages)
+
+        Returns
+        -------
+        assign : list
+            For each element of `actual`, the corresponding element of the result
+            is either ``None`` or the index of the request that is satisfied by
+            that element.
+
+        Raises
+        ------
+        InsufficientResourcesError
+            if the matching could not be done.
+        """
+        assign = [None] * len(actual)
+        for i, request in enumerate(requested):
+            use = None
+            for j, item in enumerate(actual):
+                if assign[j] is not None:
+                    continue     # Already been used for a request in this task
+                if not request.matches(item, numa_node):
+                    continue
+                good = True
+                for r in scalar_resources:
+                    need = getattr(request, r)
+                    have = getattr(item, r)
+                    if have < need:
+                        logger.debug('Not enough %s on %s %d for request %d',
+                                     r, msg, j, i)
+                        good = False
+                        break
+                if good:
+                    use = j
+                    break
+            if use is None:
+                raise InsufficientResourcesError('No suitable {} found for request {}'.format(msg, i))
+            assign[use] = i
+        return assign
 
     def _allocate_numa_node(self, numa_node, logical_task):
         # Check that there are sufficient cores on this node
@@ -1096,13 +1214,9 @@ class Agent(ResourceCollector):
                 numa_node, have, need))
 
         # Match network requests to interfaces
-        for request in logical_task.networks:
-            if not any(request.matches(interface, numa_node) for interface in self.interfaces):
-                if not any(request.matches(interface, None) for interface in self.interfaces):
-                    raise InsufficientResourcesError('Network {} not present'.format(request.network))
-                else:
-                    raise InsufficientResourcesError(
-                        'Network {} not present on NUMA node {}'.format(request.network, numa_node))
+        interface_map = self._match_children(
+            numa_node, logical_task.interfaces, self.interfaces,
+            INTERFACE_SCALAR_RESOURCES, 'interface')
         # Match volume requests to volumes
         for request in logical_task.volumes:
             if not any(request.matches(volume, numa_node) for volume in self.volumes):
@@ -1111,33 +1225,10 @@ class Agent(ResourceCollector):
                 else:
                     raise InsufficientResourcesError(
                         'Volume {} not present on NUMA node {}'.format(request.name, numa_node))
-
-        # Match GPU requests to GPUs. At the moment this is very dumb,
-        # assigning any GPU that will fit without any packing optimisation.
-        # It may even fail unnecessarily for multi-GPU requests.
-        gpu_map = [None] * len(self.gpus)
-        for i, request in enumerate(logical_task.gpus):
-            use_gpu = None
-            for j, gpu in enumerate(self.gpus):
-                if gpu_map[j] is not None:
-                    continue     # Already been used for a request in this task
-                if not request.matches(gpu, numa_node):
-                    continue
-                good = True
-                for r in GPU_SCALAR_RESOURCES:
-                    need = getattr(request, r)
-                    have = getattr(gpu, r)
-                    if have < need:
-                        logger.debug('Not enough %s on GPU %d for request %d',
-                                     r, j, i)
-                        good = False
-                        break
-                if good:
-                    use_gpu = j
-                    break
-            if use_gpu is None:
-                raise InsufficientResourcesError('No suitable GPU found for request {}'.format(i))
-            gpu_map[use_gpu] = request
+        # Match GPU requests to GPUs
+        gpu_map = self._match_children(
+            numa_node, logical_task.gpus, self.gpus,
+            GPU_SCALAR_RESOURCES, 'GPU')
 
         # Have now verified that the task fits. Create the resources for it
         alloc = ResourceAllocation(self)
@@ -1162,18 +1253,32 @@ class Agent(ResourceCollector):
                 for name in getattr(logical_task, r):
                     value = getattr(self, r).popleft()
                     getattr(alloc, r).append(value)
-        for request in logical_task.networks:
-            alloc.interfaces.append(next(interface for interface in self.interfaces
-                                         if request.matches(interface, numa_node)))
+
+        alloc.interfaces = [None] * len(logical_task.interfaces)
+        for i, interface in enumerate(self.interfaces):
+            idx = interface_map[i]
+            if idx is not None:
+                request = logical_task.interfaces[idx]
+                interface_alloc = InterfaceResourceAllocation(i)
+                for r in INTERFACE_SCALAR_RESOURCES:
+                    need = getattr(request, r)
+                    interface.inc_attr(r, -need)
+                    setattr(interface_alloc, r, need)
+                alloc.interfaces[idx] = interface_alloc
         for request in logical_task.volumes:
             alloc.volumes.append(next(volume for volume in self.volumes
                                       if request.matches(volume, numa_node)))
+        alloc.gpus = [None] * len(logical_task.gpus)
         for i, gpu in enumerate(self.gpus):
-            if gpu_map[i] is not None:
+            idx = gpu_map[i]
+            if idx is not None:
+                request = logical_task.gpus[idx]
+                gpu_alloc = GPUResourceAllocation(i)
                 for r in GPU_SCALAR_RESOURCES:
-                    need = getattr(gpu_map[i], r)
+                    need = getattr(request, r)
                     gpu.inc_attr(r, -need)
-                    setattr(alloc.gpus[i], r, need)
+                    setattr(gpu_alloc, r, need)
+                alloc.gpus[idx] = gpu_alloc
         return alloc
 
     def allocate(self, logical_task):
@@ -1409,7 +1514,7 @@ class PhysicalTask(PhysicalNode):
     ----------
     interfaces : dict
         Map from logical interface names requested by
-        :class:`LogicalTask.interfaces` to :class:`Interface`s.
+        :class:`LogicalTask.interfaces` to :class:`AgentInterface`s.
     taskinfo : :class:`mesos_pb2.TaskInfo`
         Task info for Mesos to run the task
     allocation : class:`ResourceAllocation`
@@ -1469,7 +1574,7 @@ class PhysicalTask(PhysicalNode):
             Specific resources assigned to the task
         """
         self.allocation = allocation
-        for request, value in zip(self.logical_node.networks, self.allocation.interfaces):
+        for request, value in zip(self.logical_node.interfaces, self.allocation.interfaces):
             self.interfaces[request.network] = value
         for r in RANGE_RESOURCES:
             d = {}
@@ -1536,9 +1641,19 @@ class PhysicalTask(PhysicalNode):
         docker_parameters = []
 
         any_infiniband = False
-        for request, value in zip(self.logical_node.networks, self.allocation.interfaces):
+        for request, interface_alloc in zip(self.logical_node.interfaces, self.allocation.interfaces):
+            for r in INTERFACE_SCALAR_RESOURCES:
+                value = getattr(interface_alloc, r)
+                if value:
+                    resource = Dict()
+                    resource.name = 'katsdpcontroller.interface.{}.{}'.format(
+                        interface_alloc.index, r)
+                    resource.type = 'SCALAR'
+                    resource.scalar.value = value
+                    taskinfo.resources.append(resource)
             if request.infiniband:
-                docker_devices.update(value.infiniband_devices)
+                interface = self.agent.interfaces[interface_alloc.index]
+                docker_devices.update(interface.infiniband_devices)
                 any_infiniband = True
         if any_infiniband:
             # ibverbs uses memory mapping for DMA. Take away the default rlimit
@@ -1546,20 +1661,20 @@ class PhysicalTask(PhysicalNode):
             docker_parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
 
         gpu_driver_version = None
-        for i, gpu_alloc in enumerate(self.allocation.gpus):
+        for gpu_alloc in self.allocation.gpus:
             for r in GPU_SCALAR_RESOURCES:
                 value = getattr(gpu_alloc, r)
                 if value:
                     resource = Dict()
-                    resource.name = 'katsdpcontroller.gpu.{}.{}'.format(i, r)
+                    resource.name = 'katsdpcontroller.gpu.{}.{}'.format(gpu_alloc.index, r)
                     resource.type = 'SCALAR'
                     resource.scalar.value = value
                     taskinfo.resources.append(resource)
-            if gpu_alloc.compute > 0:
-                docker_parameters.append({'key': 'device', 'value': self.agent.gpus[i].device})
-                # We assume all GPUs on an agent have the same driver version.
-                # This is reflected in the NVML API, so should be safe.
-                gpu_driver_version = self.agent.gpus[i].driver_version
+            gpu = self.agent.gpus[gpu_alloc.index]
+            docker_parameters.append({'key': 'device', 'value': gpu.device})
+            # We assume all GPUs on an agent have the same driver version.
+            # This is reflected in the NVML API, so should be safe.
+            gpu_driver_version = gpu.driver_version
         if gpu_driver_version is not None:
             docker_devices.update(['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools'])
             volume = Dict()
@@ -1789,8 +1904,10 @@ class Scheduler(pymesos.Scheduler):
         # and the total amount of each resource.
         max_resources = {}
         max_gpu_resources = {}
+        max_interface_resources = {}     # Double-hash, indexed by network then resource
         total_resources = {}
         total_gpu_resources = {}
+        total_interface_resources = {}   # Double-hash, indexed by network then resource
         for r in SCALAR_RESOURCES:
             available = [getattr(agent, r) for agent in agents]
             max_resources[r] = max(available) if available else 0.0
@@ -1812,10 +1929,37 @@ class Scheduler(pymesos.Scheduler):
             max_gpu_resources[r] = max(available) if available else 0.0
             total_gpu_resources[r] = sum(available)
 
+        # Collect together all interfaces on the same network
+        networks = {}
+        for agent in agents:
+            for interface in agent.interfaces:
+                networks.setdefault(interface.network, []).append(interface)
+        for network, interfaces in six.iteritems(networks):
+            max_interface_resources[network] = {}
+            total_interface_resources[network] = {}
+            for r in INTERFACE_SCALAR_RESOURCES:
+                available = [getattr(interface, r) for interface in interfaces]
+                max_interface_resources[network][r] = max(available)
+                total_interface_resources[network][r] = sum(available)
+
         # Check if there is a single node that won't run anywhere
         for node in nodes:
             logical_task = node.logical_node
             if not any(agent.can_allocate(logical_task) for agent in agents):
+                # Check if there is an interface/volume/GPU request that
+                # doesn't match anywhere.
+                for request in logical_task.interfaces:
+                    if not any(request.matches(interface, None)
+                               for agent in agents for interface in agent.interfaces):
+                        raise TaskNoInterfaceError(node, request)
+                for request in logical_task.volumes:
+                    if not any(request.matches(volume, None)
+                               for agent in agents for volume in agent.volumes):
+                        raise TaskNoVolumeError(node, request)
+                for i, request in enumerate(logical_task.gpus):
+                    if not any(request.matches(gpu, None)
+                               for agent in agents for gpu in agent.gpus):
+                        raise TaskNoGPUError(node, i)
                 # Check if there is some specific resource that is lacking.
                 for r in SCALAR_RESOURCES:
                     need = getattr(logical_task, r)
@@ -1831,20 +1975,12 @@ class Scheduler(pymesos.Scheduler):
                         if need > max_gpu_resources[r]:
                             raise TaskInsufficientGPUResourcesError(
                                 node, i, r, need, max_gpu_resources[r])
-                # Check if there is an interface/volume/GPU request that
-                # doesn't match anywhere.
-                for request in logical_task.networks:
-                    if not any(request.matches(interface, None)
-                               for agent in agents for interface in agent.interfaces):
-                        raise TaskNoNetworkError(node, request)
-                for request in logical_task.volumes:
-                    if not any(request.matches(volume, None)
-                               for agent in agents for volume in agent.volumes):
-                        raise TaskNoVolumeError(node, request)
-                for i, request in enumerate(logical_task.gpus):
-                    if not any(request.matches(gpu, None)
-                               for agent in agents for gpu in agent.gpus):
-                        raise TaskNoGPUError(node, i)
+                for request in logical_task.interfaces:
+                    for r in INTERFACE_SCALAR_RESOURCES:
+                        need = getattr(request, r)
+                        if need > max_interface_resources[request.network][r]:
+                            raise TaskInsufficientInterfaceResourcesError(
+                                node, request, r, need, max_interface_resources[request.network][r])
                 # This node doesn't fit but the reason is more complex e.g.
                 # there is enough of each resource individually but not all on
                 # the same agent or NUMA node.
@@ -1862,9 +1998,17 @@ class Scheduler(pymesos.Scheduler):
             if need > total_resources[r]:
                 raise GroupInsufficientResourcesError(r, need, total_resources[r])
         for r in GPU_SCALAR_RESOURCES:
-            need = sum(getattr(gpu, r) for node in nodes for gpu in node.logical_node.gpus)
+            need = sum(getattr(request, r) for node in nodes for request in node.logical_node.gpus)
             if need > total_gpu_resources[r]:
                 raise GroupInsufficientGPUResourcesError(r, need, total_gpu_resources[r])
+        for network in six.iterkeys(networks):
+            for r in INTERFACE_SCALAR_RESOURCES:
+                need = sum(getattr(request, r)
+                           for node in nodes for request in node.logical_node.interfaces
+                           if request.network == network)
+                if need > total_interface_resources[network][r]:
+                    raise GroupInsufficientInterfaceResourcesError(
+                        network, r, need, total_interface_resources[network][r])
         # Not a simple error e.g. due to packing problems
         raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
@@ -2216,17 +2360,22 @@ __all__ = [
     'LogicalNode', 'PhysicalNode',
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
-    'Interface', 'ResourceAllocation', 'GPUResourceAllocation',
+    'Volume',
+    'ResourceAllocation',
+    'GPUResourceAllocation', 'InterfaceResourceAllocation',
     'InsufficientResourcesError',
     'NoOffersError',
     'TaskNoAgentError',
     'TaskInsufficientResourcesError',
     'TaskInsufficientGPUResourcesError',
-    'TaskNoNetworkError',
+    'TaskInsufficientInterfaceResourcesError',
+    'TaskNoInterfaceError',
     'TaskNoVolumeError',
     'TaskNoGPUError',
     'GroupInsufficientResourcesError',
     'GroupInsufficientGPUResourcesError',
-    'NetworkRequest', 'GPURequest',
+    'GroupInsufficientInterfaceResourcesError',
+    'InterfaceRequest', 'GPURequest',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
+    'Agent', 'AgentGPU', 'AgentInterface',
     'Scheduler', 'instantiate']

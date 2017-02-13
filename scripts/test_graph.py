@@ -22,7 +22,7 @@ from katsdpcontroller.scheduler import (
     LogicalExternal, PhysicalExternal,
     LogicalTask, PhysicalTask,
     TaskState, Scheduler, Resolver, ImageResolver, TaskIDAllocator,
-    GPURequest, NetworkRequest,
+    GPURequest, InterfaceRequest,
     instantiate, RANGE_RESOURCES)
 from katsdpcontroller.sdpcontroller import MulticastIPResources
 

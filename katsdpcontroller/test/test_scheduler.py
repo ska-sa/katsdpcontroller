@@ -449,11 +449,15 @@ class TestAgent(unittest.TestCase):
             self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5,
                               'katsdpcontroller.gpu.0.compute': 0.25,
                               'katsdpcontroller.gpu.0.mem': 256.0,
+                              'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+                              'katsdpcontroller.interface.0.bandwidth_out': 1e9,
                               'cores': [(8, 9)]}, attrs),
             self._make_offer({'katsdpcontroller.gpu.0.compute': 0.5,
                               'katsdpcontroller.gpu.0.mem': 1024.0,
                               'katsdpcontroller.gpu.1.compute': 0.125,
-                              'katsdpcontroller.gpu.1.mem': 2048.0})
+                              'katsdpcontroller.gpu.1.mem': 2048.0,
+                              'katsdpcontroller.interface.0.bandwidth_in': 1e8,
+                              'katsdpcontroller.interface.0.bandwidth_out': 2e8})
         ]
         agent = scheduler.Agent(offers)
         assert_equal(self.agent_id, agent.agent_id)
@@ -471,13 +475,14 @@ class TestAgent(unittest.TestCase):
         assert_equal(2048.0, agent.gpus[1].mem)
         assert_equal(list(range(0, 9)), list(agent.cores))
         assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.ports))
-        assert_equal([scheduler.Interface(name='eth0',
-                                          network='net0',
-                                          ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
-                                          numa_node=1,
-                                          speed=None,
-                                          infiniband_devices=['/dev/infiniband/foo'])],
-                     agent.interfaces)
+        assert_equal(1, len(agent.interfaces))
+        assert_equal('eth0', agent.interfaces[0].name)
+        assert_equal('net0', agent.interfaces[0].network)
+        assert_equal(ipaddress.IPv4Address(u'192.168.254.254'), agent.interfaces[0].ipv4_address)
+        assert_equal(1, agent.interfaces[0].numa_node)
+        assert_equal(11e8, agent.interfaces[0].bandwidth_in)
+        assert_equal(12e8, agent.interfaces[0].bandwidth_out)
+        assert_equal(['/dev/infiniband/foo'], agent.interfaces[0].infiniband_devices)
         assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
                       scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      agent.volumes)
@@ -535,10 +540,10 @@ class TestAgent(unittest.TestCase):
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
-    def test_allocate_missing_network(self):
+    def test_allocate_missing_interface(self):
         """allocate raises if the task requires a network that is not present"""
         task = scheduler.LogicalTask('task')
-        task.networks = [scheduler.NetworkRequest('net0'), scheduler.NetworkRequest('net1')]
+        task.interfaces = [scheduler.InterfaceRequest('net0'), scheduler.InterfaceRequest('net1')]
         agent = scheduler.Agent([self._make_offer({}, [self.if_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
@@ -562,6 +567,17 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 2048.0}, [self.gpu_attr])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
+    def test_allocate_insufficient_interface(self):
+        """allocate raises if the task requires more interface resources than available"""
+        task = scheduler.LogicalTask('task')
+        task.interfaces.append(scheduler.InterfaceRequest('net0'))
+        task.interfaces[-1].bandwidth_in = 1200e6
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -605,7 +621,7 @@ class TestAgent(unittest.TestCase):
         task.cpus = 3.0
         task.mem = 128.0
         task.cores = ['a', 'b', None]
-        task.networks.append(scheduler.NetworkRequest('net0', affinity=True))
+        task.interfaces.append(scheduler.InterfaceRequest('net0', affinity=True))
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [self.if_attr, self.numa_attr])])
@@ -618,7 +634,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.cpus = 1.0
         task.mem = 128.0
-        task.networks.append(scheduler.NetworkRequest('net0', infiniband=True))
+        task.interfaces.append(scheduler.InterfaceRequest('net0', infiniband=True))
         if_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
@@ -649,47 +665,53 @@ class TestAgent(unittest.TestCase):
         task.cpus = 4.0
         task.mem = 128.0
         task.cores = ['a', 'b', 'c']
-        task.networks = [scheduler.NetworkRequest('net0')]
+        task.interfaces = [scheduler.InterfaceRequest('net0')]
+        task.interfaces[0].bandwidth_in = 1000e6
+        task.interfaces[0].bandwidth_out = 500e6
         task.volumes = [scheduler.VolumeRequest('vol2', '/container-path', 'RW')]
         task.gpus = [scheduler.GPURequest(), scheduler.GPURequest()]
         task.gpus[0].compute = 0.5
         task.gpus[0].mem = 1024.0
-        task.gpus[0].affinity = True
         task.gpus[1].compute = 0.5
         task.gpus[1].mem = 256.0
+        task.gpus[1].affinity = True
         agent = scheduler.Agent([
             self._make_offer({
                 'cpus': 4.0, 'mem': 200.0, 'cores': [(3, 8)],
-                'katsdpcontroller.gpu.0.compute': 0.75,
-                'katsdpcontroller.gpu.0.mem': 2048.0,
                 'katsdpcontroller.gpu.1.compute': 0.75,
-                'katsdpcontroller.gpu.1.mem': 256.0
+                'katsdpcontroller.gpu.1.mem': 2048.0,
+                'katsdpcontroller.gpu.0.compute': 0.75,
+                'katsdpcontroller.gpu.0.mem': 256.0,
+                'katsdpcontroller.interface.0.bandwidth_in': 2000e6,
+                'katsdpcontroller.interface.0.bandwidth_out': 2100e6
             }, [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr])])
         ra = agent.allocate(task)
         assert_equal(4.0, ra.cpus)
         assert_equal(128.0, ra.mem)
-        assert_equal([scheduler.Interface(name='eth0',
-                                          network='net0',
-                                          ipv4_address=ipaddress.IPv4Address(u'192.168.254.254'),
-                                          numa_node=1,
-                                          speed=None,
-                                          infiniband_devices=['/dev/infiniband/foo'])],
-                     ra.interfaces)
+        assert_equal(1, len(ra.interfaces))
+        assert_equal(1000e6, ra.interfaces[0].bandwidth_in)
+        assert_equal(500e6, ra.interfaces[0].bandwidth_out)
+        assert_equal(0, ra.interfaces[0].index)
         assert_equal([scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      ra.volumes)
         assert_equal(2, len(ra.gpus))
         assert_equal(0.5, ra.gpus[0].compute)
         assert_equal(1024.0, ra.gpus[0].mem)
+        assert_equal(1, ra.gpus[0].index)
         assert_equal(0.5, ra.gpus[1].compute)
         assert_equal(256.0, ra.gpus[1].mem)
+        assert_equal(0, ra.gpus[1].index)
         assert_equal([3, 5, 7], ra.cores)
+        # Check that the resources were subtracted
         assert_equal(0.0, agent.cpus)
         assert_equal(72.0, agent.mem)
         assert_equal([4, 6], list(agent.cores))
+        assert_equal(1000e6, agent.interfaces[0].bandwidth_in)
+        assert_equal(1600e6, agent.interfaces[0].bandwidth_out)
         assert_equal(0.25, agent.gpus[0].compute)
-        assert_equal(1024.0, agent.gpus[0].mem)
+        assert_equal(0.0, agent.gpus[0].mem)
         assert_equal(0.25, agent.gpus[1].compute)
-        assert_equal(0.0, agent.gpus[1].mem)
+        assert_equal(1024.0, agent.gpus[1].mem)
 
 
 class TestPhysicalTask(object):
@@ -701,14 +723,16 @@ class TestPhysicalTask(object):
         self.logical_task.mem = 256.0
         self.logical_task.ports = ['port1', 'port2']
         self.logical_task.cores = ['core1', 'core2', 'core3']
-        self.logical_task.networks = [
-            scheduler.NetworkRequest('net0'),
-            scheduler.NetworkRequest('net1')]
+        self.logical_task.interfaces = [
+            scheduler.InterfaceRequest('net1'),
+            scheduler.InterfaceRequest('net0')]
         self.logical_task.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
-        self.eth0 = scheduler.Interface('eth0', 'net0', ipaddress.IPv4Address(u'192.168.1.1'),
-                                        None, None, [])
-        self.eth1 = scheduler.Interface('eth1', 'net1', ipaddress.IPv4Address(u'192.168.2.1'),
-                                        None, None, [])
+        self.eth0 = scheduler.InterfaceResourceAllocation(0)
+        self.eth0.bandwidth_in = 500e6
+        self.eth0.bandwidth_out = 600e6
+        self.eth1 = scheduler.InterfaceResourceAllocation(1)
+        self.eth1.bandwidth_in = 300e6
+        self.eth1.bandwidth_out = 200e6
         self.vol0 = scheduler.Volume('vol0', '/host0', numa_node=1)
         attributes = [
             _make_json_attr('katsdpcontroller.interfaces', [
@@ -720,7 +744,11 @@ class TestPhysicalTask(object):
         ]
         offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
-                               'ports': [(30000, 31000)], 'cores': [(1, 8)]},
+                               'ports': [(30000, 31000)], 'cores': [(1, 8)],
+                               'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+                               'katsdpcontroller.interface.0.bandwidth_out': 1000e6,
+                               'katsdpcontroller.interface.1.bandwidth_in': 1000e6,
+                               'katsdpcontroller.interface.1.bandwidth_out': 1000e6},
                               attributes)]
         agent = scheduler.Agent(offers)
         self.allocation = scheduler.ResourceAllocation(agent)
@@ -728,7 +756,7 @@ class TestPhysicalTask(object):
         self.allocation.mem = self.logical_task.mem
         self.allocation.ports = [30000, 30001]
         self.allocation.cores = [1, 2, 3]
-        self.allocation.interfaces = [self.eth0, self.eth1]
+        self.allocation.interfaces = [self.eth1, self.eth0]
         self.allocation.volumes = [self.vol0]
 
     def test_properties_init(self):
@@ -778,7 +806,8 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         interface_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
-              'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}])
+              'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']},
+             {'name': 'eth1', 'network': 'net1', 'ipv4_address': '192.168.1.2'}])
         volume_attr = _make_json_attr(
             'katsdpcontroller.volumes',
             [{'name': 'vol0', 'host_path': '/host0'}])
@@ -804,7 +833,11 @@ class TestDiagnoseInsufficient(unittest.TestCase):
              'katsdpcontroller.gpu.0.mem': 256.0}, 6,
             [numa_attr, gpu_attr])])
         self.interface_agent = scheduler.Agent([self._make_offer(
-            {'cpus': 1.0, 'mem': 1, 'disk': 1}, 7,
+            {'cpus': 1.0, 'mem': 1, 'disk': 1,
+             'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+             'katsdpcontroller.interface.0.bandwidth_out': 1e9,
+             'katsdpcontroller.interface.1.bandwidth_in': 1e9,
+             'katsdpcontroller.interface.1.bandwidth_out': 1e9}, 7,
             [interface_attr])])
         self.volume_agent = scheduler.Agent([self._make_offer(
             {'cpus': 1.0, 'mem': 1, 'disk': 1}, 8,
@@ -864,17 +897,31 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(2048, cm.exception.needed)
         self.assertEqual(2.25, cm.exception.available)
 
-    def test_task_no_network(self):
-        """A task requests a network interface that is not available on any agent"""
-        self.logical_task.networks = [
-            scheduler.NetworkRequest('net0'),
-            scheduler.NetworkRequest('badnet')
-        ]
-        with self.assertRaises(scheduler.TaskNoNetworkError) as cm:
+    def test_task_insufficient_interface_scalar_resources(self):
+        """A task requests more of an interface scalar resource than any agent has"""
+        req = scheduler.InterfaceRequest('net0')
+        req.bandwidth_in = 5e9
+        self.logical_task.interfaces = [req]
+        with self.assertRaises(scheduler.TaskInsufficientInterfaceResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.interface_agent], [self.physical_task])
         self.assertIs(self.physical_task, cm.exception.node)
-        self.assertIs(self.logical_task.networks[1], cm.exception.request)
+        self.assertEqual(req, cm.exception.request)
+        self.assertEqual('bandwidth_in', cm.exception.resource)
+        self.assertEqual(5e9, cm.exception.needed)
+        self.assertEqual(1e9, cm.exception.available)
+
+    def test_task_no_interface(self):
+        """A task requests a network interface that is not available on any agent"""
+        self.logical_task.interfaces = [
+            scheduler.InterfaceRequest('net0'),
+            scheduler.InterfaceRequest('badnet')
+        ]
+        with self.assertRaises(scheduler.TaskNoInterfaceError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.mem_agent, self.interface_agent], [self.physical_task])
+        self.assertIs(self.physical_task, cm.exception.node)
+        self.assertIs(self.logical_task.interfaces[1], cm.exception.request)
 
     def test_task_no_volume(self):
         """A task requests a volume that is not available on any agent"""
@@ -947,6 +994,26 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(1.25, cm.exception.needed)
         self.assertEqual(1.125, cm.exception.available)
 
+    def test_group_insufficient_interface_scalar_resources(self):
+        """A group of tasks require more of a network resource than available"""
+        self.logical_task.interfaces = [
+            scheduler.InterfaceRequest('net0'),
+            scheduler.InterfaceRequest('net1')
+        ]
+        self.logical_task.interfaces[0].bandwidth_in = 800e6
+        # An amount that must not be added to the needed value reported
+        self.logical_task.interfaces[1].bandwidth_in = 50e6
+        self.logical_task2.interfaces = [scheduler.InterfaceRequest('net0')]
+        self.logical_task2.interfaces[0].bandwidth_in = 700e6
+        with self.assertRaises(scheduler.GroupInsufficientInterfaceResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.interface_agent],
+                [self.physical_task, self.physical_task2])
+        self.assertEqual('net0', cm.exception.network)
+        self.assertEqual('bandwidth_in', cm.exception.resource)
+        self.assertEqual(1500e6, cm.exception.needed)
+        self.assertEqual(1000e6, cm.exception.available)
+
     def test_generic(self):
         """A group of tasks can't fit, but on simpler explanation is available"""
         # Create a tasks that uses just too much memory for the
@@ -1000,7 +1067,9 @@ class TestScheduler(object):
         node0.gpus.append(scheduler.GPURequest())
         node0.gpus[-1].compute = 0.5
         node0.gpus[-1].mem = 256.0
-        node0.networks = [scheduler.NetworkRequest('net0', infiniband=True)]
+        node0.interfaces = [scheduler.InterfaceRequest('net0', infiniband=True)]
+        node0.interfaces[-1].bandwidth_in = 500e6
+        node0.interfaces[-1].bandwidth_out = 200e6
         node0.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
         node1 = scheduler.LogicalTask('node1')
         node1.cpus = 0.5
@@ -1110,7 +1179,9 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.0.compute': 0.25,
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
-            'katsdpcontroller.gpu.1.mem': 1024.0
+            'katsdpcontroller.gpu.1.mem': 1024.0,
+            'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+            'katsdpcontroller.interface.0.bandwidth_out': 1e9
         }, 0, self.agent0_attrs)
         offer1 = self._make_offer({
             'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
@@ -1148,7 +1219,9 @@ class TestScheduler(object):
         expected_taskinfo0.resources = _make_resources({
             'cpus': 1.0, 'ports': [(30000, 30001)],
             'katsdpcontroller.gpu.1.compute': 0.5,
-            'katsdpcontroller.gpu.1.mem': 256.0
+            'katsdpcontroller.gpu.1.mem': 256.0,
+            'katsdpcontroller.interface.0.bandwidth_in': 500e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 200e6
         })
         expected_taskinfo0.discovery.visibility = 'EXTERNAL'
         expected_taskinfo0.discovery.name = 'node0'
@@ -1269,7 +1342,9 @@ class TestScheduler(object):
             'katsdpcontroller.gpu.0.compute': 0.25,
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
-            'katsdpcontroller.gpu.1.mem': 1024.0
+            'katsdpcontroller.gpu.1.mem': 1024.0,
+            'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+            'katsdpcontroller.interface.0.bandwidth_out': 1e9
         }, 0, self.agent0_attrs)
         launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                 loop=self.loop)

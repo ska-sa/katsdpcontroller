@@ -144,7 +144,7 @@ def infiniband_devices(interface):
                         if os.path.exists(device):
                             devices.append(device)
                 return devices
-    except (IOError, OSError) as error:
+    except (IOError, OSError):
         pass
     return None
 

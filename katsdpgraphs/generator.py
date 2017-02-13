@@ -157,7 +157,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
-    timeplot.interfaces = [scheduler.NetworkRequest('sdp_10g')]
+    timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
         'description': 'Signal displays for {0.subarray_name}',
@@ -194,7 +194,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # only half this.
         ingest.mem = 32 * cbf_vis_mb + 256
         ingest.transitions = capture_transitions
-        ingest.networks = [scheduler.NetworkRequest('cbf'), scheduler.NetworkRequest('sdp_10g')]
+        ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
         g.add_node(ingest, config=lambda resolver: {
             'continuum_factor': 32,
             'sd_continuum_factor': cbf_channels // 256,
@@ -225,7 +225,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # 32GB of psrdada buffers, regardless of channels
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
-        bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True, affinity=True)]
+        bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
         bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
@@ -250,7 +250,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             # to be on the safe side we double everything. Values are int8*2.
             # Allow 512MB for various buffers.
             bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
-            bf_ingest.networks = [scheduler.NetworkRequest('cbf', infiniband=True)]
+            bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
@@ -288,7 +288,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         # overhead should be enough. Finally, allow 256MB for general use.
         cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
         cal.volumes = [data_vol]
-        cal.interfaces = [scheduler.NetworkRequest('sdp_10g')]
+        cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         g.add_node(cal, config=lambda resolver: {
             'cbf_channels': cbf_channels,
             'buffer_maxsize': buffer_size
@@ -311,7 +311,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
-    filewriter.networks = [scheduler.NetworkRequest('sdp_10g')]
+    filewriter.networks = [scheduler.InterfaceRequest('sdp_10g')]
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda resolver: {'file_base': '/var/kat/data'})
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda resolver, endpoint: {
@@ -338,7 +338,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         sim.gpus[0].compute = min(1.0, 0.2 * scale)
         sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
-        sim.interfaces = [scheduler.NetworkRequest('cbf')]
+        sim.interfaces = [scheduler.InterfaceRequest('cbf')]
         g.add_node(sim, config=lambda resolver: {
             'cbf_channels': cbf_channels
         })
