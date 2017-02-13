@@ -1601,14 +1601,13 @@ class PhysicalTask(PhysicalNode):
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
+        docker_devices = set()
+        docker_parameters = []
         taskinfo = Dict()
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
         command = [x.format(**args) for x in self.logical_node.command]
-        if self.allocation.cores:
-            # TODO: see if this can be done through Docker instead of with taskset
-            command = ['taskset', '-c', ','.join(str(core) for core in self.allocation.cores)] + command
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
@@ -1637,8 +1636,9 @@ class PhysicalTask(PhysicalNode):
                     resource.ranges.range.append(Dict(begin=item, end=item))
                 taskinfo.resources.append(resource)
 
-        docker_devices = set()
-        docker_parameters = []
+        if self.allocation.cores:
+            core_list = ','.join(str(core) for core in self.allocation.cores)
+            docker_parameters.append({'key': 'cpuset-cpus', 'value': core_list})
 
         any_infiniband = False
         for request, interface_alloc in zip(self.logical_node.interfaces, self.allocation.interfaces):
