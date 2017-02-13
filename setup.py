@@ -7,7 +7,6 @@ tests_require = ['mock', 'unittest2', 'nose', 'futures', 'requests_mock']
 
 setup (
     name = "katsdpcontroller",
-    version = "trunk",
     description = "Service providing control and monitoring services for the MeerKAT Science Data Processor",
     author = "Simon Ratcliffe",
     packages = find_packages(),
