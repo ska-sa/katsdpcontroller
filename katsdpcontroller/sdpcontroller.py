@@ -579,7 +579,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 yield From(self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim'))
                  # instruct the simulator to rebuild its local config from the values in telstate
                 yield From(self._issue_req(
-                    'capture-start', args=['baseline-correlation-products'], node_type='sdp.sim'))
+                    'capture-start', args=['i0.baseline-correlation-products'], node_type='sdp.sim'))
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
@@ -593,7 +593,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if self.simulate:
             logger.info("SIMULATE: Issuing a capture-stop to the simulator")
             yield From(self._issue_req(
-                'capture-stop', args=['baseline-correlation-products'], node_type='sdp.sim', timeout=120))
+                'capture-stop', args=['i0.baseline-correlation-products'], node_type='sdp.sim', timeout=120))
         yield From(self.exec_transitions(State.DONE))
          # called in an explicit fashion (above as well) so we can manage
          # execution order correctly when dealing with a simulator

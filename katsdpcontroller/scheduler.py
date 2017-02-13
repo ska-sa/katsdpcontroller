@@ -641,7 +641,8 @@ class ImageResolver(object):
                     response.raise_for_status()
                     return response.headers['Docker-Content-Digest']
                 except requests.exceptions.RequestException as error:
-                    six.raise_from(ImageError('Failed to get digest from {}'.format(url)), error)
+                    six.raise_from(ImageError('Failed to get digest from {}: {}'.format(url, error)),
+                                   error)
                 except KeyError:
                     raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
                 finally:
