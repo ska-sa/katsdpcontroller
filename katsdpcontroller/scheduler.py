@@ -799,8 +799,8 @@ class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
         self.available = available
 
     def __str__(self):
-        return ("Not enough interface {0.resource} for {0.request.network} from "
-                "task {0.node.name}".format(self))
+        return ("Not enough interface {0.resource} on {0.request.network} for "
+                "{0.node.name} on any agent ({0.needed} > {0.available})".format(self))
 
 
 class TaskNoInterfaceError(TaskNoAgentError):
