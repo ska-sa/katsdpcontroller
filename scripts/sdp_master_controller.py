@@ -143,12 +143,15 @@ if __name__ == "__main__":
     loop = trollius.get_event_loop()
     ioloop = AsyncIOMainLoop()
     ioloop.install()
-    sched = scheduler.Scheduler(loop)
-    driver = pymesos.MesosSchedulerDriver(
-        sched, framework_info, opts.master, use_addict=True,
-        implicit_acknowledgements=False)
-    sched.set_driver(driver)
-    driver.start()
+    if opts.interface_mode:
+        sched = None
+    else:
+        sched = scheduler.Scheduler(loop)
+        driver = pymesos.MesosSchedulerDriver(
+            sched, framework_info, opts.master, use_addict=True,
+            implicit_acknowledgements=False)
+        sched.set_driver(driver)
+        driver.start()
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port, sched, loop,
         simulate=opts.simulate,
