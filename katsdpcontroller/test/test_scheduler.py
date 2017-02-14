@@ -1238,12 +1238,13 @@ class TestScheduler(object):
         expected_taskinfo1.task_id.value = 'test-00000001'
         expected_taskinfo1.agent_id.value = 'agentid1'
         expected_taskinfo1.command.shell = False
-        expected_taskinfo1.command.value = 'taskset'
+        expected_taskinfo1.command.value = 'test'
         expected_taskinfo1.command.arguments = [
-            '-c', '0,2', 'test', '--host=agenthost1', '--remote=agenthost0:30000',
+            '--host=agenthost1', '--remote=agenthost0:30000',
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
+        expected_taskinfo1.container.docker.parameters = [{'key': 'cpuset-cpus', 'value': '0,2'}]
         expected_taskinfo1.resources = _make_resources({'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
         expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'
