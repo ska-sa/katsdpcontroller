@@ -152,7 +152,6 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     # add a fixed amount since in very small arrays the 20% might not cover
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
-    timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
