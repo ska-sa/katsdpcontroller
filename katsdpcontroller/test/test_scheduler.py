@@ -779,7 +779,14 @@ class TestPhysicalTask(object):
         assert_equal('agenthost', physical_task.host)
         assert_equal('agentid', physical_task.agent_id)
         assert_is(self.allocation, physical_task.allocation)
-        assert_equal({'net0': self.eth0, 'net1': self.eth1}, physical_task.interfaces)
+        assert_in('net0', physical_task.interfaces)
+        assert_equal('eth0', physical_task.interfaces['net0'].name)
+        assert_equal(ipaddress.IPv4Address(u'192.168.1.1'),
+                     physical_task.interfaces['net0'].ipv4_address)
+        assert_in('net1', physical_task.interfaces)
+        assert_equal('eth1', physical_task.interfaces['net1'].name)
+        assert_equal(ipaddress.IPv4Address(u'192.168.2.1'),
+                     physical_task.interfaces['net1'].ipv4_address)
         assert_equal({}, physical_task.endpoints)
         assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
         assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
