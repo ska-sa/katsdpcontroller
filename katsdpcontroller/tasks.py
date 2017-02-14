@@ -225,16 +225,16 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
     @trollius.coroutine
     def resolve(self, resolver, graph, loop):
         yield From(super(SDPPhysicalTask, self).resolve(resolver, graph, loop))
-        config = graph.node[self].get('config', lambda resolver_: {})(resolver)
-        for r in scheduler.RANGE_RESOURCES:
-            for name, value in six.iteritems(getattr(self, r)):
-                config[name] = value
+        config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        for name, value in six.iteritems(self.ports):
+            config[name] = value
         for src, trg, attr in graph.out_edges_iter(self, data=True):
             endpoint = None
             if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr['port']
                 endpoint = Endpoint(trg.host, trg.ports[port])
-            config.update(attr.get('config', lambda resolver_, endpoint_: {})(resolver, endpoint))
+            config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
+                self, resolver, endpoint))
         logger.debug('Config for {}: {}'.format(self.name, config))
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 

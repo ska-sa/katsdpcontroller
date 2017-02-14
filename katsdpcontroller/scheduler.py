@@ -1575,7 +1575,7 @@ class PhysicalTask(PhysicalNode):
         """
         self.allocation = allocation
         for request, value in zip(self.logical_node.interfaces, self.allocation.interfaces):
-            self.interfaces[request.network] = value
+            self.interfaces[request.network] = self.allocation.agent.interfaces[value.index]
         for r in RANGE_RESOURCES:
             d = {}
             for name, value in zip(getattr(self.logical_node, r), getattr(self.allocation, r)):
