@@ -39,7 +39,6 @@ class TelstateTask(SDPPhysicalTaskBase):
 
 def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, dump_rate):
     from katsdpcontroller.sdpcontroller import State
-    # TODO: missing network requests (other than for CBF network)
 
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
     cbf_antennas = 4
