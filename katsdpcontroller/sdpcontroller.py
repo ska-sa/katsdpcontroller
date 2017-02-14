@@ -875,7 +875,8 @@ class SDPControllerServer(AsyncDeviceServer):
     def async_stop(self):
         super(SDPControllerServer, self).stop()
         yield From(self.deconfigure_on_exit())
-        yield From(self.sched.close())
+        if self.sched is not None:
+            yield From(self.sched.close())
 
     @time_request
     @request(Str(), Str())
