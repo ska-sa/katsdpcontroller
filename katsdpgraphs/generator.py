@@ -250,7 +250,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             # to be on the safe side we double everything. Values are int8*2.
             # Allow 512MB for various buffers.
             bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
-            bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+            bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
@@ -311,7 +311,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
-    filewriter.networks = [scheduler.InterfaceRequest('sdp_10g')]
+    filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda resolver: {'file_base': '/var/kat/data'})
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda resolver, endpoint: {
