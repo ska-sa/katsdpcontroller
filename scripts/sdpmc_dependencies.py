@@ -22,7 +22,7 @@ def find_images():
                     # Unlike antennas, dump rate doesn't affect the set of
                     # images used
                     graph = katsdpgraphs.generator.build_logical_graph(
-                        beamformer_mode, simulate, channels, antennas, 1.0)
+                        beamformer_mode, simulate, False, channels, antennas, 1.0)
                     for node in graph:
                         if hasattr(node, 'image'):
                             images.add(node.image)

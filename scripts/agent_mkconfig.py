@@ -196,8 +196,14 @@ def attributes_resources(args):
             with open('/sys/class/net/{}/speed'.format(interface)) as f:
                 speed = float(f.read().strip()) * 1e6  # /sys/class/net has speed in Mbps
         except (IOError, OSError, ValueError) as error:
-            raise RuntimeError('Could not determine speed of interface {}: {}'.format(
-                interface, error))
+            if interface == 'lo':
+                # Loopback interface speed is limited only by CPU power. Just
+                # pick a large number - this will only be used for testing
+                # anyway.
+                speed = 40e9
+            else:
+                raise RuntimeError('Could not determine speed of interface {}: {}'.format(
+                    interface, error))
         resources['katsdpcontroller.interface.{}.bandwidth_in'.format(i)] = speed
         resources['katsdpcontroller.interface.{}.bandwidth_out'.format(i)] = speed
     attributes['katsdpcontroller.interfaces'] = interfaces
@@ -227,12 +233,15 @@ def attributes_resources(args):
     gpus = []
     for i, gpu in enumerate(hwloc.gpus()):
         config = {
-            'device': '/dev/nvidia{}'.format(gpu.minor),
+            'devices': ['/dev/nvidia{}'.format(gpu.minor)],
             'driver_version': gpu.driver_version,
             'name': gpu.name,
             'compute_capability': gpu.compute_capability,
             'device_attributes': gpu.device_attributes
         }
+        for dev in ['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools']:
+            if os.path.exists(dev):
+                config['devices'].append(dev)
         if gpu.node is not None:
             config['numa_node'] = gpu.node
         gpus.append(config)

@@ -51,6 +51,9 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--simulate', dest='simulate', default=False,
                         action='store_true',
                         help='run controller in simulation mode suitable for lab testing (default: %(default)s)')
+    parser.add_argument('--develop', default=False,
+                        action='store_true',
+                        help='relax constraints to allow testing on different hardware (default: %(default)s)')
     parser.add_argument('--no-prometheus', dest='prometheus', default=True,
                         action='store_false',
                         help='disable Prometheus client HTTP service')
@@ -121,7 +124,7 @@ if __name__ == "__main__":
     for override in opts.graph_override:
         if len(override.split(':', 1)) < 2:
             die("--graph-override option must be in the form <subarray_product_id>:<graph_name>")
-    graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override, simulate=opts.simulate)
+    graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override)
 
     gui_urls = None
     if opts.gui_urls is not None:
@@ -155,6 +158,7 @@ if __name__ == "__main__":
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port, sched, loop,
         simulate=opts.simulate,
+        develop=opts.develop,
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,

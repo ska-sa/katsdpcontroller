@@ -202,9 +202,12 @@ GPUS_SCHEMA = {
     'items': {
         'type': 'object',
         'properties': {
-            'device': {
-                'type': 'string',
-                'minLength': 1
+            'devices': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                    'minLength': 1
+                }
             },
             'driver_version': {
                 'type': 'string',
@@ -228,7 +231,7 @@ GPUS_SCHEMA = {
                 'minimum': 0
             }
         },
-        'required': ['device', 'driver_version', 'name', 'compute_capability', 'device_attributes']
+        'required': ['devices', 'driver_version', 'name', 'compute_capability', 'device_attributes']
     }
 }
 logger = logging.getLogger(__name__)
@@ -1012,7 +1015,7 @@ class ResourceCollector(object):
 class AgentGPU(ResourceCollector):
     """A single GPU on an agent machine, tracking both attributes and free resources."""
     def __init__(self, spec):
-        self.device = spec['device']
+        self.devices = spec['devices']
         self.driver_version = spec['driver_version']
         self.name = spec['name']
         self.compute_capability = tuple(spec['compute_capability'])
@@ -1671,12 +1674,11 @@ class PhysicalTask(PhysicalNode):
                     resource.scalar.value = value
                     taskinfo.resources.append(resource)
             gpu = self.agent.gpus[gpu_alloc.index]
-            docker_parameters.append({'key': 'device', 'value': gpu.device})
+            docker_devices.update(gpu.devices)
             # We assume all GPUs on an agent have the same driver version.
             # This is reflected in the NVML API, so should be safe.
             gpu_driver_version = gpu.driver_version
         if gpu_driver_version is not None:
-            docker_devices.update(['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools'])
             volume = Dict()
             volume.mode = 'RO'
             volume.container_path = '/usr/local/nvidia'
