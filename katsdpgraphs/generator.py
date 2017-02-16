@@ -39,7 +39,6 @@ class TelstateTask(SDPPhysicalTaskBase):
 
 def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, dump_rate):
     from katsdpcontroller.sdpcontroller import State
-    # TODO: missing network requests (other than for CBF network)
 
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
     cbf_antennas = 4
@@ -129,7 +128,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         for beam in six.iterkeys(beams_spead):
             streams[beam] = 'beamformer'
         streams_arg = ','.join("{}:{}".format(key, value) for key, value in streams.items())
-        g.add_node(cam2telstate, config=lambda resolver: {
+        g.add_node(cam2telstate, config=lambda task, resolver: {
             'url': resolver.resources.get_url('camdata'),
             'streams': streams_arg,
             'collapse_streams': True
@@ -153,7 +152,6 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     # add a fixed amount since in very small arrays the 20% might not cover
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
-    timeplot.cores = [None] * 2
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
@@ -164,7 +162,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
-    g.add_node(timeplot, config=lambda resolver: {
+    g.add_node(timeplot, config=lambda task, resolver: {
         'cbf_channels': cbf_channels,
         'config_base': '/var/kat/config/.katsdpdisp',
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
@@ -195,19 +193,19 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         ingest.mem = 32 * cbf_vis_mb + 256
         ingest.transitions = capture_transitions
         ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
-        g.add_node(ingest, config=lambda resolver: {
+        g.add_node(ingest, config=lambda task, resolver: {
             'continuum_factor': 32,
             'sd_continuum_factor': cbf_channels // 256,
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9    # local machine, so crank it up a bit (TODO: no longer necessarily true)
         })
-        g.add_edge(ingest, bcp_spead, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(ingest, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
             'cbf_spead': str(endpoint)})
-        g.add_edge(ingest, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(ingest, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l0_spectral_spead': str(endpoint)})
-        g.add_edge(ingest, l0_continuum, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(ingest, l0_continuum, port='spead', config=lambda task, resolver, endpoint: {
             'l0_continuum_spead': str(endpoint)})
-        g.add_edge(ingest, timeplot, port='spead_port', config=lambda resolver, endpoint: {
+        g.add_edge(ingest, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
             'sdisp_spead': str(endpoint)})
 
     if beamformer_mode == 'ptuse':
@@ -229,20 +227,18 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
-        g.add_node(bf_ingest, config=lambda resolver: {
+        g.add_node(bf_ingest, config=lambda task, resolver: {
             'cbf_channels': cbf_channels
         })
         for stream in six.itervalues(beams_spead):
-            g.add_edge(bf_ingest, stream, port='spead', config=lambda resolver, endpoint: {
+            g.add_edge(bf_ingest, stream, port='spead', config=lambda task, resolver, endpoint: {
                 'cbf_spead{}'.format(stream.name[-1]): str(endpoint)})
     elif beamformer_mode != 'none':
         ram = beamformer_mode == 'hdf5_ram'
         for i, stream in enumerate(six.itervalues(beams_spead)):
             bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
             bf_ingest.image = 'katsdpingest'
-            bf_ingest.command = ['bf_ingest.py',
-                                 '--affinity={cores[disk]},{cores[network]}',
-                                 '--interface={interfaces[cbf].name}']
+            bf_ingest.command = ['bf_ingest.py']
             bf_ingest.cpus = 2
             bf_ingest.cores = ['disk', 'network']
             # CBF sends 256 time samples per heap, and bf_ingest accumulates
@@ -250,19 +246,21 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
             # to be on the safe side we double everything. Values are int8*2.
             # Allow 512MB for various buffers.
             bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
-            bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+            bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
             bf_ingest.ports = ['port']
             bf_ingest.transitions = capture_transitions
-            g.add_node(bf_ingest, config=lambda resolver: {
+            g.add_node(bf_ingest, config=lambda task, resolver: {
                 'file_base': '/data',
+                'affinity': [task.cores['disk'], task.cores['network']],
+                'interface': task.interfaces['cbf'].name,
                 'ibv': True,
                 'direct_io': beamformer_mode == 'hdf5_ssd',   # Can't use O_DIRECT on tmpfs
                 'stream_name': stream.name
             })
-            g.add_edge(bf_ingest, stream, port='spead', config=lambda resolver, endpoint: {
+            g.add_edge(bf_ingest, stream, port='spead', config=lambda task, resolver, endpoint: {
                 'cbf_spead': str(endpoint)})
 
     # Calibration node (only possible to calibrate with at least 4 antennas)
@@ -289,13 +287,13 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-        g.add_node(cal, config=lambda resolver: {
+        g.add_node(cal, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
             'buffer_maxsize': buffer_size
         })
-        g.add_edge(cal, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l0_spectral_spead': str(endpoint)})
-        g.add_edge(cal, l1_spectral, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(cal, l1_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l1_spectral_spead': str(endpoint)})
 
     # filewriter node
@@ -311,10 +309,10 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
-    filewriter.networks = [scheduler.InterfaceRequest('sdp_10g')]
+    filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     filewriter.transitions = capture_transitions
-    g.add_node(filewriter, config=lambda resolver: {'file_base': '/var/kat/data'})
-    g.add_edge(filewriter, l0_spectral, port='spead', config=lambda resolver, endpoint: {
+    g.add_node(filewriter, config=lambda task, resolver: {'file_base': '/var/kat/data'})
+    g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
         'l0_spectral_spead': str(endpoint)})
 
     # Simulator node
@@ -339,10 +337,10 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
         sim.interfaces = [scheduler.InterfaceRequest('cbf')]
-        g.add_node(sim, config=lambda resolver: {
+        g.add_node(sim, config=lambda task, resolver: {
             'cbf_channels': cbf_channels
         })
-        g.add_edge(sim, bcp_spead, port='spead', config=lambda resolver, endpoint: {
+        g.add_edge(sim, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
             'cbf_spead': str(endpoint)
         })
 

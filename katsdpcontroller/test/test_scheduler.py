@@ -779,7 +779,14 @@ class TestPhysicalTask(object):
         assert_equal('agenthost', physical_task.host)
         assert_equal('agentid', physical_task.agent_id)
         assert_is(self.allocation, physical_task.allocation)
-        assert_equal({'net0': self.eth0, 'net1': self.eth1}, physical_task.interfaces)
+        assert_in('net0', physical_task.interfaces)
+        assert_equal('eth0', physical_task.interfaces['net0'].name)
+        assert_equal(ipaddress.IPv4Address(u'192.168.1.1'),
+                     physical_task.interfaces['net0'].ipv4_address)
+        assert_in('net1', physical_task.interfaces)
+        assert_equal('eth1', physical_task.interfaces['net1'].name)
+        assert_equal(ipaddress.IPv4Address(u'192.168.2.1'),
+                     physical_task.interfaces['net1'].ipv4_address)
         assert_equal({}, physical_task.endpoints)
         assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
         assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
@@ -1231,12 +1238,13 @@ class TestScheduler(object):
         expected_taskinfo1.task_id.value = 'test-00000001'
         expected_taskinfo1.agent_id.value = 'agentid1'
         expected_taskinfo1.command.shell = False
-        expected_taskinfo1.command.value = 'taskset'
+        expected_taskinfo1.command.value = 'test'
         expected_taskinfo1.command.arguments = [
-            '-c', '0,2', 'test', '--host=agenthost1', '--remote=agenthost0:30000',
+            '--host=agenthost1', '--remote=agenthost0:30000',
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
+        expected_taskinfo1.container.docker.parameters = [{'key': 'cpuset-cpus', 'value': '0,2'}]
         expected_taskinfo1.resources = _make_resources({'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
         expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'
