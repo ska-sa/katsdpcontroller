@@ -1,0 +1,37 @@
+version: "3"
+services:
+    exhibitor:
+        image: netflixoss/exhibitor:1.5.2
+        ports:
+            - "127.0.0.1:2181:2181"
+    mesos-master:
+        network_mode: host
+        image: mesosphere/mesos-master:1.1.0-2.0.107.ubuntu1404.02
+        environment:
+            MESOS_PORT: 5050
+            MESOS_ZK: zk://127.0.0.1:2181/mesos
+            MESOS_QUORUM: 1
+            MESOS_REGISTRY: in_memory
+            MESOS_LOG_DIR: /var/log/mesos
+            MESOS_WORK_DIR: /var/tmp/mesos
+    mesos-slave:
+        network_mode: host
+        image: mesosphere/mesos-slave:1.1.0-2.0.107.ubuntu1404
+        environment:
+            MESOS_IP: 127.0.0.1
+            MESOS_PORT: 5051
+            MESOS_MASTER: zk://127.0.0.1:2181/mesos
+            MESOS_SWITCH_USER: 0
+            MESOS_CONTAINERIZERS: docker,mesos
+            MESOS_DOCKER_CONFIG: file:///etc/mesos/config.json
+            MESOS_EXECUTOR_REGISTRATION_TIMEOUT: 5mins
+            MESOS_WORK_DIR: /var/tmp/mesos
+        volumes:
+            - "${HOME}/.docker/config.json:/etc/mesos/config.json"
+            - /var/run/docker.sock:/var/run/docker.sock
+            - /sys:/sys
+            - /usr/bin/docker:/usr/local/bin/docker
+            - ./mesos-slave:/etc/mesos-slave
+        entrypoint:
+            - /usr/bin/mesos-init-wrapper
+            - slave

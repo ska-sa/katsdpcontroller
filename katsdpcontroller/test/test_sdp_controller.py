@@ -302,6 +302,7 @@ class TestSDPController(unittest.TestCase):
                             port_num += 1
                 node.allocation = mock.MagicMock()
                 node.allocation.agent.host = 'host.' + node.logical_node.name
+                node.allocation.agent.gpus[0].name = 'GeForce GTX TITAN X'
         for node in nodes:
             if node.state < scheduler.TaskState.RUNNING:
                 yield From(node.resolve(resolver, graph, self.loop))

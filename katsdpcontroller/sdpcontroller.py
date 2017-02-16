@@ -127,12 +127,9 @@ class GraphResolver(object):
        ----------
        overrides : list, optional
             A list of override strings in the form <subarray_product_id>:<override_graph_name>
-       simulate : bool, optional
-            Resolver will product graph name suitable for use in simulation when set to true. (default: False)
        """
-    def __init__(self, overrides=[], simulate=False):
+    def __init__(self, overrides=[]):
         self._overrides = {}
-        self.simulate = simulate
 
         for override in overrides:
             fields = override.split(':', 1)
@@ -153,7 +150,7 @@ class GraphResolver(object):
         except KeyError:
             base_graph_name = subarray_product_id.split("_")[-1]
              # default graph name is to split out the trailing name from the subarray product id specifier
-        return "{}{}".format(base_graph_name, "sim" if self.simulate else "")
+        return base_graph_name
 
     def get_subarray_numeric_id(self, subarray_product_id):
         """Returns the numeric subarray identifier string from the specified subarray product id.
@@ -260,7 +257,7 @@ class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
     def __init__(self, sched, graph_name, n_antennas, dump_rate,
-                 resolver, subarray_product_id, loop,
+                 simulate, develop, resolver, subarray_product_id, loop,
                  sdp_controller=None, telstate_name='sdp.telstate'):
         self.sched = sched
         self.resolver = resolver
@@ -274,6 +271,8 @@ class SDPGraph(object):
         graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
         graph_kwargs['l0_antennas'] = n_antennas
         graph_kwargs['dump_rate'] = dump_rate
+        graph_kwargs['simulate'] = simulate
+        graph_kwargs['develop'] = develop
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         # generate physical nodes
         mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
@@ -397,7 +396,8 @@ class SDPSubarrayProductBase(object):
     ** This can be used directly as a stubbed interface for use in standalone testing and validation.
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, simulate):
+    def __init__(self, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
+                 simulate, develop):
         self.subarray_product_id = subarray_product_id
         self.antennas = antennas
         self.n_antennas = len(antennas.split(","))
@@ -410,6 +410,7 @@ class SDPSubarrayProductBase(object):
         self.psb_id = 0
          # TODO: Most of the above parameters are now deprecated - remove
         self.simulate = simulate
+        self.develop = develop
         self.graph = graph
         if self.n_beams == 0:
            self.data_rate = (((self.n_antennas*(self.n_antennas+1))/2) * 4 * dump_rate * n_channels * 64) / 1e9
@@ -677,7 +678,7 @@ class SDPControllerServer(AsyncDeviceServer):
     BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
-                 simulate=False, interface_mode=False,
+                 simulate=False, develop=False, interface_mode=False,
                  graph_resolver=None, image_resolver_factory=None,
                  gui_urls=None, **kwargs):
          # setup sensors
@@ -693,6 +694,9 @@ class SDPControllerServer(AsyncDeviceServer):
 
         self.simulate = simulate
         if self.simulate: logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
+        self.develop = develop
+        if self.develop:
+            logger.warning("Note: Running in developer mode. This will relax some constraints.")
         self.interface_mode = interface_mode
         if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.loop = loop
@@ -704,7 +708,7 @@ class SDPControllerServer(AsyncDeviceServer):
          # track async product configure request to avoid handling more than one at a time
 
         if graph_resolver is None:
-            graph_resolver = GraphResolver(simulate=self.simulate)
+            graph_resolver = GraphResolver()
         self.graph_resolver = graph_resolver
         if image_resolver_factory is None:
             image_resolver_factory = scheduler.ImageResolver
@@ -1148,6 +1152,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         n_antennas = len(antennas.split(','))
         graph = SDPGraph(self.sched, graph_name, n_antennas, dump_rate,
+                         self.simulate, self.develop,
                          resolver, subarray_product_id,
                          self.loop, sdp_controller=self)
          # create graph object and build physical graph from specified resources
@@ -1176,7 +1181,9 @@ class SDPControllerServer(AsyncDeviceServer):
 
         if self.interface_mode:
             logger.warning("No components will be started - running in interface mode")
-            product = SDPSubarrayProductBase(subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            product = SDPSubarrayProductBase(
+                subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
+                self.simulate, self.develop)
             self.subarray_products[subarray_product_id] = product
             self.subarray_product_config[subarray_product_id] = config_args
             return
@@ -1205,7 +1212,9 @@ class SDPControllerServer(AsyncDeviceServer):
              # at this point telstate is up, nodes have been launched, katcp connections established
              # we can now safely expose this product for use in other katcp commands like ?capture-init
              # adding a product is also safe with regard to commands like ?capture-status
-            product = SDPSubarrayProduct(self.sched, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph, self.simulate)
+            product = SDPSubarrayProduct(
+                self.sched, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
+                self.simulate, self.develop)
             self.subarray_products[subarray_product_id] = product
             self.subarray_product_config[subarray_product_id] = config_args
         except Exception:

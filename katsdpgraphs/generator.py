@@ -10,6 +10,9 @@ from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase
 
 
+INGEST_GPU_NAME = 'GeForce GTX TITAN X'
+
+
 class LogicalMulticast(scheduler.LogicalExternal):
     def __init__(self, name):
         super(LogicalMulticast, self).__init__(name)
@@ -37,7 +40,27 @@ class TelstateTask(SDPPhysicalTaskBase):
         self.taskinfo.container.docker.port_mappings = [portmap]
 
 
-def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, dump_rate):
+class IngestTask(SDPPhysicalTask):
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(IngestTask, self).resolve(resolver, graph, loop))
+        # In develop mode, the GPU can be anything, and we need to pick a
+        # matching image. If it is the standard GPU, don't try to override
+        # anything, but otherwise synthesize an image name by mangling the
+        # GPU name.
+        gpu = self.agent.gpus[self.allocation.gpus[0].index]
+        if gpu.name != INGEST_GPU_NAME:
+            # Turn spaces and dashes into underscores, remove anything that isn't
+            # alphanumeric or underscore, and lowercase (because Docker doesn't
+            # allow uppercase in image names).
+            print(gpu.name)
+            mangled = re.sub('[- ]', '_', gpu.name.lower())
+            mangled = re.sub('[^a-z0-9_]', '', mangled)
+            image_path = yield From(resolver.image_resolver('katsdpingest_' + mangled, loop))
+            self.taskinfo.container.docker.image = image_path
+
+
+def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate):
     from katsdpcontroller.sdpcontroller import State
 
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
@@ -172,11 +195,13 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
     n_ingest = 1
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('sdp.ingest.{}'.format(i))
+        ingest.physical_factory = IngestTask
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
         ingest.ports = ['port']
         ingest.gpus = [scheduler.GPURequest()]
-        ingest.gpus[-1].name = 'GeForce GTX TITAN X'
+        if not develop:
+            ingest.gpus[-1].name = INGEST_GPU_NAME
         # Scale for a full GPU for 32 antennas, 32K channels
         scale = cbf_vis / (32 * 33 * 2 * 32768)
         ingest.gpus[0].compute = scale
@@ -190,7 +215,7 @@ def build_logical_graph(beamformer_mode, simulate, cbf_channels, l0_antennas, du
         ingest.cpus = 7.5 * scale
         # Scale factor of 32 may be overly conservative: actual usage may be
         # only half this.
-        ingest.mem = 32 * cbf_vis_mb + 256
+        ingest.mem = 32 * cbf_vis_mb + 4096
         ingest.transitions = capture_transitions
         ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
         g.add_node(ingest, config=lambda task, resolver: {
@@ -367,13 +392,12 @@ def graph_parameters(graph_name):
     parameters : dict
         Key-value pairs to pass as parameters to :func:`build_physical_graph`
     """
-    match = re.match('^(?P<mode>c|bc)856M(?P<channels>4|32)k(?P<sim>(?:sim)?)$', graph_name)
+    match = re.match('^(?P<mode>c|bc)856M(?P<channels>4|32)k$', graph_name)
     if not match:
-        match = re.match('^bec856M(?P<channels>4|32)k(?P<mode>ssd|ram)(?P<sim>(?:sim)?)$', graph_name)
+        match = re.match('^bec856M(?P<channels>4|32)k(?P<mode>ssd|ram)$', graph_name)
         if not match:
             raise ValueError('Unsupported graph ' + graph_name)
     beamformer_modes = {'c': 'none', 'bc': 'ptuse', 'ssd': 'hdf5_ssd', 'ram': 'hdf5_ram'}
     beamformer_mode = beamformer_modes[match.group('mode')]
     return dict(beamformer_mode=beamformer_mode,
-                cbf_channels=int(match.group('channels')) * 1024,
-                simulate=bool(match.group('sim')))
+                cbf_channels=int(match.group('channels')) * 1024)
