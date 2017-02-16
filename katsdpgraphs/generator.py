@@ -1,4 +1,5 @@
 from __future__ import print_function, division, absolute_import
+import logging
 import networkx as nx
 import re
 from collections import OrderedDict
@@ -11,6 +12,7 @@ from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalT
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
+logger = logging.getLogger(__name__)
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
@@ -53,11 +55,11 @@ class IngestTask(SDPPhysicalTask):
             # Turn spaces and dashes into underscores, remove anything that isn't
             # alphanumeric or underscore, and lowercase (because Docker doesn't
             # allow uppercase in image names).
-            print(gpu.name)
             mangled = re.sub('[- ]', '_', gpu.name.lower())
             mangled = re.sub('[^a-z0-9_]', '', mangled)
             image_path = yield From(resolver.image_resolver('katsdpingest_' + mangled, loop))
             self.taskinfo.container.docker.image = image_path
+            logger.info('Develop mode: using %s for ingest', image_path)
 
 
 def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate):
