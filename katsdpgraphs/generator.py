@@ -93,6 +93,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # - 3: conservative estimate of bloat from text-based pickling
     # - /1024**2 to convert to megabytes
     bp_mb = l0_channels * (2 * l0_antennas) * 8 * 3 * 200 / 1024**2
+    # Bandwidths, in bits per second
+    # * 8 for bytes -> bits, * 1.05 + 2048 to add room for network overheads
+    cbf_vis_bandwidth = (cbf_vis_size * 8 * 1.05 + 2048) * dump_rate
+    l0_bandwidth = (l0_size * 8 * 1.05 + 2048) * dump_rate
 
     g = nx.MultiDiGraph(config=lambda resolver: {
         'sdp_cbf_channels': cbf_channels,
@@ -180,7 +184,6 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
     timeplot.wait_ports = ['html_port', 'data_port']
     timeplot.volumes = [config_vol]
-    timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
         'description': 'Signal displays for {0.subarray_name}',
@@ -220,6 +223,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         ingest.mem = 32 * cbf_vis_mb + 4096
         ingest.transitions = capture_transitions
         ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
+        ingest.networks[0].bandwidth_in = cbf_vis_bandwidth
+        ingest.networks[1].bandwidth_out = l0_bandwidth
         g.add_node(ingest, config=lambda task, resolver: {
             'continuum_factor': 32,
             'sd_continuum_factor': cbf_channels // 256,
@@ -235,6 +240,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         g.add_edge(ingest, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
             'sdisp_spead': str(endpoint)})
 
+    # TODO: this hard-codes L band - the ADC rate for other bands may be
+    # different. It also hard-codes the bits-per-sample. The 1.05 is to account
+    # for network overheads.
+    bf_bandwidth_1pol = 1712000000.0 * 8 * 1.05
     if beamformer_mode == 'ptuse':
         bf_ingest = SDPLogicalTask('sdp.bf_ingest.1')
         bf_ingest.image = 'beamform'
@@ -251,6 +260,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
         bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
+        bf_ingest.networks[0].bandwidth_in = bf_bandwidth_1pol * 2
         bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
@@ -274,6 +284,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             # Allow 512MB for various buffers.
             bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
             bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+            bf_ingest.interfaces[0].bandwidth_in = bf_bandwidth_1pol
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
             bf_ingest.volumes = [
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
@@ -314,6 +325,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+        cal.interfaces[0].bandwidth_in = l0_bandwidth
         g.add_node(cal, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
             'buffer_maxsize': buffer_size
@@ -337,6 +349,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
     filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    filewriter.interfaces[0].bandwidth_in = l0_bandwidth
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda task, resolver: {'file_base': '/var/kat/data'})
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
@@ -364,6 +377,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
         sim.interfaces = [scheduler.InterfaceRequest('cbf')]
+        sim.interfaces[0].bandwidth_out = cbf_vis_bandwidth
         g.add_node(sim, config=lambda task, resolver: {
             'cbf_channels': cbf_channels
         })
