@@ -63,9 +63,11 @@ def get_servers(client):
             value = inform.arguments[4]
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
+                continue
             match = re.match(r'^(array_\d+)\.sdp\.timeplot\.1\.html_port$', name)
             if not match:
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
+                continue
             array = match.group(1)
             servers[array] = value
     raise tornado.gen.Return(servers)
