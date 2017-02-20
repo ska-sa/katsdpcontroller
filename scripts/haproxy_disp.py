@@ -21,6 +21,7 @@ import tornado.gen
 import tornado.process
 import tornado.locks
 import katcp
+from katsdptelstate.endpoint import endpoint_parser
 
 
 logger = logging.getLogger(__name__)
@@ -76,15 +77,9 @@ def get_servers(client):
 @tornado.gen.coroutine
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('sdpmc', help='host:port of the SDP master controller')
+    parser.add_argument('sdpmc', type=endpoint_parser(5001),
+                        help='host[:port] of the SDP master controller')
     args = parser.parse_args()
-    if ':' in args.sdpmc:
-        pos = args.sdpmc.rfind(':')
-        host = args.sdpmc[:pos]
-        port = int(args.sdpmc[pos + 1:])
-    else:
-        host = args.sdpmc
-        port = 5001
 
     ioloop = tornado.ioloop.IOLoop.current()
     wake = tornado.locks.Event()
@@ -100,7 +95,7 @@ def main():
     haproxy = None
     content = None
     try:
-        client = Client(wake, host, port)
+        client = Client(wake, args.sdpmc.host, args.sdpmc.port)
         client.set_ioloop(ioloop)
         client.start()
         while True:
