@@ -7,6 +7,11 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
+# Install haproxy for haproxy_disp
+USER root
+RUN apt-get -y update && apt-get -y --no-install-recommends install haproxy
+USER kat
+
 # Install Python dependencies
 COPY requirements.txt /tmp/install/requirements.txt
 RUN install-requirements.py --default-versions ~/docker-base/base-requirements.txt -r /tmp/install/requirements.txt
