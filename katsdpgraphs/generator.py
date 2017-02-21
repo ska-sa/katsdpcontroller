@@ -76,12 +76,16 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     cbf_vis_mb = cbf_vis_size / 1024**2
     cbf_gains_mb = cbf_channels * cbf_antennas * 4 * 8 / 1024**2
 
+    # Except where otherwise noted, l0 values are for the spectral product
     l0_channels = cbf_channels                # could differ in future
     l0_baselines = l0_antennas * (l0_antennas + 1) * 2
     l0_vis = l0_baselines * l0_channels
     # vis, flags, weights, plus per-channel float32 weight
     l0_size = l0_vis * 10 + l0_channels * 4
+    l0_cont_factor = 32
+    l0_cont_size = l0_size // l0_cont_factor
     l0_mb = l0_size / 1024**2
+    l0_cont_mb = l0_cont_size / 1024**2
     l0_gains_mb = l0_channels * l0_antennas * 4 * 8 / 1024**2
     # Extra memory allocation for tasks that deal with bandpass calibration
     # solutions in telescope state. The exact size of these depends on how
@@ -97,6 +101,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # * 8 for bytes -> bits, * 1.05 + 2048 to add room for network overheads
     cbf_vis_bandwidth = (cbf_vis_size * 8 * 1.05 + 2048) * dump_rate
     l0_bandwidth = (l0_size * 8 * 1.05 + 2048) * dump_rate
+    l0_cont_bandwidth = (l0_cont_size * 8 * 1.05 + 2048) * dump_rate
 
     g = nx.MultiDiGraph(config=lambda resolver: {
         'sdp_cbf_channels': cbf_channels,
@@ -219,14 +224,14 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # in an ingest machine).
         ingest.cpus = 7.5 * scale
         # Scale factor of 32 may be overly conservative: actual usage may be
-        # only half this.
+        # only half this. This also leaves headroom for buffering L0 output.
         ingest.mem = 32 * cbf_vis_mb + 4096
         ingest.transitions = capture_transitions
         ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
         ingest.networks[0].bandwidth_in = cbf_vis_bandwidth
-        ingest.networks[1].bandwidth_out = l0_bandwidth
+        ingest.networks[1].bandwidth_out = l0_bandwidth + l0_cont_bandwidth
         g.add_node(ingest, config=lambda task, resolver: {
-            'continuum_factor': 32,
+            'continuum_factor': l0_cont_factor,
             'sd_continuum_factor': cbf_channels // 256,
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9    # local machine, so crank it up a bit (TODO: no longer necessarily true)
