@@ -29,6 +29,7 @@ from prometheus_client import Histogram
 from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
+import katsdpcontroller
 from . import scheduler
 
 try:
@@ -674,8 +675,8 @@ def time_request(func):
 
 class SDPControllerServer(AsyncDeviceServer):
 
-    VERSION_INFO = ("sdpcontroller", 0, 1)
-    BUILD_INFO = ("sdpcontroller", 0, 1, "rc2")
+    VERSION_INFO = ("sdpcontroller", 1, 0)
+    BUILD_INFO = ("sdpcontroller",) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, develop=False, interface_mode=False,
