@@ -20,6 +20,7 @@ from trollius import From, Return
 import networkx
 import six
 
+import jsonschema
 import ipaddress
 import netifaces
 import faulthandler
@@ -52,6 +53,16 @@ class State(scheduler.OrderedEnum):
     DONE = 3
 
 TASK_STATES = {0:'init',1:'running',2:'killed'}
+STREAMS_SCHEMA = {
+    'type': 'object',
+    'additionalProperties': {
+        'type': 'object',
+        'additionalProperties': {
+            'type': 'string',
+            'minLength': 1
+        }
+    }
+}
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
@@ -1105,6 +1116,7 @@ class SDPControllerServer(AsyncDeviceServer):
         try:
             # Try to parse the supplied string as a JSON encoded dict of stream urls
             streams_dict = json.loads(stream_sources)
+            jsonschema.validate(streams_dict, STREAMS_SCHEMA)
             for (stream_type, stream_spec_dict) in streams_dict.iteritems():
                 # each stream type has a dict of stream specifiers of the form
                 # stream_name:stream_url
@@ -1124,10 +1136,10 @@ class SDPControllerServer(AsyncDeviceServer):
                     else:
                         urls[stream_name] = stream_url
                         logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
-        except ValueError:
+        except (ValueError, jsonschema.ValidationError) as error:
              # something is definitely wrong with these
             retmsg = "Failed to parse source stream specifiers. You must supply a JSON dict of the form {<type>: {<name>: <url>, ...}, ...}"
-            logger.error(retmsg)
+            logger.error('%s (%s)', retmsg, error)
             raise FailReply(retmsg)
 
         graph_name = self.graph_resolver(subarray_product_id)
