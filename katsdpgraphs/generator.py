@@ -280,9 +280,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         for i, stream in enumerate(six.itervalues(beams_spead)):
             bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
             bf_ingest.image = 'katsdpingest'
-            bf_ingest.command = ['bf_ingest.py']
+            bf_ingest.command = ['schedrr', 'bf_ingest.py']
             bf_ingest.cpus = 2
             bf_ingest.cores = ['disk', 'network']
+            bf_ingest.capabilities.append('SYS_NICE')
             # CBF sends 256 time samples per heap, and bf_ingest accumulates
             # 128 of these in the ring buffer. It's not a lot of memory, so
             # to be on the safe side we double everything. Values are int8*2.
