@@ -1222,6 +1222,18 @@ class SDPControllerServer(AsyncDeviceServer):
                 logger.error(ret_msg)
                 yield From(graph.shutdown())
                 raise FailReply(ret_msg)
+            # Record the TaskInfo for each task in telstate, as well as details
+            # about the image resolver.
+            details = {}
+            for task in graph.physical_graph:
+                if isinstance(task, scheduler.PhysicalTask):
+                    details[task.logical_node.name] = {
+                        'host': task.host,
+                        'taskinfo': task.taskinfo
+                    }
+            graph.telstate.add('sdp_task_details', details, immutable=True)
+            graph.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+            graph.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides, immutable=True)
              # at this point telstate is up, nodes have been launched, katcp connections established
              # we can now safely expose this product for use in other katcp commands like ?capture-init
              # adding a product is also safe with regard to commands like ?capture-status
