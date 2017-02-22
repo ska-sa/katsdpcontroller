@@ -602,6 +602,14 @@ class ImageResolver(object):
         else:
             self._auth = None
 
+    @property
+    def tag(self):
+        return self._tag
+
+    @property
+    def overrides(self):
+        return dict(self._overrides)
+
     def override(self, name, path):
         self._overrides[name] = path
 
