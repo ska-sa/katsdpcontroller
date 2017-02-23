@@ -280,14 +280,22 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         for i, stream in enumerate(six.itervalues(beams_spead)):
             bf_ingest = SDPLogicalTask('sdp.bf_ingest.{}'.format(i + 1))
             bf_ingest.image = 'katsdpingest'
-            bf_ingest.command = ['bf_ingest.py']
+            bf_ingest.command = ['schedrr', 'bf_ingest.py']
             bf_ingest.cpus = 2
             bf_ingest.cores = ['disk', 'network']
-            # CBF sends 256 time samples per heap, and bf_ingest accumulates
-            # 128 of these in the ring buffer. It's not a lot of memory, so
-            # to be on the safe side we double everything. Values are int8*2.
-            # Allow 512MB for various buffers.
-            bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
+            bf_ingest.capabilities.append('SYS_NICE')
+            if not ram:
+                # CBF sends 256 time samples per heap, and bf_ingest accumulates
+                # 128 of these in the ring buffer. It's not a lot of memory, so
+                # to be on the safe side we double everything. Values are int8*2.
+                # Allow 512MB for various buffers.
+                bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
+            else:
+                # When writing to tmpfs, the file is accounted as memory to our
+                # process, so we need more memory allocation than there is
+                # space in the ramdisk. This is only used for lab testing, so
+                # we just hardcode a number.
+                bf_ingest.ram = 210 * 1024
             bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             bf_ingest.interfaces[0].bandwidth_in = bf_bandwidth_1pol
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'

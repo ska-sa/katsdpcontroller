@@ -972,6 +972,10 @@ class LogicalTask(LogicalNode):
         List of :class:`InterfaceRequest` objects, one per interface requested
     gpus : list
         List of :class:`GPURequest` objects, one per GPU needed
+    capabilities : list
+        List of Linux capability names to add e.g. `SYS_NICE`. Note that this
+        doesn't guarantee that the process can use the capability, if it runs
+        as a non-root user.
     image : str
         Base name of the Docker image (without registry or tag).
     container : :class:`addict.Dict`
@@ -998,6 +1002,7 @@ class LogicalTask(LogicalNode):
         self.gpus = []
         self.interfaces = []
         self.volumes = []
+        self.capabilities = []
         self.image = None
         self.command = []
         self.container = Dict()
@@ -1694,6 +1699,12 @@ class PhysicalTask(PhysicalNode):
             volume.source.docker_volume.driver = 'nvidia-docker'
             volume.source.docker_volume.name = 'nvidia_driver_' + gpu_driver_version
             taskinfo.container.setdefault('volumes', []).append(volume)
+
+        # container.linux_info.capabilities doesn't work with Docker
+        # containerizer (https://issues.apache.org/jira/browse/MESOS-6163), so
+        # pass in the parameters.
+        for capability in self.logical_node.capabilities:
+            docker_parameters.append({'key': 'cap-add', 'value': capability})
 
         for device in docker_devices:
             docker_parameters.append({'key': 'device', 'value': device})
