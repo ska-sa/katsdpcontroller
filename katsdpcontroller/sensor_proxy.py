@@ -36,7 +36,10 @@ class PrometheusObserver(object):
                     logger.warn(
                         'Counter %s went backwards (%d to %d), not sending delta to Prometheus',
                         self._sensor.name, self._old_value, value)
-                    return
+                    # self._old_value is still updated with value. This is
+                    # appropriate if the counter was reset (e.g. at the
+                    # start of a new observation), so that Prometheus
+                    # sees a cumulative count.
                 else:
                     self._value_metric.inc(value - self._old_value)
         else:
