@@ -288,9 +288,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
                 # CBF sends 256 time samples per heap, and bf_ingest accumulates
                 # 128 of these in the ring buffer. It's not a lot of memory, so
                 # to be on the safe side we double everything. Values are int8*2.
-                # libhdf5 seems to be quite memory-hungry, to allow 2GiB for
-                # overhead.
-                bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 2048
+                # Allow 512MB for various buffers.
+                bf_ingest.mem = 256 * 256 * 2 * cbf_channels / 1024**2 + 512
             else:
                 # When writing to tmpfs, the file is accounted as memory to our
                 # process, so we need more memory allocation than there is
