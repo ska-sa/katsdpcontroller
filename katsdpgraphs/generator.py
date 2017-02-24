@@ -227,9 +227,9 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # only half this. This also leaves headroom for buffering L0 output.
         ingest.mem = 32 * cbf_vis_mb + 4096
         ingest.transitions = capture_transitions
-        ingest.networks = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
-        ingest.networks[0].bandwidth_in = cbf_vis_bandwidth
-        ingest.networks[1].bandwidth_out = l0_bandwidth + l0_cont_bandwidth
+        ingest.interfaces = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
+        ingest.interfaces[0].bandwidth_in = cbf_vis_bandwidth
+        ingest.interfaces[1].bandwidth_out = l0_bandwidth + l0_cont_bandwidth
         g.add_node(ingest, config=lambda task, resolver: {
             'continuum_factor': l0_cont_factor,
             'sd_continuum_factor': cbf_channels // 256,
@@ -264,8 +264,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # 32GB of psrdada buffers, regardless of channels
         # 4GB to handle general process stuff
         bf_ingest.mem = 36 * 1024
-        bf_ingest.networks = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
-        bf_ingest.networks[0].bandwidth_in = bf_bandwidth_1pol * 2
+        bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
+        bf_ingest.interfaces[0].bandwidth_in = bf_bandwidth_1pol * 2
         bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
