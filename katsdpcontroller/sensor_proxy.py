@@ -32,7 +32,16 @@ class PrometheusObserver(object):
         elif type(self._value_metric).__name__ == 'Counter':
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
-                self._value_metric.inc(value - self._old_value)
+                if value < self._old_value:
+                    logger.warn(
+                        'Counter %s went backwards (%d to %d), not sending delta to Prometheus',
+                        self._sensor.name, self._old_value, value)
+                    # self._old_value is still updated with value. This is
+                    # appropriate if the counter was reset (e.g. at the
+                    # start of a new observation), so that Prometheus
+                    # sees a cumulative count.
+                else:
+                    self._value_metric.inc(value - self._old_value)
         else:
             raise TypeError('Expected a Counter or Gauge')
         if valid:
