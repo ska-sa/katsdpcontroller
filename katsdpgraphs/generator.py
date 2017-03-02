@@ -404,6 +404,12 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
             g.add_edge(node, telstate, port='telstate', order='strong')
+        # MESOS-7197 causes the master to crash if we ask for too little of
+        # a resource. Enforce some minima.
+        if isinstance(node, SDPLogicalTask):
+            node.cpus = max(node.cpus, 0.01)
+            for request in node.gpus:
+                request.compute = max(request.compute, 0.01)
     return g
 
 
