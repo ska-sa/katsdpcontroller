@@ -1229,7 +1229,7 @@ class SDPControllerServer(AsyncDeviceServer):
                 if isinstance(task, scheduler.PhysicalTask):
                     details[task.logical_node.name] = {
                         'host': task.host,
-                        'taskinfo': task.taskinfo
+                        'taskinfo': task.taskinfo.to_dict()
                     }
             graph.telstate.add('sdp_task_details', details, immutable=True)
             graph.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
