@@ -7,6 +7,7 @@
 
 import sys
 import os
+import os.path
 import json
 import signal
 import tornado
@@ -28,6 +29,7 @@ try:
 except ImportError:
     manhole = None
 
+
 @trollius.coroutine
 def on_shutdown(loop, server):
     loop.remove_signal_handler(signal.SIGINT)
@@ -36,6 +38,36 @@ def on_shutdown(loop, server):
     yield From(server.async_stop())
     ioloop.stop()
     loop.stop()
+
+
+class InvalidGuiUrlsError(RuntimeError):
+    pass
+
+
+def load_gui_urls_file(filename):
+    try:
+        with open(filename) as gui_urls_file:
+            gui_urls = json.load(gui_urls_file)
+    except (IOError, OSError) as error:
+        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
+    except ValueError as error:
+        raise InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
+    if not isinstance(gui_urls, list):
+        raise InvalidGuiUrlsError('{} does not contain a list'.format(filename))
+    return gui_urls
+
+
+def load_gui_urls_dir(dirname):
+    try:
+        gui_urls = []
+        for name in sorted(os.listdir(dirname)):
+            filename = os.path.join(dirname, name)
+            if filename.endswith('.json') and os.path.isfile(filename):
+                gui_urls.extend(load_gui_urls_file(filename))
+    except (IOError, OSError) as error:
+        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
+    return gui_urls
+
 
 if __name__ == "__main__":
 
@@ -73,8 +105,8 @@ if __name__ == "__main__":
     parser.add_argument('--graph-override', dest='graph_override', action='append',
                         default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
                         help='Override the graph to be used for the specified subarray product id (default: none)')
-    parser.add_argument('--gui-urls', metavar='FILE',
-                        help='File containing JSON describing related GUIs (default: none)')
+    parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
+                        help='File containing JSON describing related GUIs, or directory with .json files (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--role', default='katsdpcontroller',
@@ -127,14 +159,15 @@ if __name__ == "__main__":
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override)
 
     gui_urls = None
-    if opts.gui_urls is not None:
-        try:
-            with open(opts.gui_urls) as gui_urls_file:
-                gui_urls = json.load(gui_urls_file)
-        except IOError as error:
-            die('Cannot read {}: {}'.format(opts.gui_urls, error))
-        except ValueError as error:
-            die('Invalid JSON in {}: {}'.format(opts.gui_urls, error))
+    try:
+        if os.path.isdir(opts.gui_urls):
+            gui_urls = load_gui_urls_dir(opts.gui_urls)
+        else:
+            gui_urls = load_gui_urls_file(opts.gui_urls)
+    except InvalidGuiUrlsError as error:
+        die(str(error))
+    except Exception as error:
+        die('Could not read {}: {}'.format(opts.gui_urls, error))
 
     framework_info = addict.Dict()
     framework_info.user = 'root'
