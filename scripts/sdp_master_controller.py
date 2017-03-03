@@ -159,15 +159,16 @@ if __name__ == "__main__":
     graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override)
 
     gui_urls = None
-    try:
-        if os.path.isdir(opts.gui_urls):
-            gui_urls = load_gui_urls_dir(opts.gui_urls)
-        else:
-            gui_urls = load_gui_urls_file(opts.gui_urls)
-    except InvalidGuiUrlsError as error:
-        die(str(error))
-    except Exception as error:
-        die('Could not read {}: {}'.format(opts.gui_urls, error))
+    if opts.gui_urls is not None:
+        try:
+            if os.path.isdir(opts.gui_urls):
+                gui_urls = load_gui_urls_dir(opts.gui_urls)
+            else:
+                gui_urls = load_gui_urls_file(opts.gui_urls)
+        except InvalidGuiUrlsError as error:
+            die(str(error))
+        except Exception as error:
+            die('Could not read {}: {}'.format(opts.gui_urls, error))
 
     framework_info = addict.Dict()
     framework_info.user = 'root'
