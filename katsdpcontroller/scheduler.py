@@ -89,6 +89,15 @@ MiB).
 
 The node must also provide nvidia-docker-plugin so that driver volumes can be
 loaded.
+
+Agent prioritisation
+--------------------
+Each agent is assigned a 'priority', and tasks are assigned to the
+lowest-priority agent where they fit (so that specialised tasks that can only
+run on one agent are not blocked by more generic tasks being assigned to that
+agent). By default, the priority is the total number of volumes, interfaces and
+GPUs it has. This can be overridden by assigning a `katsdpcontroller.priority`
+scalar attribute. Ties are broken by amount of available memory.
 """
 
 
@@ -1096,6 +1105,7 @@ class Agent(ResourceCollector):
         self.volumes = []
         self.gpus = []
         self.numa = []
+        self.priority = None
         self._min_port = min_port
         for attribute in offers[0].attributes:
             try:
@@ -1121,6 +1131,8 @@ class Agent(ResourceCollector):
                     value = _decode_json_base64(attribute.text.value)
                     jsonschema.validate(value, NUMA_SCHEMA)
                     self.numa = value
+                elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
+                    self.priority = attribute.scalar.value
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
                 logger.warn('Could not parse %s (%s)',
                             attribute.name, attribute.text.value)
@@ -1157,6 +1169,11 @@ class Agent(ResourceCollector):
                     resource_name = parts[3]
                     if resource_name in INTERFACE_SCALAR_RESOURCES:
                         self.interfaces[index].inc_attr(resource_name, resource.scalar.value)
+        if self.priority is None:
+            self.priority = float(len(self.gpus) + 
+                                  len(self.interfaces) +
+                                  len(self.volumes))
+        logger.debug('Agent %s has priority %f', self.agent_id, self.priority)
 
     @classmethod
     def _match_children(cls, numa_node, requested, actual, scalar_resources, msg):
@@ -2085,7 +2102,7 @@ class Scheduler(pymesos.Scheduler):
                     # there is no other choice. Should eventually look into smarter
                     # algorithms e.g. Dominant Resource Fairness
                     # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                    agents.sort(key=lambda agent: (len(agent.gpus), agent.mem))
+                    agents.sort(key=lambda agent: (agent.priority, agent.mem))
                     nodes.sort(key=self._node_sort_key, reverse=True)
                     allocations = []
                     for node in nodes:
