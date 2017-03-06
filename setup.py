@@ -33,6 +33,7 @@ setup (
         'katcp',
         'tornado',
         'katsdptelstate',
+        'katsdpservices',
         'faulthandler',
         'kazoo',
         'tornado>=4.3',
