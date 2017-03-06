@@ -439,10 +439,14 @@ class TestAgent(unittest.TestCase):
              {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'], 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 0}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.priority_attr = Dict()
+        self.priority_attr.name = 'katsdpcontroller.priority'
+        self.priority_attr.type = 'SCALAR'
+        self.priority_attr.scalar.value = 8.5
 
     def test_construct(self):
         """Construct an agent from some offers"""
-        attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr]
+        attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr, self.priority_attr]
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
                               'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
@@ -487,6 +491,16 @@ class TestAgent(unittest.TestCase):
                       scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      agent.volumes)
         assert_equal([[0, 2, 4, 6], [1, 3, 5, 7]], agent.numa)
+        assert_equal(8.5, agent.priority)
+
+    def test_construct_implicit_priority(self):
+        """Test computation of priority when none is given"""
+        attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr]
+        offers = [
+            self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5}, attrs)
+        ]
+        agent = scheduler.Agent(offers)
+        assert_equal(5, agent.priority)
 
     def test_no_offers(self):
         """ValueError is raised if zero offers are passed"""
