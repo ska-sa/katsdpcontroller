@@ -136,6 +136,10 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             {'key': 'label',
              'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'.format(self.subarray_product_id)}
         ])
+        # Request SDP services to escape newlines, for the benefit of
+        # logstash.
+        self.taskinfo.command.environment.setdefault('variables', []).append(
+            {'name': 'KATSDP_LOG_ONELINE', 'value': '1'})
 
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
