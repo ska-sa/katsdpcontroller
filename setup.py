@@ -19,7 +19,7 @@ setup (
     setup_requires = ['katversion'],
     install_requires = [
         'pymesos>=0.2.9',
-        'addict',
+        'addict!=2.0.*',   # 2.0.* had quite a few bugs, particularly https://github.com/mewwts/addict/issues/83
         'trollius',
         'decorator',
         'docker',
