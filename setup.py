@@ -18,7 +18,7 @@ setup (
         ],
     setup_requires = ['katversion'],
     install_requires = [
-        'pymesos>=0.2.9',
+        'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
         'addict',
         'trollius',
         'decorator',

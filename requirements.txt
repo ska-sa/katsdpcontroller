@@ -24,7 +24,7 @@ pkginfo
 ply
 prometheus_client==0.0.18
 ProxyTypes
-pymesos==0.2.9
+pymesos==0.2.10
 redis
 requests==2.8.1
 singledispatch
