@@ -585,18 +585,32 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _start(self):
         """Move to capturing state"""
-        yield From(self.exec_transitions(State.INITIALISED))
+        stream = 'i0.baseline-correlation-products'
         if self.simulate:
-            logger.info("SIMULATE: Issuing a capture-start to the simulator")
+            logger.info('SIMULATE: Configuring streams in simulator')
             try:
                 yield From(self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim'))
                  # instruct the simulator to rebuild its local config from the values in telstate
-                yield From(self._issue_req(
-                    'capture-start', args=['i0.baseline-correlation-products'], node_type='sdp.sim'))
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
+            logger.info('SIMULATE: Sending metadata to telstate')
+            try:
+                yield From(self._issue_req('capture-meta', args=[stream], node_type='sdp.sim'))
+            except Exception as error:
+                logger.error("SIMULATE: capture-meta failed", exc_info=True)
+                raise FailReply("SIMULATE: capture-meta: {}".format(error))
+        yield From(self.exec_transitions(State.INITIALISED))
+        if self.simulate:
+            logger.info("SIMULATE: Issuing a capture-start to the simulator")
+            try:
+                yield From(self._issue_req(
+                    'capture-start', args=[stream], node_type='sdp.sim'))
+            except Exception as error:
+                logger.error("SIMULATE: capture-start failed", exc_info=True)
+                raise FailReply(
+                    "SIMULATE: capture-start failed: {}".format(error))
 
     @trollius.coroutine
     def _stop(self):
