@@ -19,7 +19,7 @@ setup (
     setup_requires = ['katversion'],
     install_requires = [
         'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
-        'addict',
+        'addict!=2.0.*',
         'trollius',
         'decorator',
         'docker',
@@ -33,6 +33,7 @@ setup (
         'katcp',
         'tornado',
         'katsdptelstate',
+        'katsdpservices',
         'faulthandler',
         'kazoo',
         'tornado>=4.3',
