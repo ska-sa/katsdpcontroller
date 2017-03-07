@@ -18,8 +18,8 @@ setup (
         ],
     setup_requires = ['katversion'],
     install_requires = [
-        'pymesos>=0.2.9',
-        'addict!=2.0.*',   # 2.0.* had quite a few bugs, particularly https://github.com/mewwts/addict/issues/83
+        'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
+        'addict!=2.0.*',
         'trollius',
         'decorator',
         'docker',

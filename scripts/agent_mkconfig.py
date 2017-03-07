@@ -9,6 +9,7 @@ import os.path
 import sys
 import base64
 import json
+import numbers
 from collections import OrderedDict
 import xml.etree.ElementTree
 import netifaces
@@ -250,6 +251,9 @@ def attributes_resources(args):
         resources['katsdpcontroller.gpu.{}.mem'.format(i)] = float(gpu.mem) / 2**20
     attributes['katsdpcontroller.gpus'] = gpus
 
+    if args.priority is not None:
+        attributes['katsdpcontroller.priority'] = args.priority
+
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     # Mesos sees "cpus" and "mem" in our custom resource names, and skips the
@@ -264,10 +268,13 @@ def encode(d):
     JSON, then to base64url. The JSON string is padded with spaces so that the base64
     string has no = pad characters, which are outside the legal set for Mesos.
     """
-    s = json.dumps(d)
-    while len(s) % 3:
-        s += ' '
-    return base64.urlsafe_b64encode(s)
+    if isinstance(d, numbers.Real):
+        return repr(float(d))
+    else:
+        s = json.dumps(d)
+        while len(s) % 3:
+            s += ' '
+        return base64.urlsafe_b64encode(s)
 
 
 def write_dict(name, path, args, d, do_encode=False):
@@ -346,6 +353,7 @@ def main():
     parser.add_argument('--volume', dest='volumes', action='append', default=[],
                         metavar='NAME:PATH[:NUMA]',
                         help='Map host directory to a logical volume name')
+    parser.add_argument('--priority', type=float, help='Set agent priority for placement')
     args = parser.parse_args()
 
     attributes, resources = attributes_resources(args)
