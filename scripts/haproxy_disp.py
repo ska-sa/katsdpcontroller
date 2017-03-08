@@ -5,8 +5,8 @@ Run haproxy to reverse-proxy signal displays. To use it, run as
 
 docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller haproxy_disp.py <sdpmchost>:5001
 
-Then connect to the machine on http://<HOST>:<PORT>/array_<N> to get the signal
-displays from subarray N. If they aren't running, haproxy will return a 503 error.
+Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get the signal
+displays from that subarray-product. If they aren't running, haproxy will return a 503 error.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -60,7 +60,7 @@ def get_servers(client):
     servers = defaultdict(Server)
     if client.is_connected():
         reply, informs = yield client.future_request(katcp.Message.request(
-            'sensor-value', r'/^array_\d+\.sdp\.timeplot\.1\.(?:html|data)_port$/'))
+            'sensor-value', r'/^array_\d+_[A-Za-z0-9]+\.sdp\.timeplot\.1\.(?:html|data)_port$/'))
         for inform in informs:
             if len(inform.arguments) != 5:
                 logger.warning('#sensor-value inform has wrong number of arguments, ignoring')
