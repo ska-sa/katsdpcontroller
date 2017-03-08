@@ -16,6 +16,7 @@ import signal
 import logging
 import tempfile
 import textwrap
+from collections import defaultdict
 import tornado.ioloop
 import tornado.gen
 import tornado.process
@@ -49,12 +50,17 @@ def terminate(wake, die):
     wake.set()
 
 
+class Server(object):
+    def __init__(self):
+        self.endpoints = {}   # Indexed with 'html' and 'data'
+
+
 @tornado.gen.coroutine
 def get_servers(client):
-    servers = {}
+    servers = defaultdict(Server)
     if client.is_connected():
         reply, informs = yield client.future_request(katcp.Message.request(
-            'sensor-value', r'/^array_\d+\.sdp\.timeplot\.1\.html_port$/'))
+            'sensor-value', r'/^array_\d+\.sdp\.timeplot\.1\.(?:html|data)_port$/'))
         for inform in informs:
             if len(inform.arguments) != 5:
                 logger.warning('#sensor-value inform has wrong number of arguments, ignoring')
@@ -65,12 +71,12 @@ def get_servers(client):
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
                 continue
-            match = re.match(r'^(array_\d+)\.sdp\.timeplot\.1\.html_port$', name)
+            match = re.match(r'^(array_\d+)\.sdp\.timeplot\.1\.(html|data)_port$', name)
             if not match:
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
                 continue
             array = match.group(1)
-            servers[array] = value
+            servers[array].endpoints[match.group(2)] = value
     raise tornado.gen.Return(servers)
 
 
@@ -118,18 +124,31 @@ def main():
 
                 frontend http-in
                     bind *:8080
-                    acl has_array path_reg '^/array_\d+(/|$)'
+                    acl missing_slash path_reg '^/array_\d+$'
+                    acl has_array path_reg '^/array_\d+/'
+                    acl has_ws path_reg '^/array_\d+/data$'
+                    http-request redirect code 301 prefix / drop-query append-slash if missing_slash
                     http-request set-var(req.array) path,field(2,/) if has_array
-                    http-request set-path %[path,regsub(^/array_\d+/?,/)] if has_array
-                    use_backend %[var(req.array)]
-
+                    use_backend %[var(req.array)]_html if has_array !has_ws
+                    use_backend %[var(req.array)]_data if has_ws
                 """)
-            for array, address in sorted(servers.items()):
+            for array, server in sorted(servers.items()):
+                if 'html' not in server.endpoints:
+                    logger.warn('Array %s has no signal display html port', array)
+                    continue
+                if 'data' not in server.endpoints:
+                    logger.warn('Array %s has no signal display data port', array)
+                    continue
                 content += textwrap.dedent(r"""
-                    backend {array}
-                        server {array}_server {address}
+                    backend {array}_html
+                        http-request set-path %[path,regsub(^/array_\d+/,/)]
+                        http-request set-header X-Timeplot-Data-Address ws://%[req.hdr(Host)]/%[var(req.array)]/data
+                        server {array}_html_server {server.endpoints[html]}
 
-                    """.format(array=array, address=address))
+                    backend {array}_data
+                        http-request set-path %[path,regsub(^/array_\d+/data$,/)]
+                        server {array}_data_server {server.endpoints[data]}
+                    """.format(array=array, server=server))
             if content != old_content:
                 cfg.seek(0)
                 cfg.truncate(0)
