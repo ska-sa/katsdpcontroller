@@ -71,7 +71,7 @@ def get_servers(client):
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
                 continue
-            match = re.match(r'^(array_\d+)\.sdp\.timeplot\.1\.(html|data)_port$', name)
+            match = re.match(r'^(array_\d+_[A-Za-z0-9]+)\.sdp\.timeplot\.1\.(html|data)_port$', name)
             if not match:
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
                 continue
@@ -141,12 +141,12 @@ def main():
                     continue
                 content += textwrap.dedent(r"""
                     backend {array}_html
-                        http-request set-path %[path,regsub(^/array_\d+_[a-zA-Z0-9]+/,/)]
+                        http-request set-path %[path,regsub(^/.*?/,/)]
                         http-request set-header X-Timeplot-Data-Address ws://%[req.hdr(Host)]/%[var(req.array)]/data
                         server {array}_html_server {server.endpoints[html]}
 
                     backend {array}_data
-                        http-request set-path %[path,regsub(^/array_\d+_[a-zA-Z0-9]+/data$,/)]
+                        http-request set-path %[path,regsub(^/.*/data$,/)]
                         server {array}_data_server {server.endpoints[data]}
                     """.format(array=array, server=server))
             if content != old_content:
