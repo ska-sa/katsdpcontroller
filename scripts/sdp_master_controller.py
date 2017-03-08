@@ -14,7 +14,6 @@ import tornado
 import tornado.gen
 import argparse
 import logging
-import logging.handlers
 import addict
 import trollius
 from trollius import From
@@ -22,6 +21,7 @@ from tornado.platform.asyncio import AsyncIOMainLoop
 import tornado.netutil
 from prometheus_client import start_http_server
 import pymesos
+import katsdpservices
 from katsdpcontroller import scheduler, sdpcontroller
 
 try:
@@ -70,6 +70,8 @@ def load_gui_urls_dir(dirname):
 
 
 if __name__ == "__main__":
+    katsdpservices.setup_logging()
+    katsdpservices.setup_restart()
 
     usage = "%(prog)s [options] master"
     parser = argparse.ArgumentParser(usage=usage)
@@ -126,16 +128,8 @@ if __name__ == "__main__":
             parser.print_help()
         sys.exit(1)
 
-    if len(logging.root.handlers) > 0: logging.root.removeHandler(logging.root.handlers[0])
-    formatter = logging.Formatter("%(asctime)s.%(msecs)dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s",
-                                      datefmt="%Y-%m-%d %H:%M:%S")
-    sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
-    logging.root.addHandler(sh)
-    if isinstance(opts.loglevel, basestring):
-        opts.loglevel = getattr(logging, opts.loglevel.upper())
-    logging.root.setLevel(opts.loglevel)
-    logging.captureWarnings(True)
+    if opts.loglevel is not None:
+        logging.root.setLevel(opts.loglevel.upper())
     logger = logging.getLogger('sdpcontroller')
     logger.info("Starting SDP Controller...")
 
