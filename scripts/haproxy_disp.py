@@ -115,15 +115,12 @@ def main():
             content = textwrap.dedent(r"""
                 global
                     maxconn 256
-                    log 127.0.0.1:514 format rfc5424 user debug
 
                 defaults
                     mode http
                     timeout connect 5s
                     timeout client 50s
                     timeout server 50s
-                    log global
-                    option httplog
 
                 frontend http-in
                     bind *:8080
