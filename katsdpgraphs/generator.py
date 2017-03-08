@@ -65,6 +65,11 @@ class IngestTask(SDPPhysicalTask):
 def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate):
     from katsdpcontroller.sdpcontroller import State
 
+    # Note: a few lambdas in this function have default arguments e.g.
+    # stream=stream. This is needed because capturing a loop-local variable in
+    # a lambda captures only the final value of the variable, not the value it
+    # had in the loop iteration where the lambda occurred.
+
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
     cbf_antennas = 4
     while cbf_antennas < l0_antennas:
@@ -273,8 +278,9 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'cbf_channels': cbf_channels
         })
         for stream in six.itervalues(beams_spead):
-            g.add_edge(bf_ingest, stream, port='spead', config=lambda task, resolver, endpoint: {
-                'cbf_spead{}'.format(stream.name[-1]): str(endpoint)})
+            g.add_edge(bf_ingest, stream, port='spead',
+                       config=lambda task, resolver, endpoint, stream=stream: {
+                           'cbf_spead{}'.format(stream.name[-1]): str(endpoint)})
     elif beamformer_mode != 'none':
         ram = beamformer_mode == 'hdf5_ram'
         for i, stream in enumerate(six.itervalues(beams_spead)):
@@ -295,7 +301,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
                 # process, so we need more memory allocation than there is
                 # space in the ramdisk. This is only used for lab testing, so
                 # we just hardcode a number.
-                bf_ingest.ram = 210 * 1024
+                bf_ingest.ram = 220 * 1024
             bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
             bf_ingest.interfaces[0].bandwidth_in = bf_bandwidth_1pol
             volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
@@ -303,7 +309,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
                 scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
             bf_ingest.ports = ['port']
             bf_ingest.transitions = capture_transitions
-            g.add_node(bf_ingest, config=lambda task, resolver: {
+            g.add_node(bf_ingest, config=lambda task, resolver, stream=stream: {
                 'file_base': '/data',
                 'affinity': [task.cores['disk'], task.cores['network']],
                 'interface': task.interfaces['cbf'].name,
