@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+"""Sets up an agent with resources and attributes for the katsdpcontroller
+scheduler. See :mod:`katsdpcontroller.scheduler` for details.
+"""
+
 from __future__ import print_function, division, absolute_import
 import argparse
 import subprocess

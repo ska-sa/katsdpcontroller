@@ -98,6 +98,21 @@ run on one agent are not blocked by more generic tasks being assigned to that
 agent). By default, the priority is the total number of volumes, interfaces and
 GPUs it has. This can be overridden by assigning a `katsdpcontroller.priority`
 scalar attribute. Ties are broken by amount of available memory.
+
+Setting up agents
+-----------------
+The previous sections list a number of resources and attributes that need to be
+configured on each agent. To simplify this, a script
+(:file:`scripts/agent_mkconfig.py`) is provided that will interrogate most of
+the necessary information from the system. It assumes that Mesos is run with
+system wrappers that source arguments from :file:`/etc/mesos-slave/attributes`
+and :file:`/etc/mesos-slave/resources` (this is the case for the Ubuntu
+packages; untested for other operating systems).
+
+Note that Mesos slaves typically require a manual `recovery`_ step after
+changing resources or attributes and restarting.
+
+.. _recovery: http://mesos.apache.org/documentation/latest/agent-recovery/
 """
 
 
