@@ -124,9 +124,9 @@ def main():
 
                 frontend http-in
                     bind *:8080
-                    acl missing_slash path_reg '^/array_\d+$'
-                    acl has_array path_reg '^/array_\d+/'
-                    acl has_ws path_reg '^/array_\d+/data$'
+                    acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+$'
+                    acl has_array path_reg '^/array_\d+_[a-zA-Z0-9]+/'
+                    acl has_ws path_reg '^/array_\d+_[a-zA-Z0-9]+/data$'
                     http-request redirect code 301 prefix / drop-query append-slash if missing_slash
                     http-request set-var(req.array) path,field(2,/) if has_array
                     use_backend %[var(req.array)]_html if has_array !has_ws
@@ -141,12 +141,12 @@ def main():
                     continue
                 content += textwrap.dedent(r"""
                     backend {array}_html
-                        http-request set-path %[path,regsub(^/array_\d+/,/)]
+                        http-request set-path %[path,regsub(^/array_\d+_[a-zA-Z0-9]+/,/)]
                         http-request set-header X-Timeplot-Data-Address ws://%[req.hdr(Host)]/%[var(req.array)]/data
                         server {array}_html_server {server.endpoints[html]}
 
                     backend {array}_data
-                        http-request set-path %[path,regsub(^/array_\d+/data$,/)]
+                        http-request set-path %[path,regsub(^/array_\d+_[a-zA-Z0-9]+/data$,/)]
                         server {array}_data_server {server.endpoints[data]}
                     """.format(array=array, server=server))
             if content != old_content:

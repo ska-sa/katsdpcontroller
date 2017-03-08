@@ -23,7 +23,7 @@ def _add_prometheus_sensor(name, description, class_):
 
 
 logger = logging.getLogger(__name__)
-PROMETHEUS_LABELS = ('subarray', 'service')
+PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Dictionary of sensors to be exposed via Prometheus.
 # Some of these will match multiple nodes, which is fine since they get labels
 # in Prometheus.
@@ -55,11 +55,10 @@ class SDPLogicalTask(scheduler.LogicalTask):
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
-    def __init__(self, logical_task, loop, sdp_controller, subarray_name, subarray_product_id):
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
         super(SDPPhysicalTaskBase, self).__init__(logical_task, loop)
-        self.name = '{}.{}'.format(subarray_name, logical_task.name)
+        self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
         self.sdp_controller = sdp_controller
-        self.subarray_name = subarray_name
         self.subarray_product_id = subarray_product_id
         self.sensors = {}
          # list of exposed KATCP sensors
@@ -132,8 +131,6 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             {'key': 'label',
              'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'.format(self.taskinfo.task_id.value)},
             {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_name={}'.format(self.subarray_name)},
-            {'key': 'label',
              'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'.format(self.subarray_product_id)}
         ])
         # Request SDP services to escape newlines, for the benefit of
@@ -155,12 +152,12 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
     Also responsible for managing any available KATCP sensors of the controlled
     object. Such sensors are exposed at the master controller level using the
     following syntax:
-      sdp_<subarray_name>.<node_type>.<node_index>.<sensor_name>
+      sdp_<subarray_product_id>.<node_type>.<node_index>.<sensor_name>
     For example:
       sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, logical_task, loop, sdp_controller, subarray_name, subarray_product_id):
-        super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_name, subarray_product_id)
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
+        super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
 
     def get_transition(self, state):
@@ -194,7 +191,7 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                 logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(
                     self.host, self.ports['port'], self.name))
                 prefix = self.name + '.'
-                labels = (self.subarray_name, self.logical_node.name)
+                labels = (self.subarray_product_id, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
                     PROMETHEUS_SENSORS, labels,

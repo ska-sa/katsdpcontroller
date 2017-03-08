@@ -262,7 +262,7 @@ class SDPGraph(object):
         if isinstance(logical_node, tasks.SDPLogicalTask):
             return logical_node.physical_factory(
                 logical_node, self.loop,
-                self.sdp_controller, self.subarray_name, self.subarray_product_id)
+                self.sdp_controller, self.subarray_product_id)
         else:
             return logical_node.physical_factory(logical_node, self.loop)
 
@@ -275,10 +275,6 @@ class SDPGraph(object):
         self.resolver = resolver
         self.loop = loop
         self.subarray_product_id = subarray_product_id
-        name_parts = subarray_product_id.split("_")
-         # expect subarray product name to be of form [<subarray_name>_]<data_product_name>
-        self.subarray_name = name_parts[:-1] and "_".join(name_parts[:-1]) or "unknown"
-         # make sure we have some subarray name even if not specified
         self.sdp_controller = sdp_controller
         graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
         graph_kwargs['l0_antennas'] = n_antennas
@@ -922,7 +918,7 @@ class SDPControllerServer(AsyncDeviceServer):
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID of the subarray product to set overrides for in the form [<subarray_name>_]<data_product_name>.
+            The ID of the subarray product to set overrides for in the form <subarray_name>_<data_product_name>.
         override_dict_json : string
             A json string containing a dict of config key:value overrides to use.
         """
@@ -954,7 +950,7 @@ class SDPControllerServer(AsyncDeviceServer):
            Request Arguments
            -----------------
            subarray_product_id : string
-             The ID of the subarray product to reconfigure in the form [<subarray_name>_]<data_product_name>.
+             The ID of the subarray product to reconfigure in the form <subarray_name>_<data_product_name>.
 
         """
         logger.info("?data-product-reconfigure called on {}".format(subarray_product_id))
@@ -1019,7 +1015,7 @@ class SDPControllerServer(AsyncDeviceServer):
         -----------------
         subarray_product_id : string
             The ID to use for this subarray product, in the form
-            [<subarray_name>_]<data_product_name>.
+            <subarray_name>_<data_product_name>.
         antennas : string
             A comma-separated list of antenna names to use in this subarray
             product. These will be matched to the CBF output and used to pull
