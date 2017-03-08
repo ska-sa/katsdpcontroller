@@ -109,8 +109,8 @@ system wrappers that source arguments from :file:`/etc/mesos-slave/attributes`
 and :file:`/etc/mesos-slave/resources` (this is the case for the Ubuntu
 packages; untested for other operating systems).
 
-Note that Mesos slaves typically require a manual recovery_ step after changing
-resources or attributes and restarting.
+Note that Mesos slaves typically require a manual `recovery`_ step after
+changing resources or attributes and restarting.
 
 .. _recovery: http://mesos.apache.org/documentation/latest/agent-recovery/
 """
