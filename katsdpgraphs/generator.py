@@ -196,7 +196,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     timeplot.volumes = [config_vol]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
-        'description': 'Signal displays for {0.subarray_name}',
+        'description': 'Signal displays for {0.subarray_product_id}',
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
