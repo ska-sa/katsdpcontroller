@@ -76,7 +76,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cbf_antennas *= 2
     pols_per_ant = 2 if cbf_pols == 4 else 1
 
-    cbf_baselines = cbf_antennas * (cbf_antennas + 1) * 2
+    cbf_baselines = cbf_antennas * (cbf_antennas + 1) // 2 * cbf_pols
     cbf_vis = cbf_baselines * cbf_channels    # visibilities per frame
     cbf_vis_size = cbf_vis * 8                # 8 is size of complex64
     cbf_vis_mb = cbf_vis_size / 1024**2
@@ -84,7 +84,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
 
     # Except where otherwise noted, l0 values are for the spectral product
     l0_channels = cbf_channels                # could differ in future
-    l0_baselines = l0_antennas * (l0_antennas + 1) * 2 / cbf_pols
+    l0_baselines = l0_antennas * (l0_antennas + 1) // 2 * cbf_pols
     l0_vis = l0_baselines * l0_channels
     # vis, flags, weights, plus per-channel float32 weight
     l0_size = l0_vis * 10 + l0_channels * 4
