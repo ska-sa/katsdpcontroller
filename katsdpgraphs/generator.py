@@ -275,7 +275,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
         g.add_node(bf_ingest, config=lambda task, resolver: {
-            'cbf_channels': cbf_channels
+            'test':'STRING',
+            'cbf_channels': cbf_channels,
+            'affinity':[task.cores['capture0'], task.cores['capture1'],task.cores['processing'], task.cores['python']],
+            'interface': task.interfaces['cbf'].name
         })
         for stream in six.itervalues(beams_spead):
             g.add_edge(bf_ingest, stream, port='spead',
