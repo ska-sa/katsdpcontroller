@@ -211,7 +211,8 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                     # some gets wedged badly enough that katcp can't recover
                     # itself.
                     yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
-                     # some katcp connections, particularly to ingest can take a while to establish
+                    logging.info("Connected to {}:{} for node {}".format(
+                        self.host, self.ports['port'], self.name))
                     return
                 except RuntimeError:
                     self.katcp_connection.stop()
