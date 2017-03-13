@@ -1700,13 +1700,15 @@ class PhysicalTask(PhysicalNode):
                     resource.scalar.value = value
                     taskinfo.resources.append(resource)
             if request.infiniband:
-                interface = self.agent.interfaces[interface_alloc.index]
-                docker_devices.update(interface.infiniband_devices)
                 any_infiniband = True
         if any_infiniband:
             # ibverbs uses memory mapping for DMA. Take away the default rlimit
             # maximum since Docker tends to set a very low limit.
             docker_parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
+            # rdma_get_devices requires *all* the devices to be present to
+            # succeed, even if they're not all used.
+            for interface in self.agent.interfaces:
+                docker_devices.update(interface.infiniband_devices)
 
         gpu_driver_version = None
         for gpu_alloc in self.allocation.gpus:

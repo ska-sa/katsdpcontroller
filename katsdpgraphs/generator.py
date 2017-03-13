@@ -62,7 +62,7 @@ class IngestTask(SDPPhysicalTask):
             logger.info('Develop mode: using %s for ingest', image_path)
 
 
-def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate):
+def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate, cbf_pols):
     from katsdpcontroller.sdpcontroller import State
 
     # Note: a few lambdas in this function have default arguments e.g.
@@ -74,8 +74,9 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     cbf_antennas = 4
     while cbf_antennas < l0_antennas:
         cbf_antennas *= 2
+    pols_per_ant = 2 if cbf_pols == 4 else 1
 
-    cbf_baselines = cbf_antennas * (cbf_antennas + 1) * 2
+    cbf_baselines = cbf_antennas * (cbf_antennas + 1) // 2 * cbf_pols
     cbf_vis = cbf_baselines * cbf_channels    # visibilities per frame
     cbf_vis_size = cbf_vis * 8                # 8 is size of complex64
     cbf_vis_mb = cbf_vis_size / 1024**2
@@ -83,7 +84,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
 
     # Except where otherwise noted, l0 values are for the spectral product
     l0_channels = cbf_channels                # could differ in future
-    l0_baselines = l0_antennas * (l0_antennas + 1) * 2
+    l0_baselines = l0_antennas * (l0_antennas + 1) // 2 * cbf_pols
     l0_vis = l0_baselines * l0_channels
     # vis, flags, weights, plus per-channel float32 weight
     l0_size = l0_vis * 10 + l0_channels * 4
@@ -101,7 +102,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # - 200 solutions
     # - 3: conservative estimate of bloat from text-based pickling
     # - /1024**2 to convert to megabytes
-    bp_mb = l0_channels * (2 * l0_antennas) * 8 * 3 * 200 / 1024**2
+    bp_mb = l0_channels * (pols_per_ant * l0_antennas) * 8 * 3 * 200 / 1024**2
     # Bandwidths, in bits per second
     # * 8 for bytes -> bits, * 1.05 + 2048 to add room for network overheads
     cbf_vis_bandwidth = (cbf_vis_size * 8 * 1.05 + 2048) * dump_rate
@@ -196,7 +197,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     timeplot.volumes = [config_vol]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
-        'description': 'Signal displays for {0.subarray_name}',
+        'description': 'Signal displays for {0.subarray_product_id}',
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
@@ -349,6 +350,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cal.interfaces[0].bandwidth_in = l0_bandwidth
         g.add_node(cal, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
+            'cbf_pols': cbf_pols,
             'buffer_maxsize': buffer_size
         })
         g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
@@ -435,12 +437,14 @@ def graph_parameters(graph_name):
     parameters : dict
         Key-value pairs to pass as parameters to :func:`build_physical_graph`
     """
-    match = re.match('^(?P<mode>c|bc)856M(?P<channels>4|32)k$', graph_name)
+    match = re.match('^(?P<mode>c|bc)856M(?P<channels>4|32)k(?P<single_pol>1p|)$', graph_name)
     if not match:
-        match = re.match('^bec856M(?P<channels>4|32)k(?P<mode>ssd|ram)$', graph_name)
+        match = re.match('^bec856M(?P<channels>4|32)k(?P<mode>ssd|ram)(?P<single_pol>1p|)$', graph_name)
         if not match:
             raise ValueError('Unsupported graph ' + graph_name)
     beamformer_modes = {'c': 'none', 'bc': 'ptuse', 'ssd': 'hdf5_ssd', 'ram': 'hdf5_ram'}
     beamformer_mode = beamformer_modes[match.group('mode')]
+    cbf_pols = 1 if match.group('single_pol') else 4
     return dict(beamformer_mode=beamformer_mode,
-                cbf_channels=int(match.group('channels')) * 1024)
+                cbf_channels=int(match.group('channels')) * 1024,
+                cbf_pols=cbf_pols)

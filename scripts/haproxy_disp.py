@@ -5,8 +5,8 @@ Run haproxy to reverse-proxy signal displays. To use it, run as
 
 docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller haproxy_disp.py <sdpmchost>:5001
 
-Then connect to the machine on http://<HOST>:<PORT>/array_<N> to get the signal
-displays from subarray N. If they aren't running, haproxy will return a 503 error.
+Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get the signal
+displays from that subarray-product. If they aren't running, haproxy will return a 503 error.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -60,7 +60,7 @@ def get_servers(client):
     servers = defaultdict(Server)
     if client.is_connected():
         reply, informs = yield client.future_request(katcp.Message.request(
-            'sensor-value', r'/^array_\d+\.sdp\.timeplot\.1\.(?:html|data)_port$/'))
+            'sensor-value', r'/^array_\d+_[A-Za-z0-9]+\.sdp\.timeplot\.1\.(?:html|data)_port$/'))
         for inform in informs:
             if len(inform.arguments) != 5:
                 logger.warning('#sensor-value inform has wrong number of arguments, ignoring')
@@ -71,7 +71,7 @@ def get_servers(client):
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
                 continue
-            match = re.match(r'^(array_\d+)\.sdp\.timeplot\.1\.(html|data)_port$', name)
+            match = re.match(r'^(array_\d+_[A-Za-z0-9]+)\.sdp\.timeplot\.1\.(html|data)_port$', name)
             if not match:
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
                 continue
@@ -124,9 +124,9 @@ def main():
 
                 frontend http-in
                     bind *:8080
-                    acl missing_slash path_reg '^/array_\d+$'
-                    acl has_array path_reg '^/array_\d+/'
-                    acl has_ws path_reg '^/array_\d+/data$'
+                    acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+$'
+                    acl has_array path_reg '^/array_\d+_[a-zA-Z0-9]+/'
+                    acl has_ws path_reg '^/array_\d+_[a-zA-Z0-9]+/data$'
                     http-request redirect code 301 prefix / drop-query append-slash if missing_slash
                     http-request set-var(req.array) path,field(2,/) if has_array
                     use_backend %[var(req.array)]_html if has_array !has_ws
@@ -141,12 +141,12 @@ def main():
                     continue
                 content += textwrap.dedent(r"""
                     backend {array}_html
-                        http-request set-path %[path,regsub(^/array_\d+/,/)]
+                        http-request set-path %[path,regsub(^/.*?/,/)]
                         http-request set-header X-Timeplot-Data-Address ws://%[req.hdr(Host)]/%[var(req.array)]/data
                         server {array}_html_server {server.endpoints[html]}
 
                     backend {array}_data
-                        http-request set-path %[path,regsub(^/array_\d+/data$,/)]
+                        http-request set-path %[path,regsub(^/.*/data$,/)]
                         server {array}_data_server {server.endpoints[data]}
                     """.format(array=array, server=server))
             if content != old_content:
