@@ -273,7 +273,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
         bf_ingest.interfaces[0].bandwidth_in = bf_bandwidth_1pol * 2
         bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
-        bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'},{'key':'device', 'value':'/dev/infiniband'}]
+        bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
         bf_ingest.transitions = capture_transitions
         g.add_node(bf_ingest, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
