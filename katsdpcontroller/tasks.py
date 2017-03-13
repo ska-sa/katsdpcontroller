@@ -32,6 +32,14 @@ _add_prometheus_sensor('input_rate', 'Current input data rate in Bps', Gauge)
 _add_prometheus_sensor('output_rate', 'Current output data rate in Bps', Gauge)
 _add_prometheus_sensor('packets_captured', 'Total number of data dumps received', Counter)
 _add_prometheus_sensor('dumps', 'Total number of data dumps received', Counter)
+_add_prometheus_sensor('input_bytes_total', 'Number of payload bytes received', Counter)
+_add_prometheus_sensor('input_heaps_total', 'Number of payload heaps received', Counter)
+_add_prometheus_sensor('input_dumps_total', 'Number of payload dumps received', Counter)
+_add_prometheus_sensor('output_bytes_total', 'Number of payload bytes sent', Counter)
+_add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Counter)
+_add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
+_add_prometheus_sensor('last_dump_timestamp',
+                       'Timestamp of most recently received dump in Unix seconds', Gauge)
 
 
 def to_trollius_future(tornado_future, loop=None):
