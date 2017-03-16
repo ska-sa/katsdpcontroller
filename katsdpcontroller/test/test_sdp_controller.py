@@ -132,7 +132,7 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
 
     def test_interface_sensors(self):
-        self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
+        self.client.test_sensor_list(EXPECTED_SENSOR_LIST, ignore_descriptions=True)
         recorder = self.client.message_recorder(('interface-changed',))
         self.client.assert_request_succeeds(
             "data-product-configure", SUBARRAY_PRODUCT1,
