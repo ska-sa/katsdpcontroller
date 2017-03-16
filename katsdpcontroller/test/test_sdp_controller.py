@@ -38,14 +38,24 @@ STREAMS = '{"cam.http": {"camdata": "http://127.0.0.1:8999"}, \
             "cbf.baseline_correlation_products": {"i0.baseline-correlation-products": "spead://127.0.0.1:9000"}, \
             "cbf.antenna_channelised_voltage": {"i0.antenna-channelised-voltage": "spead://127.0.0.1:9001"}}'
 
-EXPECTED_SENSOR_LIST = [
+EXPECTED_SENSOR_LIST = (
     ('api-version', '', '', 'string'),
     ('build-state', '', '', 'string'),
     ('device-status', '', '', 'discrete', 'ok', 'degraded', 'fail'),
     ('fmeca.FD0001', '', '', 'boolean'),
     ('time-synchronised', '', '', 'boolean'),
     ('gui-urls', '', '', 'string')
-]
+)
+
+EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
+    (SUBARRAY_PRODUCT1 + '.' + s[0],) + s[1:] for s in (
+        ('sdp.bf_ingest.1.port', '', '', 'string'),
+        ('sdp.filewriter.1.filename', '', '', 'string'),
+        ('sdp.filewriter.1.input_rate', '', 'Bps', 'float'),
+        ('sdp.ingest.1.capture-active', '', '', 'boolean'),
+        ('sdp.timeplot.1.gui-urls', '', '', 'string'),
+        ('sdp.timeplot.1.html_port', '', '', 'string'),
+))
 
 EXPECTED_REQUEST_LIST = [
     'data-product-configure',
@@ -120,6 +130,23 @@ class TestSDPControllerInterface(unittest.TestCase):
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
         self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","INITIALISED")))
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
+
+    def test_interface_sensors(self):
+        self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
+        recorder = self.client.message_recorder(('interface-changed',))
+        self.client.assert_request_succeeds(
+            "data-product-configure", SUBARRAY_PRODUCT1,
+            ANTENNAS, "4096", "2.1", "0", STREAMS)
+        self.assertEqual([str(m) for m in recorder()], ['#interface-changed'])
+        self.client.test_sensor_list(
+            EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST_1,
+            ignore_descriptions=True)
+        # Deconfigure and check that the array sensors are gone
+        self.client.assert_request_succeeds(
+            "data-product-configure", SUBARRAY_PRODUCT1, "")
+        self.assertEqual([str(m) for m in recorder()], ['#interface-changed'])
+        self.client.test_sensor_list(
+            EXPECTED_SENSOR_LIST, ignore_descriptions=True)
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
