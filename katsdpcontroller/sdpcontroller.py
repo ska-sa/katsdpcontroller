@@ -886,7 +886,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         if self.interface_mode:
             # Remove dummy sensors for this product
-            dp_handle.interface_mode_sensors.remove_sensors()
+            dp_handle.interface_mode_sensors.remove_sensors(self)
 
     @trollius.coroutine
     def deconfigure_on_exit(self):
@@ -1219,8 +1219,8 @@ class SDPControllerServer(AsyncDeviceServer):
             self.subarray_product_config[subarray_product_id] = config_args
             # Add dummy sensors for this product
             product.interface_mode_sensors = InterfaceModeSensors(
-                self, subarray_product_id)
-            product.interface_mode_sensors.add_sensors()
+                subarray_product_id)
+            product.interface_mode_sensors.add_sensors(self)
             return
 
         if katsdptelstate is None:
@@ -1513,27 +1513,25 @@ class SDPControllerServer(AsyncDeviceServer):
 
 
 class InterfaceModeSensors(object):
-    def __init__(self, sdp_controller_server, subarray_product_id):
+    def __init__(self, subarray_product_id):
         """Manage dummy subarray product sensors on a SDPControllerServer instance
 
         Parameters
         ----------
-        sdp_controller_server : SDPControllerServer instance
         subarray_product_id : str
             Subarray product id, e.g. `array_1_c856M4k`
 
         """
-        self.server = sdp_controller_server
         self.subarray_product_id = subarray_product_id
         self.sensors = {}
 
-    def add_sensors(self):
+    def add_sensors(self, server):
         """Add dummy subarray product sensors and issue #interface-changed"""
 
         interface_sensor_params = {
             'sdp.bf_ingest.1.port': dict(
-                default='"ing1.sdp.mkat.fake.kat.ac.za",31048',
-                sensor_type=Sensor.STRING,
+                default=("ing1.sdp.mkat.fake.kat.ac.za", 31048),
+                sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for port',
                 initial_status=Sensor.NOMINAL),
             'sdp.filewriter.1.filename': dict(
@@ -1559,12 +1557,6 @@ class InterfaceModeSensors(object):
                 sensor_type=Sensor.STRING,
                 description='IP endpoint for html_port',
                 initial_status=Sensor.NOMINAL),
-            'sdp.filewriter.1.input_rate': dict(
-                default=1560186.12180116,
-                units='Bps',
-                sensor_type=Sensor.FLOAT,
-                description='Input data rate in Bps averaged over last 10 dumps',
-                initial_status=Sensor.NOMINAL),
         }
 
         sensors_added = False
@@ -1578,21 +1570,20 @@ class InterfaceModeSensors(object):
                 sensor_params['name'] = sensor_name
                 sensor = Sensor(**sensor_params)
                 self.sensors[sensor_name] = sensor
-                self.server.add_sensor(sensor)
+                server.add_sensor(sensor)
                 sensors_added = True
         finally:
             if sensors_added:
-                self.server.mass_inform(Message.inform('interface-changed'))
+                server.mass_inform(Message.inform('interface-changed'))
 
-
-    def remove_sensors(self):
+    def remove_sensors(self, server):
         """Remove dummy subarray product sensors and issue #interface-changed"""
         sensors_removed = False
         try:
-            for sensor_name, sensor in  self.sensors.items():
-                self.server.remove_sensor(sensor)
+            for sensor_name, sensor in self.sensors.items():
+                server.remove_sensor(sensor)
                 del self.sensors[sensor_name]
                 sensors_removed = True
         finally:
             if sensors_removed:
-                self.server.mass_inform(Message.inform('interface-changed'))
+                server.mass_inform(Message.inform('interface-changed'))

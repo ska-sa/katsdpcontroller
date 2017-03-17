@@ -51,10 +51,9 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
     (SUBARRAY_PRODUCT1 + '.' + s[0],) + s[1:] for s in (
         ('sdp.bf_ingest.1.port', '', '', 'string'),
         ('sdp.filewriter.1.filename', '', '', 'string'),
-        ('sdp.filewriter.1.input_rate', '', 'Bps', 'float'),
         ('sdp.ingest.1.capture-active', '', '', 'boolean'),
         ('sdp.timeplot.1.gui-urls', '', '', 'string'),
-        ('sdp.timeplot.1.html_port', '', '', 'string'),
+        ('sdp.timeplot.1.html_port', '', '', 'string')
 ))
 
 EXPECTED_REQUEST_LIST = [
