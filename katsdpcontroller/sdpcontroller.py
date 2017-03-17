@@ -1574,7 +1574,7 @@ class InterfaceModeSensors(object):
                 sensors_added = True
         finally:
             if sensors_added:
-                server.mass_inform(Message.inform('interface-changed'))
+                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
 
     def remove_sensors(self, server):
         """Remove dummy subarray product sensors and issue #interface-changed"""
@@ -1586,4 +1586,4 @@ class InterfaceModeSensors(object):
                 sensors_removed = True
         finally:
             if sensors_removed:
-                server.mass_inform(Message.inform('interface-changed'))
+                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
