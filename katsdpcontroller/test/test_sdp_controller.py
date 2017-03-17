@@ -136,14 +136,14 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds(
             "data-product-configure", SUBARRAY_PRODUCT1,
             ANTENNAS, "4096", "2.1", "0", STREAMS)
-        self.assertEqual([str(m) for m in recorder()], ['#interface-changed'])
+        self.assertEqual([str(m) for m in recorder()], ['#interface-changed sensor-list'])
         self.client.test_sensor_list(
             EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST_1,
             ignore_descriptions=True)
         # Deconfigure and check that the array sensors are gone
         self.client.assert_request_succeeds(
             "data-product-configure", SUBARRAY_PRODUCT1, "")
-        self.assertEqual([str(m) for m in recorder()], ['#interface-changed'])
+        self.assertEqual([str(m) for m in recorder()], ['#interface-changed sensor-list'])
         self.client.test_sensor_list(
             EXPECTED_SENSOR_LIST, ignore_descriptions=True)
 
