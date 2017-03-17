@@ -27,7 +27,7 @@ import faulthandler
 
 from prometheus_client import Histogram
 
-from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply
+from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply, Message
 from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 import katsdpcontroller
@@ -880,6 +880,10 @@ class SDPControllerServer(AsyncDeviceServer):
         del self.subarray_product_config[subarray_product_id]
         logger.info("Deconfigured subarray product {}".format(subarray_product_id))
 
+        if self.interface_mode:
+            # Remove dummy sensors for this product
+            dp_handle.interface_mode_sensors.remove_sensors(self)
+
     @trollius.coroutine
     def deconfigure_on_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
@@ -1209,6 +1213,10 @@ class SDPControllerServer(AsyncDeviceServer):
                 self.simulate, self.develop)
             self.subarray_products[subarray_product_id] = product
             self.subarray_product_config[subarray_product_id] = config_args
+            # Add dummy sensors for this product
+            product.interface_mode_sensors = InterfaceModeSensors(
+                subarray_product_id)
+            product.interface_mode_sensors.add_sensors(self)
             return
 
         if katsdptelstate is None:
@@ -1498,3 +1506,80 @@ class SDPControllerServer(AsyncDeviceServer):
         for (component_name,component) in self.components:
             req.inform("%s:%s",component_name,component.status)
         return ("ok", len(self.components))
+
+
+class InterfaceModeSensors(object):
+    def __init__(self, subarray_product_id):
+        """Manage dummy subarray product sensors on a SDPControllerServer instance
+
+        Parameters
+        ----------
+        subarray_product_id : str
+            Subarray product id, e.g. `array_1_c856M4k`
+
+        """
+        self.subarray_product_id = subarray_product_id
+        self.sensors = {}
+
+    def add_sensors(self, server):
+        """Add dummy subarray product sensors and issue #interface-changed"""
+
+        interface_sensor_params = {
+            'sdp.bf_ingest.1.port': dict(
+                default=("ing1.sdp.mkat.fake.kat.ac.za", 31048),
+                sensor_type=Sensor.ADDRESS,
+                description='IP endpoint for port',
+                initial_status=Sensor.NOMINAL),
+            'sdp.filewriter.1.filename': dict(
+                default='/var/kat/data/148966XXXX.h5',
+                sensor_type=Sensor.STRING,
+                description='Final name for file being captured',
+                initial_status=Sensor.NOMINAL),
+            'sdp.ingest.1.capture-active': dict(
+                default=False,
+                sensor_type=Sensor.BOOLEAN,
+                description='Is there a currently active capture session.',
+                initial_status=Sensor.NOMINAL),
+            'sdp.timeplot.1.gui-urls': dict(
+                default='[{"category": "Plot", '
+                '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
+                '"description": "Signal displays for array_1_bc856M4k", '
+                '"title": "Signal Display"}]',
+                sensor_type=Sensor.STRING,
+                description='URLs for GUIs',
+                initial_status=Sensor.NOMINAL),
+            'sdp.timeplot.1.html_port': dict(
+                default=("ing1.sdp.mkat.fake.kat.ac.za", 31054),
+                sensor_type=Sensor.ADDRESS,
+                description='IP endpoint for html_port',
+                initial_status=Sensor.NOMINAL),
+        }
+
+        sensors_added = False
+        try:
+            for postfix, sensor_params in interface_sensor_params.items():
+                sensor_name = self.subarray_product_id + '.' + postfix
+                if sensor_name in self.sensors:
+                    logger.info('Simulated sensor %r already exists, skipping',
+                                sensor_name)
+                    continue
+                sensor_params['name'] = sensor_name
+                sensor = Sensor(**sensor_params)
+                self.sensors[sensor_name] = sensor
+                server.add_sensor(sensor)
+                sensors_added = True
+        finally:
+            if sensors_added:
+                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+
+    def remove_sensors(self, server):
+        """Remove dummy subarray product sensors and issue #interface-changed"""
+        sensors_removed = False
+        try:
+            for sensor_name, sensor in self.sensors.items():
+                server.remove_sensor(sensor)
+                del self.sensors[sensor_name]
+                sensors_removed = True
+        finally:
+            if sensors_removed:
+                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
