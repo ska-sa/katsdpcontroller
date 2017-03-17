@@ -186,7 +186,6 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
 
-
     def test_help(self):
         self.client.test_help(EXPECTED_REQUEST_LIST)
 
