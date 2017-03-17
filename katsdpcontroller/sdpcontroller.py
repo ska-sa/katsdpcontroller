@@ -1534,31 +1534,37 @@ class InterfaceModeSensors(object):
             'sdp.bf_ingest.1.port': dict(
                 default='"ing1.sdp.mkat.fake.kat.ac.za",31048',
                 sensor_type=Sensor.STRING,
-                description='IP endpoint for port'),
+                description='IP endpoint for port',
+                initial_status=Sensor.NOMINAL),
             'sdp.filewriter.1.filename': dict(
                 default='/var/kat/data/148966XXXX.h5',
                 sensor_type=Sensor.STRING,
-                description='Final name for file being captured'),
+                description='Final name for file being captured',
+                initial_status=Sensor.NOMINAL),
             'sdp.ingest.1.capture-active': dict(
                 default=False,
                 sensor_type=Sensor.BOOLEAN,
-                description='Is there a currently active capture session.'),
+                description='Is there a currently active capture session.',
+                initial_status=Sensor.NOMINAL),
             'sdp.timeplot.1.gui-urls': dict(
                 default='[{"category": "Plot", '
-                '"href": "http://ing1.sdp.mkat.karoo.kat.ac.za:31054/", '
+                '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
                 '"description": "Signal displays for array_1_bc856M4k", '
                 '"title": "Signal Display"}]',
                 sensor_type=Sensor.STRING,
-                description='URLs for GUIs'),
+                description='URLs for GUIs',
+                initial_status=Sensor.NOMINAL),
             'sdp.timeplot.1.html_port': dict(
-                default='["ing1.sdp.mkat.karoo.kat.ac.za",31054]',
+                default='["ing1.sdp.mkat.fake.kat.ac.za",31054]',
                 sensor_type=Sensor.STRING,
-                description='IP endpoint for html_port'),
+                description='IP endpoint for html_port',
+                initial_status=Sensor.NOMINAL),
             'sdp.filewriter.1.input_rate': dict(
                 default=1560186.12180116,
                 units='Bps',
                 sensor_type=Sensor.FLOAT,
-                description='Input data rate in Bps averaged over last 10 dumps'),
+                description='Input data rate in Bps averaged over last 10 dumps',
+                initial_status=Sensor.NOMINAL),
         }
 
         sensors_added = False
