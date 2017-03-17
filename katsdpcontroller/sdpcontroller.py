@@ -1553,8 +1553,8 @@ class InterfaceModeSensors(object):
                 description='URLs for GUIs',
                 initial_status=Sensor.NOMINAL),
             'sdp.timeplot.1.html_port': dict(
-                default='["ing1.sdp.mkat.fake.kat.ac.za",31054]',
-                sensor_type=Sensor.STRING,
+                default=("ing1.sdp.mkat.fake.kat.ac.za", 31054),
+                sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for html_port',
                 initial_status=Sensor.NOMINAL),
         }

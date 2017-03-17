@@ -53,7 +53,7 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         ('sdp.filewriter.1.filename', '', '', 'string'),
         ('sdp.ingest.1.capture-active', '', '', 'boolean'),
         ('sdp.timeplot.1.gui-urls', '', '', 'string'),
-        ('sdp.timeplot.1.html_port', '', '', 'string')
+        ('sdp.timeplot.1.html_port', '', '', 'address')
 ))
 
 EXPECTED_REQUEST_LIST = [
@@ -186,8 +186,6 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
 
-    def test_sensor_list(self):
-        self.client.test_sensor_list(EXPECTED_SENSOR_LIST,ignore_descriptions=True)
 
     def test_help(self):
         self.client.test_help(EXPECTED_REQUEST_LIST)
