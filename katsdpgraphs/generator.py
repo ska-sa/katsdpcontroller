@@ -147,7 +147,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # telstate node
     telstate = SDPLogicalTask('sdp.telstate')
     telstate.cpus = 0.1
-    telstate.mem = 1024 + bp_mb
+    telstate.mem = 8192 + bp_mb
     telstate.disk = telstate.mem
     telstate.image = 'redis'
     telstate.ports = ['telstate']
