@@ -30,6 +30,7 @@ PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 PROMETHEUS_SENSORS = {}
 _add_prometheus_sensor('input_rate', 'Current input data rate in Bps', Gauge)
 _add_prometheus_sensor('output_rate', 'Current output data rate in Bps', Gauge)
+_add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
 _add_prometheus_sensor('packets_captured', 'Total number of data dumps received', Counter)
 _add_prometheus_sensor('dumps', 'Total number of data dumps received', Counter)
 _add_prometheus_sensor('input_bytes_total', 'Number of payload bytes received', Counter)
