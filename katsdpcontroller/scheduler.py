@@ -427,7 +427,7 @@ def poll_ports(host, ports, loop):
                 flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
         except socket.gaierror as error:
             logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error)
-            yield From(trolluis.sleep(5, loop=loop))
+            yield From(trollius.sleep(5, loop=loop))
         else:
             break
         
