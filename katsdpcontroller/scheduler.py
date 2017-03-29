@@ -412,16 +412,25 @@ def poll_ports(host, ports, loop):
 
     Raises
     ------
-    socket.gaierror
-        for any error in resolving `host`
     OSError
         on any socket operation errors other than the connect
     """
-    addrs = yield From(loop.getaddrinfo(
-        host=host, port=None,
-        type=socket.SOCK_STREAM,
-        proto=socket.IPPROTO_TCP,
-        flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
+    # protect against temporary name resolution failure.
+    # in the case of permanent DNS failure this will block
+    # indefinitely and higher level timeouts will be needed
+    while True:
+        try:
+            addrs = yield From(loop.getaddrinfo(
+                host=host, port=None,
+                type=socket.SOCK_STREAM,
+                proto=socket.IPPROTO_TCP,
+                flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
+        except socket.gaierror as error:
+            logger.warning('Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error)
+            yield From(trolluis.sleep(5, loop=loop))
+        else:
+            break
+        
     # getaddrinfo always returns at least 1 (it is an error if there are no
     # matches), so we do not need to check for the empty case
     (family, type_, proto, canonname, sockaddr) = addrs[0]
