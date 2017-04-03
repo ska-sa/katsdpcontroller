@@ -218,15 +218,10 @@ class TestPollPorts(object):
             legit_future.set_result(test_address)
              # create a legitimate return future for getaddrinfo
 
-            getaddrinfo.side_effect = [ legit_future, socket.gaierror("Failed to resolve"), legit_future ]
-             # sequential calls to getaddrinfo produce success, failure and success
+            getaddrinfo.side_effect = [socket.gaierror("Failed to resolve"), legit_future]
+             # sequential calls to getaddrinfo produce failure and success
 
-            future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
             self.sock.listen(1)
-            yield From(trollius.sleep(1, loop=loop))
-            assert_true(future.done())
-             # first time through we should get proper resolution
-
             future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
             yield From(trollius.sleep(1, loop=loop))
             assert_false(future.done())
