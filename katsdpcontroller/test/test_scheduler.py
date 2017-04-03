@@ -213,7 +213,7 @@ class TestPollPorts(object):
     def test_temporary_dns_failure(self, loop):
         """Test poll ports against a temporary DNS failure."""
         with mock.patch.object(loop, 'getaddrinfo', autospec=True) as getaddrinfo:
-            test_address = [(2, 1, 6, '', ('127.0.0.1', [self.port]))]
+            test_address = socket.getaddrinfo('127.0.0.1', self.port)
             legit_future = trollius.Future(loop=loop)
             legit_future.set_result(test_address)
              # create a legitimate return future for getaddrinfo
