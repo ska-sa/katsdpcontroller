@@ -210,11 +210,30 @@ class TestPollPorts(object):
             yield From(future)
 
     @run_with_event_loop
-    def test_bad_host(self, loop):
-        """poll_ports raises :exc:`socket.gaierror` if given a bad address"""
-        with assert_raises(socket.gaierror):
-            yield From(scheduler.poll_ports('not a hostname', [self.port], loop))
+    def test_temporary_dns_failure(self, loop):
+        """Test poll ports against a temporary DNS failure."""
+        with mock.patch.object(loop, 'getaddrinfo', autospec=True) as getaddrinfo:
+            test_address = [(2, 1, 6, '', ('127.0.0.1', [self.port]))]
+            legit_future = trollius.Future(loop=loop)
+            legit_future.set_result(test_address)
+             # create a legitimate return future for getaddrinfo
 
+            getaddrinfo.side_effect = [ legit_future, socket.gaierror("Failed to resolve"), legit_future ]
+             # sequential calls to getaddrinfo produce success, failure and success
+
+            future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
+            self.sock.listen(1)
+            yield From(trollius.sleep(1, loop=loop))
+            assert_true(future.done())
+             # first time through we should get proper resolution
+
+            future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
+            yield From(trollius.sleep(1, loop=loop))
+            assert_false(future.done())
+             # temporary DNS failure
+            yield From(trollius.sleep(6, loop=loop))
+             # wait for retry loop (currently 5s)
+            assert_true(future.done())
 
 class TestTaskState(object):
     """Tests that TaskState ordering works as expected"""
