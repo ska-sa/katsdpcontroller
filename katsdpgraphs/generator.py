@@ -193,7 +193,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
     timeplot.ports = ['spead_port', 'html_port', 'data_port']
-    timeplot.wait_ports = ['html_port', 'data_port']
+    timeplot.wait_ports = ['html_port']
     timeplot.volumes = [config_vol]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
