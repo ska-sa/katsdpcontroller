@@ -17,7 +17,7 @@ def find_images():
     for beamformer_mode in ["none", "hdf5_ram", "hdf5_ssd", "ptuse"]:
         for channels in [4096, 32768]:
             # There is a special case for small numbers of antennas
-            for antennas in [1, 2, 3, 4, 16]:
+            for antennas in [1, 2, 3, 4, 16, 32]:
                 for simulate in [False, True]:
                     # Unlike antennas, dump rate doesn't affect the set of
                     # images used
