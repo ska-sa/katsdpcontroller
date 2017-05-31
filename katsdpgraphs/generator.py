@@ -366,9 +366,9 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     # antennas, 32K channels requires two CPUs (one for capture, one for
     # writing) and scale from there.
     filewriter.cpus = 2 * l0_vis / (16 * 17 * 2 * 32768)
-    # Memory pool has 8 entries, but allocate 16 to be safe.
-    # Filewriter also uses this (incorrect) formula for heap size.
-    filewriter.mem = 16 * (16 * 17 * 2 * 32768 * 9) / 1024**2 + bp_mb + 256
+    # Memory pool has 8 entries, plus the socket buffer, but allocate 12 to be
+    # safe.
+    filewriter.mem = 12 * l0_mb + bp_mb + 256
     filewriter.ports = ['port']
     filewriter.volumes = [data_vol]
     filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
