@@ -240,7 +240,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'continuum_factor': l0_cont_factor,
             'sd_continuum_factor': cbf_channels // 256,
             'cbf_channels': cbf_channels,
-            'sd_spead_rate': 3e9    # local machine, so crank it up a bit (TODO: no longer necessarily true)
+            'sd_spead_rate': 3e9,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
+            'cbf_interface': task.interfaces['cbf'].name,
+            'l0_spectral_interface': task.interfaces['sdp_10g'].name,
+            'l0_continuum_interface': task.interfaces['sdp_10g'].name
         })
         g.add_edge(ingest, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
             'cbf_spead': str(endpoint)})
@@ -351,7 +354,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         g.add_node(cal, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
             'cbf_pols': cbf_pols,
-            'buffer_maxsize': buffer_size
+            'buffer_maxsize': buffer_size,
+            'l0_spectral_interface': task.interfaces['sdp_10g'].name
         })
         g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l0_spectral_spead': str(endpoint)})
@@ -374,7 +378,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     filewriter.interfaces[0].bandwidth_in = l0_bandwidth
     filewriter.transitions = capture_transitions
-    g.add_node(filewriter, config=lambda task, resolver: {'file_base': '/var/kat/data'})
+    g.add_node(filewriter, config=lambda task, resolver: {
+        'file_base': '/var/kat/data',
+        'l0_spectral_interface': task.interfaces['sdp_10g'].name
+    })
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
         'l0_spectral_spead': str(endpoint)})
 
@@ -402,7 +409,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         sim.interfaces = [scheduler.InterfaceRequest('cbf')]
         sim.interfaces[0].bandwidth_out = cbf_vis_bandwidth
         g.add_node(sim, config=lambda task, resolver: {
-            'cbf_channels': cbf_channels
+            'cbf_channels': cbf_channels,
+            'cbf_interface': task.interfaces['cbf'].name
         })
         g.add_edge(sim, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
             'cbf_spead': str(endpoint)
