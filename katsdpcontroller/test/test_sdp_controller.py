@@ -323,9 +323,14 @@ class TestSDPController(unittest.TestCase):
                         if port is not None:
                             node.ports[port] = port_num
                             port_num += 1
-                node.allocation = mock.MagicMock()
-                node.allocation.agent.host = 'host.' + node.logical_node.name
-                node.allocation.agent.gpus[0].name = 'GeForce GTX TITAN X'
+                if isinstance(node.logical_node, scheduler.LogicalTask):
+                    node.allocation = mock.MagicMock()
+                    node.allocation.agent.host = 'host.' + node.logical_node.name
+                    node.allocation.agent.gpus[0].name = 'GeForce GTX TITAN X'
+                    for request in node.logical_node.interfaces:
+                        interface = mock.Mock()
+                        interface.name = 'em1'
+                        node.interfaces[request.network] = interface
         for node in nodes:
             if node.state < scheduler.TaskState.RUNNING:
                 yield From(node.resolve(resolver, graph, self.loop))
@@ -408,7 +413,8 @@ class TestSDPController(unittest.TestCase):
         ts.add.assert_any_call('config.sdp.filewriter.1', {
             'file_base': '/var/kat/data',
             'port': 20000,
-            'l0_spectral_spead': mock.ANY
+            'l0_spectral_spead': mock.ANY,
+            'l0_spectral_interface': 'em1'
         }, immutable=True)
 
         # Verify the state of the subarray
