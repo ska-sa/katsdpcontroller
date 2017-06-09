@@ -1,4 +1,5 @@
 from __future__ import print_function, division, absolute_import
+import math
 import logging
 import networkx as nx
 import re
@@ -225,15 +226,18 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # We use slightly higher multipliers to be safe, as well as
         # conservatively using cbf_* instead of l0_*.
         ingest.gpus[0].mem = (70 * cbf_vis + 168 * cbf_channels) // 1024**2 + 128
-        # Actual requirements haven't been measured. Scale things so that
-        # 32 antennas, 32K channels uses a bit less than 8 CPUs (the number
-        # in an ingest machine).
-        ingest.cpus = 7.5 * scale
+        # Provide 4 CPUs for 32 antennas, 32K channels (the number in a NUMA
+        # node of an ingest machine). It might not actually need this much.
+        # Cores are reserved solely to get NUMA affinity with the NIC.
+        ingest.cpus = int(math.ceil(4.0 * scale))
+        ingest.cores = [None] * ingest.cpus
         # Scale factor of 32 may be overly conservative: actual usage may be
         # only half this. This also leaves headroom for buffering L0 output.
         ingest.mem = 32 * cbf_vis_mb + 4096
         ingest.transitions = capture_transitions
-        ingest.interfaces = [scheduler.InterfaceRequest('cbf'), scheduler.InterfaceRequest('sdp_10g')]
+        ingest.interfaces = [
+            scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
+            scheduler.InterfaceRequest('sdp_10g')]
         ingest.interfaces[0].bandwidth_in = cbf_vis_bandwidth
         ingest.interfaces[1].bandwidth_out = l0_bandwidth + l0_cont_bandwidth
         g.add_node(ingest, config=lambda task, resolver: {
@@ -242,6 +246,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
             'cbf_interface': task.interfaces['cbf'].name,
+            'cbf_ibv': not develop,
             'l0_spectral_interface': task.interfaces['sdp_10g'].name,
             'l0_continuum_interface': task.interfaces['sdp_10g'].name
         })
