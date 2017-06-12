@@ -346,8 +346,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # - flags (uint8)
         # - weights (float32)
         # There are also timestamps, but they're insignificant compared to the rest.
-        # We want ~30 min of data per buffer
-        slots = 30 * 60 * dump_rate
+        # We want ~15 min of data per buffer
+        slots = 15 * 60 * dump_rate
         buffer_size = slots * l0_vis * 13
         # There are two buffers, and also some arrays that are reduced versions
         # of the main buffers. The reduction factors are variable, but 10%
