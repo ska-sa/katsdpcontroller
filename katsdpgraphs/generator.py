@@ -246,7 +246,11 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
             'cbf_interface': task.interfaces['cbf'].name,
-            'cbf_ibv': not develop,
+            # ibverbs is disabled in --develop because a developer's machine
+            # typically won't support it, and in --simulate because it doesn't
+            # currently work if the simulator and ingest run on the same
+            # machine (it will work if the simulator uses ibverbs).
+            'cbf_ibv': not develop and not simulate,
             'l0_spectral_interface': task.interfaces['sdp_10g'].name,
             'l0_continuum_interface': task.interfaces['sdp_10g'].name
         })
