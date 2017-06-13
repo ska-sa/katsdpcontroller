@@ -246,11 +246,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'cbf_channels': cbf_channels,
             'sd_spead_rate': 3e9,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
             'cbf_interface': task.interfaces['cbf'].name,
-            # ibverbs is disabled in --develop because a developer's machine
-            # typically won't support it, and in --simulate because it doesn't
-            # currently work if the simulator and ingest run on the same
-            # machine (it will work if the simulator uses ibverbs).
-            'cbf_ibv': not develop and not simulate,
+            'cbf_ibv': not develop,
             'l0_spectral_interface': task.interfaces['sdp_10g'].name,
             'l0_continuum_interface': task.interfaces['sdp_10g'].name
         })
@@ -415,11 +411,18 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         sim.gpus[0].compute = min(1.0, 0.2 * scale)
         sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
         sim.ports = ['port']
-        sim.interfaces = [scheduler.InterfaceRequest('cbf')]
+        ibv = not develop
+        if ibv:
+            # The verbs send interface seems to create a large number of
+            # file handles per stream, easily exceeding the default of
+            # 1024.
+            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+        sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = cbf_vis_bandwidth
         g.add_node(sim, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
-            'cbf_interface': task.interfaces['cbf'].name
+            'cbf_interface': task.interfaces['cbf'].name,
+            'cbf_ibv': ibv
         })
         g.add_edge(sim, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
             'cbf_spead': str(endpoint)
