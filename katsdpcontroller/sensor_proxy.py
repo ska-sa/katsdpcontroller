@@ -128,7 +128,7 @@ class SensorProxyClient(InspectingClientAsync):
                 value_metric, status_metric = self.prometheus_sensors[normalised_name]
                 # It's tempting to push this work onto the caller, but that
                 # causes the metric to be instantiated with the labels
-                # whether the matching sensor exists of not.
+                # whether the matching sensor exists or not.
                 value_metric = value_metric.labels(*self.prometheus_labels)
                 status_metric = status_metric.labels(*self.prometheus_labels)
             except KeyError:
