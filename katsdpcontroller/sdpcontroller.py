@@ -585,8 +585,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if self.simulate:
             logger.info('SIMULATE: Configuring antennas in simulator')
             try:
+                # Replace temporary fake antennas with ones configured by kattelmod
                 yield From(self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim'))
-                 # instruct the simulator to rebuild its local config from the values in telstate
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
