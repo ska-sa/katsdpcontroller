@@ -540,7 +540,6 @@ class TestSDPController(unittest.TestCase):
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         katcp_client.future_request.assert_has_calls([
             mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-meta', 'i0.baseline-correlation-products')),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-start', 'i0.baseline-correlation-products'))
