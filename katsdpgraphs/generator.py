@@ -162,6 +162,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cam2telstate.command = ['cam2telstate.py']
         cam2telstate.cpus = 0.2
         cam2telstate.mem = 256
+        cam2telstate.ports = ['port']
         streams = {
             'i0.baseline-correlation-products': 'visibility',
             'i0.antenna-channelised-voltage': 'fengine'
@@ -174,6 +175,45 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'streams': streams_arg,
             'collapse_streams': True
         })
+    else:
+        # Simulate mode
+        sim = SDPLogicalTask('sdp.sim.1')
+        sim.image = 'katcbfsim'
+        # create-fx-stream is passed on the command-line instead of telstate
+        # for now due to SR-462.
+        sim.command = ['cbfsim.py', '--create-fx-stream', 'i0.baseline-correlation-products']
+        # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
+        # 16 antennas, 32K, and cap it there (threads for compute and network).
+        # cbf_vis is an overestimate since the simulator is not constrained to
+        # power-of-two antenna counts like the real CBF.
+        scale = cbf_vis / (16 * 17 * 2 * 32768)
+        sim.cpus = 2 * min(1.0, scale)
+        # Factor of 4 is conservative; only actually double-buffered
+        sim.mem = 4 * cbf_vis_mb + cbf_gains_mb + 512
+        sim.cores = [None, None]
+        sim.gpus = [scheduler.GPURequest()]
+        # Scale for 20% at 16 ant, 32K channels
+        sim.gpus[0].compute = min(1.0, 0.2 * scale)
+        sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
+        sim.ports = ['port']
+        ibv = not develop
+        if ibv:
+            # The verbs send interface seems to create a large number of
+            # file handles per stream, easily exceeding the default of
+            # 1024.
+            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+        sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        sim.interfaces[0].bandwidth_out = cbf_vis_bandwidth
+        g.add_node(sim, config=lambda task, resolver: {
+            'cbf_channels': cbf_channels,
+            'cbf_interface': task.interfaces['cbf'].name,
+            'cbf_ibv': ibv
+        })
+        g.add_edge(sim, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
+            'cbf_spead': str(endpoint)
+        })
+        # The simulator populates telstate, so plays the role of cam2telstate
+        cam2telstate = sim
 
     # signal display node
     timeplot = SDPLogicalTask('sdp.timeplot.1')
@@ -390,50 +430,16 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
         'l0_spectral_spead': str(endpoint)})
 
-    # Simulator node
-    if simulate:
-        sim = SDPLogicalTask('sdp.sim.1')
-        sim.image = 'katcbfsim'
-        # create-fx-stream is passed on the command-line instead of telstate
-        # for now due to SR-462.
-        sim.command = ['cbfsim.py', '--create-fx-stream', 'i0.baseline-correlation-products']
-        # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
-        # 16 antennas, 32K, and cap it there (threads for compute and network).
-        # cbf_vis is an overestimate since the simulator is not constrained to
-        # power-of-two antenna counts like the real CBF.
-        scale = cbf_vis / (16 * 17 * 2 * 32768)
-        sim.cpus = 2 * min(1.0, scale)
-        # Factor of 4 is conservative; only actually double-buffered
-        sim.mem = 4 * cbf_vis_mb + cbf_gains_mb + 512
-        sim.cores = [None, None]
-        sim.gpus = [scheduler.GPURequest()]
-        # Scale for 20% at 16 ant, 32K channels
-        sim.gpus[0].compute = min(1.0, 0.2 * scale)
-        sim.gpus[0].mem = 2 * cbf_vis_mb + cbf_gains_mb + 256
-        sim.ports = ['port']
-        ibv = not develop
-        if ibv:
-            # The verbs send interface seems to create a large number of
-            # file handles per stream, easily exceeding the default of
-            # 1024.
-            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
-        sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
-        sim.interfaces[0].bandwidth_out = cbf_vis_bandwidth
-        g.add_node(sim, config=lambda task, resolver: {
-            'cbf_channels': cbf_channels,
-            'cbf_interface': task.interfaces['cbf'].name,
-            'cbf_ibv': ibv
-        })
-        g.add_edge(sim, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
-            'cbf_spead': str(endpoint)
-        })
-
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
             g.add_edge(node, telstate, port='telstate', order='strong')
+            if node is not cam2telstate:
+                # No direct network connection, but strong dependency because
+                # they communicate indirectly via telstate.
+                g.add_edge(node, cam2telstate, order='strong')
         # MESOS-7197 causes the master to crash if we ask for too little of
         # a resource. Enforce some minima.
         if isinstance(node, SDPLogicalTask):

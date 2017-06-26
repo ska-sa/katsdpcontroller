@@ -212,12 +212,12 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                     # whether to cancel it. We use a timeout here, together
                     # with the while True loop, rather than letting
                     # until_synced run forever, because Tornado futures have no
-                    # concept of cancellation. If wait_ready is called, then it will
-                    # stop the connection immediately, but the Tornado future
-                    # will hang around until it times out.
+                    # concept of cancellation. If wait_ready is cancelled, then
+                    # it will stop the connection immediately, but the Tornado
+                    # future will hang around until it times out.
                     #
                     # Timing out also allows recovery if the TCP connection
-                    # some gets wedged badly enough that katcp can't recover
+                    # somehow gets wedged badly enough that katcp can't recover
                     # itself.
                     yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
                     logging.info("Connected to {}:{} for node {}".format(

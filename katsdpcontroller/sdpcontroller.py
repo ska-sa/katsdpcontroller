@@ -583,20 +583,14 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """Move to capturing state"""
         stream = 'i0.baseline-correlation-products'
         if self.simulate:
-            logger.info('SIMULATE: Configuring streams in simulator')
+            logger.info('SIMULATE: Configuring antennas in simulator')
             try:
+                # Replace temporary fake antennas with ones configured by kattelmod
                 yield From(self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim'))
-                 # instruct the simulator to rebuild its local config from the values in telstate
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
-            logger.info('SIMULATE: Sending metadata to telstate')
-            try:
-                yield From(self._issue_req('capture-meta', args=[stream], node_type='sdp.sim'))
-            except Exception as error:
-                logger.error("SIMULATE: capture-meta failed", exc_info=True)
-                raise FailReply("SIMULATE: capture-meta: {}".format(error))
         yield From(self.exec_transitions(State.INITIALISED))
         if self.simulate:
             logger.info("SIMULATE: Issuing a capture-start to the simulator")
