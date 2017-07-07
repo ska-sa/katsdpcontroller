@@ -396,6 +396,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
+        cal.ports = ['port']
+        cal.transitions = capture_transitions
         g.add_node(cal, config=lambda task, resolver: {
             'cbf_channels': cbf_channels,
             'cbf_pols': cbf_pols,
