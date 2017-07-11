@@ -1477,7 +1477,7 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_launch_resources_timeout(self):
         """Test a launch failing due to insufficient resources within the timeout"""
-        self.sched.resources_timeout = 0.001
+        self.sched.resources_timeout = 0.01
         launch, kill = yield From(self._transition_node0(TaskState.STARTING))
         with assert_raises(scheduler.InsufficientResourcesError):
             yield From(launch)
