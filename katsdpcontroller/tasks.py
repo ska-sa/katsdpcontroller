@@ -41,6 +41,23 @@ _add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Cou
 _add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
 _add_prometheus_sensor('last_dump_timestamp',
                        'Timestamp of most recently received dump in Unix seconds', Gauge)
+_add_prometheus_sensor('accumulator_batches',
+                       'Number of batches completed by the accumulator', Counter)
+_add_prometheus_sensor('accumulate_buffer_filled',
+                       'Fraction of buffer that the current accumulation has written to', Gauge)
+_add_prometheus_sensor('accumulator_capture_active', 'Whether an observation is in progress', Gauge)
+_add_prometheus_sensor('accumulator_input_heaps', 'Number of L0 heaps received', Counter)
+_add_prometheus_sensor('accumulator_last_wait',
+                       'Time the accumulator had to wait for a free buffer', Gauge)
+_add_prometheus_sensor('accumulator_observations',
+                       'Number of observations completed by the accumulator', Counter)
+_add_prometheus_sensor('pipeline_last_slots',
+                       'Number of slots filled in the most recent buffer', Gauge)
+_add_prometheus_sensor('pipeline_last_time',
+                       'Time taken to process the most recent buffer', Gauge)
+_add_prometheus_sensor('report_last_time',
+                       'Elapsed time to generate most recent report', Gauge)
+_add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
 
 
 def to_trollius_future(tornado_future, loop=None):
