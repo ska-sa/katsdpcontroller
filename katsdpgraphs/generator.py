@@ -408,6 +408,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'l0_spectral_spead': str(endpoint)})
         g.add_edge(cal, l1_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l1_spectral_spead': str(endpoint)})
+        g.add_edge(cal, ingest, order='strong')  # Attributes passed via telstate
 
     # filewriter node
     filewriter = SDPLogicalTask('sdp.filewriter.1')
