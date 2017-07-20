@@ -63,7 +63,8 @@ class IngestTask(SDPPhysicalTask):
             logger.info('Develop mode: using %s for ingest', image_path)
 
 
-def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_antennas, dump_rate, cbf_pols):
+def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
+                        cbf_channels, l0_antennas, dump_rate, cbf_pols):
     from katsdpcontroller.sdpcontroller import State
 
     # Note: a few lambdas in this function have default arguments e.g.
@@ -438,6 +439,10 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             node.command.extend([
                 '--telstate', '{endpoints[sdp.telstate_telstate]}',
                 '--name', node.name])
+            node.wrapper = wrapper
+            # Needed to allow writes to the sandbox directory
+            node.container.docker.setdefault('parameters', []).extend(
+                [{'key': 'user', 'value': 'root'}])
             g.add_edge(node, telstate, port='telstate', order='strong')
             if node is not cam2telstate:
                 # No direct network connection, but strong dependency because

@@ -32,6 +32,7 @@ services:
             - /sys:/sys
             - /usr/bin/docker:/usr/local/bin/docker
             - ./mesos-slave:/etc/mesos-slave
+            - /var/tmp/mesos:/var/tmp/mesos
         entrypoint:
             - /usr/bin/mesos-init-wrapper
             - slave
