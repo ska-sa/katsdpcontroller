@@ -9,6 +9,7 @@ enum34
 fakeredis
 faulthandler==2.4
 functools32==3.2.3-2
+future
 futures
 http-parser==0.8.3
 ipaddress==1.0.16
@@ -24,7 +25,6 @@ numpy
 pkginfo
 ply
 prometheus_client==0.0.18
-ProxyTypes
 pymesos==0.2.13
 redis
 requests==2.8.1
