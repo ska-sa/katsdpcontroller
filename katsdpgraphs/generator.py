@@ -386,13 +386,15 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # - flags (uint8)
         # - weights (float32)
         # There are also timestamps, but they're insignificant compared to the rest.
-        # We want ~15 min of data per buffer
-        slots = 15 * 60 * dump_rate
-        buffer_size = slots * l0_vis * 13
-        # There are two buffers, and also some arrays that are reduced versions
-        # of the main buffers. The reduction factors are variable, but 10%
-        # overhead should be enough. Finally, allow 256MB for general use.
-        cal.mem = 2 * buffer_size * 1.1 / 1024**2 + 256
+        # We want ~30 min of data in the buffer, to allow for a single batch of
+        # 15 minutes.
+        slots = 30 * 60 * dump_rate
+        slot_size = l0_vis * 13
+        buffer_size = slots * slot_size
+        # At present the calibration process is very wasteful of memory, so allow for
+        # a factor of two overhead, plus a few slots worth (for time-averaged data),
+        # plus some fixed amount for general use.
+        cal.mem = (buffer_size * 2 + slot_size * 4) / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
