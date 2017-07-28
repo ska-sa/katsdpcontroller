@@ -376,11 +376,12 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         cal = SDPLogicalTask('sdp.cal.1')
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
-        # TODO: not clear exactly how much CPU cal needs, although currently
-        # it doesn't make full use of multi-core. Assume 2 CPUs for 16
-        # antennas, 32K channels, and assume linear scale in antennas and
-        # channels.
-        cal.cpus = max(0.1, 2 * (l0_antennas * l0_channels) / (16 * 32768))
+        # Give cal 8 CPUs for 32K, 32 antennas, and scale from there.
+        # However, don't go below 2 (except in development mode) because we
+        # can't have less than 1 pipeline worker.
+        cal.cpus = 8 * l0_vis / (32 * 33 * 2 * 32768)
+        if not develop:
+            cal.cpus = max(cal.cpus, 2)
         # Main memory consumer is buffers for
         # - visibilities (complex64)
         # - flags (uint8)
@@ -394,7 +395,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # At present the calibration process is very wasteful of memory, so allow for
         # a factor of two overhead, plus a few slots worth (for time-averaged data),
         # plus some fixed amount for general use.
-        cal.mem = (buffer_size * 2 + slot_size * 4) / 1024**2 + 256
+        cal.mem = (buffer_size * 2 + slot_size * 16) / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
@@ -404,6 +405,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
             'cbf_channels': cbf_channels,
             'cbf_pols': cbf_pols,
             'buffer_maxsize': buffer_size,
+            'workers': max(1, int(math.ceil(cal.cpus - 1))),
             'l0_spectral_interface': task.interfaces['sdp_10g'].name
         })
         g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
