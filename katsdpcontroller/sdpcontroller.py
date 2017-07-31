@@ -695,7 +695,8 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
         self.wrapper = wrapper
         if self.wrapper is not None:
-            logger.warning('Note: Using a wrapper in all containers. This may alter behaviour.')
+            logger.warning('Note: Using wrapper %s in all containers. This may alter behaviour.',
+                           self.wrapper)
         self.loop = loop
         self.sched = sched
         self.components = {}
