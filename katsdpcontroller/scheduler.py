@@ -1673,9 +1673,14 @@ class PhysicalTask(PhysicalNode):
         if self.logical_node.wrapper is not None:
             uri = Dict()
             uri.value = self.logical_node.wrapper
-            uri.executable = True
-            uri.output_file = 'wrapper'
             taskinfo.command.uris = [uri]
+            # Archive types recognised by Mesos Fetcher (.gz is excluded
+            # because it doesn't contain a collection of files).
+            archive_exts = ['.tar', '.tgz', '.tar.gz', '.tbz2', '.tar.bz2',
+                            '.txz', '.tar.xz', '.zip']
+            if not any(self.logical_node.wrapper.endswith(ext) for ext in archive_exts):
+                uri.output_file = 'wrapper'
+                uri.executable = True
             command.insert(0, '/mnt/mesos/sandbox/wrapper')
         if command:
             taskinfo.command.value = command[0]
