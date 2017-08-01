@@ -381,7 +381,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, cbf_channels, l0_ant
         # Give cal 8 CPUs for 32K, 32 antennas, and scale from there.
         # However, don't go below 2 (except in development mode) because we
         # can't have less than 1 pipeline worker.
-        cal.cpus = 8 * l0_vis / m32_32
+        cal.cpus = 8 * l0_vis / n32_32
         if not develop:
             cal.cpus = max(cal.cpus, 2)
         # Main memory consumer is buffers for
