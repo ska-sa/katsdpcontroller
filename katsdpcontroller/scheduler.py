@@ -1025,6 +1025,10 @@ class LogicalTask(LogicalNode):
         - `endpoints` : dictionary of remote endpoints. Keys are of the form
           :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
         - `resolver` : resolver object
+    wrapper : str
+        URI for a wrapper around the command. If specified, it will be
+        downloaded to the sandbox directory and executed, with the original
+        command being passed to it.
     """
     def __init__(self, name):
         super(LogicalTask, self).__init__(name)
@@ -1038,6 +1042,7 @@ class LogicalTask(LogicalNode):
         self.capabilities = []
         self.image = None
         self.command = []
+        self.wrapper = None
         self.container = Dict()
         self.container.type = 'DOCKER'
         self.physical_factory = PhysicalTask
@@ -1665,6 +1670,18 @@ class PhysicalTask(PhysicalNode):
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
         command = [x.format(**args) for x in self.logical_node.command]
+        if self.logical_node.wrapper is not None:
+            uri = Dict()
+            uri.value = self.logical_node.wrapper
+            taskinfo.command.uris = [uri]
+            # Archive types recognised by Mesos Fetcher (.gz is excluded
+            # because it doesn't contain a collection of files).
+            archive_exts = ['.tar', '.tgz', '.tar.gz', '.tbz2', '.tar.bz2',
+                            '.txz', '.tar.xz', '.zip']
+            if not any(self.logical_node.wrapper.endswith(ext) for ext in archive_exts):
+                uri.output_file = 'wrapper'
+                uri.executable = True
+            command.insert(0, '/mnt/mesos/sandbox/wrapper')
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]

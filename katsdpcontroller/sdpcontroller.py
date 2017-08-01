@@ -245,7 +245,7 @@ class SDPGraph(object):
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
     def __init__(self, sched, graph_name, n_antennas, dump_rate,
-                 simulate, develop, resolver, subarray_product_id, loop,
+                 simulate, develop, wrapper, resolver, subarray_product_id, loop,
                  sdp_controller=None, telstate_name='sdp.telstate'):
         self.sched = sched
         self.resolver = resolver
@@ -257,6 +257,7 @@ class SDPGraph(object):
         graph_kwargs['dump_rate'] = dump_rate
         graph_kwargs['simulate'] = simulate
         graph_kwargs['develop'] = develop
+        graph_kwargs['wrapper'] = wrapper
         self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
         # generate physical nodes
         mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
@@ -670,7 +671,7 @@ class SDPControllerServer(AsyncDeviceServer):
     BUILD_INFO = ("sdpcontroller",) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
-                 simulate=False, develop=False, interface_mode=False,
+                 simulate=False, develop=False, interface_mode=False, wrapper=None,
                  graph_resolver=None, image_resolver_factory=None,
                  gui_urls=None, **kwargs):
          # setup sensors
@@ -690,7 +691,12 @@ class SDPControllerServer(AsyncDeviceServer):
         if self.develop:
             logger.warning("Note: Running in developer mode. This will relax some constraints.")
         self.interface_mode = interface_mode
-        if self.interface_mode: logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
+        if self.interface_mode:
+            logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
+        self.wrapper = wrapper
+        if self.wrapper is not None:
+            logger.warning('Note: Using wrapper %s in all containers. This may alter behaviour.',
+                           self.wrapper)
         self.loop = loop
         self.sched = sched
         self.components = {}
@@ -1149,7 +1155,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         n_antennas = len(antennas.split(','))
         graph = SDPGraph(self.sched, graph_name, n_antennas, dump_rate,
-                         self.simulate, self.develop,
+                         self.simulate, self.develop, self.wrapper,
                          resolver, subarray_product_id,
                          self.loop, sdp_controller=self)
          # create graph object and build physical graph from specified resources

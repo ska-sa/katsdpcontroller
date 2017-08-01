@@ -88,6 +88,8 @@ if __name__ == "__main__":
     parser.add_argument('--develop', default=False,
                         action='store_true',
                         help='relax constraints to allow testing on different hardware (default: %(default)s)')
+    parser.add_argument('--wrapper', metavar='URI',
+                        help='URI to wrapper script used to launch all tasks (default: none)')
     parser.add_argument('--no-prometheus', dest='prometheus', default=True,
                         action='store_false',
                         help='disable Prometheus client HTTP service')
@@ -188,6 +190,7 @@ if __name__ == "__main__":
         simulate=opts.simulate,
         develop=opts.develop,
         interface_mode=opts.interface_mode,
+        wrapper=opts.wrapper,
         image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr,
