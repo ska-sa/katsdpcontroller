@@ -110,6 +110,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     cbf_vis_bandwidth = (cbf_vis_size * 8 * 1.05 + 2048) * dump_rate
     l0_bandwidth = (l0_size * 8 * 1.05 + 2048) * dump_rate
     l0_cont_bandwidth = (l0_cont_size * 8 * 1.05 + 2048) * dump_rate
+    # Number of visibilities in a 32 antenna 32K channel dump, for scaling.
+    n32_32 = 32 * 33 * 2 * 32768
 
     g = nx.MultiDiGraph(config=lambda resolver: {
         'sdp_cbf_channels': cbf_channels,
@@ -222,7 +224,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     timeplot.command = ['time_plot.py']
     # Exact requirement not known (also depends on number of users). Give it
     # 2 CPUs (max it can use) for 32 antennas, 32K channels and scale from there.
-    timeplot.cpus = 2 * min(1.0, l0_vis / (32 * 33 * 2 * 32768))
+    timeplot.cpus = 2 * min(1.0, l0_vis / n32_32)
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
@@ -261,7 +263,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         if not develop:
             ingest.gpus[-1].name = INGEST_GPU_NAME
         # Scale for a full GPU for 32 antennas, 32K channels
-        scale = cbf_vis / (32 * 33 * 2 * 32768)
+        scale = cbf_vis / n32_32
         ingest.gpus[0].compute = scale
         # Refer to https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
         # We use slightly higher multipliers to be safe, as well as
@@ -377,11 +379,12 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         cal = SDPLogicalTask('sdp.cal.1')
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
-        # TODO: not clear exactly how much CPU cal needs, although currently
-        # it doesn't make full use of multi-core. Assume 2 CPUs for 16
-        # antennas, 32K channels, and assume linear scale in antennas and
-        # channels.
-        cal.cpus = max(0.1, 2 * (l0_antennas * l0_channels) / (16 * 32768))
+        # Give cal 8 CPUs for 32K, 32 antennas, and scale from there.
+        # However, don't go below 2 (except in development mode) because we
+        # can't have less than 1 pipeline worker.
+        cal.cpus = 8 * l0_vis / n32_32
+        if not develop:
+            cal.cpus = max(cal.cpus, 2)
         # Main memory consumer is buffers for
         # - visibilities (complex64)
         # - flags (uint8)
@@ -395,7 +398,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         # At present the calibration process is very wasteful of memory, so allow for
         # a factor of two overhead, plus a few slots worth (for time-averaged data),
         # plus some fixed amount for general use.
-        cal.mem = (buffer_size * 2 + slot_size * 4) / 1024**2 + 256
+        cal.mem = (buffer_size * 2 + slot_size * 16) / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
@@ -405,6 +408,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
             'cbf_channels': cbf_channels,
             'cbf_pols': cbf_pols,
             'buffer_maxsize': buffer_size,
+            'workers': max(1, int(math.ceil(cal.cpus - 1))),
             'l0_spectral_interface': task.interfaces['sdp_10g'].name
         })
         g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
