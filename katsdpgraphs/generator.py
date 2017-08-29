@@ -401,10 +401,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         # - average over frequency: needs far less memory than the above
         # - compute flags per baseline: works on 16 baselines at a time.
         # In each case we arbitrarily allow for 4 times the result, per worker.
-        # Additionally, the complete output flags are stored.
         extra = max(workers / slots, min(16 * workers, l0_baselines) / l0_baselines) * 4
-        flags_size = slots * l0_vis
-        cal.mem = (buffer_size * (1 + extra) + flags_size) / 1024**2 + 256
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
