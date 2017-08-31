@@ -1141,7 +1141,8 @@ class SDPControllerServer(AsyncDeviceServer):
         logger.info("Launching graph {}.".format(graph_name))
 
         resolver = scheduler.Resolver(self.image_resolver_factory(),
-                                      scheduler.TaskIDAllocator(subarray_product_id + '-'))
+                                      scheduler.TaskIDAllocator(subarray_product_id + '-'),
+                                      self.sched.http_url if self.sched else '')
         resolver.resources = SDPResources(self.resources, subarray_product_id)
         resolver.telstate = None
 
@@ -1440,7 +1441,8 @@ class SDPControllerServer(AsyncDeviceServer):
                 non_master.append(node)
 
         resolver = scheduler.Resolver(self.image_resolver_factory(),
-                                      scheduler.TaskIDAllocator('poweroff-'))
+                                      scheduler.TaskIDAllocator('poweroff-'),
+                                      self.sched.http_url)
         # Shut down everything except the master/self
         yield to_tornado_future(
             self.sched.launch(physical_graph, resolver, non_master), loop=self.loop)

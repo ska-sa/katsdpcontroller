@@ -16,6 +16,7 @@ import ipaddress
 import six
 import requests
 import trollius
+import tornado.platform.asyncio
 import networkx
 import pymesos
 from addict import Dict
@@ -1093,7 +1094,6 @@ class TestScheduler(object):
         self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator)
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
-        self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator)
         node0 = scheduler.LogicalTask('node0')
         node0.cpus = 1.0
         node0.command = ['hello', '--port={ports[port]}']
@@ -1136,10 +1136,13 @@ class TestScheduler(object):
                  'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
             self.numa_attr
         ]
-        self.loop = trollius.new_event_loop()
+        self.ioloop = tornado.platform.asyncio.AsyncIOLoop()
+        self.loop = self.ioloop.asyncio_loop
         try:
             self._make_physical()
-            self.sched = scheduler.Scheduler(self.loop)
+            self.sched = scheduler.Scheduler(self.loop, self.ioloop, 0, 'http://scheduler/')
+            self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
+                                               self.sched.http_url)
             self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
                                                spec_set=True, instance=True)
             self.sched.set_driver(self.driver)
@@ -1267,9 +1270,14 @@ class TestScheduler(object):
         expected_taskinfo1.task_id.value = 'test-00000001'
         expected_taskinfo1.agent_id.value = 'agentid1'
         expected_taskinfo1.command.shell = False
-        expected_taskinfo1.command.value = 'test'
+        uri = Dict()
+        uri.executable = True
+        uri.value = 'http://scheduler/static/delay_run.sh'
+        expected_taskinfo1.command.uris = [uri]
+        expected_taskinfo1.command.value = '/mnt/mesos/sandbox/delay_run.sh'
         expected_taskinfo1.command.arguments = [
-            '--host=agenthost1', '--remote=agenthost0:30000',
+            'http://scheduler/tasks/test-00000001/wait_start',
+            'test', '--host=agenthost1', '--remote=agenthost0:30000',
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
@@ -1361,7 +1369,7 @@ class TestScheduler(object):
         """Launch the graph and proceed until node0 is in `target_state`.
 
         This is intended to be used in test setup. It is assumed that this
-        functionality is more fully tested test_launch_serial, so minimal
+        functionality is more fully tested in test_launch_serial, so minimal
         assertions are made.
 
         Returns
