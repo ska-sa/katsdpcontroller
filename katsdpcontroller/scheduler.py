@@ -68,8 +68,8 @@ Edges are used for several distinct but overlapping purposes.
    running), rather than in response to some later trigger. At present, no
    other values are defined or should be used for the `order` attribute.
 
-It is permitted for the graph to have cycles, as long as no cycle contains a
-strong edge.
+It is permitted for the graph to have cycles, as long as there is no cycle of
+strong edges.
 
 GPU support
 -----------
@@ -145,6 +145,8 @@ import trollius
 from trollius import From, Return
 
 import tornado.web
+import tornado.netutil
+import tornado.httpserver
 
 from katsdptelstate.endpoint import Endpoint
 from katsdpservices.asyncio import to_tornado_future
@@ -933,7 +935,7 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
 
 
 class CycleError(ValueError):
-    """Raised for a graph that contains a cycle with a strong ordering dependency"""
+    """Raised for a graph that contains a cycle of strong dependencies"""
     pass
 
 
@@ -1446,6 +1448,9 @@ class PhysicalNode(object):
     dead_event : :class:`trollius.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
+    strong_dependencies : list of :class:`PhysicalNode`
+        Nodes that this node has strong dependencies on. This is only
+        populated during :meth:`resolve`.
     _ready_waiter : :class:`trollius.Task`
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
@@ -1478,14 +1483,20 @@ class PhysicalNode(object):
         loop : :class:`trollius.BaseEventLoop`
             Current event loop
         """
-        pass
+        self.strong_dependencies = []
+        for src, trg, attr in graph.out_edges_iter([self], data=True):
+            if attr.get('order') == 'strong':
+                self.strong_dependencies.append(trg)
 
     @trollius.coroutine
     def wait_ready(self):
         """Wait for the task to be ready for dependent tasks to communicate
-        with, by polling the ports. This method may be overloaded to implement
-        other checks, but it must be cancellation-safe.
+        with, by polling the ports and waiting for dependent tasks. This method
+        may be overloaded to implement other checks, but it must be
+        cancellation-safe.
         """
+        for dep in self.strong_dependencies:
+            yield From(dep.ready_event.wait())
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
@@ -1666,14 +1677,12 @@ class PhysicalTask(PhysicalNode):
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
         """
-        strong_deps = False
+        yield From(super(PhysicalTask, self).resolve(resolver, graph, loop))
         for src, trg, attr in graph.out_edges_iter([self], data=True):
             if 'port' in attr:
                 port = attr['port']
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
-            if attr.get('order') == 'strong':
-                strong_deps = True
 
         docker_devices = set()
         docker_parameters = []
@@ -1694,7 +1703,7 @@ class PhysicalTask(PhysicalNode):
                 uri.executable = True
             taskinfo.command.setdefault('uris', []).append(uri)
             command.insert(0, '/mnt/mesos/sandbox/wrapper')
-        if strong_deps:
+        if self.strong_dependencies:
             uri = Dict()
             uri.value = urllib.parse.urljoin(resolver.http_url, 'static/delay_run.sh')
             uri.executable = True
@@ -1879,8 +1888,9 @@ def run_in_event_loop(func, *args, **kw):
 
 
 class WaitStartHandler(tornado.web.RequestHandler):
-    def initialize(self, scheduler):
+    def initialize(self, scheduler, loop):
         self.scheduler = scheduler
+        self.loop = loop
 
     @tornado.gen.coroutine
     def get(self, task_id):
@@ -1891,10 +1901,10 @@ class WaitStartHandler(tornado.web.RequestHandler):
             self.write('Task ID {} not active\n'.format(task_id))
         else:
             try:
-                for src, trg, data in graph.out_edges_iter([task], data=True):
-                    if data.get('order') == 'strong':
-                        yield to_tornado_future(trg.ready_event.wait())
+                for dep in task.strong_dependencies:
+                    yield to_tornado_future(dep.ready_event.wait(), loop=self.loop)
             except Exception as error:
+                logger.exception('Exception while waiting for dependencies')
                 self.set_status(requests.codes.SERVER_ERROR)
                 self.write('Exception while waiting for dependencies:\n{}\n'.format(error))
 
@@ -1920,7 +1930,7 @@ class Scheduler(pymesos.Scheduler):
     ioloop : :class:`tornado.platform.asyncio.BaseAsyncIOLoop`
         Event loop for running the Tornado HTTP server (must wrap `loop`)
     http_port : int
-        Port for the embedded HTTP server
+        Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
         URL at which agent nodes can reach the HTTP server. If not specified,
         tries to deduce it from the host's FQDN.
@@ -1930,6 +1940,8 @@ class Scheduler(pymesos.Scheduler):
     resources_timeout : float
         Time limit for resources to become available one a task is ready to
         launch.
+    http_port : int
+        Actual HTTP port used by `http_server`
     http_server : :class:`tornado.httpserver.HTTPServer`
         Embedded HTTP server
     """
@@ -1952,10 +1964,14 @@ class Scheduler(pymesos.Scheduler):
             self.http_url = http_url
 
         app = tornado.web.Application(
-            [(r'/tasks/([^/]+)/wait_start', WaitStartHandler, dict(scheduler=self))],
+            [(r'/tasks/([^/]+)/wait_start', WaitStartHandler, dict(scheduler=self, loop=loop))],
             static_path=pkg_resources.resource_filename('katsdpcontroller', 'static'))
+        sockets = tornado.netutil.bind_sockets(http_port)
         self.http_server = tornado.httpserver.HTTPServer(app, io_loop=ioloop)
-        self.http_server.listen(http_port)
+        self.http_server.add_sockets(sockets)
+        if not http_port:
+            http_port = sockets[0].getsockname()[1]
+        self.http_port = http_port
 
     @classmethod
     def _node_sort_key(cls, physical_node):
@@ -2336,50 +2352,36 @@ class Scheduler(pymesos.Scheduler):
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
-        # Check that we don't depend on some non-ready task outside the set.
-        remaining = set(node for node in nodes if node.state == TaskState.NOT_READY)
-        for src, trg in graph.out_edges_iter(remaining):
-            if trg not in remaining and trg.state == TaskState.NOT_READY:
+        # Check that we don't depend on some non-ready task outside the set, while also
+        # building a graph of strong dependencies.
+        remaining = [node for node in nodes if node.state == TaskState.NOT_READY]
+        remaining_set = set(remaining)
+        strong_graph = networkx.DiGraph()
+        strong_graph.add_nodes_from(remaining)
+        for src, trg, data in graph.out_edges_iter(remaining, data=True):
+            if trg in remaining_set:
+                if data.get('order') == 'strong':
+                    strong_graph.add_edge(src, trg)
+            elif trg.state == TaskState.NOT_READY:
                 raise DependencyError('{} depends on {} but it is neither ready not scheduled'.format(
                     src.name, trg.name))
-        groups = deque()
-        while remaining:
-            # nodes that have a (possibly indirect) strong dependency on a non-ready task
-            blocked = set()
-            for src, trg, order in graph.out_edges_iter(remaining, data='order'):
-                if order == 'strong' and trg.state == TaskState.NOT_READY:
-                    blocked.add(src)
-                    for ancestor in networkx.ancestors(graph, src):
-                        blocked.add(ancestor)
-            group = remaining - blocked
-            if not group:
-                raise CycleError('strong cyclic dependency in graph')
-            groups.append(list(group))
-            for node in groups[-1]:
-                node.state = TaskState.STARTING
-            remaining = blocked
+        if not networkx.is_directed_acyclic_graph(strong_graph):
+            raise CycleError('cycle between strong dependencies')
 
-        while groups:
-            # Filter out nodes that have asynchronously changed state. This
-            # is particularly necessary so that we don't try to revive
-            # offers after close().
-            group_nodes = [node for node in groups[0] if node.state == TaskState.STARTING]
-            if group_nodes:
-                pending = _LaunchGroup(graph, group_nodes, resolver, self._loop)
-                # TODO: check if any dependencies have died, and if so, bail out?
-                try:
-                    yield From(self._launch_group(pending))
-                except Exception:
-                    logger.debug('Exception in launching group', exc_info=True)
-                    # Could be either an InsufficientResourcesError from
-                    # the yield or a CancelledError if this function was
-                    # cancelled.
-                    while groups:
-                        for node in groups.popleft():
-                            if node.state == TaskState.STARTING:
-                                node.set_state(TaskState.NOT_READY)
-                    raise
-            groups.popleft()
+        for node in remaining:
+            node.state = TaskState.STARTING
+        pending = _LaunchGroup(graph, remaining, resolver, self._loop)
+        try:
+            yield From(self._launch_group(pending))
+        except Exception:
+            logger.debug('Exception in launching group', exc_info=True)
+            # Could be either an InsufficientResourcesError from
+            # the yield or a CancelledError if this function was
+            # cancelled.
+            for node in remaining:
+                if node.state == TaskState.STARTING:
+                    node.set_state(TaskState.NOT_READY)
+            raise
 
     @trollius.coroutine
     def kill(self, graph, nodes=None):
