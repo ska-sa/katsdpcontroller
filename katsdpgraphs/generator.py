@@ -448,6 +448,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         # For backwards compatibility with old versions of filewriter
         'l0_spectral_spead': str(endpoint)
     })
+    g.add_edge(filewriter, ingest, order='strong')  # Attributes passed via telstate
 
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):
