@@ -439,10 +439,15 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda task, resolver: {
         'file_base': '/var/kat/data',
+        'l0_interface': task.interfaces['sdp_10g'].name,
+        # For backwards compatibility with old versions of filewriter
         'l0_spectral_interface': task.interfaces['sdp_10g'].name
     })
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
-        'l0_spectral_spead': str(endpoint)})
+        'l0_spead': str(endpoint),
+        # For backwards compatibility with old versions of filewriter
+        'l0_spectral_spead': str(endpoint)
+    })
 
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):

@@ -414,7 +414,9 @@ class TestSDPController(unittest.TestCase):
             'file_base': '/var/kat/data',
             'port': 20000,
             'l0_spectral_spead': mock.ANY,
-            'l0_spectral_interface': 'em1'
+            'l0_spead': mock.ANY,
+            'l0_spectral_interface': 'em1',
+            'l0_interface': 'em1'
         }, immutable=True)
 
         # Verify the state of the subarray
