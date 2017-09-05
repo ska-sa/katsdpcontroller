@@ -1958,10 +1958,6 @@ class Scheduler(pymesos.Scheduler):
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
-        if http_url is None:
-            self.http_url = urllib.parse.urlunsplit(('http', socket.getfqdn(), '/', '', ''))
-        else:
-            self.http_url = http_url
 
         app = tornado.web.Application(
             [(r'/tasks/([^/]+)/wait_start', WaitStartHandler, dict(scheduler=self, loop=loop))],
@@ -1972,6 +1968,12 @@ class Scheduler(pymesos.Scheduler):
         if not http_port:
             http_port = sockets[0].getsockname()[1]
         self.http_port = http_port
+        if http_url is None:
+            netloc = '{}:{}'.format(socket.getfqdn(), http_port)
+            self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
+        else:
+            self.http_url = http_url
+        logger.info('Internal HTTP server at %s', self.http_url)
 
     @classmethod
     def _node_sort_key(cls, physical_node):
