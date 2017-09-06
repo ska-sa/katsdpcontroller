@@ -236,7 +236,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     # add a fixed amount since in very small arrays the 20% might not cover
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
-    timeplot.ports = ['spead_port', 'html_port', 'data_port']
+    timeplot.ports = ['spead_port', 'html_port']
     timeplot.wait_ports = ['html_port']
     timeplot.volumes = [config_vol]
     timeplot.gui_urls = [{
@@ -385,6 +385,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         cal.cpus = 8 * l0_vis / n32_32
         if not develop:
             cal.cpus = max(cal.cpus, 2)
+        workers = max(1, int(math.ceil(cal.cpus - 1)))
         # Main memory consumer is buffers for
         # - visibilities (complex64)
         # - flags (uint8)
@@ -395,10 +396,13 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         slots = 30 * 60 * dump_rate
         slot_size = l0_vis * 13
         buffer_size = slots * slot_size
-        # At present the calibration process is very wasteful of memory, so allow for
-        # a factor of two overhead, plus a few slots worth (for time-averaged data),
-        # plus some fixed amount for general use.
-        cal.mem = (buffer_size * 2 + slot_size * 16) / 1024**2 + 256
+        # Processing operations come in a few flavours:
+        # - average over time: need O(1) extra slots
+        # - average over frequency: needs far less memory than the above
+        # - compute flags per baseline: works on 16 baselines at a time.
+        # In each case we arbitrarily allow for 4 times the result, per worker.
+        extra = max(workers / slots, min(16 * workers, l0_baselines) / l0_baselines) * 4
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 256
         cal.volumes = [data_vol]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = l0_bandwidth
@@ -408,7 +412,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
             'cbf_channels': cbf_channels,
             'cbf_pols': cbf_pols,
             'buffer_maxsize': buffer_size,
-            'workers': max(1, int(math.ceil(cal.cpus - 1))),
+            'workers': workers,
             'l0_spectral_interface': task.interfaces['sdp_10g'].name
         })
         g.add_edge(cal, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
@@ -435,10 +439,16 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     filewriter.transitions = capture_transitions
     g.add_node(filewriter, config=lambda task, resolver: {
         'file_base': '/var/kat/data',
+        'l0_interface': task.interfaces['sdp_10g'].name,
+        # For backwards compatibility with old versions of filewriter
         'l0_spectral_interface': task.interfaces['sdp_10g'].name
     })
     g.add_edge(filewriter, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
-        'l0_spectral_spead': str(endpoint)})
+        'l0_spead': str(endpoint),
+        # For backwards compatibility with old versions of filewriter
+        'l0_spectral_spead': str(endpoint)
+    })
+    g.add_edge(filewriter, ingest, order='strong')  # Attributes passed via telstate
 
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):
