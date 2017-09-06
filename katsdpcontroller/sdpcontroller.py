@@ -156,9 +156,13 @@ class MulticastIPResources(object):
         self._hosts = network.hosts()
         self._allocated = {}      # Contains strings, not IPv4Address objects
 
-    def _new_ip(self, host_class):
+    def _new_ip(self, host_class, n_groups):
         try:
             ip = str(next(self._hosts))
+            if n_groups > 1:
+                for i in range(1, n_groups):
+                    next(self._hosts)
+                ip = '{}+{}'.format(ip, n_groups - 1)
             self._allocated[host_class] = ip
             return ip
         except StopIteration:
@@ -167,10 +171,10 @@ class MulticastIPResources(object):
     def set_ip(self, host_class, ip):
         self._allocated[host_class] = ip
 
-    def get_ip(self, host_class):
+    def get_ip(self, host_class, n_groups):
         ip = self._allocated.get(host_class)
         if ip is None:
-            ip = self._new_ip(host_class)
+            ip = self._new_ip(host_class, n_groups)
         return ip
 
 
@@ -210,10 +214,10 @@ class SDPResources(object):
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
         mr.set_ip(self._qualify(group), ip)
 
-    def get_multicast_ip(self, group):
-        """For the specified host class, return an available / assigned multicast address"""
+    def get_multicast_ip(self, group, n_groups):
+        """For the specified host class, return available / assigned multicast addresses"""
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        return mr.get_ip(self._qualify(group))
+        return mr.get_ip(self._qualify(group), n_groups)
 
     def set_port(self, group, port):
         """override system-generated port with the specified one"""
@@ -275,7 +279,8 @@ class SDPGraph(object):
     @trollius.coroutine
     def launch_telstate(self, additional_config={}, base_params={}):
         """Make sure the telstate node is launched"""
-        boot = [node for node in self.physical_graph if not isinstance(node, scheduler.PhysicalTask)]
+        boot = [node for node in self.physical_graph
+                if not isinstance(node, (scheduler.PhysicalTask, tasks.PhysicalGroup))]
         boot.append(self.telstate_node)
         yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
 
