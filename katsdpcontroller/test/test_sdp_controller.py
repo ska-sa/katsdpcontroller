@@ -284,6 +284,7 @@ class TestSDPController(unittest.TestCase):
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill
+        self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         self.thread = TestServerThread(
             '127.0.0.1', 0, self.sched, simulate=True,

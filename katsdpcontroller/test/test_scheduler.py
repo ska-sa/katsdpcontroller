@@ -16,6 +16,9 @@ import ipaddress
 import six
 import requests
 import trollius
+import tornado.platform.asyncio
+import tornado.httpclient
+from katsdpservices.asyncio import to_tornado_future
 import networkx
 import pymesos
 from addict import Dict
@@ -49,11 +52,11 @@ def run_with_self_event_loop(func):
 
     @six.wraps(func)
     def wrapper(self, *args, **kwargs):
-        self.loop.run_until_complete(func(self, *args, **kwargs))
+        self.ioloop.run_sync(lambda: to_tornado_future(func(self, *args, **kwargs), loop=self.loop))
     return wrapper
 
 
-def defer(depth=20, loop=None):
+def defer(depth=50, loop=None):
     """Returns a future which is signalled in the very near future.
 
     Specifically, it tries to wait until the event loop is otherwise idle. It
@@ -229,6 +232,7 @@ class TestPollPorts(object):
             yield From(trollius.sleep(6, loop=loop))
              # wait for retry loop (currently 5s)
             assert_true(future.done())
+
 
 class TestTaskState(object):
     """Tests that TaskState ordering works as expected"""
@@ -1093,7 +1097,6 @@ class TestScheduler(object):
         self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator)
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
-        self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator)
         node0 = scheduler.LogicalTask('node0')
         node0.cpus = 1.0
         node0.command = ['hello', '--port={ports[port]}']
@@ -1114,6 +1117,8 @@ class TestScheduler(object):
         node1.cores = ['core0', 'core1']
         node2 = scheduler.LogicalExternal('node2')
         node2.wait_ports = []
+        # The reverse ordering is an artifact of the sorting done in _launch_group
+        self.task_ids = ['test-00000001', 'test-00000000', None]
         self.logical_graph = networkx.MultiDiGraph()
         self.logical_graph.add_nodes_from([node0, node1, node2])
         self.logical_graph.add_edge(node1, node0, port='port', order='strong')
@@ -1136,10 +1141,13 @@ class TestScheduler(object):
                  'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
             self.numa_attr
         ]
-        self.loop = trollius.new_event_loop()
+        self.ioloop = tornado.platform.asyncio.AsyncIOLoop()
+        self.loop = self.ioloop.asyncio_loop
         try:
             self._make_physical()
-            self.sched = scheduler.Scheduler(self.loop)
+            self.sched = scheduler.Scheduler(self.loop, self.ioloop, 0, 'http://scheduler/')
+            self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
+                                               self.sched.http_url)
             self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
                                                spec_set=True, instance=True)
             self.sched.set_driver(self.driver)
@@ -1170,14 +1178,14 @@ class TestScheduler(object):
 
     @run_with_self_event_loop
     def test_launch_cycle(self):
-        """Launch raises CycleError if there is a cycle with a strong edge in the graph"""
+        """Launch raises CycleError if there is a cycle of strong edges"""
         nodes = [scheduler.LogicalExternal('node{}'.format(i)) for i in range(4)]
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
         logical_graph.add_edge(nodes[1], nodes[0], order='strong')
         logical_graph.add_edge(nodes[1], nodes[2], order='strong')
-        logical_graph.add_edge(nodes[2], nodes[3])
-        logical_graph.add_edge(nodes[3], nodes[1])
+        logical_graph.add_edge(nodes[2], nodes[3], order='strong')
+        logical_graph.add_edge(nodes[3], nodes[1], order='strong')
         physical_graph = scheduler.instantiate(logical_graph, self.loop)
         with assert_raises(scheduler.CycleError):
             yield From(self.sched.launch(physical_graph, self.resolver))
@@ -1224,9 +1232,10 @@ class TestScheduler(object):
             'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
             'cores': [(0, 8)]
         }, 1, [self.numa_attr])
+
         expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
-        expected_taskinfo0.task_id.value = 'test-00000000'
+        expected_taskinfo0.task_id.value = self.task_ids[0]
         expected_taskinfo0.agent_id.value = 'agentid0'
         expected_taskinfo0.command.shell = False
         expected_taskinfo0.command.value = 'hello'
@@ -1264,12 +1273,17 @@ class TestScheduler(object):
         expected_taskinfo0.discovery.ports.ports = [Dict(number=30000, name='port', protocol='tcp')]
         expected_taskinfo1 = Dict()
         expected_taskinfo1.name = 'node1'
-        expected_taskinfo1.task_id.value = 'test-00000001'
+        expected_taskinfo1.task_id.value = self.task_ids[1]
         expected_taskinfo1.agent_id.value = 'agentid1'
         expected_taskinfo1.command.shell = False
-        expected_taskinfo1.command.value = 'test'
+        uri = Dict()
+        uri.executable = True
+        uri.value = 'http://scheduler/static/delay_run.sh'
+        expected_taskinfo1.command.uris = [uri]
+        expected_taskinfo1.command.value = '/mnt/mesos/sandbox/delay_run.sh'
         expected_taskinfo1.command.arguments = [
-            '--host=agenthost1', '--remote=agenthost0:30000',
+            'http://scheduler/tasks/{}/wait_start'.format(self.task_ids[1]),
+            'test', '--host=agenthost1', '--remote=agenthost0:30000',
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
@@ -1291,16 +1305,19 @@ class TestScheduler(object):
         assert_equal([mock.call.reviveOffers()], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
-        # Nothing should happen
+        # Nothing should happen, because we don't yet have enough resources.
         self.sched.resourceOffers(self.driver, [offer1])
         yield From(defer(loop=self.loop))
         assert_equal([], self.driver.mock_calls)
-        self.driver.reset_mock()
-        # Provide offer suitable for launching node0. At this point nodes 0 and 2
-        # should launch. The offers are suppressed while we wait for node 0 to come
-        # up.
+        for node in self.nodes:
+            assert_equal(TaskState.STARTING, node.state)
+            assert_false(node.ready_event.is_set())
+            assert_false(node.dead_event.is_set())
+        # Provide offer suitable for launching node0. At this point all nodes
+        # should launch.
         self.sched.resourceOffers(self.driver, [offer0])
         yield From(defer(loop=self.loop))
+
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
         assert_equal('agentid0', self.nodes[0].agent_id)
@@ -1308,19 +1325,43 @@ class TestScheduler(object):
         assert_equal({}, self.nodes[0].cores)
         assert_is_none(self.nodes[0].status)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
+
+        assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
+        assert_equal('agentid1', self.nodes[1].agent_id)
+        assert_equal(TaskState.STARTED, self.nodes[1].state)
+
         assert_equal(TaskState.READY, self.nodes[2].state)
         assert_equal(AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
-            mock.call.launchTasks([offer1.id], []),
+            mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers()
         ]), self.driver.mock_calls)
         self.driver.reset_mock()
+
+        # Tell scheduler that node1 is now running. It should go to RUNNING
+        # but not READY, because node0 isn't ready yet.
+        status = self._status_update(self.task_ids[1], 'TASK_RUNNING')
+        yield From(defer(loop=self.loop))
+        assert_equal(TaskState.RUNNING, self.nodes[1].state)
+        assert_equal(status, self.nodes[1].status)
+        assert_equal([mock.call.acknowledgeStatusUpdate(status)],
+                     self.driver.mock_calls)
+        self.driver.reset_mock()
+
+        # A real node1 would issue an HTTP request back to the scheduler. Fake
+        # it instead, to check the timing.
+        client = tornado.httpclient.AsyncHTTPClient(io_loop=self.ioloop)
+        response = client.fetch('http://localhost:{}/tasks/{}/wait_start'.format(
+                                self.sched.http_port, self.task_ids[1]))
+        yield From(defer(loop=self.loop))
+        assert_false(response.done())
+
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = trollius.Future(self.loop)
             poll_ports.return_value = poll_future
-            status = self._status_update('test-00000000', 'TASK_RUNNING')
+            status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
             yield From(defer(loop=self.loop))
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
             assert_equal(status, self.nodes[0].status)
@@ -1328,40 +1369,25 @@ class TestScheduler(object):
                          self.driver.mock_calls)
             self.driver.reset_mock()
             poll_ports.assert_called_once_with('agenthost0', [30000], self.loop)
-        # Make poll_ports ready. Node 0 should now become ready, and offers
-        # should be revived to get resources for node 1.
+
+        # Make poll_ports ready. Node 0 should now become ready, which will
+        # make node 1 ready too.
         poll_future.set_result(None)
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.READY, self.nodes[0].state)
-        self.driver.reset_mock()
-        # Now provide an offer suitable for node 1.
-        self.sched.resourceOffers(self.driver, [offer1])
-        yield From(defer(loop=self.loop))
-        assert_equal(TaskState.STARTED, self.nodes[1].state)
-        assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
-        assert_equal('agentid1', self.nodes[1].agent_id)
-        assert_equal([
-            mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
-            mock.call.suppressOffers()], self.driver.mock_calls)
-        self.driver.reset_mock()
-        # Finally, tell the scheduler that node 1 is running. There are no
-        # ports, so it will go straight to READY.
-        status = self._status_update('test-00000001', 'TASK_RUNNING')
-        yield From(defer(loop=self.loop))
+        assert_true(response.done())
+        response = response.result()
+        assert_equal(200, response.code)
         assert_equal(TaskState.READY, self.nodes[1].state)
-        assert_equal(status, self.nodes[1].status)
-        assert_equal([mock.call.acknowledgeStatusUpdate(status)],
-                     self.driver.mock_calls)
-        self.driver.reset_mock()
         assert_true(launch.done())
         yield From(launch)
 
     @trollius.coroutine
-    def _transition_node0(self, target_state, nodes=None, ports=None, task_id='test-00000000'):
+    def _transition_node0(self, target_state, nodes=None, ports=None):
         """Launch the graph and proceed until node0 is in `target_state`.
 
         This is intended to be used in test setup. It is assumed that this
-        functionality is more fully tested test_launch_serial, so minimal
+        functionality is more fully tested in test_launch_serial, so minimal
         assertions are made.
 
         Returns
@@ -1374,15 +1400,21 @@ class TestScheduler(object):
         assert target_state > TaskState.NOT_READY
         if ports is None:
             ports = [(30000, 31000)]
-        offer = self._make_offer({
-            'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
-            'katsdpcontroller.gpu.0.compute': 0.25,
-            'katsdpcontroller.gpu.0.mem': 2048.0,
-            'katsdpcontroller.gpu.1.compute': 1.0,
-            'katsdpcontroller.gpu.1.mem': 1024.0,
-            'katsdpcontroller.interface.0.bandwidth_in': 1e9,
-            'katsdpcontroller.interface.0.bandwidth_out': 1e9
-        }, 0, self.agent0_attrs)
+        offers = [
+            self._make_offer({
+                'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
+                'katsdpcontroller.gpu.0.compute': 0.25,
+                'katsdpcontroller.gpu.0.mem': 2048.0,
+                'katsdpcontroller.gpu.1.compute': 1.0,
+                'katsdpcontroller.gpu.1.mem': 1024.0,
+                'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+                'katsdpcontroller.interface.0.bandwidth_out': 1e9
+            }, 0, self.agent0_attrs),
+            self._make_offer({
+                'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
+                'cores': [(0, 8)]
+            }, 1, [self.numa_attr])
+        ]
         launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                 loop=self.loop)
         kill = None
@@ -1392,9 +1424,10 @@ class TestScheduler(object):
             poll_future = trollius.Future(self.loop)
             poll_ports.return_value = poll_future
             if target_state > TaskState.STARTING:
-                self.sched.resourceOffers(self.driver, [offer])
+                self.sched.resourceOffers(self.driver, offers)
                 yield From(defer(loop=self.loop))
                 assert_equal(TaskState.STARTED, self.nodes[0].state)
+                task_id = self.nodes[0].taskinfo.task_id.value
                 if target_state > TaskState.STARTED:
                     self._status_update(task_id, 'TASK_RUNNING')
                     yield From(defer(loop=self.loop))
@@ -1424,7 +1457,7 @@ class TestScheduler(object):
             [_make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])])
         self.sched.resourceOffers(self.driver, [offer])
         yield From(defer(loop=self.loop))
-        self._status_update('test-00000001', 'TASK_RUNNING')
+        self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
         yield From(defer(loop=self.loop))
         assert_true(launch.done())  # Ensures the next line won't hang the test
         yield From(launch)
@@ -1438,31 +1471,26 @@ class TestScheduler(object):
         assert_equal(30000, self.nodes[0].ports['port'])
         # Build a new physical graph
         self._make_physical()
-        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports,
-                                          task_id='test-00000001'))
+        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
         assert_equal(30001, self.nodes[0].ports['port'])
         # Do it again, check that it cycles back to the start
         self._make_physical()
-        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports,
-                                          task_id='test-00000002'))
+        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
         assert_equal(30000, self.nodes[0].ports['port'])
 
     @trollius.coroutine
     def _test_launch_cancel(self, target_state):
         launch, kill = yield From(self._transition_node0(target_state))
-        assert_equal(TaskState.STARTING, self.nodes[1].state)
         assert_false(launch.done())
-        # Now cancel and check that node1 goes back to NOT_READY while
-        # the others retain their state.
+        # Now cancel and check that nodes go back to NOT_READY if they were
+        # in STARTED, otherwise keep their state.
         launch.cancel()
         yield From(defer(loop=self.loop))
-        assert_equal(target_state, self.nodes[0].state)
-        assert_equal(TaskState.NOT_READY, self.nodes[1].state)
-        assert_equal(TaskState.READY, self.nodes[2].state)
-        if target_state == TaskState.READY:
-            assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+        if target_state == TaskState.STARTING:
+            for node in self.nodes:
+                assert_equal(TaskState.NOT_READY, node.state)
         else:
-            assert_equal([], self.driver.mock_calls)
+            assert_equal(target_state, self.nodes[0].state)
 
     @run_with_self_event_loop
     def test_launch_cancel_wait_task(self):
@@ -1472,7 +1500,7 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_launch_cancel_wait_resource(self):
         """Test cancelling a launch while waiting for resources"""
-        yield From(self._test_launch_cancel(TaskState.READY))
+        yield From(self._test_launch_cancel(TaskState.STARTING))
 
     @run_with_self_event_loop
     def test_launch_resources_timeout(self):
@@ -1521,7 +1549,7 @@ class TestScheduler(object):
         yield From(defer(loop=self.loop))
         if state > TaskState.STARTING:
             assert_equal(TaskState.KILLED, self.nodes[0].state)
-            status = self._status_update('test-00000000', 'TASK_KILLED')
+            status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
             yield From(defer(loop=self.loop))
             assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
@@ -1557,7 +1585,7 @@ class TestScheduler(object):
     def _test_die_in_state(self, state):
         """Test a node dying on its own while it is in the given state"""
         launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
-        status = self._status_update('test-00000000', 'TASK_FINISHED')
+        status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         yield From(defer(loop=self.loop))
         assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
@@ -1594,7 +1622,7 @@ class TestScheduler(object):
         assert_equal(TaskState.READY, self.nodes[2].state)
         self.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
-        status = self._status_update('test-00000001', 'TASK_KILLED')
+        status = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         assert_equal(AnyOrderList([
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
@@ -1605,7 +1633,7 @@ class TestScheduler(object):
         assert_equal(TaskState.DEAD, self.nodes[2].state)
         assert_false(kill.done())
         # node0 now dies, to finish the cleanup
-        self._status_update('test-00000000', 'TASK_KILLED')
+        self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         yield From(defer(loop=self.loop))
         assert_equal(TaskState.DEAD, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
@@ -1623,9 +1651,9 @@ class TestScheduler(object):
         yield From(defer(loop=self.loop))
         close = trollius.async(self.sched.close(), loop=self.loop)
         yield From(defer(loop=self.loop))
-        status1 = self._status_update('test-00000001', 'TASK_KILLED')
+        status1 = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         yield From(defer(loop=self.loop))
-        status0 = self._status_update('test-00000000', 'TASK_KILLED')
+        status0 = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         # defer is insufficient here, because close() uses run_in_executor to
         # join the driver thread. Wait up to 5 seconds for that to happen.
         yield From(trollius.wait_for(close, 5, loop=self.loop))

@@ -10,7 +10,7 @@ setup (
     description = "Service providing control and monitoring services for the MeerKAT Science Data Processor",
     author = "Simon Ratcliffe",
     packages = find_packages(),
-    package_data={'': ['conf/*']},
+    package_data={'katsdpcontroller': ['static/*']},
     include_package_data = True,
     scripts = [
         "scripts/sdp_master_controller.py",
@@ -45,5 +45,6 @@ setup (
         'test': tests_require
     },
     use_katversion = True,
-    license='MIT'
+    license='MIT',
+    zip_safe=False
 )

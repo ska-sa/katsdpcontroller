@@ -85,6 +85,10 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--simulate', dest='simulate', default=False,
                         action='store_true',
                         help='run controller in simulation mode suitable for lab testing (default: %(default)s)')
+    parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
+                        help='port that slaves communicate with (default=%(default)s)')
+    parser.add_argument('--http-url', type=str, metavar='URL',
+                        help='URL at which slaves connect to the HTTP port (default=auto)')
     parser.add_argument('--develop', default=False,
                         action='store_true',
                         help='relax constraints to allow testing on different hardware (default: %(default)s)')
@@ -179,7 +183,7 @@ if __name__ == "__main__":
     if opts.interface_mode:
         sched = None
     else:
-        sched = scheduler.Scheduler(loop)
+        sched = scheduler.Scheduler(loop, ioloop, opts.http_port, opts.http_url)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, opts.master, use_addict=True,
             implicit_acknowledgements=False)
