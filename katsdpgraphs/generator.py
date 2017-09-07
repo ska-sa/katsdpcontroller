@@ -155,6 +155,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     telstate.disk = telstate.mem
     telstate.image = 'redis'
     telstate.ports = ['telstate']
+    telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
     telstate.physical_factory = TelstateTask
     g.add_node(telstate)
 
