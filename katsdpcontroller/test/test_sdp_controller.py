@@ -747,26 +747,26 @@ class TestSDPResources(unittest.TestCase):
 
     def test_multicast_ip(self):
         # Get assigned IP's from known host classes
-        self.assertEqual('225.100.1.1', self.r1.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead'))
+        self.assertEqual('225.100.1.1+3', self.r1.get_multicast_ip('l0_spectral_spead', 4))
+        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead', 1))
         # Get assigned IP from unknown host class
-        self.assertEqual('225.100.0.1', self.r1.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip('unknown', 4))
         # Check that assignments are remembered
-        self.assertEqual('225.100.1.1', self.r1.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead'))
-        self.assertEqual('225.100.0.1', self.r1.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.1.1+3', self.r1.get_multicast_ip('l0_spectral_spead', 1))
+        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead', 1))
+        self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip('unknown', 1))
         # Override an assignment, check that this is remembered
         self.r1.set_multicast_ip('l0_spectral_spead', '239.1.2.3')
-        self.assertEqual('239.1.2.3', self.r1.get_multicast_ip('l0_spectral_spead'))
+        self.assertEqual('239.1.2.3', self.r1.get_multicast_ip('l0_spectral_spead', 1))
         # Assign a value not previously seen
         self.r1.set_multicast_ip('CAM_spead', '239.4.5.6')
-        self.assertEqual('239.4.5.6', self.r1.get_multicast_ip('CAM_spead'))
+        self.assertEqual('239.4.5.6', self.r1.get_multicast_ip('CAM_spead', 1))
 
         # Now change to a different subarray-product, check that
         # new values are used.
-        self.assertEqual('225.100.1.2', self.r2.get_multicast_ip('l0_spectral_spead'))
-        self.assertEqual('225.100.0.2', self.r2.get_multicast_ip('CAM_spead'))
-        self.assertEqual('225.100.0.3', self.r2.get_multicast_ip('unknown'))
+        self.assertEqual('225.100.1.5+3', self.r2.get_multicast_ip('l0_spectral_spead', 4))
+        self.assertEqual('225.100.0.5', self.r2.get_multicast_ip('CAM_spead', 1))
+        self.assertEqual('225.100.0.6', self.r2.get_multicast_ip('unknown', 1))
 
     def test_url(self):
         self.assertEqual(None, self.r1.get_url('CAMDATA'))
