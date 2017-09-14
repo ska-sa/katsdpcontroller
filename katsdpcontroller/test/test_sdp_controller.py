@@ -49,11 +49,11 @@ EXPECTED_SENSOR_LIST = (
 
 EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
     (SUBARRAY_PRODUCT1 + '.' + s[0],) + s[1:] for s in (
-        ('sdp.bf_ingest.1.port', '', '', 'address'),
-        ('sdp.filewriter.1.filename', '', '', 'string'),
-        ('sdp.ingest.1.capture-active', '', '', 'boolean'),
-        ('sdp.timeplot.1.gui-urls', '', '', 'string'),
-        ('sdp.timeplot.1.html_port', '', '', 'address')
+        ('bf_ingest.beamformer.1.port', '', '', 'address'),
+        ('filewriter.sdp_l0.1.filename', '', '', 'string'),
+        ('ingest.sdp_l0.1.capture-active', '', '', 'boolean'),
+        ('timeplot.sdp_l0.1.gui-urls', '', '', 'string'),
+        ('timeplot.sdp_l0.1.html_port', '', '', 'address')
 ))
 
 EXPECTED_REQUEST_LIST = [
@@ -382,32 +382,25 @@ class TestSDPController(unittest.TestCase):
     def test_data_product_configure_success(self):
         """A ?data-product-configure request must wait for the tasks to come up, then indicate success."""
         self.client.assert_request_succeeds(
-            'set-config-override', SUBARRAY_PRODUCT4, '{"override_key": ["override_value"]}')
+            'set-config-override', SUBARRAY_PRODUCT4,
+            '{"config": {"develop": true}}')
         self._configure_subarray(SUBARRAY_PRODUCT4)
-        self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
+        self.telstate_class.assert_called_once_with('host.telstate:20000')
 
         # Verify the telescope state
         ts = self.telstate_class.return_value
         # Print the list so assist in debugging if the assert fails
         print(ts.add.call_args_list)
         # This is not a complete list of calls. It check that each category of stuff
-        # is covered: overrides, additional_config, base_params, per node, per edge
-        ts.add.assert_any_call('config', {
-            'antenna_mask': ANTENNAS,
-            'subarray_numeric_id': 4,
-            'sd_int_time': 1.0 / 2.1,
-            'output_int_time': 1.0 / 2.1,
-            'stream_sources': STREAMS,
-            'override_key': ['override_value']
-        }, immutable=True)
-        ts.add.assert_any_call('sdp_cbf_channels', 4096, immutable=True)
-        ts.add.assert_any_call('config.sdp.filewriter.1', {
+        # is covered: base_params, per node, per edge
+        ts.add.assert_any_call('subarray_product_id', SUBARRAY_PRODUCT4, immutable=True)
+        ts.add.assert_any_call('cal_bp_solint', 10, immutable=True)
+        ts.add.assert_any_call('config.filewriter.sdp_l0', {
             'file_base': '/var/kat/data',
             'port': 20000,
-            'l0_spectral_spead': mock.ANY,
             'l0_spead': mock.ANY,
-            'l0_spectral_interface': 'em1',
-            'l0_interface': 'em1'
+            'l0_interface': 'em1',
+            'l0_name': 'sdp_l0'
         }, immutable=True)
 
         # Verify the state of the subarray
@@ -419,7 +412,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_data_product_configure_telstate_fail(self):
         """If the telstate task fails, data-product-configure must fail"""
-        self.fail_launches['sdp.telstate'] = 'TASK_FAILED'
+        self.fail_launches['telstate'] = 'TASK_FAILED'
         self.telstate_class.side_effect = redis.ConnectionError
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
@@ -430,9 +423,9 @@ class TestSDPController(unittest.TestCase):
 
     def test_data_product_configure_task_fail(self):
         """If a task other than telstate fails, data-product-configure must fail"""
-        self.fail_launches['sdp.ingest.1'] = 'TASK_FAILED'
+        self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
-        self.telstate_class.assert_called_once_with('host.sdp.telstate:20000')
+        self.telstate_class.assert_called_once_with('host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY)
         # Must not have created the subarray product internally
@@ -484,7 +477,8 @@ class TestSDPController(unittest.TestCase):
         self.sched.kill.reset_mock()
 
         self.client.assert_request_succeeds(
-            'set-config-override', SUBARRAY_PRODUCT1, '{"override_key": ["override_value2"]}')
+            'set-config-override', SUBARRAY_PRODUCT1,
+            '{"inputs": {"i0_baseline_correlation_products": {"simulate": true}}}')
         self.client.assert_request_succeeds('data-product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
         self.sched.kill.assert_called_with(mock.ANY)
@@ -492,13 +486,13 @@ class TestSDPController(unittest.TestCase):
         # Check that the override took effect
         ts = self.telstate_class.return_value
         print(ts.add.call_args_list)
-        ts.add.assert_any_call('config', {
+        ts.add.assert_any_call('config.sim.i0_baseline_correlation_products', {
             'antenna_mask': ANTENNAS,
-            'subarray_numeric_id': 1,
-            'sd_int_time': 1.0 / 2.1,
-            'output_int_time': 1.0 / 2.1,
-            'stream_sources': STREAMS,
-            'override_key': ['override_value2']
+            'cbf_ibv': True,
+            'cbf_channels': 4096,
+            'cbf_interface': 'em1',
+            'port': 20000,
+            'cbf_spead': '127.0.0.1:9000'
         }, immutable=True)
 
     def test_data_product_reconfigure_configure_busy(self):
@@ -511,7 +505,7 @@ class TestSDPController(unittest.TestCase):
     def test_data_product_reconfigure_configure_fails(self):
         """Tests data-product-reconfigure when the new graph fails"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
-        self.fail_launches['sdp.telstate'] = 'TASK_FAILED'
+        self.fail_launches['telstate'] = 'TASK_FAILED'
         self.client.assert_request_fails('data-product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the subarray was deconfigured cleanly
         self.assertIsNone(self.controller._conf_future)
@@ -538,7 +532,7 @@ class TestSDPController(unittest.TestCase):
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-start', 'i0.baseline-correlation-products'))
+            mock.call(Message.request('capture-start', 'i0_baseline_correlation_products'))
         ])
 
     def test_capture_init_failed_req(self):
@@ -572,7 +566,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         for node in sa.graph.physical_graph:
-            if node.logical_node.name == 'sdp.ingest.1':
+            if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
                 node.status = Dict(state='TASK_FAILED')
                 break
@@ -652,15 +646,15 @@ class TestSDPController(unittest.TestCase):
         # Need to compare just arguments, because the message objects have message IDs
         informs = [tuple(msg.arguments) for msg in informs]
         self.assertEqual(AnyOrderList([
-            (SUBARRAY_PRODUCT1, 'host.sdp.telstate:20000'),
-            (SUBARRAY_PRODUCT2, 'host.sdp.telstate:20000')
+            (SUBARRAY_PRODUCT1, 'host.telstate:20000'),
+            (SUBARRAY_PRODUCT2, 'host.telstate:20000')
         ]), informs)
 
     def test_telstate_endpoint_one(self):
         """Test telstate-endpoint with a subarray_product_id argument"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         reply, informs = self.client.blocking_request(Message.request('telstate-endpoint', SUBARRAY_PRODUCT1))
-        self.assertEqual(reply.arguments, ['ok', 'host.sdp.telstate:20000'])
+        self.assertEqual(reply.arguments, ['ok', 'host.telstate:20000'])
 
     def test_telstate_endpoint_not_found(self):
         """Test telstate-endpoint with a subarray_product_id that does not exist"""
@@ -762,10 +756,3 @@ class TestSDPResources(unittest.TestCase):
         self.assertEqual('225.100.1.5+3', self.r2.get_multicast_ip('l0_spectral_spead', 4))
         self.assertEqual('225.100.0.5', self.r2.get_multicast_ip('CAM_spead', 1))
         self.assertEqual('225.100.0.6', self.r2.get_multicast_ip('unknown', 1))
-
-    def test_url(self):
-        self.assertEqual(None, self.r1.get_url('CAMDATA'))
-        self.r1.set_url('CAMDATA', 'ws://host.domain:port/path')
-        self.assertEqual('ws://host.domain:port/path', self.r1.get_url('CAMDATA'))
-        # URLs should be unique per subarray-product
-        self.assertIsNone(self.r2.get_url('CAMDATA'))

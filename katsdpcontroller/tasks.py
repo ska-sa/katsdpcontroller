@@ -67,6 +67,17 @@ _add_prometheus_sensor('report_last_time',
 _add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
 
 
+class State(scheduler.OrderedEnum):
+    """State of a subarray. This does not really belong in this module, but it
+    is placed here to avoid a circular dependency between :mod:`generator` and
+    :mod:`sdpcontroller`.
+    """
+    UNCONFIGURED = 0
+    IDLE = 1
+    INITIALISED = 2
+    DONE = 3
+
+
 def to_trollius_future(tornado_future, loop=None):
     """Variant of :func:`tornado.platform.asyncio.to_asyncio_future` that
     allows a custom event loop to be specified."""
