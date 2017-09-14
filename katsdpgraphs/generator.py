@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
-    def __init__(self, name, n_groups=1):
+    def __init__(self, name, n_addresses=None):
         super(LogicalMulticast, self).__init__(name)
         self.physical_factory = PhysicalMulticast
-        self.n_groups = n_groups
+        self.n_addresses = n_addresses
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
@@ -29,7 +29,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
     def resolve(self, resolver, graph, loop):
         yield From(super(PhysicalMulticast, self).resolve(resolver, graph, loop))
         self.host = resolver.resources.get_multicast_ip(self.logical_node.name,
-                                                        self.logical_node.n_groups)
+                                                        self.logical_node.n_addresses)
         self.ports = {'spead': resolver.resources.get_port(self.logical_node.name)}
 
 
@@ -150,7 +150,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     g.add_node(l0_spectral)
     l0_continuum = LogicalMulticast('l0_continuum', n_ingest)
     g.add_node(l0_continuum)
-    l1_spectral = LogicalMulticast('l1_spectral')
+    l1_spectral = LogicalMulticast('l1_spectral', 1)
     g.add_node(l1_spectral)
 
     # telstate node
