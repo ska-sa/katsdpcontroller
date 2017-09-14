@@ -176,7 +176,7 @@ class MulticastIPResources(object):
         ip = self._allocated.get(host_class)
         if ip is None:
             if n_addresses is None:
-                raise RuntimeError('n_addresses is None and group {} not exist'.format(host_class))
+                raise RuntimeError('n_addresses is None and group {} does not exist'.format(host_class))
             ip = self._new_ip(host_class, n_addresses)
         elif n_addresses is not None:
             n_existing = len(endpoint_list_parser(None)(ip))
