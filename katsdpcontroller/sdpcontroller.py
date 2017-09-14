@@ -54,7 +54,6 @@ class State(scheduler.OrderedEnum):
     INITIALISED = 2
     DONE = 3
 
-TASK_STATES = {0:'init',1:'running',2:'killed'}
 STREAMS_SCHEMA = {
     'type': 'object',
     'additionalProperties': {
@@ -340,53 +339,6 @@ class SDPGraph(object):
         return True
 
 
-class SDPTask(object):
-    """SDP Task wrapper.
-
-    Represents an executing task within the scope of the SDP.
-
-    Eventually this management will be fairly intelligent and will
-    deploy and provision tasks automatically based on the available
-    resources within the SDP.
-
-    It is expected that SDPTask will be subclassed for specific types
-    of execution.
-
-    This is a very thin wrapper for now to support RTS.
-    """
-    def __init__(self, task_id, task_cmd, host):
-        self.task_id = task_id
-        self.task_cmd = task_cmd
-        self._task_cmd_array = shlex.split(task_cmd)
-        self.host = host
-        self._task = None
-        self.state = TASK_STATES[0]
-        self.start_time = None
-
-    def launch(self):
-        try:
-            self._task = subprocess.Popen(self._task_cmd_array)
-            self.state = TASK_STATES[1]
-            self.start_time = time.time()
-            logger.info("Launched task ({0}): {1}".format(self.task_id, self.task_cmd))
-        except OSError, err:
-            retmsg = "Failed to launch SDP task. {0}".format(err)
-            logger.error(retmsg)
-            return ('fail',retmsg)
-        return ('ok',"New task launched successfully")
-
-    def halt(self):
-        self._task.terminate()
-        self.state = TASK_STATES[2]
-        return ('ok',"Task terminated successfully.")
-
-    def uptime(self):
-        if self.start_time is None: return 0
-        else: return time.time() - self.start_time
-
-    def __repr__(self):
-        return "SDP Task: status => {0}, uptime => {1:.2f}, cmd => {2}".format(self.state, self.uptime(), self._task_cmd_array[0])
-
 class SDPSubarrayProductBase(object):
     """SDP Subarray Product Base
 
@@ -410,7 +362,6 @@ class SDPSubarrayProductBase(object):
         self._async_busy = False
          # protection used to avoid external state changes during async activity on this subarray
         self.state = State.IDLE
-        self.psb_id = 0
          # TODO: Most of the above parameters are now deprecated - remove
         self.simulate = simulate
         self.develop = develop
@@ -421,20 +372,6 @@ class SDPSubarrayProductBase(object):
            self.data_rate = (n_beams * dump_rate * n_channels * 32) / 1e9
            # TODO: this should be *added* to the visibility output rate
         logger.info("Created: {0}".format(self.__repr__()))
-
-    def set_psb(self, psb_id):
-        if self.psb_id > 0:
-            return ('fail', 'An existing processing schedule block is already active. Please stop the subarray product before adding a new one.')
-        if self.state < State.INITIALISED:
-            return ('fail','The subarray product specified has not yet been inited. Please do this before init post processing.')
-        self.psb_id = psb_id
-        time.sleep(2) # simulation
-        return ('ok','Post processing has been initialised')
-
-    def get_psb(self, psb_id):
-        if self.psb_id > 0:
-            return ('ok','Post processing id %i is configured and active on this subarray product' % self.psb_id)
-        return ('fail','No post processing block is active on this subarray product')
 
     @trollius.coroutine
     def _set_state(self, state):
@@ -504,7 +441,7 @@ class SDPSubarrayProductBase(object):
             self.state = state
 
     def __repr__(self):
-        return "Subarray product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s, PSB ID: %i)" % (self.subarray_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state.name, self.psb_id)
+        return "Subarray product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s)" % (self.subarray_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state.name)
 
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
@@ -795,69 +732,6 @@ class SDPControllerServer(AsyncDeviceServer):
         # only registers in .run(...) after the reply
         # has been sent.
         return req.make_reply("ok")
-
-    @time_request
-    @request(Str())
-    @return_reply(Str())
-    def request_task_terminate(self, req, task_id):
-        """Terminate the specified SDP task.
-
-        Request Arguments
-        -----------------
-        task_id : string
-            The ID of the task to terminate
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
-        """
-        if not task_id in self.tasks: return ('fail',"Specified task ID ({0}) is unknown".format(task_id))
-        task = self.tasks.pop(task_id)
-        rcode, rval = task.halt()
-        return (rcode, rval)
-
-
-    @time_request
-    @request(Str(optional=True),Str(optional=True),Str(optional=True))
-    @return_reply(Str())
-    def request_task_launch(self, req, task_id, task_cmd, host):
-        """Launch a task within the SDP.
-        This command allows tasks to be listed and launched within the SDP. Specification of a desired host
-        is optional, as in general the master controller will decide on the most appropriate location on
-        which to run the task.
-
-        Request Arguments
-        -----------------
-        task_id : string
-            The unique ID used to identify this task.
-            If empty then all managed tasks are listed.
-        task_cmd : string
-            The complete command to run including fully qualified executable and arguments
-            If empty then the status of the specified id is shown
-        host : string
-            Force the controller to launch the task on the specified host
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
-        host,port : If appropriate, the host/port pair to connect to the task via katcp is returned.
-        """
-        if not task_id:
-            for (task_id, task) in self.tasks.iteritems():
-                req.inform(task_id, task)
-            return ('ok', "{0}".format(len(self.tasks)))
-
-        if task_id in self.tasks:
-            if not task_cmd: return ('ok',"{0}: {1}".format(task_id, self.tasks[task_id]))
-            else: return ('fail',"A task with the specified ID is already running and cannot be reconfigured.")
-
-        if task_id not in self.tasks and not task_cmd: return ('fail',"You must specify a command line to run for a new task")
-
-        self.tasks[task_id] = SDPTask(task_id, task_cmd, host)
-        rcode, rval = self.tasks[task_id].launch()
-        if rcode == 'fail': self.tasks.pop(task_id)
-         # launch failed, discard task
-        return (rcode, rval)
 
     @trollius.coroutine
     def deregister_product(self,subarray_product_id,force=False):
@@ -1341,36 +1215,6 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
         return ('ok',self.subarray_products[subarray_product_id].state.name)
-
-    @time_request
-    @request(Str(),Int(optional=True))
-    @return_reply(Str())
-    def request_postproc_init(self, req, subarray_product_id, psb_id):
-        """Returns the status of the specified subarray product.
-
-        Request Arguments
-        -----------------
-        subarray_product_id : string
-            The id of the subarray product that will provide data to the post processor
-        psb_id : integer
-            The id of the post processing schedule block to retrieve
-            from the observations database that containts the configuration
-            to apply to the post processor.
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
-        """
-        if subarray_product_id not in self.subarray_products:
-            return ('fail','No existing subarray product configuration with this id found')
-        sa = self.subarray_products[subarray_product_id]
-
-        if not psb_id >= 0:
-            rcode, rval = sa.get_psb(psb_id)
-            return (rcode, rval)
-
-        rcode, rval = sa.set_psb(psb_id)
-        return (rcode, rval)
 
     @async_request
     @request(Str())
