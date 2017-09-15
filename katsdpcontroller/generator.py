@@ -26,7 +26,7 @@ CAM2TELSTATE_TYPE_MAP = {
 }
 CAPTURE_TRANSITIONS = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
-IMAGES = {
+IMAGES = frozenset([
     'beamform',
     'katcbfsim',
     'katsdpcal',
@@ -35,7 +35,7 @@ IMAGES = {
     'katsdpingest_titanx',
     'katsdpfilewriter',
     'redis'
-}
+])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Volume serviced by katsdptransfer to transfer results to the archive
