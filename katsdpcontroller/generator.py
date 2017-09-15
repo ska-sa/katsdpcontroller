@@ -684,13 +684,20 @@ def build_logical_graph(config):
         cam2telstate = _make_cam2telstate(g, config, inputs['cam.http'][0])
         sensor_producers.append(cam2telstate)
 
+    # Find all input streams that are actually used. At the moment only the
+    # direct dependencies are gathered because those are the only ones that
+    # can have the simulate flag anyway.
+    inputs_used = set()
+    for output in six.itervalues(config['outputs']):
+        inputs_used.update(output['src_streams'])
+
     # Simulators for input streams where requested
     for name in inputs.get('cbf.baseline_correlation_products', []):
-        if config['inputs'][name].get('simulate'):
+        if name in inputs_used and config['inputs'][name].get('simulate'):
             sensor_producers.append(
                 _make_baseline_correlation_products_simulator(g, config, name))
     for name in inputs.get('cbf.tied_array_channelised_voltage', []):
-        if config['inputs'][name].get('simulate'):
+        if name in inputs_used and config['inputs'][name].get('simulate'):
             raise NotImplementedError(
                     'Simulator not yet implemented for cbf.tied_array_channelised_voltage')
 
