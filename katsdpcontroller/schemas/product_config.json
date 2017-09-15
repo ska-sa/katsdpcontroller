@@ -1,0 +1,271 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "definitions": {
+        "stream_name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_]+$"
+        },
+        "stream_type": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.]+$"
+        },
+        "src_streams": {
+            "type": "array",
+            "items": {"$ref": "#/definitions/stream_name"}
+        },
+        "nonneg_integer": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "positive_integer": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "singleton": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1
+        },
+        "pair": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2
+        },
+        "channel_range": {
+            "$ref": "#/definitions/pair",
+            "items": {"$ref": "#/definitions/nonneg_integer"}
+        }
+    },
+    "type": "object",
+    "required": ["inputs", "outputs", "config", "version"],
+    "additionalProperties": false,
+    "properties": {
+        "inputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "patternProperties": {
+                "^[A-Za-z0-9_]+$": {
+                    "type": "object",
+                    "required": ["type", "url"],
+                    "properties": {
+                        "type": {"$ref": "#/definitions/stream_type"},
+                        "url": {"type": "string", "format": "uri"},
+                        "src_streams": {"$ref": "#/definitions/src_streams"}
+                    },
+                    "allOf": [
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["cbf.antenna_channelised_voltage"]},
+                                        "antennas": {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "items": {"type": "string"}
+                                        },
+                                        "n_chans": {"$ref": "#/definitions/nonneg_integer"},
+                                        "n_samples_between_spectra": {
+                                            "$ref": "#/definitions/nonneg_integer"
+                                        },
+                                        "n_pols": {"type": "integer", "enum": [1, 2]},
+                                        "adc_sample_rate": {"type": "number"},
+                                        "bandwidth": {"type": "number"},
+                                        "instrument_dev_name": {"type": "string"}
+                                    },
+                                    "required": [
+                                        "antennas",
+                                        "n_chans", "n_samples_between_spectra", "n_pols",
+                                        "adc_sample_rate", "bandwidth", "instrument_dev_name"
+                                    ]
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["cbf.antenna_channelised_voltage"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["cbf.baseline_correlation_products"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "int_time": {"type": "number"},
+                                        "n_bls": {"$ref": "#/definitions/nonneg_integer"},
+                                        "xeng_out_bits_per_sample": {"enum": [32]},
+                                        "n_chans_per_substream": {
+                                            "$ref": "#/definitions/nonneg_integer"
+                                        },
+                                        "instrument_dev_name": {"type": "string"},
+                                        "simulate": {"type": "boolean", "default": false}
+                                    },
+                                    "required": [
+                                        "src_streams", "int_time", "n_bls",
+                                        "xeng_out_bits_per_sample", "n_chans_per_substream",
+                                        "instrument_dev_name"
+                                    ]
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["cbf.baseline_correlation_products"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["cbf.tied_array_channelised_voltage"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "beng_out_bits_per_sample": {"enum": [8]},
+                                        "spectra_per_heap": {
+                                            "$ref": "#/definitions/nonneg_integer"
+                                        },
+                                        "n_chans_per_substream": {
+                                            "$ref": "#/definitions/nonneg_integer"
+                                        },
+                                        "instrument_dev_name": {"type": "string"},
+                                        "simulate": {"type": "boolean", "default": false}
+                                    },
+                                    "required": [
+                                        "src_streams", "beng_out_bits_per_sample",
+                                        "spectra_per_heap",
+                                        "n_chans_per_substream", "instrument_dev_name"
+                                    ]
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["cbf.tied_array_channelised_voltage"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["cam.http"]}
+                                    }
+                                },
+                                {
+                                    "properties": {
+                                        "type": {"not": {"enum": ["cam.http"]}}
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "outputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "patternProperties": {
+                "^[A-Za-z0-9_]+$": {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                        "type": {
+                            "enum": ["sdp.l0", "sdp.beamformer", "sdp.beamformer_engineering"]
+                        },
+                        "src_streams": {"$ref": "#/definitions/src_streams"}
+                    },
+                    "additionalProperties": true,
+                    "allOf": [
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.l0"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "output_int_time": {"type": "number"},
+                                        "output_channels": {"$ref": "#/definitions/channel_range"},
+                                        "continuum_factor": {
+                                            "$ref": "#/definitions/positive_integer"
+                                        },
+                                        "excise": {"type": "boolean", "default": true},
+                                        "cal_params": {"type": "object"}
+                                    },
+                                    "required": [
+                                        "src_streams", "output_int_time", "continuum_factor"
+                                    ],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.l0"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.beamformer_engineering"]},
+                                        "src_streams": {"$ref": "#/definitions/pair"},
+                                        "output_channels": {"$ref": "#/definitions/channel_range"},
+                                        "store": {
+                                            "enum": ["ram", "ssd"]
+                                        }
+                                    },
+                                    "required": ["src_streams", "store"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.beamformer_engineering"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.beamformer"]},
+                                        "src_streams": {"$ref": "#/definitions/pair"}
+                                    },
+                                    "required": ["src_streams"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.beamformer"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "config": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "develop": {"type": "boolean", "default": false},
+                "wrapper": {"type": "string", "format": "uri"}
+            }
+        },
+        "version": {
+            "type": "string",
+            "enum": ["1.0"]
+        }
+    }
+}
