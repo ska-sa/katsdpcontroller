@@ -49,8 +49,7 @@ def override(config, overrides):
 def validate(config):
     """Validates a config dict.
 
-    This both validates it against the schema and some semantic contraints.
-
+    This validates it against both the schema and some semantic contraints.
 
     Raises
     ------
