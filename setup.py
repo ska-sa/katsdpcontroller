@@ -24,6 +24,7 @@ setup (
         'decorator',
         'docker',
         'jsonschema',
+        'rfc3987',           # Used by jsonschema to validate URLs
         'networkx',
         'netifaces',
         'enum34',
