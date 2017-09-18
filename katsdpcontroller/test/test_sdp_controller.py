@@ -735,21 +735,6 @@ class TestSDPResources(unittest.TestCase):
         self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead', 1))
         # Get assigned IP from unknown host class
         self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip('unknown', 4))
-        # Check that assignments are remembered
-        self.assertEqual('225.100.1.1+3', self.r1.get_multicast_ip('l0_spectral_spead', 4))
-        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead', 1))
-        self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip('unknown', 4))
-        # Override an assignment, check that this is remembered
-        self.r1.set_multicast_ip('l0_spectral_spead', '239.1.2.3')
-        self.assertEqual('239.1.2.3', self.r1.get_multicast_ip('l0_spectral_spead', 1))
-        # Assign a value not previously seen
-        self.r1.set_multicast_ip('CAM_spead', '239.4.5.6')
-        self.assertEqual('239.4.5.6', self.r1.get_multicast_ip('CAM_spead', 1))
-
-        # Ask for a new group without specifying count must fail
-        self.assertRaises(RuntimeError, self.r1.get_multicast_ip, 'undefined')
-        # Ask for an existing one, with mismatched size
-        self.assertRaises(RuntimeError, self.r1.get_multicast_ip, 'unknown', 3)
 
         # Now change to a different subarray-product, check that
         # new values are used.

@@ -52,6 +52,8 @@ class LogicalMulticast(scheduler.LogicalExternal):
         self.physical_factory = PhysicalMulticast
         self.n_addresses = n_addresses
         self.endpoint = endpoint
+        if (self.n_addresses is None) == (self.endpoint is None):
+            raise ValueError('Exactly one of n_addresses and endpoint must be specified')
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
@@ -64,7 +66,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         else:
             self.host = resolver.resources.get_multicast_ip(self.logical_node.name,
                                                             self.logical_node.n_addresses)
-            self.ports = {'spead': resolver.resources.get_port(self.logical_node.name)}
+            self.ports = {'spead': resolver.resources.get_port()}
 
 
 class TelstateTask(SDPPhysicalTaskBase):

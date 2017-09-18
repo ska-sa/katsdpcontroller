@@ -130,43 +130,24 @@ class GraphResolver(object):
 
 class MulticastIPResources(object):
     def __init__(self, network):
-        self._network = network
         self._hosts = network.hosts()
-        self._allocated = {}      # Contains strings, not IPv4Address objects
 
-    def _new_ip(self, host_class, n_addresses):
+    def get_ip(self, n_addresses):
         try:
             ip = str(next(self._hosts))
             if n_addresses > 1:
                 for i in range(1, n_addresses):
                     next(self._hosts)
                 ip = '{}+{}'.format(ip, n_addresses - 1)
-            self._allocated[host_class] = ip
             return ip
         except StopIteration:
             raise RuntimeError('Multicast IP addresses exhausted')
 
-    def set_ip(self, host_class, ip):
-        self._allocated[host_class] = ip
-
-    def get_ip(self, host_class, n_addresses=None):
-        ip = self._allocated.get(host_class)
-        if ip is None:
-            if n_addresses is None:
-                raise RuntimeError('n_addresses is None and group {} does not exist'.format(host_class))
-            ip = self._new_ip(host_class, n_addresses)
-        elif n_addresses is not None:
-            n_existing = len(endpoint_list_parser(None)(ip))
-            if n_existing != n_addresses:
-                raise RuntimeError('group {} is currently {} but {} addresses expected'.format(
-                    host_class, ip, n_addresses))
-        return ip
-
 
 class SDPCommonResources(object):
     """Assigns multicast groups and ports across all subarrays."""
-    def __init__(self, safe_multicast_cidr, safe_port_range=range(30000,31000)):
-        self.safe_ports = safe_port_range
+    def __init__(self, safe_multicast_cidr, safe_port_range=xrange(30000,31000)):
+        self._ports = iter(safe_port_range)
         logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
         multicast_subnets = ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24)
         self.multicast_resources = {}
@@ -176,12 +157,12 @@ class SDPCommonResources(object):
                      'l1_spectral_spead',
                      'l1_continuum_spead']:
             self.multicast_resources[name] = MulticastIPResources(next(multicast_subnets))
-        self.allocated_ports = {}
 
-    def new_port(self, group):
-        port = self.safe_ports.pop()
-        self.allocated_ports[group] = port
-        return port
+    def get_port(self):
+        try:
+            return next(self._ports)
+        except StopIteration:
+            raise RuntimeError('Available ports exhausted')
 
 
 class SDPResources(object):
@@ -193,31 +174,14 @@ class SDPResources(object):
     def _qualify(self, name):
         return "{}_{}".format(self.subarray_product_id, name)
 
-    def set_multicast_ip(self, group, ip):
-        """"Override system-generated multicast IP address with specified one"""
+    def get_multicast_ip(self, group, n_addresses):
+        """Assign multicast addresses for a group."""
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        mr.set_ip(self._qualify(group), ip)
+        return mr.get_ip(n_addresses)
 
-    def get_multicast_ip(self, group, n_addresses=None):
-        """For the specified host class, return available / assigned multicast addresses.
-
-        If `n_addresses` is specified, the group must either not yet exist, or
-        must exist with that many addresses. If it is not specified, the group
-        must already exist.
-        """
-        mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        return mr.get_ip(self._qualify(group), n_addresses)
-
-    def set_port(self, group, port):
-        """override system-generated port with the specified one"""
-        self._common.allocated_ports[self._qualify(group)] = port
-
-    def get_port(self, group):
+    def get_port(self):
         """Return an assigned port for a multicast group"""
-        group = self._qualify(group)
-        port = self._common.allocated_ports.get(group, None)
-        if port is None: port = self._common.new_port(group)
-        return port
+        return self._common.get_port()
 
 
 class SDPGraph(object):
