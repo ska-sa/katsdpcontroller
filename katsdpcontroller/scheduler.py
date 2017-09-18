@@ -1676,6 +1676,8 @@ class PhysicalTask(PhysicalNode):
             Resolver to allocate resources like task IDs
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
+        loop : :class:`trollius.BaseEventLoop`
+            Current event loop
         """
         yield From(super(PhysicalTask, self).resolve(resolver, graph, loop))
         for src, trg, attr in graph.out_edges_iter([self], data=True):

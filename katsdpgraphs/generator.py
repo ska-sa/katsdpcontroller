@@ -9,7 +9,8 @@ from trollius import From
 import six
 import addict
 from katsdpcontroller import scheduler
-from katsdpcontroller.tasks import SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase
+from katsdpcontroller.tasks import (
+    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup)
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
@@ -17,16 +18,18 @@ logger = logging.getLogger(__name__)
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
-    def __init__(self, name):
+    def __init__(self, name, n_addresses=None):
         super(LogicalMulticast, self).__init__(name)
         self.physical_factory = PhysicalMulticast
+        self.n_addresses = n_addresses
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
     @trollius.coroutine
     def resolve(self, resolver, graph, loop):
         yield From(super(PhysicalMulticast, self).resolve(resolver, graph, loop))
-        self.host = resolver.resources.get_multicast_ip(self.logical_node.name)
+        self.host = resolver.resources.get_multicast_ip(self.logical_node.name,
+                                                        self.logical_node.n_addresses)
         self.ports = {'spead': resolver.resources.get_port(self.logical_node.name)}
 
 
@@ -72,6 +75,8 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     # a lambda captures only the final value of the variable, not the value it
     # had in the loop iteration where the lambda occurred.
 
+    # number of ingest nodes
+    n_ingest = 4
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
     cbf_antennas = 4
     while cbf_antennas < l0_antennas:
@@ -141,11 +146,11 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
             beam = 'i0.tied-array-channelised-voltage.{}'.format(suffix)
             beams_spead[beam] = LogicalMulticast(beam)
             g.add_node(beams_spead[beam])
-    l0_spectral = LogicalMulticast('l0_spectral')
+    l0_spectral = LogicalMulticast('l0_spectral', n_ingest)
     g.add_node(l0_spectral)
-    l0_continuum = LogicalMulticast('l0_continuum')
+    l0_continuum = LogicalMulticast('l0_continuum', n_ingest)
     g.add_node(l0_continuum)
-    l1_spectral = LogicalMulticast('l1_spectral')
+    l1_spectral = LogicalMulticast('l1_spectral', 1)
     g.add_node(l1_spectral)
 
     # telstate node
@@ -252,8 +257,24 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
 
-    # ingest nodes
-    n_ingest = 1
+    # Virtual ingest node which depends on the real ingest nodes, so that other
+    # services can declare dependencies on ingest rather than individual nodes.
+    ingest_group = LogicalGroup('sdp.ingest')
+    g.add_node(ingest_group, config=lambda task, resolver: {
+        'continuum_factor': l0_cont_factor,
+        'sd_continuum_factor': cbf_channels // 256,
+        'sd_spead_rate': 3e9 / n_ingest,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
+        'cbf_ibv': not develop,
+        'servers': n_ingest
+    })
+    g.add_edge(ingest_group, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
+        'cbf_spead': str(endpoint)})
+    g.add_edge(ingest_group, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
+        'l0_spectral_spead': str(endpoint)})
+    g.add_edge(ingest_group, l0_continuum, port='spead', config=lambda task, resolver, endpoint: {
+        'l0_continuum_spead': str(endpoint)})
+    g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
+        'sdisp_spead': str(endpoint)})
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('sdp.ingest.{}'.format(i))
         ingest.physical_factory = IngestTask
@@ -263,13 +284,13 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         ingest.gpus = [scheduler.GPURequest()]
         if not develop:
             ingest.gpus[-1].name = INGEST_GPU_NAME
-        # Scale for a full GPU for 32 antennas, 32K channels
-        scale = cbf_vis / n32_32
+        # Scale for a full GPU for 32 antennas, 32K channels on one node
+        scale = cbf_vis / n32_32 / n_ingest
         ingest.gpus[0].compute = scale
         # Refer to https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
         # We use slightly higher multipliers to be safe, as well as
         # conservatively using cbf_* instead of l0_*.
-        ingest.gpus[0].mem = (70 * cbf_vis + 168 * cbf_channels) // 1024**2 + 128
+        ingest.gpus[0].mem = (70 * cbf_vis + 168 * cbf_channels) / n_ingest / 1024**2 + 128
         # Provide 4 CPUs for 32 antennas, 32K channels (the number in a NUMA
         # node of an ingest machine). It might not actually need this much.
         # Cores are reserved solely to get NUMA affinity with the NIC.
@@ -277,31 +298,26 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         ingest.cores = [None] * ingest.cpus
         # Scale factor of 32 may be overly conservative: actual usage may be
         # only half this. This also leaves headroom for buffering L0 output.
-        ingest.mem = 32 * cbf_vis_mb + 4096
+        ingest.mem = 32 * cbf_vis_mb / n_ingest + 4096
         ingest.transitions = capture_transitions
         ingest.interfaces = [
             scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
             scheduler.InterfaceRequest('sdp_10g')]
-        ingest.interfaces[0].bandwidth_in = cbf_vis_bandwidth
-        ingest.interfaces[1].bandwidth_out = l0_bandwidth + l0_cont_bandwidth
-        g.add_node(ingest, config=lambda task, resolver: {
-            'continuum_factor': l0_cont_factor,
-            'sd_continuum_factor': cbf_channels // 256,
-            'cbf_channels': cbf_channels,
-            'sd_spead_rate': 3e9,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
+        ingest.interfaces[0].bandwidth_in = cbf_vis_bandwidth / n_ingest
+        ingest.interfaces[1].bandwidth_out = (l0_bandwidth + l0_cont_bandwidth) / n_ingest
+        g.add_node(ingest, config=lambda task, resolver, server_id=i: {
             'cbf_interface': task.interfaces['cbf'].name,
-            'cbf_ibv': not develop,
             'l0_spectral_interface': task.interfaces['sdp_10g'].name,
-            'l0_continuum_interface': task.interfaces['sdp_10g'].name
+            'l0_continuum_interface': task.interfaces['sdp_10g'].name,
+            'server_id': server_id
         })
-        g.add_edge(ingest, bcp_spead, port='spead', config=lambda task, resolver, endpoint: {
-            'cbf_spead': str(endpoint)})
-        g.add_edge(ingest, l0_spectral, port='spead', config=lambda task, resolver, endpoint: {
-            'l0_spectral_spead': str(endpoint)})
-        g.add_edge(ingest, l0_continuum, port='spead', config=lambda task, resolver, endpoint: {
-            'l0_continuum_spead': str(endpoint)})
-        g.add_edge(ingest, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
-            'sdisp_spead': str(endpoint)})
+        # Connect to ingest_group. We need a strong dependency of the group on
+        # the node, so that other nodes depending on the group indirectly wait
+        # for all nodes; the weak dependency is to prevent the nodes being
+        # started without also starting the group, which is necessary for
+        # config.
+        g.add_edge(ingest_group, ingest, order='strong')
+        g.add_edge(ingest, ingest_group)
 
     # TODO: this hard-codes L band - the ADC rate for other bands may be
     # different. It also hard-codes the bits-per-sample. The 1.05 is to account
@@ -420,7 +436,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
             'l0_spectral_spead': str(endpoint)})
         g.add_edge(cal, l1_spectral, port='spead', config=lambda task, resolver, endpoint: {
             'l1_spectral_spead': str(endpoint)})
-        g.add_edge(cal, ingest, order='strong')  # Attributes passed via telstate
+        g.add_edge(cal, ingest_group, order='strong')  # Attributes passed via telstate
 
     # filewriter node
     filewriter = SDPLogicalTask('sdp.filewriter.1')
@@ -449,7 +465,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         # For backwards compatibility with old versions of filewriter
         'l0_spectral_spead': str(endpoint)
     })
-    g.add_edge(filewriter, ingest, order='strong')  # Attributes passed via telstate
+    g.add_edge(filewriter, ingest_group, order='strong')  # Attributes passed via telstate
 
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):

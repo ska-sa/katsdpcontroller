@@ -178,7 +178,26 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._disconnect()
 
 
-class SDPPhysicalTask(SDPPhysicalTaskBase):
+class SDPConfigMixin(object):
+    """Mixin class that takes config information from the graph and sets it in telstate."""
+    @trollius.coroutine
+    def resolve(self, resolver, graph, loop):
+        yield From(super(SDPConfigMixin, self).resolve(resolver, graph, loop))
+        config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        for name, value in six.iteritems(self.ports):
+            config[name] = value
+        for src, trg, attr in graph.out_edges_iter(self, data=True):
+            endpoint = None
+            if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
+                port = attr['port']
+                endpoint = Endpoint(trg.host, trg.ports[port])
+            config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
+                self, resolver, endpoint))
+        logger.debug('Config for {}: {}'.format(self.name, config))
+        resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
+
+
+class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     """Augments the base :class:`~scheduler.PhysicalTask` to handle katcp and
     telstate.
 
@@ -258,22 +277,6 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
                     yield From(trollius.sleep(1.0, loop=self.loop))
 
     @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(SDPPhysicalTask, self).resolve(resolver, graph, loop))
-        config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
-        for name, value in six.iteritems(self.ports):
-            config[name] = value
-        for src, trg, attr in graph.out_edges_iter(self, data=True):
-            endpoint = None
-            if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
-                port = attr['port']
-                endpoint = Endpoint(trg.host, trg.ports[port])
-            config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
-                self, resolver, endpoint))
-        logger.debug('Config for {}: {}'.format(self.name, config))
-        resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
-
-    @trollius.coroutine
     def issue_req(self, req, args=[], **kwargs):
         """Issue a request to the katcp connection.
 
@@ -290,6 +293,22 @@ class SDPPhysicalTask(SDPPhysicalTaskBase):
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
             logger.warning(msg)
         raise Return((reply, informs))
+
+
+class LogicalGroup(scheduler.LogicalExternal):
+    """Dummy node that presents a set of related real nodes.
+
+    This allows the graph to contain a single edge dependency to this node
+    instead of one to each of the real nodes. It also allows for shared config
+    to be stored once rather than repeated.
+    """
+    def __init__(self, name):
+        super(LogicalGroup, self).__init__(name)
+        self.physical_factory = PhysicalGroup
+
+
+class PhysicalGroup(SDPConfigMixin, scheduler.PhysicalExternal):
+    pass
 
 
 class PoweroffLogicalTask(scheduler.LogicalTask):

@@ -32,6 +32,7 @@ from katcp.kattypes import request, return_reply, Str, Int, Float
 import katsdpgraphs.generator
 import katsdpcontroller
 from katsdpservices.asyncio import to_tornado_future
+from katsdptelstate.endpoint import endpoint_list_parser
 from . import scheduler
 
 try:
@@ -155,9 +156,13 @@ class MulticastIPResources(object):
         self._hosts = network.hosts()
         self._allocated = {}      # Contains strings, not IPv4Address objects
 
-    def _new_ip(self, host_class):
+    def _new_ip(self, host_class, n_addresses):
         try:
             ip = str(next(self._hosts))
+            if n_addresses > 1:
+                for i in range(1, n_addresses):
+                    next(self._hosts)
+                ip = '{}+{}'.format(ip, n_addresses - 1)
             self._allocated[host_class] = ip
             return ip
         except StopIteration:
@@ -166,10 +171,17 @@ class MulticastIPResources(object):
     def set_ip(self, host_class, ip):
         self._allocated[host_class] = ip
 
-    def get_ip(self, host_class):
+    def get_ip(self, host_class, n_addresses=None):
         ip = self._allocated.get(host_class)
         if ip is None:
-            ip = self._new_ip(host_class)
+            if n_addresses is None:
+                raise RuntimeError('n_addresses is None and group {} does not exist'.format(host_class))
+            ip = self._new_ip(host_class, n_addresses)
+        elif n_addresses is not None:
+            n_existing = len(endpoint_list_parser(None)(ip))
+            if n_existing != n_addresses:
+                raise RuntimeError('group {} is currently {} but {} addresses expected'.format(
+                    host_class, ip, n_addresses))
         return ip
 
 
@@ -209,10 +221,15 @@ class SDPResources(object):
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
         mr.set_ip(self._qualify(group), ip)
 
-    def get_multicast_ip(self, group):
-        """For the specified host class, return an available / assigned multicast address"""
+    def get_multicast_ip(self, group, n_addresses=None):
+        """For the specified host class, return available / assigned multicast addresses.
+
+        If `n_addresses` is specified, the group must either not yet exist, or
+        must exist with that many addresses. If it is not specified, the group
+        must already exist.
+        """
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        return mr.get_ip(self._qualify(group))
+        return mr.get_ip(self._qualify(group), n_addresses)
 
     def set_port(self, group, port):
         """override system-generated port with the specified one"""
@@ -274,7 +291,8 @@ class SDPGraph(object):
     @trollius.coroutine
     def launch_telstate(self, additional_config={}, base_params={}):
         """Make sure the telstate node is launched"""
-        boot = [node for node in self.physical_graph if not isinstance(node, scheduler.PhysicalTask)]
+        boot = [node for node in self.physical_graph
+                if not isinstance(node, (scheduler.PhysicalTask, tasks.PhysicalGroup))]
         boot.append(self.telstate_node)
         yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
 
