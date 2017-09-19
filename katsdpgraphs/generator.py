@@ -76,7 +76,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
     # had in the loop iteration where the lambda occurred.
 
     # number of ingest nodes
-    n_ingest = 4
+    n_ingest = 1
     # CBF only does power-of-two numbers of antennas, with 4 being the minimum
     cbf_antennas = 4
     while cbf_antennas < l0_antennas:
