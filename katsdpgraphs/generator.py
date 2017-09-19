@@ -275,6 +275,7 @@ def build_logical_graph(beamformer_mode, simulate, develop, wrapper,
         'l0_continuum_spead': str(endpoint)})
     g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
         'sdisp_spead': str(endpoint)})
+    g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('sdp.ingest.{}'.format(i))
         ingest.physical_factory = IngestTask
