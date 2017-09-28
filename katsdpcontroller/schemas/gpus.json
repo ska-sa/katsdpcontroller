@@ -1,0 +1,38 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "devices": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            },
+            "driver_version": {
+                "type": "string",
+                "minLength": 1
+            },
+            "name": {
+                "type": "string",
+                "minLength": 1
+            },
+            "compute_capability": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+                "minLength": 2,
+                "maxLength": 2
+            },
+            "device_attributes": {
+                "type": "object"
+            },
+            "numa_node": {
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        "required": ["devices", "driver_version", "name", "compute_capability", "device_attributes"]
+    }
+}

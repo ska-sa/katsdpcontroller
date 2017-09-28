@@ -82,10 +82,10 @@ no isolation of GPU memory.
 To use this support, the agent must be configured with attributes and
 resources. The attribute :code:`katsdpcontroller.gpus` must be a
 base64url-encoded JSON string, describing a list of GPUs, and conforming to
-:const:`GPUS_SCHEMA`. For the ith GPU in this list (counting from 0), there
-must be corresponding resources :samp:`katsdpcontroller.gpu.{i}.compute`
-(generally with capacity 1.0) and :samp:`katsdpcontroller.gpu.{i}.mem` (in
-MiB).
+:const:`katsdpcontroller.schemas.GPUS`. For the ith GPU in this list (counting
+from 0), there must be corresponding resources
+:samp:`katsdpcontroller.gpu.{i}.compute` (generally with capacity 1.0) and
+:samp:`katsdpcontroller.gpu.{i}.mem` (in MiB).
 
 The node must also provide nvidia-docker-plugin so that driver volumes can be
 loaded.
@@ -151,6 +151,8 @@ import tornado.httpserver
 from katsdptelstate.endpoint import Endpoint
 from katsdpservices.asyncio import to_tornado_future
 
+from . import schemas
+
 
 SCALAR_RESOURCES = ['cpus', 'mem', 'disk']
 GPU_SCALAR_RESOURCES = ['compute', 'mem']
@@ -163,110 +165,6 @@ TERMINAL_STATUSES = frozenset([
     'TASK_KILLED',
     'TASK_LOST',
     'TASK_ERROR'])
-NUMA_SCHEMA = {
-    'type': 'array',
-    'items': {
-        'type': 'array',
-        'items': {
-            'type': 'integer',
-            'minimum': 0,
-        },
-        'minItems': 1,
-        'uniqueItems': True
-    },
-    'minItems': 1,
-    'uniqueItems': True
-}
-INTERFACES_SCHEMA = {
-    'type': 'array',
-    'items': {
-        'type': 'object',
-        'properties': {
-            'name': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'network': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'ipv4_address': {
-                'type': 'string',
-                'format': 'ipv4'
-            },
-            'numa_node': {
-                'type': 'integer',
-                'minimum': 0
-            },
-            'infiniband_devices': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                    'minLength': 1
-                }
-            }
-        },
-        'required': ['name', 'network', 'ipv4_address']
-    }
-}
-VOLUMES_SCHEMA = {
-    'type': 'array',
-    'items': {
-        'type': 'object',
-        'properties': {
-            'name': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'host_path': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'numa_node': {
-                'type': 'integer',
-                'minimum': 0
-            }
-        },
-        'required': ['name', 'host_path']
-    }
-}
-GPUS_SCHEMA = {
-    'type': 'array',
-    'items': {
-        'type': 'object',
-        'properties': {
-            'devices': {
-                'type': 'array',
-                'items': {
-                    'type': 'string',
-                    'minLength': 1
-                }
-            },
-            'driver_version': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'name': {
-                'type': 'string',
-                'minLength': 1
-            },
-            'compute_capability': {
-                'type': 'array',
-                'items': {'type': 'integer', 'minimum': 0},
-                'minLength': 2,
-                'maxLength': 2
-            },
-            'device_attributes': {
-                'type': 'object'
-            },
-            'numa_node': {
-                'type': 'integer',
-                'minimum': 0
-            }
-        },
-        'required': ['devices', 'driver_version', 'name', 'compute_capability', 'device_attributes']
-    }
-}
 logger = logging.getLogger(__name__)
 
 
@@ -275,7 +173,7 @@ Volume = namedtuple('Volume', ['name', 'host_path', 'numa_node'])
 
 Volumes are defined by setting the Mesos attribute
 :code:`katsdpcontroller.volumes`, whose value is a JSON string that adheres
-to the schema in :const:`VOLUMES_SCHEMA`.
+to the schema in :const:`katsdpcontroller.schemas.VOLUMES`.
 
 Attributes
 ----------
@@ -1151,11 +1049,11 @@ class Agent(ResourceCollector):
             try:
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
-                    jsonschema.validate(value, INTERFACES_SCHEMA)
+                    schemas.INTERFACES.validate(value)
                     self.interfaces = [AgentInterface(item) for item in value]
                 elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
-                    jsonschema.validate(value, VOLUMES_SCHEMA)
+                    schemas.VOLUMES.validate(value)
                     volumes = []
                     for item in value:
                         volumes.append(Volume(
@@ -1165,11 +1063,11 @@ class Agent(ResourceCollector):
                     self.volumes = volumes
                 elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
-                    jsonschema.validate(value, GPUS_SCHEMA)
+                    schemas.GPUS.validate(value)
                     self.gpus = [AgentGPU(item) for item in value]
                 elif attribute.name == 'katsdpcontroller.numa' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
-                    jsonschema.validate(value, NUMA_SCHEMA)
+                    schemas.NUMA.validate(value)
                     self.numa = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value

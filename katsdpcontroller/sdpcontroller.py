@@ -29,41 +29,17 @@ from prometheus_client import Histogram
 
 from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply, Message
 from katcp.kattypes import request, return_reply, Str, Int, Float
-import katsdpgraphs.generator
 import katsdpcontroller
 from katsdpservices.asyncio import to_tornado_future
+import katsdptelstate
 from katsdptelstate.endpoint import endpoint_list_parser
-from . import scheduler
+from . import scheduler, tasks, product_config, generator
+from .tasks import State
 
-try:
-    import katsdptelstate
-except ImportError:
-    katsdptelstate = None
-     # katsdptelstate is not needed when running in interface only mode.
-     # when not running in this mode we check to make sure that
-     # katsdptelstate has been imported or we exit.
-else:
-    from . import tasks
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 
-class State(scheduler.OrderedEnum):
-    UNCONFIGURED = 0
-    IDLE = 1
-    INITIALISED = 2
-    DONE = 3
-
-STREAMS_SCHEMA = {
-    'type': 'object',
-    'additionalProperties': {
-        'type': 'object',
-        'additionalProperties': {
-            'type': 'string',
-            'minLength': 1
-        }
-    }
-}
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
@@ -101,6 +77,7 @@ class CallbackSensor(Sensor):
         self._busy_updating = False
         return (self._timestamp, self._status, self._value)
 
+
 class GraphResolver(object):
     """Provides graph name resolution services for use when presented with
        a subarray product id.
@@ -133,7 +110,8 @@ class GraphResolver(object):
         """
         try:
             base_graph_name = self._overrides[subarray_product_id]
-            logger.warning("Graph name specified by subarray_product_id ({}) has been overriden to {}".format(subarray_product_id, base_graph_name))
+            logger.warning("Graph name specified by subarray_product_id (%s) has been overridden "
+                           "to %s", subarray_product_id, base_graph_name)
              # if an override is set use this instead, but warn the user about this
         except KeyError:
             base_graph_name = subarray_product_id.split("_")[-1]
@@ -152,43 +130,24 @@ class GraphResolver(object):
 
 class MulticastIPResources(object):
     def __init__(self, network):
-        self._network = network
         self._hosts = network.hosts()
-        self._allocated = {}      # Contains strings, not IPv4Address objects
 
-    def _new_ip(self, host_class, n_addresses):
+    def get_ip(self, n_addresses):
         try:
             ip = str(next(self._hosts))
             if n_addresses > 1:
                 for i in range(1, n_addresses):
                     next(self._hosts)
                 ip = '{}+{}'.format(ip, n_addresses - 1)
-            self._allocated[host_class] = ip
             return ip
         except StopIteration:
             raise RuntimeError('Multicast IP addresses exhausted')
 
-    def set_ip(self, host_class, ip):
-        self._allocated[host_class] = ip
-
-    def get_ip(self, host_class, n_addresses=None):
-        ip = self._allocated.get(host_class)
-        if ip is None:
-            if n_addresses is None:
-                raise RuntimeError('n_addresses is None and group {} does not exist'.format(host_class))
-            ip = self._new_ip(host_class, n_addresses)
-        elif n_addresses is not None:
-            n_existing = len(endpoint_list_parser(None)(ip))
-            if n_existing != n_addresses:
-                raise RuntimeError('group {} is currently {} but {} addresses expected'.format(
-                    host_class, ip, n_addresses))
-        return ip
-
 
 class SDPCommonResources(object):
     """Assigns multicast groups and ports across all subarrays."""
-    def __init__(self, safe_multicast_cidr, safe_port_range=range(30000,31000)):
-        self.safe_ports = safe_port_range
+    def __init__(self, safe_multicast_cidr, safe_port_range=xrange(30000,31000)):
+        self._ports = iter(safe_port_range)
         logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
         multicast_subnets = ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24)
         self.multicast_resources = {}
@@ -198,12 +157,12 @@ class SDPCommonResources(object):
                      'l1_spectral_spead',
                      'l1_continuum_spead']:
             self.multicast_resources[name] = MulticastIPResources(next(multicast_subnets))
-        self.allocated_ports = {}
 
-    def new_port(self, group):
-        port = self.safe_ports.pop()
-        self.allocated_ports[group] = port
-        return port
+    def get_port(self):
+        try:
+            return next(self._ports)
+        except StopIteration:
+            raise RuntimeError('Available ports exhausted')
 
 
 class SDPResources(object):
@@ -211,42 +170,18 @@ class SDPResources(object):
     def __init__(self, common, subarray_product_id):
         self.subarray_product_id = subarray_product_id
         self._common = common
-        self._urls = {}
 
     def _qualify(self, name):
         return "{}_{}".format(self.subarray_product_id, name)
 
-    def set_multicast_ip(self, group, ip):
-        """"Override system-generated multicast IP address with specified one"""
+    def get_multicast_ip(self, group, n_addresses):
+        """Assign multicast addresses for a group."""
         mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        mr.set_ip(self._qualify(group), ip)
+        return mr.get_ip(n_addresses)
 
-    def get_multicast_ip(self, group, n_addresses=None):
-        """For the specified host class, return available / assigned multicast addresses.
-
-        If `n_addresses` is specified, the group must either not yet exist, or
-        must exist with that many addresses. If it is not specified, the group
-        must already exist.
-        """
-        mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        return mr.get_ip(self._qualify(group), n_addresses)
-
-    def set_port(self, group, port):
-        """override system-generated port with the specified one"""
-        self._common.allocated_ports[self._qualify(group)] = port
-
-    def get_port(self, group):
+    def get_port(self):
         """Return an assigned port for a multicast group"""
-        group = self._qualify(group)
-        port = self._common.allocated_ports.get(group, None)
-        if port is None: port = self._common.new_port(group)
-        return port
-
-    def get_url(self, service):
-        return self._urls.get(service)
-
-    def set_url(self, service, url):
-        self._urls[service] = url
+        return self._common.get_port()
 
 
 class SDPGraph(object):
@@ -260,21 +195,15 @@ class SDPGraph(object):
 
     """Wrapper around a physical graph used to instantiate
     a particular SDP product/capability/subarray."""
-    def __init__(self, sched, graph_name, n_antennas, dump_rate,
-                 simulate, develop, wrapper, resolver, subarray_product_id, loop,
-                 sdp_controller=None, telstate_name='sdp.telstate'):
+    def __init__(self, sched, config, resolver, subarray_product_id, loop,
+                 sdp_controller=None, telstate_name='telstate'):
         self.sched = sched
         self.resolver = resolver
         self.loop = loop
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
-        graph_kwargs = katsdpgraphs.generator.graph_parameters(graph_name)
-        graph_kwargs['l0_antennas'] = n_antennas
-        graph_kwargs['dump_rate'] = dump_rate
-        graph_kwargs['simulate'] = simulate
-        graph_kwargs['develop'] = develop
-        graph_kwargs['wrapper'] = wrapper
-        self.logical_graph = katsdpgraphs.generator.build_logical_graph(**graph_kwargs)
+        self.config = config
+        self.logical_graph = generator.build_logical_graph(config)
         # generate physical nodes
         mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
         self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
@@ -289,17 +218,18 @@ class SDPGraph(object):
         return json_graph.node_link_data(self.physical_graph)
 
     @trollius.coroutine
-    def launch_telstate(self, additional_config={}, base_params={}):
+    def launch_telstate(self):
         """Make sure the telstate node is launched"""
         boot = [node for node in self.physical_graph
                 if not isinstance(node, (scheduler.PhysicalTask, tasks.PhysicalGroup))]
         boot.append(self.telstate_node)
-        yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
+
+        base_params = self.physical_graph.graph.get(
+            'config', lambda resolver: {})(self.resolver)
+        base_params['subarray_product_id'] = self.subarray_product_id
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
-        graph_base_params = self.physical_graph.graph.get(
-            'config', lambda resolver: {})(self.resolver)
-        base_params.update(graph_base_params)
+        yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
          # encode metadata into the telescope state for use
          # in component configuration
          # connect to telstate store
@@ -308,9 +238,7 @@ class SDPGraph(object):
         self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         self.resolver.telstate = self.telstate
 
-        logger.debug("global config: %s", additional_config)
         logger.debug("base params: %s", base_params)
-        self.telstate.add('config', additional_config, immutable=True)
          # set the configuration
         for k,v in base_params.iteritems():
             self.telstate.add(k,v, immutable=True)
@@ -351,26 +279,13 @@ class SDPSubarrayProductBase(object):
     ** This can be used directly as a stubbed interface for use in standalone testing and validation.
     It conforms to the functional interface, but does not launch tasks or generate data **
     """
-    def __init__(self, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
-                 simulate, develop):
+    def __init__(self, subarray_product_id, graph):
         self.subarray_product_id = subarray_product_id
-        self.antennas = antennas
-        self.n_antennas = len(antennas.split(","))
-        self.n_channels = n_channels
-        self.dump_rate = dump_rate
-        self.n_beams = n_beams
         self._async_busy = False
          # protection used to avoid external state changes during async activity on this subarray
         self.state = State.IDLE
          # TODO: Most of the above parameters are now deprecated - remove
-        self.simulate = simulate
-        self.develop = develop
         self.graph = graph
-        if self.n_beams == 0:
-           self.data_rate = (((self.n_antennas*(self.n_antennas+1))/2) * 4 * dump_rate * n_channels * 64) / 1e9
-        else:
-           self.data_rate = (n_beams * dump_rate * n_channels * 32) / 1e9
-           # TODO: this should be *added* to the visibility output rate
         logger.info("Created: {0}".format(self.__repr__()))
 
     @trollius.coroutine
@@ -441,7 +356,7 @@ class SDPSubarrayProductBase(object):
             self.state = state
 
     def __repr__(self):
-        return "Subarray product %s: %s antennas, %i channels, %.2f dump_rate ==> %.2f Gibps (State: %s)" % (self.subarray_product_id, self.antennas, self.n_channels, self.dump_rate, self.data_rate, self.state.name)
+        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
@@ -475,12 +390,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 # Can happen either if node is not an SDPPhysicalTask or if
                 # it has no katcp connection
                 continue
-            try:
-                node.logical_node.name.index(node_type)
-                 # filter out node_type(s) we don't want
-                 # TODO: probably needs a regexp
-            except ValueError:
-                 # node name does not match requested node_type so ignore
+            # filter out node_type(s) we don't want
+            if (not node.logical_node.name.startswith(node_type + '.')
+                    and node.logical_node.name != node_type):
                 continue
             reply, informs = yield From(node.issue_req(req, args, **kwargs))
             if not reply.reply_ok():
@@ -513,22 +425,23 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _start(self):
         """Move to capturing state"""
-        stream = 'i0.baseline-correlation-products'
-        if self.simulate:
-            logger.info('SIMULATE: Configuring antennas in simulator')
+        sim_streams = [node.logical_node.name[4:] for node in self.graph.physical_graph
+                       if node.logical_node.name.startswith('sim.')]
+        if sim_streams:
+            logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
                 # Replace temporary fake antennas with ones configured by kattelmod
-                yield From(self._issue_req('configure-subarray-from-telstate', node_type='sdp.sim'))
+                yield From(self._issue_req('configure-subarray-from-telstate', node_type='sim'))
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
         yield From(self.exec_transitions(State.INITIALISED))
-        if self.simulate:
-            logger.info("SIMULATE: Issuing a capture-start to the simulator")
+        for stream in sim_streams:
+            logger.info("SIMULATE: Issuing a capture-start to sim.%s", stream)
             try:
                 yield From(self._issue_req(
-                    'capture-start', args=[stream], node_type='sdp.sim'))
+                    'capture-start', args=[stream], node_type='sim.' + stream))
             except Exception as error:
                 logger.error("SIMULATE: capture-start failed", exc_info=True)
                 raise FailReply(
@@ -539,10 +452,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """Stop existing capture session. This is used when changing to either
         State.DONE or State.UNCONFIGURED (the latter only happens when forced).
         """
-        if self.simulate:
-            logger.info("SIMULATE: Issuing a capture-stop to the simulator")
+        sim_streams = [node.logical_node.name[4:] for node in self.graph.physical_graph
+                       if node.logical_node.name.startswith('sim.')]
+        for stream in sim_streams:
+            logger.info("SIMULATE: Issuing a capture-stop to sim.%s", stream)
             yield From(self._issue_req(
-                'capture-stop', args=['i0.baseline-correlation-products'], node_type='sdp.sim', timeout=120))
+                'capture-stop', args=[stream], node_type='sim.' + stream, timeout=120))
         yield From(self.exec_transitions(State.DONE))
          # called in an explicit fashion (above as well) so we can manage
          # execution order correctly when dealing with a simulator
@@ -765,7 +680,7 @@ class SDPControllerServer(AsyncDeviceServer):
         for subarray_product_id in self.subarray_products.keys():
             try:
                 yield From(self.deregister_product(subarray_product_id,force=True))
-            except Exception as e:
+            except Exception:
                 logger.warning("Failed to deconfigure product %s during master controller exit. "
                                "Forging ahead...", subarray_product_id, exc_info=True)
 
@@ -980,55 +895,45 @@ class SDPControllerServer(AsyncDeviceServer):
         antennas = antennas.replace(" ",",")
          # temp hack to make sure we have a comma delimited set of antennas
 
+         # all good so far, lets check arguments for validity
+        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
+            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
+
+        antennas = antennas.split(',')
+        graph_name = self.graph_resolver(subarray_product_id)
+        try:
+            streams_dict = json.loads(stream_sources)
+            config = product_config.convert(graph_name, streams_dict, antennas, dump_rate,
+                                            self.simulate, self.develop, self.wrapper)
+        except (ValueError, jsonschema.ValidationError) as error:
+             # something is definitely wrong with these
+            retmsg = "Failed to process source stream specifiers: {}".format(error)
+            logger.error(retmsg)
+            raise FailReply(retmsg)
+
+        if subarray_product_id in self.override_dicts:
+            odict = self.override_dicts.pop(subarray_product_id)
+             # this is a use-once set of overrides
+            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            config = product_config.override(config, odict)
+            # Re-validate, since the override may have broken it
+            try:
+                product_config.validate(config)
+            except (ValueError, jsonschema.ValidationError) as error:
+                retmsg = "Overrides make the config invalid: {}".format(error)
+                logger.error(retmsg)
+                raise FailReply(retmsg)
+
+        logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
+
         if subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
-            if dp.antennas == antennas and dp.n_channels == n_channels and dp.dump_rate == dump_rate and dp.n_beams == n_beams:
+            if dp.graph.config == config:
                 logger.info("Subarray product with this configuration already exists. Pass.")
                 return
             else:
                 raise FailReply("A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
 
-         # all good so far, lets check arguments for validity
-        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
-
-        streams = {}
-        urls = {}
-         # local dict to hold streams associated with the specified data product
-        try:
-            # Try to parse the supplied string as a JSON encoded dict of stream urls
-            streams_dict = json.loads(stream_sources)
-            jsonschema.validate(streams_dict, STREAMS_SCHEMA)
-            for (stream_type, stream_spec_dict) in streams_dict.iteritems():
-                # each stream type has a dict of stream specifiers of the form
-                # stream_name:stream_url
-                # e.g. {u'i0.baseline-correlation-products': u'spead://239.9.3.1+15:7148'}
-                # The fully qualified stream name is used directly, and in the future the leading term
-                # will be used to disambiguate multiple streams of the same type
-                for (stream_name, stream_url) in stream_spec_dict.iteritems():
-                    # Segregate into SPEAD streams and the rest (stored as URLs)
-                    try:
-                        stream_transport, stream_address = stream_url.split('://', 1)
-                    except ValueError:
-                        stream_transport, stream_address = 'spead', stream_url
-                    if stream_transport == 'spead':
-                        (host, port) = stream_address.split(":", 1)
-                        streams[stream_name] = (host, port)
-                        logger.info("Adding stream {} with endpoint ({},{})".format(stream_name, host, port))
-                    else:
-                        urls[stream_name] = stream_url
-                        logger.info("Adding stream {} with URL {}".format(stream_name, stream_url))
-        except (ValueError, jsonschema.ValidationError) as error:
-             # something is definitely wrong with these
-            retmsg = "Failed to parse source stream specifiers. You must supply a JSON dict of the form {<type>: {<name>: <url>, ...}, ...}"
-            logger.error('%s (%s)', retmsg, error)
-            raise FailReply(retmsg)
-
-        graph_name = self.graph_resolver(subarray_product_id)
-        subarray_numeric_id = self.graph_resolver.get_subarray_numeric_id(subarray_product_id)
-        if not subarray_numeric_id:
-            retmsg = "Failed to parse numeric subarray identifier from specified subarray product string ({})".format(subarray_product_id)
-            raise FailReply(retmsg)
 
         logger.info("Launching graph {}.".format(graph_name))
 
@@ -1038,64 +943,22 @@ class SDPControllerServer(AsyncDeviceServer):
         resolver.resources = SDPResources(self.resources, subarray_product_id)
         resolver.telstate = None
 
-        for (stream_name, endpoint) in streams.iteritems():
-            resolver.resources.set_multicast_ip(stream_name, endpoint[0])
-            resolver.resources.set_port(stream_name, endpoint[1])
-        for (stream_name, url) in urls.iteritems():
-            resolver.resources.set_url(stream_name, url)
-         # TODO: For now we encode the cam and cbf spead specification directly into the resource object.
-         # Once we have multiple ingest nodes we need to factor this out into appropriate addreses for each ingest process
-
-        n_antennas = len(antennas.split(','))
-        graph = SDPGraph(self.sched, graph_name, n_antennas, dump_rate,
-                         self.simulate, self.develop, self.wrapper,
-                         resolver, subarray_product_id,
+        graph = SDPGraph(self.sched, config, resolver, subarray_product_id,
                          self.loop, sdp_controller=self)
          # create graph object and build physical graph from specified resources
 
-        logger.debug(graph.get_json())
-         # determine additional configuration
-        calculated_int_time = 1 / float(dump_rate)
-        base_params = {
-            'subarray_product_id':subarray_product_id
-        }
-        additional_config = {
-            'antenna_mask':antennas,
-            'output_int_time':calculated_int_time,
-            'sd_int_time':calculated_int_time,
-            'stream_sources':stream_sources,
-            'subarray_numeric_id':subarray_numeric_id
-        }
-         # holds additional config that must reside within the config dict in the telstate
-        req.inform("Graph {} construction complete.".format(graph_name))
-        if subarray_product_id in self.override_dicts:
-            odict = self.override_dicts.pop(subarray_product_id)
-             # this is a use-once set of overrides
-            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
-            additional_config.update(odict)
-        logger.debug("Telstate configured. Base parameters {}".format(base_params))
-
         if self.interface_mode:
             logger.warning("No components will be started - running in interface mode")
-            product = SDPSubarrayProductBase(
-                subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
-                self.simulate, self.develop)
+            product = SDPSubarrayProductBase(subarray_product_id, graph)
             self.subarray_products[subarray_product_id] = product
             self.subarray_product_config[subarray_product_id] = config_args
             # Add dummy sensors for this product
-            product.interface_mode_sensors = InterfaceModeSensors(
-                subarray_product_id)
+            product.interface_mode_sensors = InterfaceModeSensors(subarray_product_id)
             product.interface_mode_sensors.add_sensors(self)
             return
 
-        if katsdptelstate is None:
-             # from here onwards we require the katsdptelstate module to be installed.
-            retmsg = "You must have the katsdptelstate library installed to use the master controller in non interface only mode."
-            logger.error(retmsg)
-            raise FailReply(retmsg)
-
         try:
-            yield From(graph.launch_telstate(additional_config, base_params))
+            yield From(graph.launch_telstate())
              # launch the telescope state for this graph
             req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
             logger.debug("Executing graph {}".format(graph_name))
@@ -1124,9 +987,7 @@ class SDPControllerServer(AsyncDeviceServer):
              # at this point telstate is up, nodes have been launched, katcp connections established
              # we can now safely expose this product for use in other katcp commands like ?capture-init
              # adding a product is also safe with regard to commands like ?capture-status
-            product = SDPSubarrayProduct(
-                self.sched, subarray_product_id, antennas, n_channels, dump_rate, n_beams, graph,
-                self.simulate, self.develop)
+            product = SDPSubarrayProduct(self.sched, subarray_product_id, graph)
             self.subarray_products[subarray_product_id] = product
             self.subarray_product_config[subarray_product_id] = config_args
         except Exception:
@@ -1365,22 +1226,22 @@ class InterfaceModeSensors(object):
         """Add dummy subarray product sensors and issue #interface-changed"""
 
         interface_sensor_params = {
-            'sdp.bf_ingest.1.port': dict(
+            'bf_ingest.beamformer.1.port': dict(
                 default=("ing1.sdp.mkat.fake.kat.ac.za", 31048),
                 sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for port',
                 initial_status=Sensor.NOMINAL),
-            'sdp.filewriter.1.filename': dict(
+            'filewriter.sdp_l0.1.filename': dict(
                 default='/var/kat/data/148966XXXX.h5',
                 sensor_type=Sensor.STRING,
                 description='Final name for file being captured',
                 initial_status=Sensor.NOMINAL),
-            'sdp.ingest.1.capture-active': dict(
+            'ingest.sdp_l0.1.capture-active': dict(
                 default=False,
                 sensor_type=Sensor.BOOLEAN,
                 description='Is there a currently active capture session.',
                 initial_status=Sensor.NOMINAL),
-            'sdp.timeplot.1.gui-urls': dict(
+            'timeplot.sdp_l0.1.gui-urls': dict(
                 default='[{"category": "Plot", '
                 '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
                 '"description": "Signal displays for array_1_bc856M4k", '
@@ -1388,7 +1249,7 @@ class InterfaceModeSensors(object):
                 sensor_type=Sensor.STRING,
                 description='URLs for GUIs',
                 initial_status=Sensor.NOMINAL),
-            'sdp.timeplot.1.html_port': dict(
+            'timeplot.sdp_l0.1.html_port': dict(
                 default=("ing1.sdp.mkat.fake.kat.ac.za", 31054),
                 sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for html_port',

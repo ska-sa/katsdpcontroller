@@ -1,0 +1,33 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "minLength": 1
+            },
+            "network": {
+                "type": "string",
+                "minLength": 1
+            },
+            "ipv4_address": {
+                "type": "string",
+                "format": "ipv4"
+            },
+            "numa_node": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "infiniband_devices": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "required": ["name", "network", "ipv4_address"]
+    }
+}
