@@ -24,7 +24,7 @@ setup (
         'decorator',
         'docker',
         'jsonschema',
-        'networkx',
+        'networkx<2.0',
         'netifaces',
         'enum34',
         'ipaddress',
