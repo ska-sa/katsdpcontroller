@@ -125,7 +125,7 @@ def _bandwidth(size, time, ratio=1.05, overhead=2048):
     overhead : int
         Absolute overhead, in bytes
     """
-    return (size * 1.05 + overhead) * 8 / time
+    return (size * ratio + overhead) * 8 / time
 
 
 class CBFStreamInfo(object):
@@ -192,7 +192,6 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
     def net_bandwidth(self):
         """Network bandwidth in bits per second"""
-        # The 1.05 is an estimate for network overheads
         return self.bandwidth * self.raw['beng_out_bits_per_sample'] * 2
 
 
@@ -255,7 +254,7 @@ def find_node(g, name):
 def _make_telstate(g, config):
     telstate = SDPLogicalTask('telstate')
     telstate.cpus = 0.1
-    telstate.mem = 8192    # TODO: add back bp_mb
+    telstate.mem = 8192
     telstate.disk = telstate.mem
     telstate.image = 'redis'
     telstate.ports = ['telstate']
