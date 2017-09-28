@@ -419,7 +419,6 @@ class TestSDPController(unittest.TestCase):
         self.sched.kill.assert_called_with(mock.ANY)
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     def test_data_product_configure_task_fail(self):
         """If a task other than telstate fails, data-product-configure must fail"""
@@ -430,7 +429,6 @@ class TestSDPController(unittest.TestCase):
         self.sched.kill.assert_called_with(mock.ANY)
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     def test_data_product_configure_busy(self):
         """Cannot have concurrent data-product-configure commands"""
@@ -440,7 +438,6 @@ class TestSDPController(unittest.TestCase):
             self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT2))
         # Check that no state leaked through
         self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_products)
-        self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_product_config)
         self.assertIsNone(self.controller._conf_future)
 
     def test_data_product_deconfigure(self):
@@ -452,7 +449,6 @@ class TestSDPController(unittest.TestCase):
         # Verify the state
         self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     def test_data_product_deconfigure_capturing(self):
         """data-product-configure for deconfigure must fail while capturing"""
@@ -510,7 +506,6 @@ class TestSDPController(unittest.TestCase):
         # Check that the subarray was deconfigured cleanly
         self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     # TODO: test that reconfigure with override dict picks up the override dict
     # TODO: test that reconfigure fails if another configuration is happening
@@ -614,7 +609,6 @@ class TestSDPController(unittest.TestCase):
             Message.request('capture-done'), timeout=mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY)
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     def test_deconfigure_on_exit_busy(self):
         """Calling deconfigure_on_exit while a capture-init or capture-done
@@ -624,7 +618,6 @@ class TestSDPController(unittest.TestCase):
             self._async_deconfigure_on_exit()
         self.sched.kill.assert_called_with(mock.ANY)
         self.assertEqual({}, self.controller.subarray_products)
-        self.assertEqual({}, self.controller.subarray_product_config)
 
     def test_deconfigure_on_exit_cancel(self):
         """Calling deconfigure_on_exit while a configure is in process cancels

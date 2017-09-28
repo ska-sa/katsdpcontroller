@@ -588,10 +588,6 @@ class SDPControllerServer(AsyncDeviceServer):
 
         self.subarray_products = {}
          # dict of currently configured SDP subarray_products
-        self.subarray_product_config = {}
-         # store calling arguments used to create a specified subarray_product
-         # this has either the current args or those most recently
-         # configured for this subarray_product
         self.override_dicts = {}
          # per subarray product dictionaries used to override internal config
         self.tasks = {}
@@ -649,7 +645,7 @@ class SDPControllerServer(AsyncDeviceServer):
         return req.make_reply("ok")
 
     @trollius.coroutine
-    def deregister_product(self,subarray_product_id,force=False):
+    def deregister_product(self, subarray_product_id, force=False):
         """Deregister a subarray product.
 
         This first checks to make sure the product is in an appropriate state
@@ -660,12 +656,164 @@ class SDPControllerServer(AsyncDeviceServer):
         dp_handle = self.subarray_products[subarray_product_id]
         yield From(dp_handle.deconfigure(force=force))
         del self.subarray_products[subarray_product_id]
-        del self.subarray_product_config[subarray_product_id]
         logger.info("Deconfigured subarray product {}".format(subarray_product_id))
 
         if self.interface_mode:
             # Remove dummy sensors for this product
             dp_handle.interface_mode_sensors.remove_sensors(self)
+
+    def _check_existing_conf(self):
+        """Raise :exc:`.FailReply` if a configure or deconfigure command is already running."""
+        if self._conf_future:
+            msg = ("A configure/deconfigure command is currently running. "
+                   "Please wait until this completes.")
+            logger.warn(msg)
+            raise FailReply(msg)
+
+    @trollius.coroutine
+    def deconfigure_product(self, subarray_product_id):
+        """Deconfigure a subarray product in response to a request.
+
+        Unlike :meth:`deregister_product` (which implements this method), this
+        method checks and sets :attr:`_conf_future`.
+
+        Raises
+        ------
+        FailReply
+            if a configure/deconfigure is in progress
+        FailReply
+            if `subarray_product_id` does not exist
+        """
+        if subarray_product_id not in self.subarray_products:
+            raise FailReply("Deconfiguration of subarray product {} requested, "
+                            "but no configuration found.".format(subarray_product_id))
+        self._check_existing_conf()
+        try:
+            self._conf_future = trollius.ensure_future(
+                self.deregister_product(subarray_product_id), loop=self.loop)
+            yield From(self._conf_future)
+        finally:
+            self._conf_future = None
+
+    @trollius.coroutine
+    def _async_configure_product(self, req, subarray_product_id, config):
+        """Asynchronous portion of product configuration. This is run as a trollius
+        task that can be cancelled e.g. during shutdown. It is only run once we have
+        done basic sanity checks, and should contain any parts of configuration
+        that are potentially slow.
+        """
+
+        logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
+        logger.info("Launching graph {}.".format(subarray_product_id))
+
+        resolver = scheduler.Resolver(self.image_resolver_factory(),
+                                      scheduler.TaskIDAllocator(subarray_product_id + '-'),
+                                      self.sched.http_url if self.sched else '')
+        resolver.resources = SDPResources(self.resources, subarray_product_id)
+        resolver.telstate = None
+
+        graph = SDPGraph(self.sched, config, resolver, subarray_product_id,
+                         self.loop, sdp_controller=self)
+         # create graph object and build physical graph from specified resources
+
+        if self.interface_mode:
+            logger.warning("No components will be started - running in interface mode")
+            product = SDPSubarrayProductBase(subarray_product_id, graph)
+            self.subarray_products[subarray_product_id] = product
+            # Add dummy sensors for this product
+            product.interface_mode_sensors = InterfaceModeSensors(subarray_product_id)
+            product.interface_mode_sensors.add_sensors(self)
+            return
+
+        try:
+            yield From(graph.launch_telstate())
+             # launch the telescope state for this graph
+            req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
+            yield From(graph.execute_graph(req))
+             # launch containers for those nodes that require them
+            req.inform("All nodes launched")
+            alive = graph.check_nodes()
+             # is everything we asked for alive
+            if not alive:
+                ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+                logger.error(ret_msg)
+                yield From(graph.shutdown())
+                raise FailReply(ret_msg)
+            # Record the TaskInfo for each task in telstate, as well as details
+            # about the image resolver.
+            details = {}
+            for task in graph.physical_graph:
+                if isinstance(task, scheduler.PhysicalTask):
+                    details[task.logical_node.name] = {
+                        'host': task.host,
+                        'taskinfo': task.taskinfo.to_dict()
+                    }
+            graph.telstate.add('sdp_task_details', details, immutable=True)
+            graph.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+            graph.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides, immutable=True)
+             # at this point telstate is up, nodes have been launched, katcp connections established
+             # we can now safely expose this product for use in other katcp commands like ?capture-init
+             # adding a product is also safe with regard to commands like ?capture-status
+            product = SDPSubarrayProduct(self.sched, subarray_product_id, graph)
+            self.subarray_products[subarray_product_id] = product
+        except Exception:
+            # If there was a problem the graph might be semi-running. Shut it all down.
+            exc_info = sys.exc_info()
+            yield From(graph.shutdown())
+            six.reraise(*exc_info)
+
+    @trollius.coroutine
+    def configure_product(self, req, subarray_product_id, config):
+        """Configure a subarray product in response to a request.
+
+        Raises
+        ------
+        FailReply
+            if a configure/deconfigure is in progress
+        FailReply
+            If any of the following occur
+            - The specified subarray product id already exists, but the config differs from that specified
+            - If docker python libraries are not installed and we are not using interface mode
+            - There are insufficient resources to launch
+            - A docker image could not be found
+            - If one or more nodes fail to launch (e.g. container not found)
+            - If one or more nodes fail to become alive
+            - If we fail to establish katcp connection to all nodes requiring them.
+        """
+        if subarray_product_id in self.override_dicts:
+            odict = self.override_dicts.pop(subarray_product_id)
+             # this is a use-once set of overrides
+            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            config = product_config.override(config, odict)
+            # Re-validate, since the override may have broken it
+            try:
+                product_config.validate(config)
+            except (ValueError, jsonschema.ValidationError) as error:
+                retmsg = "Overrides make the config invalid: {}".format(error)
+                logger.error(retmsg)
+                raise FailReply(retmsg)
+
+        if subarray_product_id in self.subarray_products:
+            dp = self.subarray_products[subarray_product_id]
+            if dp.graph.config == config:
+                logger.info("Subarray product with this configuration already exists. Pass.")
+                return
+            else:
+                raise FailReply("A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
+
+        self._check_existing_conf()
+        # we are only going to allow a single conf/deconf at a time
+        self._conf_future = trollius.ensure_future(
+            self._async_configure_product(req, subarray_product_id, config),
+            loop=self.loop)
+        try:
+            yield From(self._conf_future)
+        except scheduler.InsufficientResourcesError as error:
+            raise FailReply('Insufficient resources to launch {}: {}'.format(subarray_product_id, error))
+        except scheduler.ImageError as error:
+            raise FailReply(str(error))
+        finally:
+            self._conf_future = None
 
     @trollius.coroutine
     def deconfigure_on_exit(self):
@@ -742,41 +890,28 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         logger.info("?data-product-reconfigure called on {}".format(subarray_product_id))
         try:
-            config_args = self.subarray_product_config[subarray_product_id]
+            config = self.subarray_products[subarray_product_id].graph.config
         except KeyError:
-            raise gen.Return(('fail',"The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id)))
+            raise FailReply("The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
 
-        if self._conf_future:
-            msg = "A configure/deconfigure command is currently running. Please wait until this completes to issue the reconfigure."
-            logger.warn(msg)
-            raise gen.Return(('fail',msg))
-         # we are only going to allow a single conf/deconf at a time
-
+        logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
         try:
-            self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-                req, req_msg, subarray_product_id, "0", None, None, None, None), self.loop)
-             # start with a deconfigure
+            yield to_tornado_future(self.deconfigure_product(subarray_product_id), loop=self.loop)
+        except Exception as error:
+            msg = "Unable to deconfigure as part of reconfigure"
+            logger.error(msg, exc_info=True)
+            raise FailReply("{}. {}".format(msg, error))
 
-            logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
-            try:
-                yield to_tornado_future(self._conf_future, loop=self.loop)
-            except Exception as error:
-                msg = "Unable to deconfigure as part of reconfigure"
-                logger.error(msg, exc_info=True)
-                raise FailReply("{}. {}".format(msg, error))
+        logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+        try:
+            yield to_tornado_future(self.configure_product(req, subarray_product_id, config),
+                                    loop=self.loop)
+        except Exception as error:
+            msg = "Unable to configure as part of reconfigure, original array deconfigured"
+            logger.error(msg, exc_info=True)
+            raise FailReply("{}. {}".format(msg, error))
 
-            logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
-            self._conf_future = trollius.ensure_future(self._async_data_product_configure(
-                req, req_msg, subarray_product_id, *config_args), loop=self.loop)
-            try:
-                yield to_tornado_future(self._conf_future, loop=self.loop)
-            except Exception as error:
-                msg = "Unable to configure as part of reconfigure, original array deconfigured"
-                logger.error(msg, exc_info=True)
-                raise FailReply("{}. {}".format(msg, error))
-            raise gen.Return(('ok', ''))
-        finally:
-            self._conf_future = None
+        raise gen.Return(('ok', ''))
 
     @async_request
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
@@ -837,69 +972,20 @@ class SDPControllerServer(AsyncDeviceServer):
             else:
                 raise gen.Return(('fail',"This subarray product id has no current configuration."))
 
-         # we have either a configure or deconfigure, which may take time, so we proceed with async if allowed
-        if self._conf_future:
-            raise gen.Return(('fail',"A data product configure command is currently executing."))
-
-         # a configure is essentially thread safe since the array object is only exposed
-         # as a last step. deconf needs some protection since the object does exist, thus
-         # we first mark the product into a deconfiguring state before going async
         if antennas == "0" or antennas == "":
             req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
-        else:
-            req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
-
-         # we are only going to allow a single conf/deconf at a time
-        self._conf_future = trollius.ensure_future(
-            self._async_data_product_configure(
-                req, req_msg, subarray_product_id, antennas, n_channels, dump_rate,
-                n_beams, stream_sources), loop=self.loop)
-         # store our calling context for later use in the reconfigure command
-
-        try:
-            yield to_tornado_future(self._conf_future, loop=self.loop)
+            yield to_tornado_future(self.deconfigure_product(subarray_product_id), loop=self.loop)
             raise gen.Return(('ok', ''))
-        except scheduler.InsufficientResourcesError as error:
-            raise FailReply('Insufficient resources to launch {}: {}'.format(subarray_product_id, error))
-        except scheduler.ImageError as error:
-            raise FailReply(str(error))
-        finally:
-            self._conf_future = None
-
-    @trollius.coroutine
-    def _async_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
-        """Asynchronous portion of data product configure. See docstring for request_data_product_configure above.
-
-        Raises
-        ------
-        FailReply
-            If any of the following occur
-            - The specified subarray product id already exists, but the config differs from that specified
-            - If the antennas, channels, dump rate, beams and stream sources are not specified
-            - If the stream_sources specified do not conform to either a URI or SPEAD endpoint syntax
-            - If the specified subarray_product_id cannot be parsed into suitable components
-            - If neither telstate nor docker python libraries are installed and we are not using interface mode
-            - If one or more nodes fail to launch (e.g. container not found)
-            - If one or more nodes fail to become alive (essentially a NOP for now)
-            - If we fail to establish katcp connection to all nodes requiring them.
-        """
-        config_args = [antennas, n_channels, dump_rate, n_beams, stream_sources]
-        if antennas == "0" or antennas == "":
-            if subarray_product_id not in self.subarray_products:
-                raise FailReply("Deconfiguration of subarray product {} requested, "
-                                "but no configuration found.".format(subarray_product_id))
-            yield From(self.deregister_product(subarray_product_id))
-            return
 
         logger.info("Using '{}' as antenna mask".format(antennas))
         antennas = antennas.replace(" ",",")
          # temp hack to make sure we have a comma delimited set of antennas
+        antennas = antennas.split(',')
 
-         # all good so far, lets check arguments for validity
+        # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
             raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
 
-        antennas = antennas.split(',')
         graph_name = self.graph_resolver(subarray_product_id)
         try:
             streams_dict = json.loads(stream_sources)
@@ -911,90 +997,10 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg)
 
-        if subarray_product_id in self.override_dicts:
-            odict = self.override_dicts.pop(subarray_product_id)
-             # this is a use-once set of overrides
-            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
-            config = product_config.override(config, odict)
-            # Re-validate, since the override may have broken it
-            try:
-                product_config.validate(config)
-            except (ValueError, jsonschema.ValidationError) as error:
-                retmsg = "Overrides make the config invalid: {}".format(error)
-                logger.error(retmsg)
-                raise FailReply(retmsg)
-
-        logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
-
-        if subarray_product_id in self.subarray_products:
-            dp = self.subarray_products[subarray_product_id]
-            if dp.graph.config == config:
-                logger.info("Subarray product with this configuration already exists. Pass.")
-                return
-            else:
-                raise FailReply("A subarray product with this id ({0}) already exists, but has a different configuration. Please deconfigure this product or choose a new product id to continue.".format(subarray_product_id))
-
-
-        logger.info("Launching graph {}.".format(graph_name))
-
-        resolver = scheduler.Resolver(self.image_resolver_factory(),
-                                      scheduler.TaskIDAllocator(subarray_product_id + '-'),
-                                      self.sched.http_url if self.sched else '')
-        resolver.resources = SDPResources(self.resources, subarray_product_id)
-        resolver.telstate = None
-
-        graph = SDPGraph(self.sched, config, resolver, subarray_product_id,
-                         self.loop, sdp_controller=self)
-         # create graph object and build physical graph from specified resources
-
-        if self.interface_mode:
-            logger.warning("No components will be started - running in interface mode")
-            product = SDPSubarrayProductBase(subarray_product_id, graph)
-            self.subarray_products[subarray_product_id] = product
-            self.subarray_product_config[subarray_product_id] = config_args
-            # Add dummy sensors for this product
-            product.interface_mode_sensors = InterfaceModeSensors(subarray_product_id)
-            product.interface_mode_sensors.add_sensors(self)
-            return
-
-        try:
-            yield From(graph.launch_telstate())
-             # launch the telescope state for this graph
-            req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
-            logger.debug("Executing graph {}".format(graph_name))
-            yield From(graph.execute_graph(req))
-             # launch containers for those nodes that require them
-            req.inform("All nodes launched")
-            alive = graph.check_nodes()
-             # is everything we asked for alive
-            if not alive:
-                ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
-                logger.error(ret_msg)
-                yield From(graph.shutdown())
-                raise FailReply(ret_msg)
-            # Record the TaskInfo for each task in telstate, as well as details
-            # about the image resolver.
-            details = {}
-            for task in graph.physical_graph:
-                if isinstance(task, scheduler.PhysicalTask):
-                    details[task.logical_node.name] = {
-                        'host': task.host,
-                        'taskinfo': task.taskinfo.to_dict()
-                    }
-            graph.telstate.add('sdp_task_details', details, immutable=True)
-            graph.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-            graph.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides, immutable=True)
-             # at this point telstate is up, nodes have been launched, katcp connections established
-             # we can now safely expose this product for use in other katcp commands like ?capture-init
-             # adding a product is also safe with regard to commands like ?capture-status
-            product = SDPSubarrayProduct(self.sched, subarray_product_id, graph)
-            self.subarray_products[subarray_product_id] = product
-            self.subarray_product_config[subarray_product_id] = config_args
-        except Exception:
-            # If there was a problem the graph might be semi-running. Shut it all down.
-            exc_info = sys.exc_info()
-            yield From(graph.shutdown())
-            six.reraise(*exc_info)
+        req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
+        yield to_tornado_future(self.configure_product(req, subarray_product_id, config),
+                                loop=self.loop)
+        raise gen.Return(('ok', ''))
 
     @async_request
     @request(Str())
