@@ -529,9 +529,6 @@ class TestSDPController(unittest.TestCase):
             mock.call(Message.request('configure-subarray-from-telstate')),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
             mock.call(Message.request('capture-start', 'i0_baseline_correlation_products'))
         ])
 

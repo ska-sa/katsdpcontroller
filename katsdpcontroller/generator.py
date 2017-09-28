@@ -373,7 +373,7 @@ def _make_timeplot(g, config, spectral_name):
 def _make_ingest(g, config, spectral_name, continuum_name):
     # Number of ingest nodes.
     # TODO: adjust based on the number of channels requested
-    n_ingest = 4
+    n_ingest = 1
 
     spectral_info = L0Info(config, spectral_name)
     continuum_info = L0Info(config, continuum_name)
@@ -419,6 +419,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     timeplot = find_node(g, 'timeplot.' + spectral_name)
     g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
         'sdisp_spead': str(endpoint)})
+    g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(spectral_name, i))
         ingest.physical_factory = IngestTask
