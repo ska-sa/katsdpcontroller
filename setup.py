@@ -25,7 +25,7 @@ setup (
         'docker',
         'jsonschema',
         'rfc3987',           # Used by jsonschema to validate URLs
-        'networkx',
+        'networkx<2.0',
         'netifaces',
         'enum34',
         'ipaddress',
