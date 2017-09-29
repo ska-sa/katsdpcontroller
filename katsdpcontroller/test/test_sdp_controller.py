@@ -578,6 +578,10 @@ class TestSDPController(unittest.TestCase):
             'antenna_mask': ANTENNAS,
             'cbf_ibv': True,
             'cbf_channels': 4096,
+            'cbf_substreams': 16,
+            'cbf_adc_sample_rate': 1712000000.0,
+            'cbf_bandwidth': 856000000.0,
+            'cbf_int_time': 0.499,
             'cbf_interface': 'em1',
             'port': 20000,
             'cbf_spead': '127.0.0.1:9000'

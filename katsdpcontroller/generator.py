@@ -191,6 +191,10 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
         return self.raw['int_time']
 
     @property
+    def n_channels_per_substream(self):
+        return self.raw['n_chans_per_substream']
+
+    @property
     def size(self):
         """Size of frame in bytes"""
         return self.n_vis * 8     # size of complex64
@@ -206,7 +210,7 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
         """Size of frame in bytes"""
         return (self.raw['beng_out_bits_per_sample'] * 2
                 * self.raw['spectra_per_heap']
-                * self.raw['n_chans_per_substream']) // 8
+                * self.n_channels_per_substream) // 8
 
     @property
     def int_time(self):
@@ -343,8 +347,13 @@ def _make_baseline_correlation_products_simulator(g, config, name):
         sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
     sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     sim.interfaces[0].bandwidth_out = info.net_bandwidth
+    substreams = info.n_channels // info.n_channels_per_substream
     g.add_node(sim, config=lambda task, resolver: {
         'cbf_channels': info.n_channels,
+        'cbf_adc_sample_rate': info.adc_sample_rate,
+        'cbf_bandwidth': info.bandwidth,
+        'cbf_int_time': info.int_time,
+        'cbf_substreams': substreams,
         'cbf_interface': task.interfaces['cbf'].name,
         'cbf_ibv': ibv,
         'antenna_mask': ','.join(info.antennas)

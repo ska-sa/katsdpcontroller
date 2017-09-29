@@ -97,6 +97,17 @@ def validate(config):
     if len(cam_http) > 1:
         raise ValueError('Cannot have more than one cam.http stream')
 
+    for name, stream in six.iteritems(config['inputs']):
+        if stream['type'] in ['cbf.baseline_correlation_products',
+                              'cbf.tied_array_channelised_voltage']:
+            src_stream = stream['src_streams'][0]
+            n_chans = config['inputs'][src_stream]['n_chans']
+            n_chans_per_substream = stream['n_chans_per_substream']
+            if n_chans % n_chans_per_substream != 0:
+                raise ValueError(
+                    '{}: n_chans ({}) not a multiple of n_chans_per_substream ({})'.format(
+                        name, n_chans, n_chans_per_substream))
+
     for name, output in six.iteritems(config['outputs']):
         # Names of inputs and outputs must be disjoint
         if name in config['inputs']:
