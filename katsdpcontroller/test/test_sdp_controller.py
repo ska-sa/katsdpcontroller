@@ -6,6 +6,7 @@ import contextlib
 import concurrent.futures
 import unittest2 as unittest
 import mock
+import json
 
 from addict import Dict
 from katcp.testutils import BlockingTestClient
@@ -38,6 +39,53 @@ STREAMS = '{"cam.http": {"camdata": "http://127.0.0.1:8999"}, \
             "cbf.baseline_correlation_products": {"i0.baseline-correlation-products": "spead://127.0.0.1:9000"}, \
             "cbf.antenna_channelised_voltage": {"i0.antenna-channelised-voltage": "spead://127.0.0.1:9001"}}'
 
+CONFIG = '''{
+    "version": "1.0",
+    "inputs": {
+        "camdata": {
+            "type": "cam.http",
+            "url": "http://127.0.0.1:8999"
+        },
+        "i0_antenna_channelised_voltage": {
+            "type": "cbf.antenna_channelised_voltage",
+            "url": "spead://127.0.0.1:9001",
+            "antennas": ["m063", "m064"],
+            "n_chans": 4096,
+            "n_pols": 2,
+            "adc_sample_rate": 1712000000.0,
+            "bandwidth": 856000000.0,
+            "n_samples_between_spectra": 8192,
+            "instrument_dev_name": "i0"
+        },
+        "i0_baseline_correlation_products": {
+            "type": "cbf.baseline_correlation_products",
+            "url": "spead://127.0.0.1:9000",
+            "src_streams": ["i0_antenna_channelised_voltage"],
+            "int_time": 0.499,
+            "n_bls": 40,
+            "xeng_out_bits_per_sample": 32,
+            "n_chans_per_substream": 256,
+            "instrument_dev_name": "i0",
+            "simulate": true
+        }
+    },
+    "outputs": {
+        "sdp_l0": {
+            "type": "sdp.l0",
+            "src_streams": ["i0_baseline_correlation_products"],
+            "output_int_time": 4.0,
+            "continuum_factor": 1
+        },
+        "sdp_l0_continuum": {
+            "type": "sdp.l0",
+            "src_streams": ["i0_baseline_correlation_products"],
+            "output_int_time": 4.0,
+            "continuum_factor": 16
+        }
+    },
+    "config": {}
+}'''
+
 EXPECTED_SENSOR_LIST = (
     ('api-version', '', '', 'string'),
     ('build-state', '', '', 'string'),
@@ -59,6 +107,10 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
 EXPECTED_REQUEST_LIST = [
     'data-product-configure',
     'data-product-reconfigure',
+    'product-configure',
+    'product-deconfigure',
+    'product-reconfigure',
+    'product-list',
     'sdp-status',
     'capture-done',
     'capture-init',
@@ -113,7 +165,7 @@ class TestSDPControllerInterface(unittest.TestCase):
 
     def test_capture_init(self):
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT1,ANTENNAS,"4096","2.1","0",STREAMS)
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT1,CONFIG)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
@@ -123,30 +175,28 @@ class TestSDPControllerInterface(unittest.TestCase):
     def test_interface_sensors(self):
         self.client.test_sensor_list(EXPECTED_SENSOR_LIST, ignore_descriptions=True)
         recorder = self.client.message_recorder(('interface-changed',))
-        self.client.assert_request_succeeds(
-            "data-product-configure", SUBARRAY_PRODUCT1,
-            ANTENNAS, "4096", "2.1", "0", STREAMS)
+        self.client.assert_request_succeeds("product-configure", SUBARRAY_PRODUCT1, CONFIG)
         self.assertEqual([str(m) for m in recorder()], ['#interface-changed sensor-list'])
         self.client.test_sensor_list(
             EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST_1,
             ignore_descriptions=True)
         # Deconfigure and check that the array sensors are gone
         self.client.assert_request_succeeds(
-            "data-product-configure", SUBARRAY_PRODUCT1, "")
+            "product-deconfigure", SUBARRAY_PRODUCT1)
         self.assertEqual([str(m) for m in recorder()], ['#interface-changed sensor-list'])
         self.client.test_sensor_list(
             EXPECTED_SENSOR_LIST, ignore_descriptions=True)
 
     def test_capture_done(self):
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT2,ANTENNAS,"4096","2.1","0",STREAMS)
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT2,CONFIG)
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
 
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT2)
         self.client.assert_request_succeeds("capture-done",SUBARRAY_PRODUCT2)
         self.client.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
 
-    def test_deconfigure_subarray_product(self):
+    def test_deconfigure_subarray_product_legacy(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT3,"")
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT3)
@@ -155,7 +205,16 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("capture-done",SUBARRAY_PRODUCT3)
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT3,"")
 
-    def test_configure_subarray_product(self):
+    def test_deconfigure_subarray_product(self):
+        self.client.assert_request_fails("product-configure",SUBARRAY_PRODUCT3)
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT3,CONFIG)
+        self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT3)
+        self.client.assert_request_fails("product-configure",SUBARRAY_PRODUCT3)
+         # should not be able to deconfigure when not in idle state
+        self.client.assert_request_succeeds("capture-done",SUBARRAY_PRODUCT3)
+        self.client.assert_request_succeeds("product-list",SUBARRAY_PRODUCT3)
+
+    def test_configure_subarray_product_legacy(self):
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure")
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
@@ -169,12 +228,40 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,"")
         self.client.assert_request_fails("data-product-configure",SUBARRAY_PRODUCT4)
 
-    def test_reconfigure_subarray_product(self):
+    def test_configure_subarray_product(self):
+        self.client.assert_request_fails("product-deconfigure",SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("product-list")
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
+        # Same config again is okay
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
+        # Changing the config without deconfiguring is not okay
+        config2 = json.loads(CONFIG)
+        config2['outputs']['sdp_l0_continuum']['continuum_factor'] = 8
+        config2 = json.dumps(config2)
+        self.client.assert_request_fails("product-configure",SUBARRAY_PRODUCT4,config2)
+        self.client.assert_request_succeeds("product-deconfigure",SUBARRAY_PRODUCT4)
+        # Check that config2 is valid - otherwise the above test is testing the wrong thing
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,config2)
+
+        reply, informs = self.client.blocking_request(Message.request("product-list"))
+        self.assertEqual(repr(reply),repr(Message.reply("product-list","ok",1)))
+
+        self.client.assert_request_succeeds("product-deconfigure",SUBARRAY_PRODUCT4)
+        self.client.assert_request_fails("product-list",SUBARRAY_PRODUCT4)
+
+    def test_reconfigure_subarray_product_legacy(self):
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
         self.client.assert_request_succeeds("data-product-reconfigure", SUBARRAY_PRODUCT4)
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         self.client.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
+
+    def test_reconfigure_subarray_product(self):
+        self.client.assert_request_fails("product-reconfigure", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
+        self.client.assert_request_succeeds("product-reconfigure", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
+        self.client.assert_request_fails("product-reconfigure", SUBARRAY_PRODUCT4)
 
     def test_help(self):
         self.client.test_help(EXPECTED_REQUEST_LIST)
@@ -240,7 +327,7 @@ class TestSDPController(unittest.TestCase):
 
     @contextlib.contextmanager
     def _data_product_configure_slow(self, subarray_product, expect_ok=True):
-        """Context manager that runs its block with a data-product-configure in
+        """Context manager that runs its block with a product-configure in
         progress."""
         # See comments in _capture_init_slow
         reply_future = concurrent.futures.Future()
@@ -373,14 +460,13 @@ class TestSDPController(unittest.TestCase):
             raise ValueError('You must specify a valid interface name')
 
     def _configure_args(self, subarray_product):
-        return ("data-product-configure", subarray_product, ANTENNAS, "4096",
-                "2.1", "0", STREAMS)
+        return ("product-configure", subarray_product, CONFIG)
 
     def _configure_subarray(self, subarray_product):
         self.client.assert_request_succeeds(*self._configure_args(subarray_product))
 
-    def test_data_product_configure_success(self):
-        """A ?data-product-configure request must wait for the tasks to come up, then indicate success."""
+    def test_product_configure_success(self):
+        """A ?product-configure request must wait for the tasks to come up, then indicate success."""
         self.client.assert_request_succeeds(
             'set-config-override', SUBARRAY_PRODUCT4,
             '{"config": {"develop": true}}')
@@ -410,8 +496,8 @@ class TestSDPController(unittest.TestCase):
         self.assertFalse(sa._async_busy)
         self.assertEqual(State.IDLE, sa.state)
 
-    def test_data_product_configure_telstate_fail(self):
-        """If the telstate task fails, data-product-configure must fail"""
+    def test_product_configure_telstate_fail(self):
+        """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
         self.telstate_class.side_effect = redis.ConnectionError
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
@@ -420,8 +506,8 @@ class TestSDPController(unittest.TestCase):
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
 
-    def test_data_product_configure_task_fail(self):
-        """If a task other than telstate fails, data-product-configure must fail"""
+    def test_product_configure_task_fail(self):
+        """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.telstate_class.assert_called_once_with('host.telstate:20000')
@@ -430,8 +516,8 @@ class TestSDPController(unittest.TestCase):
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
 
-    def test_data_product_configure_busy(self):
-        """Cannot have concurrent data-product-configure commands"""
+    def test_product_configure_busy(self):
+        """Cannot have concurrent product-configure commands"""
         with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
             # We use a different subarray product, which would otherwise be
             # legal.
@@ -440,34 +526,34 @@ class TestSDPController(unittest.TestCase):
         self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_products)
         self.assertIsNone(self.controller._conf_future)
 
-    def test_data_product_deconfigure(self):
-        """Checks success path of data-product-configure for deconfiguration"""
+    def test_product_deconfigure(self):
+        """Checks success path of product-deconfigure"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
-        self.client.assert_request_succeeds("data-product-configure", SUBARRAY_PRODUCT1, "0")
+        self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1)
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY)
         # Verify the state
         self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
 
-    def test_data_product_deconfigure_capturing(self):
-        """data-product-configure for deconfigure must fail while capturing"""
+    def test_product_deconfigure_capturing(self):
+        """product-deconfigure must fail while capturing"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT1)
-        self.client.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT1, "0")
+        self.client.assert_request_fails("product-deconfigure", SUBARRAY_PRODUCT1)
 
-    def test_data_product_deconfigure_busy(self):
-        """data-product-configure for deconfigure cannot happen concurrently with capture-init"""
+    def test_product_deconfigure_busy(self):
+        """product-deconfigure cannot happen concurrently with capture-init"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         with self._capture_init_slow(SUBARRAY_PRODUCT1):
-            self.client.assert_request_fails('data-product-configure', SUBARRAY_PRODUCT1, '0')
+            self.client.assert_request_fails('product-deconfigure', SUBARRAY_PRODUCT1, '0')
         # Check that the subarray still exists and has the right state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa._async_busy)
         self.assertEqual(State.INITIALISED, sa.state)
 
-    def test_data_product_reconfigure(self):
-        """Checks success path of data_product_reconfigure"""
+    def test_product_reconfigure(self):
+        """Checks success path of product_reconfigure"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         self.sched.launch.reset_mock()
         self.sched.kill.reset_mock()
@@ -475,7 +561,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds(
             'set-config-override', SUBARRAY_PRODUCT1,
             '{"inputs": {"i0_baseline_correlation_products": {"simulate": true}}}')
-        self.client.assert_request_succeeds('data-product-reconfigure', SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
         self.sched.kill.assert_called_with(mock.ANY)
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
@@ -491,18 +577,18 @@ class TestSDPController(unittest.TestCase):
             'cbf_spead': '127.0.0.1:9000'
         }, immutable=True)
 
-    def test_data_product_reconfigure_configure_busy(self):
-        """Cannot run data-product-reconfigure concurrently with another
-        data-product-configure"""
+    def test_product_reconfigure_configure_busy(self):
+        """Cannot run product-reconfigure concurrently with another
+        product-configure"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         with self._data_product_configure_slow(SUBARRAY_PRODUCT2):
-            self.client.assert_request_fails('data-product-reconfigure', SUBARRAY_PRODUCT1)
+            self.client.assert_request_fails('product-reconfigure', SUBARRAY_PRODUCT1)
 
-    def test_data_product_reconfigure_configure_fails(self):
-        """Tests data-product-reconfigure when the new graph fails"""
+    def test_product_reconfigure_configure_fails(self):
+        """Tests product-reconfigure when the new graph fails"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        self.client.assert_request_fails('data-product-reconfigure', SUBARRAY_PRODUCT1)
+        self.client.assert_request_fails('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the subarray was deconfigured cleanly
         self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
@@ -555,7 +641,7 @@ class TestSDPController(unittest.TestCase):
 
         TODO: that's probably not really the behaviour we want.
         """
-        self.client.assert_request_succeeds("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
+        self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         for node in sa.graph.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':

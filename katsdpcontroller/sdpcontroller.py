@@ -705,6 +705,8 @@ class SDPControllerServer(AsyncDeviceServer):
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))
+        req.inform("Starting configuration of new product {}. This may take a few minutes..."
+            .format(subarray_product_id))
 
         resolver = scheduler.Resolver(self.image_resolver_factory(),
                                       scheduler.TaskIDAllocator(subarray_product_id + '-'),
@@ -869,26 +871,9 @@ class SDPControllerServer(AsyncDeviceServer):
             return ('fail', msg)
         return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
 
-    @async_request
-    @request(Str(), include_msg=True)
-    @return_reply(Str())
     @gen.coroutine
-    def request_data_product_reconfigure(self, req, req_msg, subarray_product_id):
-        """Reconfigure the specified SDP subarray product instance.
-
-           The primary use of this command is to restart the SDP components for a particular
-           subarray without having to reconfigure the rest of the system.
-
-           Essentially this runs a deconfigure() followed by a configure() with the same parameters as originally
-           specified via the data_product_configure katcp call.
-
-           Request Arguments
-           -----------------
-           subarray_product_id : string
-             The ID of the subarray product to reconfigure in the form <subarray_name>_<data_product_name>.
-
-        """
-        logger.info("?data-product-reconfigure called on {}".format(subarray_product_id))
+    def _product_reconfigure(self, req, req_msg, subarray_product_id):
+        logger.info("?product-reconfigure called on {}".format(subarray_product_id))
         try:
             config = self.subarray_products[subarray_product_id].graph.config
         except KeyError:
@@ -914,11 +899,44 @@ class SDPControllerServer(AsyncDeviceServer):
         raise gen.Return(('ok', ''))
 
     @async_request
+    @request(Str(), include_msg=True)
+    @return_reply(Str())
+    @gen.coroutine
+    def request_product_reconfigure(self, req, req_msg, subarray_product_id):
+        """Reconfigure the specified SDP subarray product instance.
+
+           The primary use of this command is to restart the SDP components for a particular
+           subarray without having to reconfigure the rest of the system.
+
+           Essentially this runs a deconfigure() followed by a configure() with the same parameters as originally
+           specified via the product-configure katcp request.
+
+           Request Arguments
+           -----------------
+           subarray_product_id : string
+             The ID of the subarray product to reconfigure.
+
+        """
+        ret = yield self._product_reconfigure(req, req_msg, subarray_product_id)
+        raise gen.Return(ret)
+
+    # Backwards-compatibility alias
+    @async_request
+    @request(Str(), include_msg=True)
+    @return_reply(Str())
+    @gen.coroutine
+    def request_data_product_reconfigure(self, req, req_msg, subarray_product_id):
+        ret = yield self._product_reconfigure(req, req_msg, subarray_product_id)
+        raise gen.Return(ret)
+
+    request_data_product_reconfigure.__doc__ = request_product_reconfigure.__doc__
+
+    @async_request
     @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
     @return_reply(Str())
     @gen.coroutine
     def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
-        """Configure a SDP subarray product instance.
+        """Configure a SDP subarray product instance (legacy interface).
 
         A subarray product instance is comprised of a telescope state, a
         collection of containers running required SDP services, and a
@@ -961,16 +979,16 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         logger.info("?data-product-configure called with: {}".format(req_msg))
          # INFO for now, but should be DEBUG post integration
-        if not subarray_product_id:
-            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id,subarray_product)
-            raise gen.Return(('ok',"%i" % len(self.subarray_products)))
-
         if antennas is None:
-            if subarray_product_id in self.subarray_products:
-                raise gen.Return(('ok',"%s is currently configured: %s" % (subarray_product_id,repr(self.subarray_products[subarray_product_id]))))
+            if subarray_product_id is None:
+                for (subarray_product_id, subarray_product) in self.subarray_products.iteritems():
+                    req.inform(subarray_product_id,subarray_product)
+                raise gen.Return(('ok', "%i" % len(self.subarray_products)))
+            elif subarray_product_id in self.subarray_products:
+                raise gen.Return(('ok', "%s is currently configured: %s" %
+                        (subarray_product_id, repr(self.subarray_products[subarray_product_id]))))
             else:
-                raise gen.Return(('fail',"This subarray product id has no current configuration."))
+                raise FailReply("This subarray product id has no current configuration.")
 
         if antennas == "0" or antennas == "":
             req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
@@ -997,10 +1015,103 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg)
 
-        req.inform("Starting configuration of new product {}. This may take a few minutes...".format(subarray_product_id))
         yield to_tornado_future(self.configure_product(req, subarray_product_id, config),
                                 loop=self.loop)
         raise gen.Return(('ok', ''))
+
+    @async_request
+    @request(Str(), Str(), include_msg=True)
+    @return_reply(Str())
+    @gen.coroutine
+    def request_product_configure(self, req, req_msg, subarray_product_id, config):
+        """Configure a SDP subarray product instance.
+
+        A subarray product instance is comprised of a telescope state, a
+        collection of containers running required SDP services, and a
+        networking configuration appropriate for the required data movement.
+
+        On configuring a new product, several steps occur:
+         * Build initial static configuration. Includes elements such as IP
+           addresses of deployment machines, multicast subscription details etc
+         * Launch a new Telescope State Repository (redis instance) for this
+           product and copy in static config.
+         * Launch service containers as described in the static configuration.
+         * Verify all services are running and reachable.
+
+        Request Arguments
+        -----------------
+        subarray_product_id : string
+            The ID to use for this product (an arbitrary string, with
+            characters A-Z, a-z, 0-9 and _).
+        config : string
+            A JSON-encoded dictionary of configuration data.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        """
+        logger.info("?product-configure called with: {}".format(req_msg))
+
+        if not re.match('^[A-Za-z0-9_]+$', subarray_product_id):
+            raise FailReply('Subarray_product_id contains illegal characters')
+        try:
+            config_dict = json.loads(config)
+            product_config.validate(config_dict)
+        except (ValueError, jsonschema.ValidationError) as error:
+            retmsg = "Failed to process config: {}".format(error)
+            logger.error(retmsg)
+            raise FailReply(retmsg)
+
+        yield to_tornado_future(self.configure_product(req, subarray_product_id, config_dict),
+                                loop=self.loop)
+        raise gen.Return(('ok', ''))
+
+    @async_request
+    @request(Str())
+    @return_reply()
+    @gen.coroutine
+    def request_product_deconfigure(self, req, subarray_product_id):
+        """Deconfigure an existing subarray product.
+
+        Parameters
+        ----------
+        subarray_product_id : string
+            Subarray product to deconfigure
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+        """
+        req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
+        yield to_tornado_future(self.deconfigure_product(subarray_product_id), loop=self.loop)
+        raise gen.Return(('ok',))
+
+    @request(Str(optional=True))
+    @return_reply(Int())
+    def request_product_list(self, req, subarray_product_id):
+        """List existing subarray products
+
+        Parameters
+        ----------
+        subarray_product_id : string, optional
+            If specified, report on only this subarray product ID
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+
+        num_informs : integer
+            Number of subarray products listed
+        """
+        if subarray_product_id is None:
+            for (subarray_product_id, subarray_product) in self.subarray_products.iteritems():
+                req.inform(subarray_product_id, subarray_product)
+            return ('ok', len(self.subarray_products))
+        elif subarray_product_id in self.subarray_products:
+            req.inform(subarray_product_id, self.subarray_products[subarray_product_id])
+            return ('ok', 1)
+        else:
+            raise FailReply("This product id has no current configuration.")
 
     @async_request
     @request(Str())
