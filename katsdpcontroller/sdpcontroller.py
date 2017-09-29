@@ -537,7 +537,7 @@ def time_request(func):
 
 class SDPControllerServer(AsyncDeviceServer):
 
-    VERSION_INFO = ("sdpcontroller", 1, 0)
+    VERSION_INFO = ("sdpcontroller", 1, 1)
     BUILD_INFO = ("sdpcontroller",) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
