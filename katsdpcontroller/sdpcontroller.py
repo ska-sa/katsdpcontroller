@@ -28,7 +28,7 @@ import faulthandler
 from prometheus_client import Histogram
 
 from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply, Message
-from katcp.kattypes import request, return_reply, Str, Int, Float
+from katcp.kattypes import request, return_reply, Str, Int, Float, Bool
 import katsdpcontroller
 from katsdpservices.asyncio import to_tornado_future
 import katsdptelstate
@@ -671,7 +671,7 @@ class SDPControllerServer(AsyncDeviceServer):
             raise FailReply(msg)
 
     @trollius.coroutine
-    def deconfigure_product(self, subarray_product_id):
+    def deconfigure_product(self, subarray_product_id, force=False):
         """Deconfigure a subarray product in response to a request.
 
         Unlike :meth:`deregister_product` (which implements this method), this
@@ -690,7 +690,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self._check_existing_conf()
         try:
             self._conf_future = trollius.ensure_future(
-                self.deregister_product(subarray_product_id), loop=self.loop)
+                self.deregister_product(subarray_product_id, force), loop=self.loop)
             yield From(self._conf_future)
         finally:
             self._conf_future = None
@@ -1067,23 +1067,27 @@ class SDPControllerServer(AsyncDeviceServer):
         raise gen.Return(('ok', ''))
 
     @async_request
-    @request(Str())
+    @request(Str(), Bool(optional=True, default=False))
     @return_reply()
     @gen.coroutine
-    def request_product_deconfigure(self, req, subarray_product_id):
+    def request_product_deconfigure(self, req, subarray_product_id, force=False):
         """Deconfigure an existing subarray product.
 
         Parameters
         ----------
         subarray_product_id : string
             Subarray product to deconfigure
+        force : bool, optional
+            Take down the subarray immediately, even if it is still capturing,
+            and without waiting for completion.
 
         Returns
         -------
         success : {'ok', 'fail'}
         """
         req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
-        yield to_tornado_future(self.deconfigure_product(subarray_product_id), loop=self.loop)
+        yield to_tornado_future(self.deconfigure_product(subarray_product_id, force),
+                                loop=self.loop)
         raise gen.Return(('ok',))
 
     @request(Str(optional=True))

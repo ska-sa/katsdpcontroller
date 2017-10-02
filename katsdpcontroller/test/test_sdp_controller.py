@@ -542,6 +542,12 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT1)
         self.client.assert_request_fails("product-deconfigure", SUBARRAY_PRODUCT1)
 
+    def test_product_deconfigure_capturing_force(self):
+        """forced product-deconfigure must succeed while capturing"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT1)
+        self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1, '1')
+
     def test_product_deconfigure_busy(self):
         """product-deconfigure cannot happen concurrently with capture-init"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
