@@ -275,9 +275,9 @@ def _make_cam2telstate(g, config, name):
     streams = {}
     for name2, input2 in six.iteritems(config['inputs']):
         if input2['type'] in CAM2TELSTATE_TYPE_MAP:
-            streams[name2] = CAM2TELSTATE_TYPE_MAP[input2['type']]
+            streams[name2] = (CAM2TELSTATE_TYPE_MAP[input2['type']], input2['instrument_dev_name'])
     streams_arg = ','.join(
-        "{}:{}".format(key, value) for key, value in six.iteritems(streams))
+        "{0}:{1[0]}:{1[1]}".format(key, value) for key, value in six.iteritems(streams))
     # TODO: need to pass cam2telstate the src_streams and instrument_dev_name fields?
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
