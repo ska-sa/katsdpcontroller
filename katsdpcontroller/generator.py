@@ -161,6 +161,18 @@ class CBFStreamInfo(object):
     def n_pols(self):
         return self.antenna_channelised_voltage['n_pols']
 
+    @property
+    def bandwidth(self):
+        return self.antenna_channelised_voltage['bandwidth']
+
+    @property
+    def adc_sample_rate(self):
+        return self.antenna_channelised_voltage['adc_sample_rate']
+
+    @property
+    def n_samples_between_spectra(self):
+        return self.antenna_channelised_voltage['n_samples_between_spectra']
+
 
 class VisInfo(object):
     """Mixin for info classes to compute visibility info from baselines and channels."""
@@ -190,10 +202,21 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
 
 class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
-    def net_bandwidth(self):
-        """Network bandwidth in bits per second"""
-        return self.bandwidth * self.raw['beng_out_bits_per_sample'] * 2
+    def size(self):
+        """Size of frame in bytes"""
+        return (self.raw['beng_out_bits_per_sample'] * 2
+                * self.raw['spectra_per_heap']
+                * self.raw['n_chans_per_substream']) // 8
 
+    @property
+    def int_time(self):
+        """Interval between heaps, in seconds"""
+        return self.raw['spectra_per_heap'] * self.n_samples_between_spectra / self.adc_sample_rate
+
+    @property
+    def net_bandwidth(self, ratio=1.05, overhead=2048):
+        """Network bandwidth in bits per second"""
+        return _bandwidth(self.size, self.int_time, ratio, overhead)
 
 class L0Info(VisInfo):
     """Query properties of an L0 data stream"""
@@ -275,9 +298,9 @@ def _make_cam2telstate(g, config, name):
     streams = {}
     for name2, input2 in six.iteritems(config['inputs']):
         if input2['type'] in CAM2TELSTATE_TYPE_MAP:
-            streams[name2] = CAM2TELSTATE_TYPE_MAP[input2['type']]
+            streams[name2] = (CAM2TELSTATE_TYPE_MAP[input2['type']], input2['instrument_dev_name'])
     streams_arg = ','.join(
-        "{}:{}".format(key, value) for key, value in six.iteritems(streams))
+        "{0}:{1[0]}:{1[1]}".format(key, value) for key, value in six.iteritems(streams))
     # TODO: need to pass cam2telstate the src_streams and instrument_dev_name fields?
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
@@ -598,9 +621,9 @@ def _make_beamformer_ptuse(g, config, name):
         'interface': task.interfaces['cbf'].name
     })
     for src, pol in zip(srcs, 'xy'):
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src, port='spead',
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
                    config=lambda task, resolver, endpoint, pol=pol: {
-                       'cbf_spead{}'.format(pol): str(endpoint)}))
+                       'cbf_spead{}'.format(pol): str(endpoint)})
     return bf_ingest
 
 
