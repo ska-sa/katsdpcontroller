@@ -621,9 +621,9 @@ def _make_beamformer_ptuse(g, config, name):
         'interface': task.interfaces['cbf'].name
     })
     for src, pol in zip(srcs, 'xy'):
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src, port='spead',
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
                    config=lambda task, resolver, endpoint, pol=pol: {
-                       'cbf_spead{}'.format(pol): str(endpoint)}))
+                       'cbf_spead{}'.format(pol): str(endpoint)})
     return bf_ingest
 
 
