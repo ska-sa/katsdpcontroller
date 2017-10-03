@@ -166,6 +166,10 @@ class CBFStreamInfo(object):
         return self.antenna_channelised_voltage['bandwidth']
 
     @property
+    def adc_sample_rate(self):
+        return self.antenna_channelised_voltage['adc_sample_rate']
+
+    @property
     def n_samples_between_spectra(self):
         return self.antenna_channelised_voltage['n_samples_between_spectra']
 
