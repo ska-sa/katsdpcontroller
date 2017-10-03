@@ -22,7 +22,7 @@ INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAM2TELSTATE_TYPE_MAP = {
     'cbf.baseline_correlation_products': 'visibility',
     'cbf.antenna_channelised_voltage': 'fengine',
-    'cbf.tied_array_correlation_products': 'beamformer'
+    'cbf.tied_array_channelised_voltage': 'beamformer'
 }
 CAPTURE_TRANSITIONS = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
