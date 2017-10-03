@@ -161,6 +161,14 @@ class CBFStreamInfo(object):
     def n_pols(self):
         return self.antenna_channelised_voltage['n_pols']
 
+    @property
+    def bandwidth(self):
+        return self.antenna_channelised_voltage['bandwidth']
+
+    @property
+    def n_samples_between_spectra(self):
+        return self.antenna_channelised_voltage['n_samples_between_spectra']
+
 
 class VisInfo(object):
     """Mixin for info classes to compute visibility info from baselines and channels."""
@@ -190,10 +198,21 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
 
 class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
-    def net_bandwidth(self):
-        """Network bandwidth in bits per second"""
-        return self.bandwidth * self.raw['beng_out_bits_per_sample'] * 2
+    def size(self):
+        """Size of frame in bytes"""
+        return (self.raw['beng_out_bits_per_sample'] * 2
+                * self.raw['spectra_per_heap']
+                * self.raw['n_chans_per_substream']) // 8
 
+    @property
+    def int_time(self):
+        """Interval between heaps, in seconds"""
+        return self.raw['spectra_per_heap'] * self.n_samples_between_spectra / self.adc_sample_rate
+
+    @property
+    def net_bandwidth(self, ratio=1.05, overhead=2048):
+        """Network bandwidth in bits per second"""
+        return _bandwidth(self.size, self.int_time, ratio, overhead)
 
 class L0Info(VisInfo):
     """Query properties of an L0 data stream"""
