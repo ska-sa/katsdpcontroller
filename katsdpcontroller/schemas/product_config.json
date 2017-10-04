@@ -260,7 +260,19 @@
             "additionalProperties": false,
             "properties": {
                 "develop": {"type": "boolean", "default": false},
-                "wrapper": {"type": "string", "format": "uri"}
+                "wrapper": {"type": "string", "format": "uri"},
+                "image_tag": {"type": "string" },
+                "service_overrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "config": { "type": "object" },
+                            "taskinfo": { "type": "object" }
+                        }
+                    }
+                }
             }
         },
         "version": {

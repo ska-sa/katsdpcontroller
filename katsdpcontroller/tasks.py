@@ -12,7 +12,7 @@ import six
 from katcp import Sensor, Message
 from prometheus_client import Gauge, Counter
 from katsdptelstate.endpoint import Endpoint
-from . import scheduler, sensor_proxy
+from . import scheduler, sensor_proxy, product_config
 
 
 def _add_prometheus_sensor(name, description, class_):
@@ -145,10 +145,6 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     @trollius.coroutine
     def resolve(self, resolver, graph, loop):
         yield From(super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop))
-        # Add some useful sensors
-        version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
-        version_sensor.set_value(self.taskinfo.container.docker.image)
-        self._add_sensor(version_sensor)
 
         gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -182,6 +178,17 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self.taskinfo.command.environment.setdefault('variables', []).append(
             {'name': 'KATSDP_LOG_ONELINE', 'value': '1'})
 
+        # Apply overrides to taskinfo given by the user
+        overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('taskinfo')
+        if overrides:
+            logger.warn('Applying overrides to taskinfo of %s', self.name)
+            self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
+
+        # Add some useful sensors
+        version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
+        version_sensor.set_value(self.taskinfo.container.docker.image)
+        self._add_sensor(version_sensor)
+
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
         super(SDPPhysicalTaskBase, self).set_state(state)
@@ -204,7 +211,11 @@ class SDPConfigMixin(object):
                 endpoint = Endpoint(trg.host, trg.ports[port])
             config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
                 self, resolver, endpoint))
-        logger.debug('Config for {}: {}'.format(self.name, config))
+        overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('config')
+        if overrides:
+            logger.warning('Overriding config for %s', self.name)
+            config = product_config.override(config, overrides)
+        logger.debug('Config for %s: %s', self.name, config)
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 

@@ -469,7 +469,19 @@ class TestSDPController(unittest.TestCase):
         """A ?product-configure request must wait for the tasks to come up, then indicate success."""
         self.client.assert_request_succeeds(
             'set-config-override', SUBARRAY_PRODUCT4,
-            '{"config": {"develop": true}}')
+            '''
+            {
+                "config": {
+                    "develop": true,
+                    "service_overrides": {
+                        "filewriter.sdp_l0": {
+                            "config": {
+                                "override_test": "value"
+                            }
+                        }
+                    }
+                }
+            }''')
         self._configure_subarray(SUBARRAY_PRODUCT4)
         self.telstate_class.assert_called_once_with('host.telstate:20000')
 
@@ -486,7 +498,8 @@ class TestSDPController(unittest.TestCase):
             'port': 20000,
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
-            'l0_name': 'sdp_l0'
+            'l0_name': 'sdp_l0',
+            'override_test': 'value'
         }, immutable=True)
 
         # Verify the state of the subarray
@@ -566,7 +579,25 @@ class TestSDPController(unittest.TestCase):
 
         self.client.assert_request_succeeds(
             'set-config-override', SUBARRAY_PRODUCT1,
-            '{"inputs": {"i0_baseline_correlation_products": {"simulate": true}}}')
+            '''
+            {
+                "inputs": {
+                    "i0_baseline_correlation_products": {
+                        "simulate": true
+                    }
+                },
+                "config": {
+                    "service_overrides": {
+                        "sim.i0_baseline_correlation_products": {
+                            "taskinfo": {
+                                "command": {
+                                    "shell": true
+                                }
+                            }
+                        }
+                    }
+                }
+            }''')
         self.client.assert_request_succeeds('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
         self.sched.kill.assert_called_with(mock.ANY)
@@ -582,6 +613,12 @@ class TestSDPController(unittest.TestCase):
             'port': 20000,
             'cbf_spead': '127.0.0.1:9000'
         }, immutable=True)
+        # Check that the taskinfo override worked
+        ts.add.assert_any_call('sdp_task_details', mock.ANY, immutable=True)
+        for call in ts.add.call_args_list:
+            if call[0][0] == 'sdp_task_details':
+                task_details = call[0][1]
+        self.assertTrue(task_details['sim.i0_baseline_correlation_products']['taskinfo']['command']['shell'])
 
     def test_product_reconfigure_configure_busy(self):
         """Cannot run product-reconfigure concurrently with another

@@ -510,17 +510,22 @@ class ImageResolver(object):
     tag_file : str, optional
         If specified, the file will be read to determine the image tag to use.
         It does not affect overrides, to allow them to specify their own tags.
+    tag : str, optional
+        If specified, `tag_file` is ignored and this tag is used.
     use_digests : bool, optional
         Whether to look up the latest digests from the `registry`. If this is
         not specified, old versions of images on the agents could be used.
     """
-    def __init__(self, private_registry=None, tag_file=None, use_digests=True):
+    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
         self._tag_file = tag_file
         self._private_registry = private_registry
         self._overrides = {}
         self._cache = {}
         self._use_digests = use_digests
-        if self._tag_file is None:
+        if tag is not None:
+            self._tag = tag
+            self._tag_file = None
+        elif self._tag_file is None:
             self._tag = 'latest'
         else:
             with open(self._tag_file, 'r') as f:
@@ -629,17 +634,18 @@ class ImageResolverFactory(object):
     See :class:`ImageResolver` for an explanation of the constructor
     arguments and :meth:`~ImageResolver.override`.
     """
-    def __init__(self, private_registry=None, tag_file=None, use_digests=True):
-        self._tag_file = tag_file
-        self._private_registry = private_registry
-        self._use_digests = use_digests
+    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
+        self._args = dict(private_registry=private_registry,
+                          tag_file=tag_file, tag=tag, use_digests=use_digests)
         self._overrides = {}
 
     def override(self, name, path):
         self._overrides[name] = path
 
-    def __call__(self):
-        image_resolver = ImageResolver(self._private_registry, self._tag_file, self._use_digests)
+    def __call__(self, **kwargs):
+        args = dict(self._args)
+        args.update(kwargs)
+        image_resolver = ImageResolver(**kwargs)
         for name, path in six.iteritems(self._overrides):
             image_resolver.override(name, path)
         return image_resolver

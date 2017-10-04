@@ -359,6 +359,15 @@ class TestImageResolver(object):
         with assert_raises(ValueError):
             scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
 
+    @mock.patch('__builtin__.open', autospec=file)
+    @run_with_event_loop
+    def test_tag(self, open_mock, loop):
+        """Test with an explicit tag"""
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                           tag_file='tag_file', tag='mytag', use_digests=False)
+        assert_equal('my-registry:5000/test1:mytag', (yield From(resolver('test1', loop))))
+        open_mock.assert_not_called()
+
 
 class TestTaskIDAllocator(object):
     """Tests for :class:`katsdpcontroller.scheduler.TaskIDAllocator`."""
