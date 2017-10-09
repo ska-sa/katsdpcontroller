@@ -6,7 +6,7 @@ services:
             - "127.0.0.1:2181:2181"
     mesos-master:
         network_mode: host
-        image: mesosphere/mesos-master:1.3.1
+        image: mesosphere/mesos-master:1.4.0
         environment:
             MESOS_PORT: 5050
             MESOS_ZK: zk://127.0.0.1:2181/mesos
@@ -16,7 +16,7 @@ services:
             MESOS_WORK_DIR: /var/tmp/mesos
     mesos-slave:
         network_mode: host
-        image: mesosphere/mesos-slave:1.3.1
+        image: mesosphere/mesos-slave:1.4.0
         environment:
             MESOS_IP: 127.0.0.1
             MESOS_PORT: 5051
@@ -26,12 +26,13 @@ services:
             MESOS_DOCKER_CONFIG: file:///etc/mesos/config.json
             MESOS_EXECUTOR_REGISTRATION_TIMEOUT: 5mins
             MESOS_WORK_DIR: /var/tmp/mesos
+            MESOS_SYSTEMD_ENABLE_SUPPORT: "false"
         volumes:
             - "${HOME}/.docker/config.json:/etc/mesos/config.json"
             - /var/run/docker.sock:/var/run/docker.sock
             - /sys:/sys
             - /usr/bin/docker:/usr/local/bin/docker
-            - ./mesos-slave:/etc/mesos-slave
+            - ./mesos-slave:/etc/mesos-slave:ro
             - /var/tmp/mesos:/var/tmp/mesos
         entrypoint:
             - /usr/bin/mesos-init-wrapper
