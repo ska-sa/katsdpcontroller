@@ -645,7 +645,7 @@ class ImageResolverFactory(object):
     def __call__(self, **kwargs):
         args = dict(self._args)
         args.update(kwargs)
-        image_resolver = ImageResolver(**kwargs)
+        image_resolver = ImageResolver(**args)
         for name, path in six.iteritems(self._overrides):
             image_resolver.override(name, path)
         return image_resolver
