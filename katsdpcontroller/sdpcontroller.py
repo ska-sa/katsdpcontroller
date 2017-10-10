@@ -708,10 +708,16 @@ class SDPControllerServer(AsyncDeviceServer):
         req.inform("Starting configuration of new product {}. This may take a few minutes..."
             .format(subarray_product_id))
 
-        resolver = scheduler.Resolver(self.image_resolver_factory(),
+        image_tag = config['config'].get('image_tag')
+        if image_tag is not None:
+            resolver_factory_args=dict(tag=image_tag)
+        else:
+            resolver_factory_args={}
+        resolver = scheduler.Resolver(self.image_resolver_factory(**resolver_factory_args),
                                       scheduler.TaskIDAllocator(subarray_product_id + '-'),
                                       self.sched.http_url if self.sched else '')
         resolver.resources = SDPResources(self.resources, subarray_product_id)
+        resolver.service_overrides = config['config'].get('service_overrides', {})
         resolver.telstate = None
 
         graph = SDPGraph(self.sched, config, resolver, subarray_product_id,
