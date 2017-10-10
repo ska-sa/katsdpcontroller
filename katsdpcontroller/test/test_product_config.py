@@ -148,6 +148,12 @@ class TestValidate(object):
             product_config.validate(self.config)
         assert_in("have more than one cam.http", str(cm.exception))
 
+    def test_bad_n_chans_per_substream(self):
+        self.config["inputs"]["i0_baseline_correlation_products"]["n_chans_per_substream"] = 123
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("not a multiple of", str(cm.exception))
+
 
 class TestConvert(object):
     """Tests for :func:`~katsdpcontroller.product_config.convert`.
@@ -364,4 +370,3 @@ class TestConvert(object):
         with assert_raises(jsonschema.ValidationError):
             product_config.convert("c856M4k", self.stream_sources, self.antennas,
                                    0.5, False, False, "not a valid URL")
-
