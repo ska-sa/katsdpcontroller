@@ -24,7 +24,7 @@ CAM2TELSTATE_TYPE_MAP = {
     'cbf.antenna_channelised_voltage': 'fengine',
     'cbf.tied_array_channelised_voltage': 'beamformer'
 }
-CAPTURE_TRANSITIONS = {State.INITIALISED: 'capture-init', State.DONE: 'capture-done'}
+CAPTURE_TRANSITIONS = {State.INITIALISED: ['capture-init'], State.DONE: ['capture-done']}
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
     'beamform',
@@ -347,6 +347,10 @@ def _make_baseline_correlation_products_simulator(g, config, name):
         sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
     sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     sim.interfaces[0].bandwidth_out = info.net_bandwidth
+    sim.transitions = {
+        State.INITIALISED: ['capture-start', name],
+        State.DONE: ['capture-stop', name]
+    }
     substreams = info.n_channels // info.n_channels_per_substream
     g.add_node(sim, config=lambda task, resolver: {
         'cbf_channels': info.n_channels,

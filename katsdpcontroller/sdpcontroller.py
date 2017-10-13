@@ -413,7 +413,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                                req, node.name)
             else:
                 # TODO: should handle katcp exceptions or failed replies
-                yield From(node.issue_req(req, timeout=300))
+                yield From(node.issue_req(req[0], req[1:], timeout=300))
 
     @trollius.coroutine
     def exec_transitions(self, state, reverse):
@@ -464,9 +464,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _start(self):
         """Move to capturing state"""
-        sim_streams = [node.logical_node.name[4:] for node in self.graph.physical_graph
-                       if node.logical_node.name.startswith('sim.')]
-        if sim_streams:
+        if any(node.logical_node.name.startswith('sim.') for node in self.graph.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
                 # Replace temporary fake antennas with ones configured by kattelmod
@@ -476,31 +474,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
         yield From(self.exec_transitions(State.INITIALISED, True))
-        for stream in sim_streams:
-            logger.info("SIMULATE: Issuing a capture-start to sim.%s", stream)
-            try:
-                yield From(self._issue_req(
-                    'capture-start', args=[stream], node_type='sim.' + stream))
-            except Exception as error:
-                logger.error("SIMULATE: capture-start failed", exc_info=True)
-                raise FailReply(
-                    "SIMULATE: capture-start failed: {}".format(error))
 
     @trollius.coroutine
     def _stop(self):
         """Stop existing capture session. This is used when changing to either
         State.DONE or State.UNCONFIGURED (the latter only happens when forced).
         """
-        sim_streams = [node.logical_node.name[4:] for node in self.graph.physical_graph
-                       if node.logical_node.name.startswith('sim.')]
-        for stream in sim_streams:
-            logger.info("SIMULATE: Issuing a capture-stop to sim.%s", stream)
-            yield From(self._issue_req(
-                'capture-stop', args=[stream], node_type='sim.' + stream, timeout=120))
         yield From(self.exec_transitions(State.DONE, False))
-         # called in an explicit fashion (above as well) so we can manage
-         # execution order correctly when dealing with a simulator
-         # all other commands can execute in arbitrary order
 
     @trollius.coroutine
     def _set_state(self, state):
