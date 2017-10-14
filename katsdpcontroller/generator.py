@@ -422,10 +422,14 @@ def _make_ingest(g, config, spectral_name, continuum_name):
            and spectral_info.n_channels // sd_continuum_factor >= 384):
         sd_continuum_factor *= 2
 
+    # For 64 antennas we need about 550 Mbits per signal display
+    # frame in the worst case (128 custom signals, 256 continuum channels).
+    # For safety we round this up to 700 Mbits.
+    sd_spead_rate = 700e6 / n_ingest / spectral_info.int_time
     g.add_node(ingest_group, config=lambda task, resolver: {
         'continuum_factor': continuum_info.raw['continuum_factor'],
         'sd_continuum_factor': sd_continuum_factor,
-        'sd_spead_rate': 3e9 / n_ingest,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
+        'sd_spead_rate': sd_spead_rate,
         'cbf_ibv': not develop,
         'servers': n_ingest,
         'l0_spectral_name': spectral_name,
