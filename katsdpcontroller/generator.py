@@ -222,6 +222,7 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
         """Network bandwidth in bits per second"""
         return _bandwidth(self.size, self.int_time, ratio, overhead)
 
+
 class L0Info(VisInfo):
     """Query properties of an L0 data stream"""
     def __init__(self, config, name):
@@ -402,6 +403,24 @@ def _make_timeplot(g, config, spectral_name):
     return timeplot
 
 
+def _timeplot_frame_size(spectral_info, n_cont_channels):
+    """Approximate size of the data sent from all ingest processes to timeplot per heap"""
+    # This is based on _init_ig_sd from katsdpingest/ingest_session.py
+    max_custom_signals = 128      # From katsdpdisp/scripts/time_plot.py
+    n_perc_signals = 5 * 8
+    n_spec_channels = spectral_info.n_channels
+    n_bls = spectral_info.n_baselines
+    ans = n_spec_channels * max_custom_signals * 9  # sd_data + sd_flags
+    ans += max_custom_signals * 4                   # sd_data_index
+    ans += n_cont_channels * n_bls * 9              # sd_blmx_data + sd_blmx_flags
+    ans += n_bls * 12                               # sd_timeseries + sd_timeseriesabs
+    ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
+    # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
+    ans += n_bls * 10                               # bls_ordering
+    # There are a few scalar values, but that doesn't add up to enough to worry about
+    return ans
+
+
 def _make_ingest(g, config, spectral_name, continuum_name):
     # Number of ingest nodes.
     # TODO: adjust based on the number of channels requested
@@ -422,10 +441,15 @@ def _make_ingest(g, config, spectral_name, continuum_name):
            and spectral_info.n_channels // sd_continuum_factor >= 384):
         sd_continuum_factor *= 2
 
+    sd_frame_size = _timeplot_frame_size(
+        spectral_info, spectral_info.n_channels // sd_continuum_factor)
+    # The rates are low, so we allow plenty of padding in case the calculation is
+    # missing something.
+    sd_spead_rate = _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
     g.add_node(ingest_group, config=lambda task, resolver: {
         'continuum_factor': continuum_info.raw['continuum_factor'],
         'sd_continuum_factor': sd_continuum_factor,
-        'sd_spead_rate': 3e9 / n_ingest,   # local machine, so crank it up a bit (TODO: no longer necessarily true)
+        'sd_spead_rate': sd_spead_rate / n_ingest,
         'cbf_ibv': not develop,
         'servers': n_ingest,
         'l0_spectral_name': spectral_name,
