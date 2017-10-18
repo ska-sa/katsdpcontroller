@@ -210,7 +210,7 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
         """Size of frame in bytes"""
         return (self.raw['beng_out_bits_per_sample'] * 2
                 * self.raw['spectra_per_heap']
-                * self.n_channels_per_substream) // 8
+                * self.raw['n_chans_per_substream']) // 8
 
     @property
     def int_time(self):
