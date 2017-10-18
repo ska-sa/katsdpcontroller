@@ -428,7 +428,7 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
 def _make_ingest(g, config, spectral_name, continuum_name):
     # Number of ingest nodes.
     # TODO: adjust based on the number of channels requested
-    n_ingest = 1
+    n_ingest = 4
 
     spectral_info = L0Info(config, spectral_name)
     continuum_info = L0Info(config, continuum_name)
