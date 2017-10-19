@@ -219,7 +219,8 @@ def convert(graph_name, stream_sources, antennas, dump_rate, simulate, develop, 
                     for src_name in stream_sources['cbf.antenna_channelised_voltage']
                 ]
                 cur['n_chans_per_substream'] = cbf_channels // len(endpoints)
-                cur['simulate'] = simulate
+                # simulation not yet supported for tied_array_channelised_voltage
+                cur['simulate'] = simulate and type_ != 'cbf.tied_array_channelised_voltage'
             if type_ == 'cbf.antenna_channelised_voltage':
                 cur['antennas'] = antennas
                 cur['n_chans'] = cbf_channels

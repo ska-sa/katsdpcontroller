@@ -27,17 +27,27 @@ from katsdpcontroller.sdpcontroller import (
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
 
-ANTENNAS = 'm063,m064'
+ANTENNAS = 'm000,m001,m063,m064'
 
-PRODUCT = 'c856M4k'
+PRODUCT = 'bc856M4k'
 SUBARRAY_PRODUCT1 = 'array_1_' + PRODUCT
 SUBARRAY_PRODUCT2 = 'array_2_' + PRODUCT
 SUBARRAY_PRODUCT3 = 'array_3_' + PRODUCT
 SUBARRAY_PRODUCT4 = 'array_4_' + PRODUCT
 
-STREAMS = '{"cam.http": {"camdata": "http://127.0.0.1:8999"}, \
-            "cbf.baseline_correlation_products": {"i0.baseline-correlation-products": "spead://127.0.0.1:9000"}, \
-            "cbf.antenna_channelised_voltage": {"i0.antenna-channelised-voltage": "spead://127.0.0.1:9001"}}'
+STREAMS = '''{
+    "cam.http": {"camdata": "http://127.0.0.1:8999"},
+    "cbf.baseline_correlation_products": {
+        "i0.baseline-correlation-products": "spead://239.102.255.0+15:7148"
+    },
+    "cbf.antenna_channelised_voltage": {
+        "i0.antenna-channelised-voltage": "spead://239.102.252.0+15:7148"
+    },
+    "cbf.tied_array_channelised_voltage": {
+        "i0.tied-array-channelised-voltage-0x": "spead://239.102.254.1+15:7148",
+        "i0.tied-array-channelised-voltage-0y": "spead://239.102.253.1+15:7148"
+    }
+}'''
 
 CONFIG = '''{
     "version": "1.0",
@@ -48,8 +58,8 @@ CONFIG = '''{
         },
         "i0_antenna_channelised_voltage": {
             "type": "cbf.antenna_channelised_voltage",
-            "url": "spead://127.0.0.1:9001",
-            "antennas": ["m063", "m064"],
+            "url": "spead://239.102.252.0+15:7148",
+            "antennas": ["m000", "m001", "m063", "m064"],
             "n_chans": 4096,
             "n_pols": 2,
             "adc_sample_rate": 1712000000.0,
@@ -59,7 +69,7 @@ CONFIG = '''{
         },
         "i0_baseline_correlation_products": {
             "type": "cbf.baseline_correlation_products",
-            "url": "spead://127.0.0.1:9000",
+            "url": "spead://239.102.255.0+15:7148",
             "src_streams": ["i0_antenna_channelised_voltage"],
             "int_time": 0.499,
             "n_bls": 40,
@@ -67,6 +77,24 @@ CONFIG = '''{
             "n_chans_per_substream": 256,
             "instrument_dev_name": "i0",
             "simulate": true
+        },
+        "i0_tied_array_channelised_voltage_0x": {
+            "type": "cbf.tied_array_channelised_voltage",
+            "url": "spead://239.102.254.1+15:7148",
+            "src_streams": ["i0_antenna_channelised_voltage"],
+            "spectra_per_heap": 256,
+            "n_chans_per_substream": 256,
+            "beng_out_bits_per_sample": 8,
+            "instrument_dev_name": "i0"
+        },
+        "i0_tied_array_channelised_voltage_0y": {
+            "type": "cbf.tied_array_channelised_voltage",
+            "url": "spead://239.102.253.1+15:7148",
+            "src_streams": ["i0_antenna_channelised_voltage"],
+            "spectra_per_heap": 256,
+            "n_chans_per_substream": 256,
+            "beng_out_bits_per_sample": 8,
+            "instrument_dev_name": "i0"
         }
     },
     "outputs": {
@@ -81,6 +109,31 @@ CONFIG = '''{
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
             "continuum_factor": 16
+        },
+        "sdp_beamformer": {
+            "type": "sdp.beamformer",
+            "src_streams": [
+                "i0_tied_array_channelised_voltage_0x",
+                "i0_tied_array_channelised_voltage_0y"
+            ]
+        },
+        "sdp_beamformer_engineering_ssd": {
+            "type": "sdp.beamformer_engineering",
+            "src_streams": [
+                "i0_tied_array_channelised_voltage_0x",
+                "i0_tied_array_channelised_voltage_0y"
+            ],
+            "output_channels": [0, 4096],
+            "store": "ssd"
+        },
+        "sdp_beamformer_engineering_ram": {
+            "type": "sdp.beamformer_engineering",
+            "src_streams": [
+                "i0_tied_array_channelised_voltage_0x",
+                "i0_tied_array_channelised_voltage_0y"
+            ],
+            "output_channels": [0, 4096],
+            "store": "ram"
         }
     },
     "config": {}
@@ -401,6 +454,12 @@ class TestSDPController(unittest.TestCase):
                         if port is not None:
                             node.ports[port] = port_num
                             port_num += 1
+                if hasattr(node.logical_node, 'cores'):
+                    core_num = 0
+                    for core in node.logical_node.cores:
+                        if core is not None:
+                            node.cores[core] = core_num
+                            core_num += 1
                 if isinstance(node.logical_node, scheduler.LogicalTask):
                     node.allocation = mock.MagicMock()
                     node.allocation.agent.host = 'host.' + node.logical_node.name
@@ -615,7 +674,7 @@ class TestSDPController(unittest.TestCase):
             'cbf_int_time': 0.499,
             'cbf_interface': 'em1',
             'port': 20000,
-            'cbf_spead': '127.0.0.1:9000'
+            'cbf_spead': '239.102.255.0+15:7148'
         }, immutable=True)
         # Check that the taskinfo override worked
         ts.add.assert_any_call('sdp_task_details', mock.ANY, immutable=True)
@@ -653,16 +712,14 @@ class TestSDPController(unittest.TestCase):
         self.assertEqual(State.INITIALISED, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        katcp_client.future_request.assert_has_calls([
-            mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
-            mock.call(Message.request(
-                'capture-start', 'i0_baseline_correlation_products'), timeout=mock.ANY)
-        ])
+        expected_calls = []
+        expected_calls.append(mock.call(Message.request('configure-subarray-from-telstate')))
+        # 4x ingest, filewriter, beamformer, 4x engineering beamformer, cal
+        expected_calls.extend([
+            mock.call(Message.request('capture-init'), timeout=mock.ANY)] * 11)
+        expected_calls.append(mock.call(Message.request(
+            'capture-start', 'i0_baseline_correlation_products'), timeout=mock.ANY))
+        katcp_client.future_request.assert_has_calls(expected_calls)
 
     def test_capture_init_failed_req(self):
         """Capture-init bumbles on even if a child request fails.
