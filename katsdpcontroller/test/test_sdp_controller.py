@@ -110,6 +110,18 @@ CONFIG = '''{
             "output_int_time": 4.0,
             "continuum_factor": 16
         },
+        "sdp_l0_spectral_only": {
+            "type": "sdp.l0",
+            "src_streams": ["i0_baseline_correlation_products"],
+            "output_int_time": 1.9,
+            "continuum_factor": 1
+        },
+        "sdp_l0_continuum_only": {
+            "type": "sdp.l0",
+            "src_streams": ["i0_baseline_correlation_products"],
+            "output_int_time": 2.1,
+            "continuum_factor": 16
+        },
         "sdp_beamformer": {
             "type": "sdp.beamformer",
             "src_streams": [
@@ -714,9 +726,9 @@ class TestSDPController(unittest.TestCase):
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         expected_calls = []
         expected_calls.append(mock.call(Message.request('configure-subarray-from-telstate')))
-        # 4x ingest, filewriter, beamformer, 4x engineering beamformer, cal
+        # 12x ingest, 2x filewriter, beamformer, 4x engineering beamformer, 2x cal
         expected_calls.extend([
-            mock.call(Message.request('capture-init'), timeout=mock.ANY)] * 11)
+            mock.call(Message.request('capture-init'), timeout=mock.ANY)] * 21)
         expected_calls.append(mock.call(Message.request(
             'capture-start', 'i0_baseline_correlation_products'), timeout=mock.ANY))
         katcp_client.future_request.assert_has_calls(expected_calls)
