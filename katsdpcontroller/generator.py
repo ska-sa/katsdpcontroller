@@ -234,12 +234,12 @@ class L0Info(VisInfo):
         if 'output_channels' in self.raw:
             return tuple(self.raw['output_channels'])
         else:
-            return (0, self.src_info.n_channels // self.raw['continuum_factor'])
+            return (0, self.src_info.n_channels)
 
     @property
     def n_channels(self):
         rng = self.output_channels
-        return rng[1] - rng[0]
+        return (rng[1] - rng[0]) // self.raw['continuum_factor']
 
     @property
     def n_pols(self):
@@ -450,6 +450,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     sd_spead_rate = _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
+    output_channels_str = '{}:{}'.format(*spectral_info.output_channels)
     g.add_node(ingest_group, config=lambda task, resolver: {
         'continuum_factor': continuum_info.raw['continuum_factor'],
         'sd_continuum_factor': sd_continuum_factor,
@@ -460,7 +461,9 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         'l0_continuum_name': continuum_name,
         'antenna_mask': src_info.antennas,
         'output_int_time': spectral_info.int_time,
-        'sd_int_time': spectral_info.int_time
+        'sd_int_time': spectral_info.int_time,
+        'output_channels': output_channels_str,
+        'sd_output_channels': output_channels_str
     })
 
     spectral_multicast = LogicalMulticast('multicast.' + spectral_name, n_ingest)
