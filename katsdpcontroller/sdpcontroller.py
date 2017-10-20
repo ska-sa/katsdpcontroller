@@ -227,6 +227,7 @@ class SDPGraph(object):
         base_params = self.physical_graph.graph.get(
             'config', lambda resolver: {})(self.resolver)
         base_params['subarray_product_id'] = self.subarray_product_id
+        base_params['sdp_config'] = self.config
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
         yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
