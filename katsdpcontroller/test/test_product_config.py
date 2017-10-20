@@ -392,9 +392,8 @@ class TestConvert(object):
                                         0.5, True, True, "http://invalid.com/wrapper")
         del self.expected_inputs["camdata"]
         self.expected_inputs["i0_baseline_correlation_products"]["simulate"] = True
-        # Disabled until simulation of tied-array-channelised-voltage is supported
-        # self.expected_inputs["i0_tied_array_channelised_voltage_0x"]["simulate"] = True
-        # self.expected_inputs["i0_tied_array_channelised_voltage_0y"]["simulate"] = True
+        self.expected_inputs["i0_tied_array_channelised_voltage_0x"]["simulate"] = True
+        self.expected_inputs["i0_tied_array_channelised_voltage_0y"]["simulate"] = True
         expected = {
             "config": {
                 "develop": True,
