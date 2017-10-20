@@ -206,11 +206,15 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
 
 class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
+    def n_substreams(self):
+        return self.n_channels // self.raw['n_chans_per_substream']
+
+    @property
     def size(self):
         """Size of frame in bytes"""
         return (self.raw['beng_out_bits_per_sample'] * 2
                 * self.raw['spectra_per_heap']
-                * self.raw['n_chans_per_substream']) // 8
+                * self.n_channels) // 8
 
     @property
     def int_time(self):
@@ -220,7 +224,8 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
     def net_bandwidth(self, ratio=1.05, overhead=2048):
         """Network bandwidth in bits per second"""
-        return _bandwidth(self.size, self.int_time, ratio, overhead)
+        heap_size = self.size / self.n_substreams
+        return _bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
 
 
 class L0Info(VisInfo):
@@ -701,6 +706,11 @@ def _make_beamformer_engineering(g, config, name):
     nodes = []
     for i, src in enumerate(srcs):
         info = TiedArrayChannelisedVoltageInfo(config, src)
+        output_channels = output.get('output_channels')
+        if output_channels is None:
+            output_channels = (0, info.n_channels)
+        fraction = (output_channels[1] - output_channels[0]) / info.n_channels
+
         bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
         bf_ingest.image = 'katsdpingest'
         bf_ingest.command = ['schedrr', 'bf_ingest.py']
@@ -708,11 +718,10 @@ def _make_beamformer_engineering(g, config, name):
         bf_ingest.cores = ['disk', 'network']
         bf_ingest.capabilities.append('SYS_NICE')
         if not ram:
-            # CBF sends 256 time samples per heap, and bf_ingest accumulates
-            # 128 of these in the ring buffer. It's not a lot of memory, so
-            # to be on the safe side we double everything. Values are int8*2.
-            # Allow 512MB for various buffers.
-            bf_ingest.mem = 256 * 256 * 2 * info.n_channels / 1024**2 + 512
+            # bf_ingest accumulates 128 frames in the ring buffer. It's not a
+            # lot of memory, so to be on the safe side we double everything.
+            # Values are int8*2.  Allow 512MB for various buffers.
+            bf_ingest.mem = 256 * info.size * fraction / 1024**2 + 512
         else:
             # When writing to tmpfs, the file is accounted as memory to our
             # process, so we need more memory allocation than there is
@@ -720,7 +729,7 @@ def _make_beamformer_engineering(g, config, name):
             # we just hardcode a number.
             bf_ingest.ram = 220 * 1024
         bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
-        bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth
+        bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth * fraction
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [
             scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
@@ -732,7 +741,8 @@ def _make_beamformer_engineering(g, config, name):
             'interface': task.interfaces['cbf'].name,
             'ibv': True,
             'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-            'stream_name': src
+            'stream_name': src,
+            'channels': '{}:{}'.format(*output_channels)
         })
         g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})

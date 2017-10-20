@@ -71,6 +71,30 @@ class TestValidate(object):
                     "n_chans_per_substream": 256,
                     "instrument_dev_name": "i0"
                 },
+                "i0_tied_array_channelised_voltage_0x": {
+                    "beng_out_bits_per_sample": 8,
+                    "instrument_dev_name": "i0",
+                    "n_chans_per_substream": 256,
+                    "simulate": False,
+                    "spectra_per_heap": 256,
+                    "src_streams": [
+                        "i0_antenna_channelised_voltage"
+                    ],
+                    "type": "cbf.tied_array_channelised_voltage",
+                    "url": "spead://239.9.3.30+15:7148"
+                },
+                "i0_tied_array_channelised_voltage_0y": {
+                    "beng_out_bits_per_sample": 8,
+                    "instrument_dev_name": "i0",
+                    "n_chans_per_substream": 256,
+                    "simulate": False,
+                    "spectra_per_heap": 256,
+                    "src_streams": [
+                        "i0_antenna_channelised_voltage"
+                    ],
+                    "type": "cbf.tied_array_channelised_voltage",
+                    "url": "spead://239.9.3.46+7:7148"
+                }
             },
             "outputs": {
                 "l0": {
@@ -80,6 +104,15 @@ class TestValidate(object):
                     "output_channels": [0, 4096],
                     "continuum_factor": 1
                 },
+                "beamformer_engineering": {
+                    "type": "sdp.beamformer_engineering",
+                    "src_streams": [
+                        "i0_tied_array_channelised_voltage_0x",
+                        "i0_tied_array_channelised_voltage_0y"
+                    ],
+                    "output_channels": [0, 4096],
+                    "store": "ssd"
+                }
             },
             "config": {}
         }
@@ -113,6 +146,27 @@ class TestValidate(object):
             product_config.validate(self.config)
         assert_in("Unknown source i0_antenna_channelised_voltage", str(cm.exception))
 
+    def test_input_not_spead(self):
+        """A CBF stream has a non-spead URL scheme"""
+        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = "http://dummy/"
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("non-spead URL", str(cm.exception))
+
+    def test_input_no_spead_port(self):
+        """A CBF stream has a spead URL but with no port"""
+        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = "spead://239.9.3.1+15"
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("has no port", str(cm.exception))
+
+    def test_input_bad_n_endpoints(self):
+        """Number of endpoints doesn't divide into number of channels"""
+        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = "spead://239.9.3.1+14:7148"
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("not a multiple of endpoints", str(cm.exception))
+
     def test_output_missing_stream(self):
         """An output whose ``src_streams`` reference does not exist"""
         del self.config["inputs"]["i0_baseline_correlation_products"]
@@ -141,6 +195,13 @@ class TestValidate(object):
         self.config["outputs"]["l0"]["output_channels"] = [10, 4097]   # Overflows
         with assert_raises(ValueError):
             product_config.validate(self.config)
+
+    def test_misaligned_channel_range(self):
+        """Beamformer channel range is not aligned to the endpoints"""
+        self.config["outputs"]["beamformer_engineering"]["output_channels"] = [256, 4096]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("not aligned to endpoints", str(cm.exception))
 
     def test_multiple_cam_http(self):
         self.config["inputs"]["camdata2"] = self.config["inputs"]["camdata"]

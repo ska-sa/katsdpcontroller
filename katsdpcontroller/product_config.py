@@ -100,13 +100,24 @@ def validate(config):
     for name, stream in six.iteritems(config['inputs']):
         if stream['type'] in ['cbf.baseline_correlation_products',
                               'cbf.tied_array_channelised_voltage']:
+            url_parts = urllib.parse.urlsplit(stream['url'])
+            if url_parts.scheme != 'spead':
+                raise ValueError('{}: non-spead URL {}'.format(name, stream['url']))
+            if url_parts.port is None:
+                raise ValueError('{}: URL {} has no port'.format(name, stream['url']))
+            n_endpoints = len(endpoint_list_parser(None)(url_parts.netloc))
             src_stream = stream['src_streams'][0]
             n_chans = config['inputs'][src_stream]['n_chans']
             n_chans_per_substream = stream['n_chans_per_substream']
-            if n_chans % n_chans_per_substream != 0:
+            if n_chans % n_endpoints != 0:
                 raise ValueError(
-                    '{}: n_chans ({}) not a multiple of n_chans_per_substream ({})'.format(
-                        name, n_chans, n_chans_per_substream))
+                    '{}: n_chans ({}) not a multiple of endpoints ({})'.format(
+                        name, n_chans, n_endpoints))
+            n_chans_per_endpoint = n_chans // n_endpoints
+            if n_chans_per_endpoint % n_chans_per_substream != 0:
+                raise ValueError(
+                    '{}: channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
+                    .format(name, n_chans_per_endpoint, n_chans_per_substream))
 
     for name, output in six.iteritems(config['outputs']):
         # Names of inputs and outputs must be disjoint
@@ -114,14 +125,23 @@ def validate(config):
             raise ValueError('{} cannot be both an input and an output'.format(name))
 
         # Channel ranges must be non-empty and not overflow
-        if output['type'] == 'sdp.l0':
+        if output['type'] in ['sdp.l0', 'sdp.beamformer_engineering']:
             if 'output_channels' in output:
                 c = output['output_channels']
-                src = config['inputs'][output['src_streams'][0]]
-                acv = config['inputs'][src['src_streams'][0]]
-                if not 0 <= c[0] < c[1] <= acv['n_chans']:
-                    raise ValueError('Channel range {}:{} for {} is invalid'.format(
-                        c[0], c[1], name))
+                for src in (config['inputs'][src_name] for src_name in output['src_streams']):
+                    acv = config['inputs'][src['src_streams'][0]]
+                    if not 0 <= c[0] < c[1] <= acv['n_chans']:
+                        raise ValueError('Channel range {}:{} for {} is invalid'.format(
+                            c[0], c[1], name))
+                    # beamformer_engineering requires alignment to multicast addresses
+                    if output['type'] == 'sdp.beamformer_engineering':
+                        url_parts = urllib.parse.urlsplit(src['url'])
+                        n_endpoints = len(endpoint_list_parser(None)(url_parts.netloc))
+                        n_chans_per_endpoint = acv['n_chans'] // n_endpoints
+                        if c[0] % n_chans_per_endpoint != 0 or c[1] % n_chans_per_endpoint != 0:
+                            raise ValueError(
+                                'Channel range {}:{} for {} is not aligned to endpoints'.format(
+                                    c[0], c[1], name))
 
 
 def parse(config_bytes):
