@@ -852,19 +852,29 @@ class TestSDPController(unittest.TestCase):
 class TestSDPResources(unittest.TestCase):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPResources`."""
     def setUp(self):
-        self.r = SDPCommonResources("225.100.0.0/16")
+        self.r = SDPCommonResources("225.100.0.0/23")
         self.r1 = SDPResources(self.r, 'array_1_c856M4k')
         self.r2 = SDPResources(self.r, 'array_1_bc856M4k')
 
     def test_multicast_ip(self):
-        # Get assigned IP's from known host classes
-        self.assertEqual('225.100.1.1+3', self.r1.get_multicast_ip('l0_spectral_spead', 4))
-        self.assertEqual('225.100.4.1', self.r1.get_multicast_ip('l1_continuum_spead', 1))
-        # Get assigned IP from unknown host class
-        self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip('unknown', 4))
+        """Get assigned IP's from different subarrays"""
+        self.assertEqual('225.100.0.1+3', self.r1.get_multicast_ip(4))
+        self.assertEqual('225.100.1.1', self.r2.get_multicast_ip(1))
+        self.assertEqual('225.100.0.5+7', self.r1.get_multicast_ip(8))
 
-        # Now change to a different subarray-product, check that
-        # new values are used.
-        self.assertEqual('225.100.1.5+3', self.r2.get_multicast_ip('l0_spectral_spead', 4))
-        self.assertEqual('225.100.0.5', self.r2.get_multicast_ip('CAM_spead', 1))
-        self.assertEqual('225.100.0.6', self.r2.get_multicast_ip('unknown', 1))
+    def test_multicast_ip_exhausted(self):
+        """Error raised when a single subnet is used up"""
+        self.r1.get_multicast_ip(4)
+        with self.assertRaises(RuntimeError):
+            self.r1.get_multicast_ip(255)
+
+    def test_multicast_ip_exhausted_subnets(self):
+        """Error raised when too many subnets are requested"""
+        with self.assertRaises(RuntimeError):
+            SDPResources(self.r, 'array_2_c856M4k')
+
+    def test_recycle_subnets(self):
+        """Closing a subnet makes it available again"""
+        self.r1.close()
+        r3 = SDPResources(self.r, 'array_3_c856M4k')
+        self.assertEqual('225.100.0.1+3', r3.get_multicast_ip(4))
