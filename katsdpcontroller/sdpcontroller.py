@@ -228,6 +228,15 @@ class SDPGraph(object):
             'config', lambda resolver: {})(self.resolver)
         base_params['subarray_product_id'] = self.subarray_product_id
         base_params['sdp_config'] = self.config
+        # Provide attributes to describe the relationships between CBF streams
+        # and instruments. This could be extracted from sdp_config, but these
+        # specific sensors are easier to mock.
+        for name, stream in six.iteritems(self.config['inputs']):
+            if stream['type'].startswith('cbf.'):
+                prefix = 'cbf_' + name + '_'
+                for suffix in ['src_streams', 'instrument_dev_name']:
+                    if suffix in stream:
+                        base_params[prefix + suffix] = stream[suffix]
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
         yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
@@ -241,8 +250,8 @@ class SDPGraph(object):
 
         logger.debug("base params: %s", base_params)
          # set the configuration
-        for k,v in base_params.iteritems():
-            self.telstate.add(k,v, immutable=True)
+        for k, v in base_params.iteritems():
+            self.telstate.add(k, v, immutable=True)
 
     @trollius.coroutine
     def execute_graph(self, req):
