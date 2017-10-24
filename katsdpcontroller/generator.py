@@ -426,15 +426,15 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
 
 
 def _make_ingest(g, config, spectral_name, continuum_name):
+    develop = is_develop(config)
     # Number of ingest nodes.
     # TODO: adjust based on the number of channels requested
-    n_ingest = 4
+    n_ingest = 4 if not develop else 2
 
     spectral_info = L0Info(config, spectral_name)
     continuum_info = L0Info(config, continuum_name)
     src = spectral_info.raw['src_streams'][0]
     src_info = spectral_info.src_info
-    develop = is_develop(config)
 
     # Virtual ingest node which depends on the real ingest nodes, so that other
     # services can declare dependencies on ingest rather than individual nodes.
