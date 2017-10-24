@@ -97,6 +97,7 @@ def validate(config):
     if len(cam_http) > 1:
         raise ValueError('Cannot have more than one cam.http stream')
 
+    input_endpoints = {}
     for name, stream in six.iteritems(config['inputs']):
         if stream['type'] in ['cbf.baseline_correlation_products',
                               'cbf.tied_array_channelised_voltage']:
@@ -106,6 +107,7 @@ def validate(config):
             if url_parts.port is None:
                 raise ValueError('{}: URL {} has no port'.format(name, stream['url']))
             n_endpoints = len(endpoint_list_parser(None)(url_parts.netloc))
+            input_endpoints[name] = n_endpoints
             src_stream = stream['src_streams'][0]
             n_chans = config['inputs'][src_stream]['n_chans']
             n_chans_per_substream = stream['n_chans_per_substream']
@@ -128,15 +130,15 @@ def validate(config):
         if output['type'] in ['sdp.l0', 'sdp.beamformer_engineering']:
             if 'output_channels' in output:
                 c = output['output_channels']
-                for src in (config['inputs'][src_name] for src_name in output['src_streams']):
+                for src_name in output['src_streams']:
+                    src = config['inputs'][src_name]
                     acv = config['inputs'][src['src_streams'][0]]
                     if not 0 <= c[0] < c[1] <= acv['n_chans']:
                         raise ValueError('Channel range {}:{} for {} is invalid'.format(
                             c[0], c[1], name))
                     # beamformer_engineering requires alignment to multicast addresses
                     if output['type'] == 'sdp.beamformer_engineering':
-                        url_parts = urllib.parse.urlsplit(src['url'])
-                        n_endpoints = len(endpoint_list_parser(None)(url_parts.netloc))
+                        n_endpoints = input_endpoints[src_name]
                         n_chans_per_endpoint = acv['n_chans'] // n_endpoints
                         if c[0] % n_chans_per_endpoint != 0 or c[1] % n_chans_per_endpoint != 0:
                             raise ValueError(
