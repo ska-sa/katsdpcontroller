@@ -401,6 +401,7 @@ def _make_timeplot(g, config, spectral_name):
     }]
     g.add_node(timeplot, config=lambda task, resolver: {
         'config_base': '/var/kat/config/.katsdpdisp',
+        'l0_name': spectral_name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
     return timeplot
