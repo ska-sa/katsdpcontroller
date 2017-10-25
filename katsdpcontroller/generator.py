@@ -823,9 +823,10 @@ def build_logical_graph(config):
             node.cpus = max(node.cpus, 0.01)
             for request in node.gpus:
                 request.compute = max(request.compute, 0.01)
-            # Bandwidths are typically large values, and having fractional
-            # parts seems to cause rounding problems for Mesos as well. We
-            # don't need sub-bps precision, so just round things off.
+            # Bandwidths are typically large values. If they get large enough
+            # then MESOS-8129 can bite (although this has only happened due to
+            # misconfiguration). We don't need sub-bps precision, so just round
+            # things off, which mitigates the problem.
             for request in node.interfaces:
                 request.bandwidth_in = round(request.bandwidth_in)
                 request.bandwidth_out = round(request.bandwidth_out)
