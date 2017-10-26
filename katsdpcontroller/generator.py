@@ -205,11 +205,15 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
 
 class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
+    def n_substreams(self):
+        return self.n_channels // self.raw['n_chans_per_substream']
+
+    @property
     def size(self):
         """Size of frame in bytes"""
         return (self.raw['beng_out_bits_per_sample'] * 2
                 * self.raw['spectra_per_heap']
-                * self.raw['n_chans_per_substream']) // 8
+                * self.n_channels) // 8
 
     @property
     def int_time(self):
@@ -219,7 +223,8 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
     def net_bandwidth(self, ratio=1.05, overhead=2048):
         """Network bandwidth in bits per second"""
-        return _bandwidth(self.size, self.int_time, ratio, overhead)
+        heap_size = self.size / self.n_substreams
+        return _bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
 
 
 class L0Info(VisInfo):
@@ -233,12 +238,12 @@ class L0Info(VisInfo):
         if 'output_channels' in self.raw:
             return tuple(self.raw['output_channels'])
         else:
-            return (0, self.src_info.n_channels // self.raw['continuum_factor'])
+            return (0, self.src_info.n_channels)
 
     @property
     def n_channels(self):
         rng = self.output_channels
-        return rng[1] - rng[0]
+        return (rng[1] - rng[0]) // self.raw['continuum_factor']
 
     @property
     def n_pols(self):
@@ -431,14 +436,22 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # TODO: adjust based on the number of channels requested
     n_ingest = 4 if not develop else 2
 
-    spectral_info = L0Info(config, spectral_name)
-    continuum_info = L0Info(config, continuum_name)
+    if not spectral_name and not continuum_name:
+        raise ValueError('At least one of spectral_name or continuum_name must be given')
+    continuum_info = L0Info(config, continuum_name) if continuum_name else None
+    spectral_info = L0Info(config, spectral_name) if spectral_name else None
+    if spectral_info is None:
+        spectral_info = continuum_info
+        # Make a copy of the info, then override continuum_factor
+        spectral_info.raw = dict(spectral_info.raw)
+        spectral_info.raw['continuum_factor'] = 1
+    name = spectral_name if spectral_name else continuum_name
     src = spectral_info.raw['src_streams'][0]
     src_info = spectral_info.src_info
 
     # Virtual ingest node which depends on the real ingest nodes, so that other
     # services can declare dependencies on ingest rather than individual nodes.
-    ingest_group = LogicalGroup('ingest.' + spectral_name)
+    ingest_group = LogicalGroup('ingest.' + name)
     sd_continuum_factor = 1
     # Aim for about 256 signal display coarse channels
     while (spectral_info.n_channels % (sd_continuum_factor * n_ingest * 2) == 0
@@ -450,8 +463,9 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     sd_spead_rate = _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
-    g.add_node(ingest_group, config=lambda task, resolver: {
-        'continuum_factor': continuum_info.raw['continuum_factor'],
+    output_channels_str = '{}:{}'.format(*spectral_info.output_channels)
+    group_config = {
+        'continuum_factor': continuum_info.raw['continuum_factor'] if continuum_name else 1,
         'sd_continuum_factor': sd_continuum_factor,
         'sd_spead_rate': sd_spead_rate / n_ingest,
         'cbf_ibv': not develop,
@@ -460,28 +474,38 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         'l0_continuum_name': continuum_name,
         'antenna_mask': src_info.antennas,
         'output_int_time': spectral_info.int_time,
-        'sd_int_time': spectral_info.int_time
-    })
+        'sd_int_time': spectral_info.int_time,
+        'output_channels': output_channels_str,
+        'sd_output_channels': output_channels_str
+    }
+    if spectral_name:
+        group_config.update(l0_spectral_name=spectral_name)
+    if continuum_name:
+        group_config.update(l0_continuum_name=continuum_name)
+    g.add_node(ingest_group, config=lambda task, resolver: group_config)
 
-    spectral_multicast = LogicalMulticast('multicast.' + spectral_name, n_ingest)
-    g.add_node(spectral_multicast)
-    continuum_multicast = LogicalMulticast('multicast.' + continuum_name, n_ingest)
-    g.add_node(continuum_multicast)
+    if spectral_name:
+        spectral_multicast = LogicalMulticast('multicast.' + spectral_name, n_ingest)
+        g.add_node(spectral_multicast)
+        g.add_edge(ingest_group, spectral_multicast, port='spead',
+                   config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+    if continuum_name:
+        continuum_multicast = LogicalMulticast('multicast.' + continuum_name, n_ingest)
+        g.add_node(continuum_multicast)
+        g.add_edge(ingest_group, continuum_multicast, port='spead',
+                   config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
     src_multicast = find_node(g, 'multicast.' + src)
-
     g.add_edge(ingest_group, src_multicast, port='spead',
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
-    g.add_edge(ingest_group, spectral_multicast, port='spead',
-               config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
-    g.add_edge(ingest_group, continuum_multicast, port='spead',
-               config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
+
     # TODO: get timeplot to use multicast
-    timeplot = find_node(g, 'timeplot.' + spectral_name)
-    g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
-        'sdisp_spead': str(endpoint)})
-    g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
+    if spectral_name:
+        timeplot = find_node(g, 'timeplot.' + spectral_name)
+        g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
+            'sdisp_spead': str(endpoint)})
+        g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
-        ingest = SDPLogicalTask('ingest.{}.{}'.format(spectral_name, i))
+        ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
@@ -510,14 +534,24 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
             scheduler.InterfaceRequest('sdp_10g')]
         ingest.interfaces[0].bandwidth_in = src_info.net_bandwidth / n_ingest
-        ingest.interfaces[1].bandwidth_out = \
-            (spectral_info.net_bandwidth + continuum_info.net_bandwidth) / n_ingest
-        g.add_node(ingest, config=lambda task, resolver, server_id=i: {
-            'cbf_interface': task.interfaces['cbf'].name,
-            'l0_spectral_interface': task.interfaces['sdp_10g'].name,
-            'l0_continuum_interface': task.interfaces['sdp_10g'].name,
-            'server_id': server_id
-        })
+        net_bandwidth = 0.0
+        if spectral_name:
+            net_bandwidth += spectral_info.net_bandwidth
+        if continuum_name:
+            net_bandwidth += continuum_info.net_bandwidth
+        ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
+
+        def make_config(task, resolver, server_id=i):
+            conf = {
+                'cbf_interface': task.interfaces['cbf'].name,
+                'server_id': server_id
+            }
+            if spectral_name:
+                conf.update(l0_spectral_interface=task.interfaces['sdp_10g'].name)
+            if continuum_name:
+                conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
+            return conf
+        g.add_node(ingest, config=make_config)
         # Connect to ingest_group. We need a strong dependency of the group on
         # the node, so that other nodes depending on the group indirectly wait
         # for all nodes; the weak dependency is to prevent the nodes being
@@ -672,6 +706,11 @@ def _make_beamformer_engineering(g, config, name):
     nodes = []
     for i, src in enumerate(srcs):
         info = TiedArrayChannelisedVoltageInfo(config, src)
+        output_channels = output.get('output_channels')
+        if output_channels is None:
+            output_channels = (0, info.n_channels)
+        fraction = (output_channels[1] - output_channels[0]) / info.n_channels
+
         bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
         bf_ingest.image = 'katsdpingest'
         bf_ingest.command = ['schedrr', 'bf_ingest.py']
@@ -679,11 +718,10 @@ def _make_beamformer_engineering(g, config, name):
         bf_ingest.cores = ['disk', 'network']
         bf_ingest.capabilities.append('SYS_NICE')
         if not ram:
-            # CBF sends 256 time samples per heap, and bf_ingest accumulates
-            # 128 of these in the ring buffer. It's not a lot of memory, so
-            # to be on the safe side we double everything. Values are int8*2.
-            # Allow 512MB for various buffers.
-            bf_ingest.mem = 256 * 256 * 2 * info.n_channels / 1024**2 + 512
+            # bf_ingest accumulates 128 frames in the ring buffer. It's not a
+            # lot of memory, so to be on the safe side we double everything.
+            # Values are int8*2.  Allow 512MB for various buffers.
+            bf_ingest.mem = 256 * info.size * fraction / 1024**2 + 512
         else:
             # When writing to tmpfs, the file is accounted as memory to our
             # process, so we need more memory allocation than there is
@@ -691,7 +729,7 @@ def _make_beamformer_engineering(g, config, name):
             # we just hardcode a number.
             bf_ingest.ram = 220 * 1024
         bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
-        bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth
+        bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth * fraction
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [
             scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
@@ -703,7 +741,8 @@ def _make_beamformer_engineering(g, config, name):
             'interface': task.interfaces['cbf'].name,
             'ibv': True,
             'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-            'stream_name': src
+            'stream_name': src,
+            'channels': '{}:{}'.format(*output_channels)
         })
         g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -787,9 +826,24 @@ def build_logical_graph(config):
                         _make_filewriter(g, config, name, ingest)
                         l0_done.add(name)
                         l0_done.add(name2)
-    l0_missing = set(outputs.get('sdp.l0', [])) - l0_done
-    if l0_missing:
-        raise NotImplementedError('unmatched spectral and continuum L0 are not yet supported')
+    l0_spectral_only = False
+    l0_continuum_only = False
+    for name in set(outputs.get('sdp.l0', [])) - l0_done:
+        is_spectral = config['outputs'][name]['continuum_factor'] == 1
+        if is_spectral:
+            l0_spectral_only = True
+        else:
+            l0_continuum_only = True
+        if is_spectral:
+            _make_timeplot(g, config, name)
+            ingest = _make_ingest(g, config, name, None)
+            _make_cal(g, config, name, ingest)
+            _make_filewriter(g, config, name, ingest)
+        else:
+            _make_ingest(g, config, None, name)
+    if l0_continuum_only and l0_spectral_only:
+        logger.warning('Both continuum-only and spectral-only L0 streams found - '
+                       'perhaps they were intended to be matched?')
 
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
