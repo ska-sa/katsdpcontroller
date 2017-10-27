@@ -199,7 +199,12 @@ def attributes_resources(args):
         interfaces.append(config)
         try:
             with open('/sys/class/net/{}/speed'.format(interface)) as f:
-                speed = float(f.read().strip()) * 1e6  # /sys/class/net has speed in Mbps
+                speed = f.read().strip()
+                # This dummy value has been observed on a NIC which had been
+                # configured but had no cable attached.
+                if speed == '4294967295':
+                    raise ValueError('cable unplugged?')
+                speed = float(speed) * 1e6  # /sys/class/net has speed in Mbps
         except (IOError, OSError, ValueError) as error:
             if interface == 'lo':
                 # Loopback interface speed is limited only by CPU power. Just

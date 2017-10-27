@@ -64,8 +64,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
         else:
-            self.host = resolver.resources.get_multicast_ip(self.logical_node.name,
-                                                            self.logical_node.n_addresses)
+            self.host = resolver.resources.get_multicast_ip(self.logical_node.n_addresses)
             self.ports = {'spead': resolver.resources.get_port()}
 
 
@@ -441,6 +440,7 @@ def _make_timeplot(g, config, spectral_name):
     }]
     g.add_node(timeplot, config=lambda task, resolver: {
         'config_base': '/var/kat/config/.katsdpdisp',
+        'l0_name': spectral_name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
     return timeplot
@@ -465,9 +465,10 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
 
 
 def _make_ingest(g, config, spectral_name, continuum_name):
+    develop = is_develop(config)
     # Number of ingest nodes.
     # TODO: adjust based on the number of channels requested
-    n_ingest = 4
+    n_ingest = 4 if not develop else 2
 
     if not spectral_name and not continuum_name:
         raise ValueError('At least one of spectral_name or continuum_name must be given')
@@ -481,7 +482,6 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     name = spectral_name if spectral_name else continuum_name
     src = spectral_info.raw['src_streams'][0]
     src_info = spectral_info.src_info
-    develop = is_develop(config)
 
     # Virtual ingest node which depends on the real ingest nodes, so that other
     # services can declare dependencies on ingest rather than individual nodes.
@@ -910,4 +910,11 @@ def build_logical_graph(config):
             node.cpus = max(node.cpus, 0.01)
             for request in node.gpus:
                 request.compute = max(request.compute, 0.01)
+            # Bandwidths are typically large values. If they get large enough
+            # then MESOS-8129 can bite (although this has only happened due to
+            # misconfiguration). We don't need sub-bps precision, so just round
+            # things off, which mitigates the problem.
+            for request in node.interfaces:
+                request.bandwidth_in = round(request.bandwidth_in)
+                request.bandwidth_out = round(request.bandwidth_out)
     return g

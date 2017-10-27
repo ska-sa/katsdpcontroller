@@ -10,6 +10,7 @@ import json
 import signal
 import re
 import sys
+from collections import deque
 
 from tornado import gen
 import tornado.platform.asyncio
@@ -146,23 +147,10 @@ class MulticastIPResources(object):
 
 class SDPCommonResources(object):
     """Assigns multicast groups and ports across all subarrays."""
-    def __init__(self, safe_multicast_cidr, safe_port_range=xrange(30000,31000)):
-        self._ports = iter(safe_port_range)
+    def __init__(self, safe_multicast_cidr):
         logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
-        multicast_subnets = ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24)
-        self.multicast_resources = {}
-        self.multicast_resources_fallback = MulticastIPResources(next(multicast_subnets))
-        for name in ['l0_spectral_spead',
-                     'l0_continuum_spead',
-                     'l1_spectral_spead',
-                     'l1_continuum_spead']:
-            self.multicast_resources[name] = MulticastIPResources(next(multicast_subnets))
-
-    def get_port(self):
-        try:
-            return next(self._ports)
-        except StopIteration:
-            raise RuntimeError('Available ports exhausted')
+        self.multicast_subnets = deque(
+            ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24))
 
 
 class SDPResources(object):
@@ -170,18 +158,26 @@ class SDPResources(object):
     def __init__(self, common, subarray_product_id):
         self.subarray_product_id = subarray_product_id
         self._common = common
+        try:
+            self._subnet = self._common.multicast_subnets.popleft()
+        except IndexError:
+            raise RuntimeError("Multicast subnets exhausted")
+        logger.info("Using {} for {}".format(self._subnet, subarray_product_id))
+        self._multicast_resources = MulticastIPResources(self._subnet)
 
-    def _qualify(self, name):
-        return "{}_{}".format(self.subarray_product_id, name)
-
-    def get_multicast_ip(self, group, n_addresses):
+    def get_multicast_ip(self, n_addresses):
         """Assign multicast addresses for a group."""
-        mr = self._common.multicast_resources.get(group, self._common.multicast_resources_fallback)
-        return mr.get_ip(n_addresses)
+        return self._multicast_resources.get_ip(n_addresses)
 
     def get_port(self):
         """Return an assigned port for a multicast group"""
-        return self._common.get_port()
+        return 7148
+
+    def close(self):
+        if self._subnet is not None:
+            self._common.multicast_subnets.append(self._subnet)
+            self._subnet = None
+            self._multicast_resources = None
 
 
 class SDPGraph(object):
@@ -227,6 +223,16 @@ class SDPGraph(object):
         base_params = self.physical_graph.graph.get(
             'config', lambda resolver: {})(self.resolver)
         base_params['subarray_product_id'] = self.subarray_product_id
+        base_params['sdp_config'] = self.config
+        # Provide attributes to describe the relationships between CBF streams
+        # and instruments. This could be extracted from sdp_config, but these
+        # specific sensors are easier to mock.
+        for name, stream in six.iteritems(self.config['inputs']):
+            if stream['type'].startswith('cbf.'):
+                prefix = 'cbf_' + name + '_'
+                for suffix in ['src_streams', 'instrument_dev_name']:
+                    if suffix in stream:
+                        base_params[prefix + suffix] = stream[suffix]
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
         yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
@@ -240,8 +246,8 @@ class SDPGraph(object):
 
         logger.debug("base params: %s", base_params)
          # set the configuration
-        for k,v in base_params.iteritems():
-            self.telstate.add(k,v, immutable=True)
+        for k, v in base_params.iteritems():
+            self.telstate.add(k, v, immutable=True)
 
     @trollius.coroutine
     def execute_graph(self, req):
@@ -251,7 +257,10 @@ class SDPGraph(object):
 
     @trollius.coroutine
     def shutdown(self):
-        yield From(self.sched.kill(self.physical_graph))
+        try:
+            yield From(self.sched.kill(self.physical_graph))
+        finally:
+            self.resolver.resources.close()
 
     def check_nodes(self):
         """Check that all requested nodes are actually running.
@@ -735,7 +744,6 @@ class SDPControllerServer(AsyncDeviceServer):
         resolver = scheduler.Resolver(self.image_resolver_factory(**resolver_factory_args),
                                       scheduler.TaskIDAllocator(subarray_product_id + '-'),
                                       self.sched.http_url if self.sched else '')
-        resolver.resources = SDPResources(self.resources, subarray_product_id)
         resolver.service_overrides = config['config'].get('service_overrides', {})
         resolver.telstate = None
 
@@ -753,6 +761,7 @@ class SDPControllerServer(AsyncDeviceServer):
             return
 
         try:
+            resolver.resources = SDPResources(self.resources, subarray_product_id)
             yield From(graph.launch_telstate())
              # launch the telescope state for this graph
             req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
