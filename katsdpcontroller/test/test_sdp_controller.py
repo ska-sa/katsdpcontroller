@@ -372,20 +372,20 @@ class TestSDPController(unittest.TestCase):
         return started, release
 
     @contextlib.contextmanager
-    def _capture_init_slow(self, subarray_product, cancelled=False):
-        """Context manager that runs its block with a capture-init in
-        progress. The subarray product must already be configured.
+    def _slow(self, request, mock, return_value, cancelled):
+        """Context manager that runs its block with a message in progress.
 
-        If `cancelled` is true, the capture-init is expected to have been
-        cancelled, otherwise it is expected to succeed.
+        The `mock` is modified to return a future that only resolves to
+        `return_value` after the with block has completed (the first time it is
+        called).
+
+        If `cancelled` is true, the request is expected to fail with a message
+        about being cancelled, otherwise it is expected to succeed.
         """
         # Set when the capture-init is blocked
         reply_future = concurrent.futures.Future()
-        sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        started_future, release = self._delay_mock(sensor_proxy_client.katcp_client.future_request)
-        self.client.callback_request(
-            Message.request('capture-init', subarray_product),
-            reply_cb=lambda msg: reply_future.set_result(msg))
+        started_future, release = self._delay_mock(mock)
+        self.client.callback_request(request, reply_cb=lambda msg: reply_future.set_result(msg))
         # Wait until the first command gets blocked
         started_future.result()
         # Do the test
@@ -393,7 +393,7 @@ class TestSDPController(unittest.TestCase):
             yield
         finally:
             # Unblock things
-            release((Message.reply('capture-init', 'ok'), []))
+            release(return_value)
         reply = reply_future.result()
         if cancelled:
             self.assertFalse(reply.reply_ok())
@@ -401,23 +401,28 @@ class TestSDPController(unittest.TestCase):
         else:
             self.assertTrue(reply.reply_ok())
 
-    @contextlib.contextmanager
-    def _data_product_configure_slow(self, subarray_product, expect_ok=True):
+    def _capture_init_slow(self, subarray_product, cancelled=False):
+        """Context manager that runs its block with a capture-init in
+        progress. The subarray product must already be configured.
+
+        If `cancelled` is true, the capture-init is expected to have been
+        cancelled, otherwise it is expected to succeed.
+        """
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        return self._slow(
+            Message.request('capture-init', subarray_product),
+            sensor_proxy_client.katcp_client.future_request,
+            (Message.reply('capture-init', 'ok'), []),
+            cancelled)
+
+    def _data_product_configure_slow(self, subarray_product, cancelled=False):
         """Context manager that runs its block with a product-configure in
         progress."""
-        # See comments in _capture_init_slow
-        reply_future = concurrent.futures.Future()
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        started_future, release = self._delay_mock(sensor_proxy_client.until_synced)
-        self.client.callback_request(
+        return self._slow(
             Message.request(*self._configure_args(subarray_product)),
-            reply_cb=lambda msg: reply_future.set_result(msg))
-        started_future.result()
-        try:
-            yield
-        finally:
-            release(None)
-        self.assertEqual(expect_ok, reply_future.result().reply_ok())
+            sensor_proxy_client.until_synced,
+            None, cancelled)
 
     def setUp(self):
         # Future that is already resolved with no return value
@@ -652,6 +657,25 @@ class TestSDPController(unittest.TestCase):
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.CAPTURING, sa.state)
 
+    def test_product_deconfigure_busy_force(self):
+        """forced product-deconfigure must succeed while in capture-init"""
+        self._configure_subarray(SUBARRAY_PRODUCT1)
+        with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
+            self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1, '1')
+        # Check that the graph was shut down
+        self.sched.kill.assert_called_with(mock.ANY)
+        # Verify the state
+        self.assertEqual({}, self.controller.subarray_products)
+
+    def test_product_deconfigure_while_configuring_force(self):
+        """forced product-deconfigure must succeed while in product-configure"""
+        with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
+            self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1, '1')
+        # Check that the graph was shut down
+        self.sched.kill.assert_called_with(mock.ANY)
+        # Verify the state
+        self.assertEqual({}, self.controller.subarray_products)
+
     def test_product_reconfigure(self):
         """Checks success path of product_reconfigure"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
@@ -753,15 +777,16 @@ class TestSDPController(unittest.TestCase):
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(State.CAPTURING, sa.state)
 
-    def _test_capture_busy(self, command, *args):
-        """Test that a command fails if issued while a ?capture-init is in progress"""
-        self._configure_subarray(SUBARRAY_PRODUCT1)
+    def _test_busy(self, command, *args):
+        """Test that a command fails if issued while ?capture-init or ?product-configure is in progress"""
+        with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
+            self.client.assert_request_fails(command, *args)
         with self._capture_init_slow(SUBARRAY_PRODUCT1):
             self.client.assert_request_fails(command, *args)
 
     def test_capture_init_busy(self):
         """Capture-init fails if an asynchronous operation is already in progress"""
-        self._test_capture_busy("capture-init", SUBARRAY_PRODUCT1)
+        self._test_busy("capture-init", SUBARRAY_PRODUCT1)
 
     def test_capture_init_dead_process(self):
         """Capture-init bumbles on even if a child process is dead.
@@ -797,7 +822,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
-        self._test_capture_busy("capture-done", SUBARRAY_PRODUCT1)
+        self._test_busy("capture-done", SUBARRAY_PRODUCT1)
 
     def _async_deconfigure_on_exit(self):
         """Call deconfigure_on_exit from the IOLoop"""
@@ -835,7 +860,7 @@ class TestSDPController(unittest.TestCase):
     def test_deconfigure_on_exit_cancel(self):
         """Calling deconfigure_on_exit while a configure is in process cancels
         that configure and kills off the graph."""
-        with self._data_product_configure_slow(SUBARRAY_PRODUCT1, expect_ok=False):
+        with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self._async_deconfigure_on_exit()
         # We must have killed off the partially-launched graph
         self.sched.kill.assert_called_with(mock.ANY)

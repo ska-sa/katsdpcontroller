@@ -822,7 +822,7 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         yield From(product.deconfigure(self, force=force))
         # Product against potential race conditions
-        if self.subarray_products[product.subarray_product_id] is product:
+        if self.subarray_products.get(product.subarray_product_id) is product:
             del self.subarray_products[product.subarray_product_id]
             logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
@@ -921,7 +921,7 @@ class SDPControllerServer(AsyncDeviceServer):
         except Exception:
             # Safety check in case a deconfigure-cancellation has already
             # removed the product.
-            if self.subarray_products[subarray_product_id] is product:
+            if self.subarray_products.get(subarray_product_id) is product:
                 del self.subarray_products[subarray_product_id]
             raise
 
