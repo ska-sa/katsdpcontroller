@@ -59,8 +59,9 @@ class Server(object):
 def get_servers(client):
     servers = defaultdict(Server)
     if client.is_connected():
+        sensor_regex = r'^(array_\d+_[A-Za-z0-9]+)\.timeplot\.[^.]*\.html_port$'
         reply, informs = yield client.future_request(katcp.Message.request(
-            'sensor-value', r'/^array_\d+_[A-Za-z0-9]+\.sdp\.timeplot\.1\.html_port$/'))
+            'sensor-value', '/' + sensor_regex + '/'))
         for inform in informs:
             if len(inform.arguments) != 5:
                 logger.warning('#sensor-value inform has wrong number of arguments, ignoring')
@@ -71,7 +72,7 @@ def get_servers(client):
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
                 continue
-            match = re.match(r'^(array_\d+_[A-Za-z0-9]+)\.sdp\.timeplot\.1\.html_port$', name)
+            match = re.match(sensor_regex, name)
             if not match:
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
                 continue
