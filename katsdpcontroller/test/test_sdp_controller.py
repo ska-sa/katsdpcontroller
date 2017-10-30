@@ -234,7 +234,7 @@ class TestSDPControllerInterface(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init",SUBARRAY_PRODUCT1)
 
         reply, informs = self.client.blocking_request(Message.request("capture-status",SUBARRAY_PRODUCT1))
-        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","INITIALISED")))
+        self.assertEqual(repr(reply),repr(Message.reply("capture-status","ok","CAPTURING")))
         self.client.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
 
     def test_interface_sensors(self):
@@ -361,8 +361,10 @@ class TestSDPController(unittest.TestCase):
         """
         started = concurrent.futures.Future()
         result = tornado.gen.Future()
+        old_side_effect = mock.side_effect
         def side_effect(*args, **kwargs):
             started.set_result(None)
+            mock.side_effect = old_side_effect
             return result
         def release(value):
             self.controller.loop.call_soon_threadsafe(result.set_result, value)
@@ -370,9 +372,13 @@ class TestSDPController(unittest.TestCase):
         return started, release
 
     @contextlib.contextmanager
-    def _capture_init_slow(self, subarray_product):
+    def _capture_init_slow(self, subarray_product, cancelled=False):
         """Context manager that runs its block with a capture-init in
-        progress. The subarray product must already be configured."""
+        progress. The subarray product must already be configured.
+
+        If `cancelled` is true, the capture-init is expected to have been
+        cancelled, otherwise it is expected to succeed.
+        """
         # Set when the capture-init is blocked
         reply_future = concurrent.futures.Future()
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
@@ -388,7 +394,12 @@ class TestSDPController(unittest.TestCase):
         finally:
             # Unblock things
             release((Message.reply('capture-init', 'ok'), []))
-        self.assertTrue(reply_future.result().reply_ok())
+        reply = reply_future.result()
+        if cancelled:
+            self.assertFalse(reply.reply_ok())
+            self.assertEqual('request was cancelled', reply.arguments[1])
+        else:
+            self.assertTrue(reply.reply_ok())
 
     @contextlib.contextmanager
     def _data_product_configure_slow(self, subarray_product, expect_ok=True):
@@ -574,10 +585,9 @@ class TestSDPController(unittest.TestCase):
         }, immutable=True)
 
         # Verify the state of the subarray
-        self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.override_dicts)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertFalse(sa._async_busy)
+        self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
 
     def test_product_configure_telstate_fail(self):
@@ -597,18 +607,19 @@ class TestSDPController(unittest.TestCase):
         self.telstate_class.assert_called_once_with('host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY)
-        # Must not have created the subarray product internally
+        # Must have cleaned up the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
 
-    def test_product_configure_busy(self):
-        """Cannot have concurrent product-configure commands"""
+    def test_product_configure_parallel(self):
+        """Can configure two subarray products at the same time"""
         with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
-            # We use a different subarray product, which would otherwise be
-            # legal.
-            self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT2))
-        # Check that no state leaked through
-        self.assertNotIn(SUBARRAY_PRODUCT2, self.controller.subarray_products)
-        self.assertIsNone(self.controller._conf_future)
+            # We use a different subarray product
+            self.client.assert_request_succeeds(*self._configure_args(SUBARRAY_PRODUCT2))
+        # Check that both products are in the right state
+        self.assertIn(SUBARRAY_PRODUCT1, self.controller.subarray_products)
+        self.assertEqual(State.IDLE, self.controller.subarray_products[SUBARRAY_PRODUCT1].state)
+        self.assertIn(SUBARRAY_PRODUCT2, self.controller.subarray_products)
+        self.assertEqual(State.IDLE, self.controller.subarray_products[SUBARRAY_PRODUCT2].state)
 
     def test_product_deconfigure(self):
         """Checks success path of product-deconfigure"""
@@ -617,7 +628,6 @@ class TestSDPController(unittest.TestCase):
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY)
         # Verify the state
-        self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
 
     def test_product_deconfigure_capturing(self):
@@ -639,8 +649,8 @@ class TestSDPController(unittest.TestCase):
             self.client.assert_request_fails('product-deconfigure', SUBARRAY_PRODUCT1, '0')
         # Check that the subarray still exists and has the right state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
-        self.assertFalse(sa._async_busy)
-        self.assertEqual(State.INITIALISED, sa.state)
+        self.assertFalse(sa.async_busy)
+        self.assertEqual(State.CAPTURING, sa.state)
 
     def test_product_reconfigure(self):
         """Checks success path of product_reconfigure"""
@@ -696,11 +706,10 @@ class TestSDPController(unittest.TestCase):
         self.assertTrue(task_details['sim.i0_baseline_correlation_products']['taskinfo']['command']['shell'])
 
     def test_product_reconfigure_configure_busy(self):
-        """Cannot run product-reconfigure concurrently with another
-        product-configure"""
+        """Can run product-reconfigure concurrently with another product-configure"""
         self._configure_subarray(SUBARRAY_PRODUCT1)
         with self._data_product_configure_slow(SUBARRAY_PRODUCT2):
-            self.client.assert_request_fails('product-reconfigure', SUBARRAY_PRODUCT1)
+            self.client.assert_request_succeeds('product-reconfigure', SUBARRAY_PRODUCT1)
 
     def test_product_reconfigure_configure_fails(self):
         """Tests product-reconfigure when the new graph fails"""
@@ -708,11 +717,9 @@ class TestSDPController(unittest.TestCase):
         self.fail_launches['telstate'] = 'TASK_FAILED'
         self.client.assert_request_fails('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the subarray was deconfigured cleanly
-        self.assertIsNone(self.controller._conf_future)
         self.assertEqual({}, self.controller.subarray_products)
 
     # TODO: test that reconfigure with override dict picks up the override dict
-    # TODO: test that reconfigure fails if another configuration is happening
 
     def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
@@ -720,8 +727,8 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertFalse(sa._async_busy)
-        self.assertEqual(State.INITIALISED, sa.state)
+        self.assertFalse(sa.async_busy)
+        self.assertEqual(State.CAPTURING, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         expected_calls = []
@@ -744,7 +751,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(State.INITIALISED, sa.state)
+        self.assertEqual(State.CAPTURING, sa.state)
 
     def _test_capture_busy(self, command, *args):
         """Test that a command fails if issued while a ?capture-init is in progress"""
@@ -772,7 +779,7 @@ class TestSDPController(unittest.TestCase):
             raise ValueError('Could not find ingest node')
         self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        self.assertEqual(State.INITIALISED, sa.state)
+        self.assertEqual(State.CAPTURING, sa.state)
 
     def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -781,7 +788,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertFalse(sa._async_busy)
+        self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
@@ -820,7 +827,7 @@ class TestSDPController(unittest.TestCase):
         """Calling deconfigure_on_exit while a capture-init or capture-done
         is busy kills off the graph anyway."""
         self._configure_subarray(SUBARRAY_PRODUCT1)
-        with self._capture_init_slow(SUBARRAY_PRODUCT1):
+        with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self._async_deconfigure_on_exit()
         self.sched.kill.assert_called_with(mock.ANY)
         self.assertEqual({}, self.controller.subarray_products)
@@ -867,7 +874,7 @@ class TestSDPController(unittest.TestCase):
         informs = [tuple(msg.arguments) for msg in informs]
         self.assertEqual(AnyOrderList([
             (SUBARRAY_PRODUCT1, 'IDLE'),
-            (SUBARRAY_PRODUCT2, 'INITIALISED')
+            (SUBARRAY_PRODUCT2, 'CAPTURING')
         ]), informs)
 
     def test_capture_status_one(self):
@@ -880,7 +887,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_succeeds('capture-init', SUBARRAY_PRODUCT1)
         reply, informs = self.client.blocking_request(
             Message.request('capture-status', SUBARRAY_PRODUCT1))
-        self.assertEqual(reply.arguments, ['ok', 'INITIALISED'])
+        self.assertEqual(reply.arguments, ['ok', 'CAPTURING'])
         self.client.assert_request_succeeds('capture-done', SUBARRAY_PRODUCT1)
         reply, informs = self.client.blocking_request(
             Message.request('capture-status', SUBARRAY_PRODUCT1))

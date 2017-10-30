@@ -71,11 +71,18 @@ class State(scheduler.OrderedEnum):
     """State of a subarray. This does not really belong in this module, but it
     is placed here to avoid a circular dependency between :mod:`generator` and
     :mod:`sdpcontroller`.
+
+    Only the following transitions can occur (TODO: make a picture):
+    - UNCONFIGURED -> IDLE (via product-configure)
+    - IDLE -> CAPTURING (via capture-init)
+    - CAPTURING -> IDLE (via capture-done)
+    - UNCONFIGURED/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
     """
     UNCONFIGURED = 0
     IDLE = 1
-    INITIALISED = 2
-    DONE = 3
+    CAPTURING = 2
+    DECONFIGURING = 3
+    DEAD = 4
 
 
 def to_trollius_future(tornado_future, loop=None):
@@ -234,9 +241,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
 
-    def get_transition(self, state):
-         # if this node has a specified state transition action return it
-        return self.logical_node.transitions.get(state, None)
+    def get_transition(self, old_state, new_state):
+        """If this node has a specified state transition action, return it"""
+        return self.logical_node.transitions.get((old_state, new_state), None)
 
     def _disconnect(self):
         """Close the katcp connection (if open) and remove the sensors."""
