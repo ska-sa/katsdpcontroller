@@ -24,7 +24,10 @@ CAM2TELSTATE_TYPE_MAP = {
     'cbf.antenna_channelised_voltage': 'fengine',
     'cbf.tied_array_channelised_voltage': 'beamformer'
 }
-CAPTURE_TRANSITIONS = {State.INITIALISED: ['capture-init'], State.DONE: ['capture-done']}
+CAPTURE_TRANSITIONS = {
+    (State.IDLE, State.CAPTURING): ['capture-init'],
+    (State.CAPTURING, State.IDLE): ['capture-done']
+}
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
     'beamform',
@@ -371,8 +374,8 @@ def _make_cbf_simulator(g, config, name):
     sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     sim.interfaces[0].bandwidth_out = info.net_bandwidth
     sim.transitions = {
-        State.INITIALISED: ['capture-start', name],
-        State.DONE: ['capture-stop', name]
+        (State.IDLE, State.CAPTURING): ['capture-start', name],
+        (State.CAPTURING, State.IDLE): ['capture-stop', name]
     }
     substreams = info.n_channels // info.n_channels_per_substream
 
