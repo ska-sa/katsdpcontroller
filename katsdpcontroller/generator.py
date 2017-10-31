@@ -325,19 +325,15 @@ def _make_cam2telstate(g, config, name):
 
 
 def _make_cbf_simulator(g, config, name):
-    type_ = config['inputs'][name]['type']
-    if type_ == 'cbf.baseline_correlation_products':
-        bcp = True
-        info = BaselineCorrelationProductsInfo(config, name)
-    elif type_ == 'cbf.tied_array_channelised_voltage':
-        bcp = False
-        info = TiedArrayChannelisedVoltageInfo(config, name)
-
     sim = SDPLogicalTask('sim.' + name)
     sim.image = 'katcbfsim'
+
+    type_ = config['inputs'][name]['type']
+    assert type_ in ('cbf.baseline_correlation_products', 'cbf.tied_array_channelised_voltage')
     # create-*-stream is passed on the command-line instead of telstate
     # for now due to SR-462.
-    if bcp:
+    if type_ == 'cbf.baseline_correlation_products':
+        info = BaselineCorrelationProductsInfo(config, name)
         sim.command = ['cbfsim.py', '--create-fx-stream', name]
         # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
         # 16 antennas, 32K, and cap it there (threads for compute and network).
@@ -355,6 +351,7 @@ def _make_cbf_simulator(g, config, name):
         sim.gpus[0].compute = min(1.0, 0.2 * scale)
         sim.gpus[0].mem = 2 * _mb(info.size) + _mb(gains_size) + 256
     else:
+        info = TiedArrayChannelisedVoltageInfo(config, name)
         sim.command = ['cbfsim.py', '--create-beamformer-stream', name]
         # The beamformer simulator only simulates data shape, not content. The
         # CPU load thus scales only with network bandwidth. Scale for 2 CPUs at
@@ -389,7 +386,7 @@ def _make_cbf_simulator(g, config, name):
             'cbf_ibv': ibv,
             'antenna_mask': ','.join(info.antennas)
         }
-        if bcp:
+        if type_ == 'cbf.baseline_correlation_products':
             conf.update({
                 'cbf_int_time': info.int_time,
             })
