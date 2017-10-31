@@ -73,12 +73,12 @@ class State(scheduler.OrderedEnum):
     :mod:`sdpcontroller`.
 
     Only the following transitions can occur (TODO: make a picture):
-    - UNCONFIGURED -> IDLE (via product-configure)
+    - CONFIGURING -> IDLE (via product-configure)
     - IDLE -> CAPTURING (via capture-init)
     - CAPTURING -> IDLE (via capture-done)
-    - UNCONFIGURED/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
+    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
     """
-    UNCONFIGURED = 0
+    CONFIGURING = 0
     IDLE = 1
     CAPTURING = 2
     DECONFIGURING = 3

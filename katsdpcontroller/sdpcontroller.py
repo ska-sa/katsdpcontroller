@@ -304,7 +304,7 @@ class SDPSubarrayProductBase(object):
     def __init__(self, subarray_product_id, graph):
         self.subarray_product_id = subarray_product_id
         self._async_task = None    #: Current background task (can only be one)
-        self.state = State.UNCONFIGURED
+        self.state = State.CONFIGURING
         self.graph = graph
         logger.info("Created: {!r}".format(self))
 
@@ -383,7 +383,7 @@ class SDPSubarrayProductBase(object):
     @trollius.coroutine
     def configure(self, server, req):
         assert not self.async_busy    # configure should be the first thing to happen
-        if self.state != State.UNCONFIGURED:
+        if self.state != State.CONFIGURING:
             raise FailReply('Subarray product {} is already configured'.format(
                 self.subarray_product_id))
         task = trollius.ensure_future(self._configure(server, req), loop=self.loop)
@@ -586,7 +586,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _capture_done(self):
         """Move to idle state. This is used when changing to either
-        State.DONE or State.UNCONFIGURED (the latter only happens when forced).
+        State.IDLE or State.DECONFIGURING (the latter only happens when forced).
         """
         yield From(self.exec_transitions(self.state, State.IDLE, False))
         self.state = State.IDLE
