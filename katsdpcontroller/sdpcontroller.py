@@ -35,7 +35,7 @@ from katsdpservices.asyncio import to_tornado_future
 import katsdptelstate
 from katsdptelstate.endpoint import endpoint_list_parser
 from . import scheduler, tasks, product_config, generator
-from .tasks import State
+from .tasks import State, DEPENDS_INIT
 
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
@@ -522,8 +522,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     def exec_transitions(self, old_state, new_state, reverse):
         """Issue requests to nodes on state transitions.
 
-        The requests are made in parallel, but respects strong dependencies in
-        the graph.
+        The requests are made in parallel, but respects `depends_init`
+        dependencies in the graph.
 
         Parameters
         ----------
@@ -532,32 +532,32 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         new_state : :class:`~katsdpcontroller.tasks.State`
             New state
         reverse : bool
-            If there is a strong edge from A to B in the graph, A's request
-            will be made first if `reverse` is false, otherwise B's request
-            will be made first.
+            If there is a `depends_init` edge from A to B in the graph, A's
+            request will be made first if `reverse` is false, otherwise B's
+            request will be made first.
         """
-        # Create a copy of the graph containing only strong edges.
-        strong = networkx.create_empty_copy(self.graph.physical_graph)
+        # Create a copy of the graph containing only dependency edges.
+        deps_graph = networkx.create_empty_copy(self.graph.physical_graph)
         for node in self.graph.physical_graph:
             for _, out, attr in self.graph.physical_graph.out_edges([node], data=True):
-                if attr.get('order') == 'strong':
-                    # Make strong a dependency graph
+                if attr.get(DEPENDS_INIT):
+                    # Make dep_graph a dependency graph
                     if reverse:
-                        strong.add_edge(out, node)
+                        deps_graph.add_edge(out, node)
                     else:
-                        strong.add_edge(node, out)
+                        deps_graph.add_edge(node, out)
 
         tasks = {}     # Keyed by node
         # We grab the ioloop of the first task we create.
         loop = None
-        for node in networkx.topological_sort(strong, reverse=True):
+        for node in networkx.topological_sort(deps_graph, reverse=True):
             req = None
             try:
                 req = node.get_transition(old_state, new_state)
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
-            deps = [tasks[trg] for trg in strong.successors(node) if trg in tasks]
+            deps = [tasks[trg] for trg in deps_graph.successors(node) if trg in tasks]
             if deps or req is not None:
                 task = trollius.ensure_future(self._exec_node_transition(node, req, deps),
                                               loop=node.loop)

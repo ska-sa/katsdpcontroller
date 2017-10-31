@@ -23,6 +23,8 @@ def _add_prometheus_sensor(name, description, class_):
 
 
 logger = logging.getLogger(__name__)
+# Name of edge attribute, as a constant to better catch typos
+DEPENDS_INIT = 'depends_init'
 PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Dictionary of sensors to be exposed via Prometheus.
 # Some of these will match multiple nodes, which is fine since they get labels

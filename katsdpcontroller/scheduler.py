@@ -49,27 +49,35 @@ tools for subclasses of :class:`PhysicalNode` to use during resolution.
 
 Edges
 -----
-Edges are used for several distinct but overlapping purposes.
+Edges carry information about dependencies, which are indicated by different
+edge attributes. An edge with no attributes carries no semantic information for
+the scheduler. Users of the scheduler can also define extra attributes, which
+are similarly ignored. The defined attributes on an edge from A to B are:
 
-1. If task A needs to connect to a service provided by task B, then add a
-   graph edge from A to B, and set the `port` edge attribute to the name of
-   the port on B. The endpoint on B is provided to A as part of resolution.
+depends_resource
+   Task A needs knowledge of the resources assigned to task B. This will
+   ensure that B is started either before or at the same time as A. It is
+   guaranteed that B's resources are assigned before A is resolved (but not
+   necessarily before B is resolved). It is legal for these edges to form a
+   cycle.
 
-2. If there is an edge from A to B, then B must be launched before or at the
-   same time as A. This is necessary for the resolution of port numbers above
-   to work, but applies even if no `port` attribute is set on the edge. It is
-   thus guaranteed that B's resources are assigned before A is resolved (but
-   not necessary before B is resolved).
+port
+   Task A needs to connect to a service provided by task B. Set the `port`
+   edge attribute to the name of the port on B. The endpoint on B is provided
+   to A as part of resolution. This automatically implies
+   `depends_resource`.
 
-3. If the `order` edge attribute is set to `strong` on an edge from A to B,
-   then B must be *ready* (running and listening on its ports) before A is
-   launched, and B will be killed only after A is dead. This should be used if
-   A will connect to B immediately on startup (and will fail if B is not yet
-   running), rather than in response to some later trigger. At present, no
-   other values are defined or should be used for the `order` attribute.
+depends_ready
+   Task B needs to be *ready* (running and listening on its ports) before task
+   A starts. Note that this only determines startup ordering, and has no
+   effect on shutdown. For example, task B might put some information in a
+   database before it comes ready, which is consumed by task A, but task A
+   does not require B to remain alive. It is an error for these edges to form
+   a cycle.
 
-It is permitted for the graph to have cycles, as long as there is no cycle of
-strong edges.
+depends_kill
+   Task A must be killed before task B. This is the shutdown counterpart to
+   `depends_ready`. It is an error for these edges to form a cycle.
 
 GPU support
 -----------
@@ -165,6 +173,10 @@ TERMINAL_STATUSES = frozenset([
     'TASK_KILLED',
     'TASK_LOST',
     'TASK_ERROR'])
+# Names for standard edge attributes, to give some protection against typos
+DEPENDS_READY = 'depends_ready'
+DEPENDS_RESOURCES = 'depends_resources'
+DEPENDS_KILL = 'depends_kill'
 logger = logging.getLogger(__name__)
 
 
@@ -839,7 +851,7 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
 
 
 class CycleError(ValueError):
-    """Raised for a graph that contains a cycle of strong dependencies"""
+    """Raised for a graph that contains a cycle of `depends_kill` or `depends_ready` edges"""
     pass
 
 
@@ -1352,8 +1364,8 @@ class PhysicalNode(object):
     dead_event : :class:`trollius.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
-    strong_dependencies : list of :class:`PhysicalNode`
-        Nodes that this node has strong dependencies on. This is only
+    depends_ready : list of :class:`PhysicalNode`
+        Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
     _ready_waiter : :class:`trollius.Task`
         Task which asynchronously waits for the to be ready (e.g. for ports to
@@ -1387,10 +1399,10 @@ class PhysicalNode(object):
         loop : :class:`trollius.BaseEventLoop`
             Current event loop
         """
-        self.strong_dependencies = []
+        self.depends_ready = []
         for src, trg, attr in graph.out_edges_iter([self], data=True):
-            if attr.get('order') == 'strong':
-                self.strong_dependencies.append(trg)
+            if attr.get(DEPENDS_READY):
+                self.depends_ready.append(trg)
 
     @trollius.coroutine
     def wait_ready(self):
@@ -1399,7 +1411,7 @@ class PhysicalNode(object):
         may be overloaded to implement other checks, but it must be
         cancellation-safe.
         """
-        for dep in self.strong_dependencies:
+        for dep in self.depends_ready:
             yield From(dep.ready_event.wait())
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
@@ -1609,7 +1621,7 @@ class PhysicalTask(PhysicalNode):
                 uri.executable = True
             taskinfo.command.setdefault('uris', []).append(uri)
             command.insert(0, '/mnt/mesos/sandbox/wrapper')
-        if self.strong_dependencies:
+        if self.depends_ready:
             uri = Dict()
             uri.value = urllib.parse.urljoin(resolver.http_url, 'static/delay_run.sh')
             uri.executable = True
@@ -1807,7 +1819,7 @@ class WaitStartHandler(tornado.web.RequestHandler):
             self.write('Task ID {} not active\n'.format(task_id))
         else:
             try:
-                for dep in task.strong_dependencies:
+                for dep in task.depends_ready:
                     yield to_tornado_future(dep.ready_event.wait(), loop=self.loop)
             except Exception as error:
                 logger.exception('Exception while waiting for dependencies')
@@ -2250,8 +2262,9 @@ class Scheduler(pymesos.Scheduler):
             If it is impossible to launch the nodes due to a cyclic dependency.
         DependencyError
             If any nodes in `nodes` is in state :const:`TaskState.NOT_READY`
-            and has a strong dependency on a node that is not in `nodes` and
-            is also in state :const:`TaskState.NOT_READY`.
+            and has a `depends_resources` or `depends_ready` dependency on a
+            node that is not in `nodes` and is also in state
+            :const:`TaskState.NOT_READY`.
         """
         if self._closing:
             raise trollius.InvalidStateError('Cannot launch tasks while shutting down')
@@ -2261,20 +2274,21 @@ class Scheduler(pymesos.Scheduler):
         # be started at the same time.
 
         # Check that we don't depend on some non-ready task outside the set, while also
-        # building a graph of strong dependencies.
+        # building a graph of readiness dependencies.
         remaining = [node for node in nodes if node.state == TaskState.NOT_READY]
         remaining_set = set(remaining)
-        strong_graph = networkx.DiGraph()
-        strong_graph.add_nodes_from(remaining)
+        depends_ready_graph = networkx.DiGraph()
+        depends_ready_graph.add_nodes_from(remaining)
         for src, trg, data in graph.out_edges_iter(remaining, data=True):
             if trg in remaining_set:
-                if data.get('order') == 'strong':
-                    strong_graph.add_edge(src, trg)
+                if data.get(DEPENDS_READY):
+                    depends_ready_graph.add_edge(src, trg)
             elif trg.state == TaskState.NOT_READY:
-                raise DependencyError('{} depends on {} but it is neither ready not scheduled'.format(
-                    src.name, trg.name))
-        if not networkx.is_directed_acyclic_graph(strong_graph):
-            raise CycleError('cycle between strong dependencies')
+                if data.get(DEPENDS_READY) or data.get(DEPENDS_RESOURCES) or data.get('port'):
+                    raise DependencyError('{} depends on {} but it is neither'
+                                          'started nor scheduled'.format(src.name, trg.name))
+        if not networkx.is_directed_acyclic_graph(depends_ready_graph):
+            raise CycleError('cycle between depends_ready dependencies')
 
         for node in remaining:
             node.state = TaskState.STARTING
@@ -2294,9 +2308,11 @@ class Scheduler(pymesos.Scheduler):
     @trollius.coroutine
     def kill(self, graph, nodes=None):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
-        from any state. Strong dependencies will be honoured, leaving nodes
-        alive until all their dependencies are killed (provided the
-        dependencies are included in `nodes`).
+        from any state. Dependencies specified with `depends_kill` will be
+        honoured, leaving nodes alive until all nodes that depend on them are
+        killed. Note that if any such node is not part of `nodes` then this
+        function could block indefinitely until that node dies in some other
+        way.
 
         Parameters
         ----------
@@ -2305,15 +2321,19 @@ class Scheduler(pymesos.Scheduler):
         nodes : list, optional
             If specified, the nodes to kill. The default is to kill all nodes
             in the graph.
+
+        Raises
+        ------
+        CycleError
+            If there is a cyclic dependency within the set of nodes to kill.
         """
         @trollius.coroutine
         def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
                 node.set_state(TaskState.DEAD)
             elif node.state < TaskState.KILLED:
-                for src, trg, data in graph.in_edges_iter([node], data=True):
-                    if data.get('order') == 'strong':
-                        yield From(src.dead_event.wait())
+                for src in graph.predecessors(node):
+                    yield From(src.dead_event.wait())
                 # Re-check state because it might have changed while waiting
                 if node.state < TaskState.KILLED:
                     logger.debug('Killing %s', node.name)
@@ -2321,12 +2341,20 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.KILLED)
             yield From(node.dead_event.wait())
 
+        if nodes is None:
+            nodes = graph.nodes()
+        nodes_set = set(nodes)
         futures = []
-        if nodes is not None:
-            kill_graph = graph.subgraph(nodes)
-        else:
-            kill_graph = graph
-        for node in kill_graph:
+        kill_graph = networkx.DiGraph()
+        kill_graph.add_nodes_from(nodes)
+        for src, trg, data in graph.out_edges_iter(nodes, data=True):
+            if trg in nodes_set:
+                if data.get(DEPENDS_KILL):
+                    kill_graph.add_edge(src, trg)
+        if not networkx.is_directed_acyclic_graph(kill_graph):
+            raise CycleError('cycle between depends_kill dependencies')
+
+        for node in nodes:
             futures.append(trollius.async(kill_one(node, kill_graph), loop=self._loop))
         yield From(trollius.gather(*futures, loop=self._loop))
 

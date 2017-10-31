@@ -405,6 +405,7 @@ def _make_cbf_simulator(g, config, name):
     g.add_edge(sim, multicast, port='spead', config=lambda task, resolver, endpoint: {
         'cbf_spead': str(endpoint)
     })
+    g.add_edge(multicast, sim, depends_init=True)
     return sim
 
 
@@ -523,11 +524,13 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         g.add_node(spectral_multicast)
         g.add_edge(ingest_group, spectral_multicast, port='spead',
                    config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+        g.add_edge(spectral_multicast, ingest_group, depends_init=True)
     if continuum_name:
         continuum_multicast = LogicalMulticast('multicast.' + continuum_name, n_ingest)
         g.add_node(continuum_multicast)
         g.add_edge(ingest_group, continuum_multicast, port='spead',
                    config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
+        g.add_edge(continuum_multicast, ingest_group, depends_init=True)
     src_multicast = find_node(g, 'multicast.' + src)
     g.add_edge(ingest_group, src_multicast, port='spead',
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -537,7 +540,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         timeplot = find_node(g, 'timeplot.' + spectral_name)
         g.add_edge(ingest_group, timeplot, port='spead_port',
                    config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
-        g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
+        g.add_edge(timeplot, ingest_group, depends_ready=True)  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
@@ -587,13 +590,14 @@ def _make_ingest(g, config, spectral_name, continuum_name):
                 conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
             return conf
         g.add_node(ingest, config=make_config)
-        # Connect to ingest_group. We need a strong dependency of the group on
+        # Connect to ingest_group. We need a ready dependency of the group on
         # the node, so that other nodes depending on the group indirectly wait
-        # for all nodes; the weak dependency is to prevent the nodes being
+        # for all nodes; the resource dependency is to prevent the nodes being
         # started without also starting the group, which is necessary for
         # config.
-        g.add_edge(ingest_group, ingest, order='strong')
-        g.add_edge(ingest, ingest_group)
+        g.add_edge(ingest_group, ingest, depends_ready=True, depends_init=True)
+        g.add_edge(ingest, ingest_group, depends_resources=True)
+        g.add_edge(ingest, src_multicast, depends_init=True)
     return ingest_group
 
 
@@ -656,9 +660,9 @@ def _make_cal(g, config, name, ingest):
         'l0_spectral_name': name
     })
     src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(cal, src_multicast, port='spead', config=lambda task, resolver, endpoint: {
-        'l0_spectral_spead': str(endpoint)})
-    g.add_edge(cal, ingest, order='strong')  # Attributes passed via telstate
+    g.add_edge(cal, src_multicast, port='spead', depends_init=True,
+               config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+    g.add_edge(cal, ingest, depends_ready=True)  # Attributes passed via telstate
 
     return cal
 
@@ -687,10 +691,9 @@ def _make_filewriter(g, config, name, ingest):
         'l0_interface': task.interfaces['sdp_10g'].name
     })
     src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(filewriter, src_multicast, port='spead', config=lambda task, resolver, endpoint: {
-        'l0_spead': str(endpoint)
-    })
-    g.add_edge(filewriter, ingest, order='strong')  # Attributes passed via telstate
+    g.add_edge(filewriter, src_multicast, port='spead', depends_init=True,
+               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
+    g.add_edge(filewriter, ingest, depends_ready=True)  # Attributes passed via telstate
     return filewriter
 
 
@@ -727,7 +730,7 @@ def _make_beamformer_ptuse(g, config, name):
         'interface': task.interfaces['cbf'].name
     })
     for src, pol in zip(srcs, 'xy'):
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead', depends_init=True,
                    config=lambda task, resolver, endpoint, pol=pol: {
                        'cbf_spead{}'.format(pol): str(endpoint)})
     return bf_ingest
@@ -779,7 +782,7 @@ def _make_beamformer_engineering(g, config, name):
             'stream_name': src,
             'channels': '{}:{}'.format(*output_channels)
         })
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead', depends_init=True,
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
         nodes.append(bf_ingest)
     return nodes
@@ -894,12 +897,13 @@ def build_logical_graph(config):
                 '--telstate', '{endpoints[telstate_telstate]}',
                 '--name', node.name])
             node.wrapper = config['config'].get('wrapper')
-            g.add_edge(node, telstate, port='telstate', order='strong')
+            g.add_edge(node, telstate, port='telstate',
+                       depends_ready=True, depends_kill=True)
             if node not in sensor_producers:
-                # No direct network connection, but strong dependency because
+                # No direct network connection, but ready dependency because
                 # they communicate indirectly via telstate.
                 for producer in sensor_producers:
-                    g.add_edge(node, producer, order='strong')
+                    g.add_edge(node, producer, depends_ready=True)
         if isinstance(node, SDPLogicalTask):
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Increase memory allocation where it depends on telstate content
