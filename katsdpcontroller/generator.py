@@ -205,8 +205,12 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
 
 class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
     @property
+    def n_channels_per_substream(self):
+        return self.raw['n_chans_per_substream']
+
+    @property
     def n_substreams(self):
-        return self.n_channels // self.raw['n_chans_per_substream']
+        return self.n_channels // self.n_channels_per_substream
 
     @property
     def size(self):
@@ -320,29 +324,43 @@ def _make_cam2telstate(g, config, name):
     return cam2telstate
 
 
-def _make_baseline_correlation_products_simulator(g, config, name):
-    info = BaselineCorrelationProductsInfo(config, name)
-
+def _make_cbf_simulator(g, config, name):
     sim = SDPLogicalTask('sim.' + name)
     sim.image = 'katcbfsim'
-    # create-fx-stream is passed on the command-line instead of telstate
+
+    type_ = config['inputs'][name]['type']
+    assert type_ in ('cbf.baseline_correlation_products', 'cbf.tied_array_channelised_voltage')
+    # create-*-stream is passed on the command-line instead of telstate
     # for now due to SR-462.
-    sim.command = ['cbfsim.py', '--create-fx-stream', name]
-    # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
-    # 16 antennas, 32K, and cap it there (threads for compute and network).
-    # cbf_vis is an overestimate since the simulator is not constrained to
-    # power-of-two antenna counts like the real CBF.
-    scale = info.n_vis / (16 * 17 * 2 * 32768)
-    sim.cpus = 2 * min(1.0, scale)
-    # 4 entries per Jones matrix, complex64 each
-    gains_size = info.n_antennas * info.n_channels * 4 * 8
-    # Factor of 4 is conservative; only actually double-buffered
-    sim.mem = 4 * _mb(info.size) + _mb(gains_size) + 512
-    sim.cores = [None, None]
-    sim.gpus = [scheduler.GPURequest()]
-    # Scale for 20% at 16 ant, 32K channels
-    sim.gpus[0].compute = min(1.0, 0.2 * scale)
-    sim.gpus[0].mem = 2 * _mb(info.size) + _mb(gains_size) + 256
+    if type_ == 'cbf.baseline_correlation_products':
+        info = BaselineCorrelationProductsInfo(config, name)
+        sim.command = ['cbfsim.py', '--create-fx-stream', name]
+        # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
+        # 16 antennas, 32K, and cap it there (threads for compute and network).
+        # cbf_vis is an overestimate since the simulator is not constrained to
+        # power-of-two antenna counts like the real CBF.
+        scale = info.n_vis / (16 * 17 * 2 * 32768)
+        sim.cpus = 2 * min(1.0, scale)
+        # 4 entries per Jones matrix, complex64 each
+        gains_size = info.n_antennas * info.n_channels * 4 * 8
+        # Factor of 4 is conservative; only actually double-buffered
+        sim.mem = 4 * _mb(info.size) + _mb(gains_size) + 512
+        sim.cores = [None, None]
+        sim.gpus = [scheduler.GPURequest()]
+        # Scale for 20% at 16 ant, 32K channels
+        sim.gpus[0].compute = min(1.0, 0.2 * scale)
+        sim.gpus[0].mem = 2 * _mb(info.size) + _mb(gains_size) + 256
+    else:
+        info = TiedArrayChannelisedVoltageInfo(config, name)
+        sim.command = ['cbfsim.py', '--create-beamformer-stream', name]
+        # The beamformer simulator only simulates data shape, not content. The
+        # CPU load thus scales only with network bandwidth. Scale for 2 CPUs at
+        # L band, and cap it there since there are only 2 threads. Using 1.999
+        # instead of 2.0 is to ensure rounding errors don't cause a tiny fraction
+        # extra of CPU to be used.
+        sim.cpus = min(2.0, 1.999 * info.size / info.int_time / 1712000000.0)
+        sim.mem = 4 * _mb(info.size) + 512
+
     sim.ports = ['port']
     ibv = not is_develop(config)
     if ibv:
@@ -357,16 +375,29 @@ def _make_baseline_correlation_products_simulator(g, config, name):
         State.DONE: ['capture-stop', name]
     }
     substreams = info.n_channels // info.n_channels_per_substream
-    g.add_node(sim, config=lambda task, resolver: {
-        'cbf_channels': info.n_channels,
-        'cbf_adc_sample_rate': info.adc_sample_rate,
-        'cbf_bandwidth': info.bandwidth,
-        'cbf_int_time': info.int_time,
-        'cbf_substreams': substreams,
-        'cbf_interface': task.interfaces['cbf'].name,
-        'cbf_ibv': ibv,
-        'antenna_mask': ','.join(info.antennas)
-    })
+
+    def make_config(task, resolver):
+        conf = {
+            'cbf_channels': info.n_channels,
+            'cbf_adc_sample_rate': info.adc_sample_rate,
+            'cbf_bandwidth': info.bandwidth,
+            'cbf_substreams': substreams,
+            'cbf_interface': task.interfaces['cbf'].name,
+            'cbf_ibv': ibv,
+            'antenna_mask': ','.join(info.antennas)
+        }
+        if type_ == 'cbf.baseline_correlation_products':
+            conf.update({
+                'cbf_int_time': info.int_time,
+            })
+        else:
+            conf.update({
+                'beamformer-timesteps': info.raw['spectra_per_heap'],
+                'beamformer-bits': info.raw['beng_out_bits_per_sample'],
+            })
+        return conf
+
+    g.add_node(sim, config=make_config)
     multicast = find_node(g, 'multicast.' + name)
     g.add_edge(sim, multicast, port='spead', config=lambda task, resolver, endpoint: {
         'cbf_spead': str(endpoint)
@@ -501,8 +532,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # TODO: get timeplot to use multicast
     if spectral_name:
         timeplot = find_node(g, 'timeplot.' + spectral_name)
-        g.add_edge(ingest_group, timeplot, port='spead_port', config=lambda task, resolver, endpoint: {
-            'sdisp_spead': str(endpoint)})
+        g.add_edge(ingest_group, timeplot, port='spead_port',
+                   config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
         g.add_edge(timeplot, ingest_group, order='strong')  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
@@ -516,7 +547,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         # Scale for a full GPU for 32 antennas, 32K channels on one node
         scale = src_info.n_vis / _N32_32 / n_ingest
         ingest.gpus[0].compute = scale
-        # Refer to https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
+        # Refer to
+        # https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
         # We use slightly higher multipliers to be safe, as well as
         # conservatively using src_info instead of spectral_info.
         ingest.gpus[0].mem = \
@@ -793,14 +825,12 @@ def build_logical_graph(config):
         inputs_used.update(output['src_streams'])
 
     # Simulators for input streams where requested
-    for name in inputs.get('cbf.baseline_correlation_products', []):
+    cbf_streams = inputs.get('cbf.baseline_correlation_products', [])
+    cbf_streams.extend(inputs.get('cbf.tied_array_channelised_voltage', []))
+    for name in cbf_streams:
         if name in inputs_used and config['inputs'][name].get('simulate'):
             sensor_producers.append(
-                _make_baseline_correlation_products_simulator(g, config, name))
-    for name in inputs.get('cbf.tied_array_channelised_voltage', []):
-        if name in inputs_used and config['inputs'][name].get('simulate'):
-            raise NotImplementedError(
-                    'Simulator not yet implemented for cbf.tied_array_channelised_voltage')
+                _make_cbf_simulator(g, config, name))
 
     # Group outputs by type
     outputs = {}
