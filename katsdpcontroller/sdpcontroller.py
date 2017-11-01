@@ -180,99 +180,6 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
-class SDPGraph(object):
-    def _instantiate(self, logical_node):
-        if isinstance(logical_node, tasks.SDPLogicalTask):
-            return logical_node.physical_factory(
-                logical_node, self.loop,
-                self.sdp_controller, self.subarray_product_id)
-        else:
-            return logical_node.physical_factory(logical_node, self.loop)
-
-    """Wrapper around a physical graph used to instantiate
-    a particular SDP product/capability/subarray."""
-    def __init__(self, sched, config, resolver, subarray_product_id, loop,
-                 sdp_controller=None, telstate_name='telstate'):
-        self.sched = sched
-        self.resolver = resolver
-        self.loop = loop
-        self.subarray_product_id = subarray_product_id
-        self.sdp_controller = sdp_controller
-        self.config = config
-        self.logical_graph = generator.build_logical_graph(config)
-        # generate physical nodes
-        mapping = {logical: self._instantiate(logical) for logical in self.logical_graph}
-        self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
-        # Nodes indexed by logical name
-        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
-        self.telstate_node = self._nodes[telstate_name]
-        self.telstate_endpoint = ""
-        self.telstate = None
-
-    @trollius.coroutine
-    def launch_telstate(self):
-        """Make sure the telstate node is launched"""
-        boot = [self.telstate_node]
-
-        base_params = self.physical_graph.graph.get(
-            'config', lambda resolver: {})(self.resolver)
-        base_params['subarray_product_id'] = self.subarray_product_id
-        base_params['sdp_config'] = self.config
-        # Provide attributes to describe the relationships between CBF streams
-        # and instruments. This could be extracted from sdp_config, but these
-        # specific sensors are easier to mock.
-        for name, stream in six.iteritems(self.config['inputs']):
-            if stream['type'].startswith('cbf.'):
-                prefix = 'cbf_' + name + '_'
-                for suffix in ['src_streams', 'instrument_dev_name']:
-                    if suffix in stream:
-                        base_params[prefix + suffix] = stream[suffix]
-
-        logger.debug("Launching telstate. Base parameters {}".format(base_params))
-        yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
-         # encode metadata into the telescope state for use
-         # in component configuration
-         # connect to telstate store
-        self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
-                                                self.telstate_node.ports['telstate'])
-        self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
-        self.resolver.telstate = self.telstate
-
-        logger.debug("base params: %s", base_params)
-         # set the configuration
-        for k, v in base_params.iteritems():
-            self.telstate.add(k, v, immutable=True)
-
-    @trollius.coroutine
-    def execute_graph(self, req):
-        """Launch the remainder of the graph after :meth:`launch_telstate` has completed."""
-        # TODO: issue progress reports as tasks start running
-        yield From(self.sched.launch(self.physical_graph, self.resolver))
-
-    @trollius.coroutine
-    def shutdown(self):
-        try:
-            # TODO: provide for graceful burndown here
-            # TODO: issue progress reports as tasks stop
-            yield From(self.sched.kill(self.physical_graph))
-        finally:
-            if hasattr(self.resolver, 'resources'):
-                self.resolver.resources.close()
-
-    def check_nodes(self):
-        """Check that all requested nodes are actually running.
-
-        .. todo::
-
-           Also check health state sensors
-        """
-        for node in self.physical_graph:
-            if node.state != scheduler.TaskState.READY:
-                logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
-                return False
-        return True
-
-
 class SDPSubarrayProductBase(object):
     """SDP Subarray Product Base
 
@@ -295,16 +202,19 @@ class SDPSubarrayProductBase(object):
         testing and validation.  It conforms to the functional interface, but does
         not launch tasks or generate data.
     """
-    def __init__(self, subarray_product_id, graph):
-        self.subarray_product_id = subarray_product_id
+    def __init__(self, sched, config, resolver, subarray_product_id, loop, sdp_controller):
         self._async_task = None    #: Current background task (can only be one)
         self.state = State.CONFIGURING
-        self.graph = graph
+        self.sched = sched
+        self.config = config
+        self.resolver = resolver
+        self.subarray_product_id = subarray_product_id
+        self.loop = loop
+        self.sdp_controller = sdp_controller
+        self.logical_graph = generator.build_logical_graph(config)
+        self.telstate_endpoint = ""
+        self.telstate = None
         logger.info("Created: {!r}".format(self))
-
-    @property
-    def loop(self):
-        return self.graph.loop
 
     @property
     def async_busy(self):
@@ -318,11 +228,11 @@ class SDPSubarrayProductBase(object):
                             'Please wait for it to complete first.'.format(self.subarray_product_id))
 
     @trollius.coroutine
-    def _configure(self, server, req):
+    def _configure(self, req):
         self.state = State.IDLE
 
     @trollius.coroutine
-    def _deconfigure(self, server):
+    def _deconfigure(self):
         """Low-level details of deconfiguring. Subclasses should override this.
 
         It is run as a separate task, and needs to be cancellation-safe.
@@ -375,18 +285,18 @@ class SDPSubarrayProductBase(object):
             yield From(trollius.wait([old_task], loop=self.loop))
 
     @trollius.coroutine
-    def configure(self, server, req):
+    def configure(self, req):
         assert not self.async_busy    # configure should be the first thing to happen
         if self.state != State.CONFIGURING:
             raise FailReply('Subarray product {} is already configured'.format(
                 self.subarray_product_id))
-        task = trollius.ensure_future(self._configure(server, req), loop=self.loop)
+        task = trollius.ensure_future(self._configure(req), loop=self.loop)
         task.add_done_callback(self._clear_async_task)
         self._async_task = task
         yield From(task)
 
     @trollius.coroutine
-    def deconfigure(self, server, force=False):
+    def deconfigure(self, force=False):
         if self.state == State.DEAD:
             return
         if self.async_busy:
@@ -404,7 +314,7 @@ class SDPSubarrayProductBase(object):
                                self.subarray_product_id, self.state.name)
         logger.info("Deconfiguring subarray product %s", self.subarray_product_id)
 
-        task = trollius.ensure_future(self._deconfigure(server), loop=self.loop)
+        task = trollius.ensure_future(self._deconfigure(), loop=self.loop)
         task.add_done_callback(self._clear_async_task)
         yield From(self._replace_async_task(task))
         yield From(task)
@@ -439,27 +349,44 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     """Dummy implementation of SDPSubarrayProductBase interface that does not
     actually run anything.
     """
-    def __init__(self, subarray_product_id, graph):
-        super(SDPSubarrayProductInterface, self).__init__(subarray_product_id, graph)
+    def __init__(self, *args, **kwargs):
+        super(SDPSubarrayProductInterface, self).__init__(*args, **kwargs)
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
 
     @trollius.coroutine
-    def _configure(self, server, req):
+    def _configure(self, req):
         logger.warning("No components will be started - running in interface mode")
         # Add dummy sensors for this product
-        self._interface_mode_sensors.add_sensors(server)
+        self._interface_mode_sensors.add_sensors(self.sdp_controller)
         self.state = State.IDLE
 
     @trollius.coroutine
-    def _deconfigure(self, server):
-        self._interface_mode_sensors.remove_sensors(server)
+    def _deconfigure(self):
+        self._interface_mode_sensors.remove_sensors(self.sdp_controller)
         self.state = State.DEAD
 
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
-    def __init__(self, sched, *args, **kwargs):
-        super(SDPSubarrayProduct, self).__init__(*args, **kwargs)
-        self.sched = sched
+    """Subarray product that actually launches nodes."""
+    def _instantiate(self, logical_node, sdp_controller):
+        if isinstance(logical_node, tasks.SDPLogicalTask):
+            return logical_node.physical_factory(
+                logical_node, self.loop,
+                sdp_controller, self.subarray_product_id)
+        else:
+            return logical_node.physical_factory(logical_node, self.loop)
+
+    def __init__(self, sched, config, resolver, subarray_product_id, loop,
+                 sdp_controller, telstate_name='telstate'):
+        super(SDPSubarrayProduct, self).__init__(
+            sched, config, resolver, subarray_product_id, loop, sdp_controller)
+        # generate physical nodes
+        mapping = {logical: self._instantiate(logical, sdp_controller)
+                   for logical in self.logical_graph}
+        self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
+        # Nodes indexed by logical name
+        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
+        self.telstate_node = self._nodes[telstate_name]
 
     @trollius.coroutine
     def _issue_req(self, req, args=[], node_type='ingest', **kwargs):
@@ -481,7 +408,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """
         logger.debug("Issuing request {} to node_type {}".format(req, node_type))
         ret_args = ""
-        for node in self.graph.physical_graph:
+        for node in self.physical_graph:
             katcp = getattr(node, 'katcp_connection', None)
             if katcp is None:
                 # Can happen either if node is not an SDPPhysicalTask or if
@@ -531,7 +458,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             request will be made first.
         """
         # Create a copy of the graph containing only dependency edges.
-        deps_graph = scheduler.subgraph(self.graph.physical_graph, DEPENDS_INIT)
+        deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
         if reverse:
             deps_graph = deps_graph.reverse(copy=False)
 
@@ -557,7 +484,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _capture_init(self):
         """Move to capturing state"""
-        if any(node.logical_node.name.startswith('sim.') for node in self.graph.physical_graph):
+        if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
                 # Replace temporary fake antennas with ones configured by kattelmod
@@ -580,19 +507,76 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self.state = State.IDLE
 
     @trollius.coroutine
-    def _configure(self, server, req):
+    def _launch_telstate(self):
+        """Make sure the telstate node is launched"""
+        boot = [self.telstate_node]
+
+        base_params = self.physical_graph.graph.get(
+            'config', lambda resolver: {})(self.resolver)
+        base_params['subarray_product_id'] = self.subarray_product_id
+        base_params['sdp_config'] = self.config
+        # Provide attributes to describe the relationships between CBF streams
+        # and instruments. This could be extracted from sdp_config, but these
+        # specific sensors are easier to mock.
+        for name, stream in six.iteritems(self.config['inputs']):
+            if stream['type'].startswith('cbf.'):
+                prefix = 'cbf_' + name + '_'
+                for suffix in ['src_streams', 'instrument_dev_name']:
+                    if suffix in stream:
+                        base_params[prefix + suffix] = stream[suffix]
+
+        logger.debug("Launching telstate. Base parameters {}".format(base_params))
+        yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
+         # encode metadata into the telescope state for use
+         # in component configuration
+         # connect to telstate store
+        self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
+                                                self.telstate_node.ports['telstate'])
+        self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
+        self.resolver.telstate = self.telstate
+
+        logger.debug("base params: %s", base_params)
+         # set the configuration
+        for k, v in base_params.iteritems():
+            self.telstate.add(k, v, immutable=True)
+
+    def check_nodes(self):
+        """Check that all requested nodes are actually running.
+
+        .. todo::
+
+           Also check health state sensors
+        """
+        for node in self.physical_graph:
+            if node.state != scheduler.TaskState.READY:
+                logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
+                return False
+        return True
+
+    @trollius.coroutine
+    def _shutdown(self):
+        try:
+            # TODO: provide for graceful burndown here
+            # TODO: issue progress reports as tasks stop
+            yield From(self.sched.kill(self.physical_graph))
+        finally:
+            if hasattr(self.resolver, 'resources'):
+                self.resolver.resources.close()
+
+    @trollius.coroutine
+    def _configure(self, req):
         try:
             try:
-                graph = self.graph
-                resolver = graph.resolver
-                resolver.resources = SDPResources(server.resources, self.subarray_product_id)
+                resolver = self.resolver
+                resolver.resources = SDPResources(self.sdp_controller.resources,
+                                                  self.subarray_product_id)
                 # launch the telescope state for this graph
-                yield From(graph.launch_telstate())
-                req.inform("Telstate launched. [{}]".format(graph.telstate_endpoint))
+                yield From(self._launch_telstate())
+                req.inform("Telstate launched. [{}]".format(self.telstate_endpoint))
                  # launch containers for those nodes that require them
-                yield From(graph.execute_graph(req))
+                yield From(self.sched.launch(self.physical_graph, self.resolver))
                 req.inform("All nodes launched")
-                alive = graph.check_nodes()
+                alive = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
                     ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
@@ -601,22 +585,22 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 # Record the TaskInfo for each task in telstate, as well as details
                 # about the image resolver.
                 details = {}
-                for task in graph.physical_graph:
+                for task in self.physical_graph:
                     if isinstance(task, scheduler.PhysicalTask):
                         details[task.logical_node.name] = {
                             'host': task.host,
                             'taskinfo': task.taskinfo.to_dict()
                         }
-                graph.telstate.add('sdp_task_details', details, immutable=True)
-                graph.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                graph.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                self.telstate.add('sdp_task_details', details, immutable=True)
+                self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
                                    immutable=True)
                 # Successfully configured it all
                 self.state = State.IDLE
             except Exception:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 exc_info = sys.exc_info()
-                yield From(self.graph.shutdown())
+                yield From(self._shutdown())
                 six.reraise(*exc_info)
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(
@@ -625,7 +609,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             raise FailReply(str(error))
 
     @trollius.coroutine
-    def _deconfigure(self, server):
+    def _deconfigure(self):
         if self.state == State.CAPTURING:
             try:
                 yield From(self._capture_done())
@@ -635,7 +619,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 logger.error("Failed to issue capture-done during shutdown request. "
                              "Will continue with graph shutdown.", exc_info=True)
         self.state = State.DECONFIGURING
-        yield From(self.graph.shutdown())
+        yield From(self._shutdown())
         self.state = State.DEAD
 
 
@@ -808,7 +792,7 @@ class SDPControllerServer(AsyncDeviceServer):
             if an asynchronous operation is is progress on the subarray product and
             `force` is false.
         """
-        yield From(product.deconfigure(self, force=force))
+        yield From(product.deconfigure(force=force))
         # Product against potential race conditions
         if self.subarray_products.get(product.subarray_product_id) is product:
             del self.subarray_products[product.subarray_product_id]
@@ -869,7 +853,7 @@ class SDPControllerServer(AsyncDeviceServer):
 
         if subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
-            if dp.graph.config == config:
+            if dp.config == config:
                 logger.info("Subarray product with this configuration already exists. Pass.")
                 return
             else:
@@ -894,18 +878,18 @@ class SDPControllerServer(AsyncDeviceServer):
         resolver.telstate = None
 
         # create graph object and build physical graph from specified resources
-        graph = SDPGraph(self.sched, config, resolver, subarray_product_id,
-                         self.loop, sdp_controller=self)
         if self.interface_mode:
-            product = SDPSubarrayProductInterface(subarray_product_id, graph)
+            product_cls = SDPSubarrayProductInterface
         else:
-            product = SDPSubarrayProduct(self.sched, subarray_product_id, graph)
+            product_cls = SDPSubarrayProduct
+        product = product_cls(self.sched, config, resolver, subarray_product_id,
+                              self.loop, self)
         # Speculatively put the product into the list of products, to prevent
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
         try:
-            yield From(product.configure(self, req))
+            yield From(product.configure(req))
         except Exception:
             # Safety check in case a deconfigure-cancellation has already
             # removed the product.
@@ -969,7 +953,7 @@ class SDPControllerServer(AsyncDeviceServer):
             product = self.subarray_products[subarray_product_id]
         except KeyError:
             raise FailReply("The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
-        config = product.graph.config
+        config = product.config
 
         logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
         try:
@@ -1258,12 +1242,12 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         if not subarray_product_id:
             for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id, subarray_product.graph.telstate_endpoint)
+                req.inform(subarray_product_id, subarray_product.telstate_endpoint)
             return ('ok',"%i" % len(self.subarray_products))
 
         if subarray_product_id not in self.subarray_products:
             return ('fail','No existing subarray product configuration with this id found')
-        return ('ok',self.subarray_products[subarray_product_id].graph.telstate_endpoint)
+        return ('ok',self.subarray_products[subarray_product_id].telstate_endpoint)
 
     @time_request
     @request(Str(optional=True))

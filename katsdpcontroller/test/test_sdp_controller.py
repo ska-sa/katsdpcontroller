@@ -797,7 +797,7 @@ class TestSDPController(unittest.TestCase):
         """
         self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        for node in sa.graph.physical_graph:
+        for node in sa.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
                 node.status = Dict(state='TASK_FAILED')
