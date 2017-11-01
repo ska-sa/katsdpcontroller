@@ -537,15 +537,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             request will be made first.
         """
         # Create a copy of the graph containing only dependency edges.
-        deps_graph = networkx.create_empty_copy(self.graph.physical_graph)
-        for node in self.graph.physical_graph:
-            for _, out, attr in self.graph.physical_graph.out_edges([node], data=True):
-                if attr.get(DEPENDS_INIT):
-                    # Make dep_graph a dependency graph
-                    if reverse:
-                        deps_graph.add_edge(out, node)
-                    else:
-                        deps_graph.add_edge(node, out)
+        deps_graph = scheduler.subgraph(self.graph.physical_graph, DEPENDS_INIT)
+        if reverse:
+            deps_graph = deps_graph.reverse(copy=False)
 
         tasks = {}     # Keyed by node
         # We grab the ioloop of the first task we create.

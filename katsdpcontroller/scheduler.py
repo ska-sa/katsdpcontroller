@@ -1827,6 +1827,39 @@ class WaitStartHandler(tornado.web.RequestHandler):
                 self.write('Exception while waiting for dependencies:\n{}\n'.format(error))
 
 
+def subgraph(graph, edge_filter, nodes=None):
+    """Return a new graph containing only edges with a particular attribute.
+
+    An edge is added to the returned graph only if the filter passes. If
+    `nodes` is specified, an edge must also have both endpoints in that set.
+
+    Attribute data is not tranferred to the new graph.
+
+    Parameters
+    ----------
+    graph : networkx graph
+        Original graph (will not be modified)
+    edge_filter : str or callable
+        If callable, a function that takes edge attributes and returns true or
+        false to accept/reject the edge. Otherwise, a key that must be present
+        and truthy in the attribute dict.
+    nodes : iterable, optional
+        Subset of nodes to retain in the output
+    """
+    if nodes is None:
+        nodes = graph.nodes()
+    if not callable(edge_filter):
+        attr = edge_filter
+        edge_filter = lambda data: bool(data.get(attr))
+    nodes = set(nodes)
+    out = networkx.create_empty_copy(graph, with_nodes=False)
+    out.add_nodes_from(nodes)
+    for a, b, data in graph.edges(nodes, data=True):
+        if b in nodes and edge_filter(data):
+            out.add_edge(a, b)
+    return out
+
+
 class Scheduler(pymesos.Scheduler):
     """Top-level scheduler implementing the Mesos Scheduler API.
 
@@ -2277,13 +2310,9 @@ class Scheduler(pymesos.Scheduler):
         # building a graph of readiness dependencies.
         remaining = [node for node in nodes if node.state == TaskState.NOT_READY]
         remaining_set = set(remaining)
-        depends_ready_graph = networkx.DiGraph()
-        depends_ready_graph.add_nodes_from(remaining)
+        depends_ready_graph = subgraph(graph, DEPENDS_READY, remaining_set)
         for src, trg, data in graph.out_edges_iter(remaining, data=True):
-            if trg in remaining_set:
-                if data.get(DEPENDS_READY):
-                    depends_ready_graph.add_edge(src, trg)
-            elif trg.state == TaskState.NOT_READY:
+            if trg not in remaining_set and trg.state == TaskState.NOT_READY:
                 if data.get(DEPENDS_READY) or data.get(DEPENDS_RESOURCES) or data.get('port'):
                     raise DependencyError('{} depends on {} but it is neither'
                                           'started nor scheduled'.format(src.name, trg.name))
@@ -2341,20 +2370,11 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.KILLED)
             yield From(node.dead_event.wait())
 
-        if nodes is None:
-            nodes = graph.nodes()
-        nodes_set = set(nodes)
-        futures = []
-        kill_graph = networkx.DiGraph()
-        kill_graph.add_nodes_from(nodes)
-        for src, trg, data in graph.out_edges_iter(nodes, data=True):
-            if trg in nodes_set:
-                if data.get(DEPENDS_KILL):
-                    kill_graph.add_edge(src, trg)
+        kill_graph = subgraph(graph, DEPENDS_KILL, nodes)
         if not networkx.is_directed_acyclic_graph(kill_graph):
             raise CycleError('cycle between depends_kill dependencies')
-
-        for node in nodes:
+        futures = []
+        for node in kill_graph:
             futures.append(trollius.async(kill_one(node, kill_graph), loop=self._loop))
         yield From(trollius.gather(*futures, loop=self._loop))
 

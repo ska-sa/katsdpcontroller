@@ -1077,6 +1077,35 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(scheduler.InsufficientResourcesError, type(cm.exception))
 
 
+class TestSubgraph(object):
+    """Tests for :func:`katsdpcontroller.scheduler.subgraph`"""
+    def setup(self):
+        g = networkx.MultiDiGraph()
+        g.add_nodes_from(['a', 'b', 'c'])
+        g.add_edge('a', 'b', key1=True, key2=False)
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c', key1=False)
+        g.add_edge('c', 'a', key2=123)
+        g.add_edge('c', 'b', key1=True, key2=True)
+        self.g = g
+
+    def test_simple(self):
+        """Test with string filter and all nodes"""
+        out = scheduler.subgraph(self.g, 'key2')
+        assert_equal({('c', 'a'), ('c', 'b')}, set(out.edges()))
+        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+
+    def test_restrict_nodes(self):
+        out = scheduler.subgraph(self.g, 'key2', {'a', 'c'})
+        assert_equal({('c', 'a')}, set(out.edges()))
+        assert_equal({'a', 'c'}, set(out.nodes()))
+
+    def test_callable_filter(self):
+        out = scheduler.subgraph(self.g, lambda data: 'key1' in data)
+        assert_equal({('a', 'b'), ('b', 'c'), ('c', 'b')}, set(out.edges()))
+        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+
+
 class TestScheduler(object):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
     def _make_offer(self, resources, agent_num=0, attrs=()):
