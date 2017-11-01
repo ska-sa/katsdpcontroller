@@ -216,9 +216,7 @@ class SDPGraph(object):
     @trollius.coroutine
     def launch_telstate(self):
         """Make sure the telstate node is launched"""
-        boot = [node for node in self.physical_graph
-                if not isinstance(node, (scheduler.PhysicalTask, tasks.PhysicalGroup))]
-        boot.append(self.telstate_node)
+        boot = [self.telstate_node]
 
         base_params = self.physical_graph.graph.get(
             'config', lambda resolver: {})(self.resolver)

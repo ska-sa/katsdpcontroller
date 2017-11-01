@@ -54,18 +54,22 @@ edge attributes. An edge with no attributes carries no semantic information for
 the scheduler. Users of the scheduler can also define extra attributes, which
 are similarly ignored. The defined attributes on an edge from A to B are:
 
-depends_resource
+depends_resources
    Task A needs knowledge of the resources assigned to task B. This will
    ensure that B is started either before or at the same time as A. It is
    guaranteed that B's resources are assigned before A is resolved (but not
    necessarily before B is resolved). It is legal for these edges to form a
    cycle.
 
+depends_resolve
+   Task A must be resolved after task B. This implies `depends_resources`.
+   These edges must not form a cycle.
+
 port
    Task A needs to connect to a service provided by task B. Set the `port`
    edge attribute to the name of the port on B. The endpoint on B is provided
    to A as part of resolution. This automatically implies
-   `depends_resource`.
+   `depends_resources`.
 
 depends_ready
    Task B needs to be *ready* (running and listening on its ports) before task
@@ -176,6 +180,7 @@ TERMINAL_STATUSES = frozenset([
 # Names for standard edge attributes, to give some protection against typos
 DEPENDS_READY = 'depends_ready'
 DEPENDS_RESOURCES = 'depends_resources'
+DEPENDS_RESOLVE = 'depends_resolve'
 DEPENDS_KILL = 'depends_kill'
 logger = logging.getLogger(__name__)
 
@@ -851,7 +856,7 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
 
 
 class CycleError(ValueError):
-    """Raised for a graph that contains a cycle of `depends_kill` or `depends_ready` edges"""
+    """Raised for a graph that contains an illegal dependency cycle"""
     pass
 
 
@@ -2206,7 +2211,9 @@ class Scheduler(pymesos.Scheduler):
                     for (node, allocation) in allocations:
                         node.allocate(allocation)
                     logger.debug('Performing resolution')
-                    for node in nodes:
+                    order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
+                    for node in networkx.topological_sort(order_graph, reverse=True):
+                        logger.debug('Resolving %s', node.name)
                         yield From(node.resolve(group.resolver, group.graph, self._loop))
                     # Launch the tasks
                     new_min_ports = {}
@@ -2242,6 +2249,16 @@ class Scheduler(pymesos.Scheduler):
         # Note: don't use "nodes" here: we have to wait for everything to start
         ready_futures = [node.ready_event.wait() for node in group.nodes]
         yield From(trollius.gather(*ready_futures, loop=self._loop))
+
+    @classmethod
+    def depends_resources(cls, data):
+        """Whether edge attribute has a `depends_resources` dependency.
+
+        It takes into account the keys that implicitly specify a
+        `depends_resources` dependency.
+        """
+        keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
+        return any(data.get(key) for key in keys)
 
     @trollius.coroutine
     def launch(self, graph, resolver, nodes=None):
@@ -2311,13 +2328,16 @@ class Scheduler(pymesos.Scheduler):
         remaining = [node for node in nodes if node.state == TaskState.NOT_READY]
         remaining_set = set(remaining)
         depends_ready_graph = subgraph(graph, DEPENDS_READY, remaining_set)
+        depends_resolve_graph = subgraph(graph, DEPENDS_RESOLVE, remaining_set)
         for src, trg, data in graph.out_edges_iter(remaining, data=True):
             if trg not in remaining_set and trg.state == TaskState.NOT_READY:
-                if data.get(DEPENDS_READY) or data.get(DEPENDS_RESOURCES) or data.get('port'):
+                if self.depends_resources(data):
                     raise DependencyError('{} depends on {} but it is neither'
                                           'started nor scheduled'.format(src.name, trg.name))
         if not networkx.is_directed_acyclic_graph(depends_ready_graph):
             raise CycleError('cycle between depends_ready dependencies')
+        if not networkx.is_directed_acyclic_graph(depends_ready_graph):
+            raise CycleError('cycle between depends_resolve dependencies')
 
         for node in remaining:
             node.state = TaskState.STARTING

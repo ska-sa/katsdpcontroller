@@ -3,7 +3,7 @@ import math
 import logging
 import re
 
-import networkx as nx
+import networkx
 import trollius
 from trollius import From
 import addict
@@ -402,10 +402,9 @@ def _make_cbf_simulator(g, config, name):
 
     g.add_node(sim, config=make_config)
     multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(sim, multicast, port='spead', config=lambda task, resolver, endpoint: {
-        'cbf_spead': str(endpoint)
-    })
-    g.add_edge(multicast, sim, depends_init=True)
+    g.add_edge(sim, multicast, port='spead', depends_resolve=True,
+        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+    g.add_edge(multicast, sim, depends_init=True, depends_ready=True)
     return sim
 
 
@@ -522,17 +521,17 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     if spectral_name:
         spectral_multicast = LogicalMulticast('multicast.' + spectral_name, n_ingest)
         g.add_node(spectral_multicast)
-        g.add_edge(ingest_group, spectral_multicast, port='spead',
+        g.add_edge(ingest_group, spectral_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
-        g.add_edge(spectral_multicast, ingest_group, depends_init=True)
+        g.add_edge(spectral_multicast, ingest_group, depends_init=True, depends_ready=True)
     if continuum_name:
         continuum_multicast = LogicalMulticast('multicast.' + continuum_name, n_ingest)
         g.add_node(continuum_multicast)
-        g.add_edge(ingest_group, continuum_multicast, port='spead',
+        g.add_edge(ingest_group, continuum_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
-        g.add_edge(continuum_multicast, ingest_group, depends_init=True)
+        g.add_edge(continuum_multicast, ingest_group, depends_init=True, depends_ready=True)
     src_multicast = find_node(g, 'multicast.' + src)
-    g.add_edge(ingest_group, src_multicast, port='spead',
+    g.add_edge(ingest_group, src_multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
 
     # TODO: get timeplot to use multicast
@@ -597,11 +596,12 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         # config.
         g.add_edge(ingest_group, ingest, depends_ready=True, depends_init=True)
         g.add_edge(ingest, ingest_group, depends_resources=True)
-        g.add_edge(ingest, src_multicast, depends_init=True)
+        g.add_edge(ingest, src_multicast,
+                   depends_resolve=True, depends_ready=True, depends_init=True)
     return ingest_group
 
 
-def _make_cal(g, config, name, ingest):
+def _make_cal(g, config, name):
     if 'cal_params' in config['outputs'][name]:
         raise NotImplementedError('cal_params is not implemented yet')
 
@@ -660,14 +660,14 @@ def _make_cal(g, config, name, ingest):
         'l0_spectral_name': name
     })
     src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(cal, src_multicast, port='spead', depends_init=True,
+    g.add_edge(cal, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
-    g.add_edge(cal, ingest, depends_ready=True)  # Attributes passed via telstate
 
     return cal
 
 
-def _make_filewriter(g, config, name, ingest):
+def _make_filewriter(g, config, name):
     info = L0Info(config, name)
 
     filewriter = SDPLogicalTask('filewriter.' + name)
@@ -691,9 +691,9 @@ def _make_filewriter(g, config, name, ingest):
         'l0_interface': task.interfaces['sdp_10g'].name
     })
     src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(filewriter, src_multicast, port='spead', depends_init=True,
+    g.add_edge(filewriter, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
-    g.add_edge(filewriter, ingest, depends_ready=True)  # Attributes passed via telstate
     return filewriter
 
 
@@ -730,7 +730,8 @@ def _make_beamformer_ptuse(g, config, name):
         'interface': task.interfaces['cbf'].name
     })
     for src, pol in zip(srcs, 'xy'):
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead', depends_init=True,
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+                   depends_resolve=True, depends_init=True, depends_ready=True,
                    config=lambda task, resolver, endpoint, pol=pol: {
                        'cbf_spead{}'.format(pol): str(endpoint)})
     return bf_ingest
@@ -782,7 +783,8 @@ def _make_beamformer_engineering(g, config, name):
             'stream_name': src,
             'channels': '{}:{}'.format(*output_channels)
         })
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead', depends_init=True,
+        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+                   depends_resolve=True, depends_init=True, depends_ready=True,
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
         nodes.append(bf_ingest)
     return nodes
@@ -794,7 +796,7 @@ def build_logical_graph(config):
     # a lambda captures only the final value of the variable, not the value it
     # had in the loop iteration where the lambda occurred.
 
-    g = nx.MultiDiGraph(config=lambda resolver: {
+    g = networkx.MultiDiGraph(config=lambda resolver: {
         'cal_refant': '',
         'cal_g_solint': 10,
         'cal_bp_solint': 10,
@@ -808,20 +810,24 @@ def build_logical_graph(config):
     # Make a list of input streams of each type and add SPEAD endpoints to
     # the graph.
     inputs = {}
+    input_multicast = []
     for name, input_ in six.iteritems(config['inputs']):
         inputs.setdefault(input_['type'], []).append(name)
         url = input_['url']
         parts = urllib.parse.urlsplit(url)
         if parts.scheme == 'spead':
-            g.add_node(LogicalMulticast('multicast.' + name,
-                                        endpoint=Endpoint(parts.hostname, parts.port)))
+            node = LogicalMulticast('multicast.' + name,
+                                    endpoint=Endpoint(parts.hostname, parts.port))
+            g.add_node(node)
+            input_multicast.append(node)
 
-    # Nodes that generate the sensors to describe CBF streams - needed by almost everything
-    sensor_producers = []
     # cam2telstate node (optional: if we're simulating, we don't need it)
     if 'cam.http' in inputs:
         cam2telstate = _make_cam2telstate(g, config, inputs['cam.http'][0])
-        sensor_producers.append(cam2telstate)
+        for node in input_multicast:
+            g.add_edge(node, cam2telstate, depends_ready=True)
+    else:
+        cam2telstate = None
 
     # Find all input streams that are actually used. At the moment only the
     # direct dependencies are gathered because those are the only ones that
@@ -835,8 +841,7 @@ def build_logical_graph(config):
     cbf_streams.extend(inputs.get('cbf.tied_array_channelised_voltage', []))
     for name in cbf_streams:
         if name in inputs_used and config['inputs'][name].get('simulate'):
-            sensor_producers.append(
-                _make_cbf_simulator(g, config, name))
+            _make_cbf_simulator(g, config, name)
 
     # Group outputs by type
     outputs = {}
@@ -858,8 +863,8 @@ def build_logical_graph(config):
                     if match:
                         _make_timeplot(g, config, name)
                         ingest = _make_ingest(g, config, name, name2)
-                        _make_cal(g, config, name, ingest)
-                        _make_filewriter(g, config, name, ingest)
+                        _make_cal(g, config, name)
+                        _make_filewriter(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
     l0_spectral_only = False
@@ -873,8 +878,8 @@ def build_logical_graph(config):
         if is_spectral:
             _make_timeplot(g, config, name)
             ingest = _make_ingest(g, config, name, None)
-            _make_cal(g, config, name, ingest)
-            _make_filewriter(g, config, name, ingest)
+            _make_cal(g, config, name)
+            _make_filewriter(g, config, name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
@@ -899,11 +904,6 @@ def build_logical_graph(config):
             node.wrapper = config['config'].get('wrapper')
             g.add_edge(node, telstate, port='telstate',
                        depends_ready=True, depends_kill=True)
-            if node not in sensor_producers:
-                # No direct network connection, but ready dependency because
-                # they communicate indirectly via telstate.
-                for producer in sensor_producers:
-                    g.add_edge(node, producer, depends_ready=True)
         if isinstance(node, SDPLogicalTask):
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Increase memory allocation where it depends on telstate content
