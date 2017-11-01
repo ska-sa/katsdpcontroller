@@ -209,10 +209,6 @@ class SDPGraph(object):
         self.telstate_endpoint = ""
         self.telstate = None
 
-    def get_json(self):
-        from networkx.readwrite import json_graph
-        return json_graph.node_link_data(self.physical_graph)
-
     @trollius.coroutine
     def launch_telstate(self):
         """Make sure the telstate node is launched"""
