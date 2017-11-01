@@ -18,12 +18,6 @@ from katsdpcontroller.tasks import (
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
-# TODO: change the names used by cam2telstate to make this unnecessary
-CAM2TELSTATE_TYPE_MAP = {
-    'cbf.baseline_correlation_products': 'visibility',
-    'cbf.antenna_channelised_voltage': 'fengine',
-    'cbf.tied_array_channelised_voltage': 'beamformer'
-}
 CAPTURE_TRANSITIONS = {
     (State.IDLE, State.CAPTURING): ['capture-init'],
     (State.CAPTURING, State.IDLE): ['capture-done']
@@ -311,17 +305,9 @@ def _make_cam2telstate(g, config, name):
     cam2telstate.cpus = 0.2
     cam2telstate.mem = 256
     cam2telstate.ports = ['port']
-    streams = {}
-    for name2, input2 in six.iteritems(config['inputs']):
-        if input2['type'] in CAM2TELSTATE_TYPE_MAP:
-            streams[name2] = (CAM2TELSTATE_TYPE_MAP[input2['type']], input2['instrument_dev_name'])
-    streams_arg = ','.join(
-        "{0}:{1[0]}:{1[1]}".format(key, value) for key, value in six.iteritems(streams))
-    # TODO: need to pass cam2telstate the src_streams and instrument_dev_name fields?
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
         'url': url,
-        'streams': streams_arg,
         'collapse_streams': True
     })
     return cam2telstate
