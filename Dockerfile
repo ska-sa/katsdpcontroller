@@ -7,9 +7,9 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
-# Install haproxy for haproxy_disp
+# Install haproxy for haproxy_disp and graphviz for --write-graphs support
 USER root
-RUN apt-get -y update && apt-get -y --no-install-recommends install haproxy
+RUN apt-get -y update && apt-get -y --no-install-recommends install haproxy graphviz
 USER kat
 
 # Install Python dependencies

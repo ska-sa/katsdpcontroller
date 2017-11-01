@@ -10,6 +10,7 @@ import json
 import signal
 import re
 import sys
+import os.path
 from collections import deque
 
 from tornado import gen
@@ -19,6 +20,7 @@ import tornado.concurrent
 import trollius
 from trollius import From, Return
 import networkx
+import networkx.drawing.nx_pydot
 import six
 
 import jsonschema
@@ -340,6 +342,22 @@ class SDPSubarrayProductBase(object):
         task.add_done_callback(self._clear_async_task)
         self._async_task = task
         yield From(task)
+
+    def write_graphs(self, output_dir):
+        """Write visualisations to `output_dir`."""
+        for name in ['ready', 'init', 'kill', 'resolve', 'resources']:
+            if name != 'resources':
+                g = scheduler.subgraph(self.logical_graph, 'depends_' + name)
+            else:
+                g = scheduler.subgraph(self.logical_graph, scheduler.Scheduler.depends_resources)
+            g = networkx.relabel_nodes(g, {node: node.name for node in g})
+            g = networkx.drawing.nx_pydot.to_pydot(g)
+            filename = os.path.join(output_dir,
+                                    '{}_{}.svg'.format(self.subarray_product_id, name))
+            try:
+                g.write_svg(filename)
+            except (IOError, OSError) as error:
+                logger.warn('Could not write %s: %s', filename, error)
 
     def __repr__(self):
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -683,7 +701,7 @@ class SDPControllerServer(AsyncDeviceServer):
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, develop=False, interface_mode=False, wrapper=None,
                  graph_resolver=None, image_resolver_factory=None,
-                 gui_urls=None, **kwargs):
+                 gui_urls=None, graph_dir=None):
          # setup sensors
         self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
         self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
@@ -712,6 +730,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self.components = {}
          # dict of currently managed SDP components
         self.gui_urls = gui_urls if gui_urls is not None else []
+        self.graph_dir = graph_dir
 
         if graph_resolver is None:
             graph_resolver = GraphResolver()
@@ -884,6 +903,8 @@ class SDPControllerServer(AsyncDeviceServer):
             product_cls = SDPSubarrayProduct
         product = product_cls(self.sched, config, resolver, subarray_product_id,
                               self.loop, self)
+        if self.graph_dir is not None:
+            product.write_graphs(self.graph_dir)
         # Speculatively put the product into the list of products, to prevent
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.

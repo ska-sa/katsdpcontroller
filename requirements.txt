@@ -25,7 +25,9 @@ numpy
 pkginfo
 ply
 prometheus_client==0.0.18
+pydotplus==2.0.2
 pymesos==0.2.13
+pyparsing==2.2.0       # for pydotplus
 redis
 requests==2.8.1
 rfc3987==1.3.7
