@@ -2,16 +2,21 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 import json
+import contextlib
+
 import six
+from addict import Dict
+
 import trollius
 from trollius import From, Return
 import tornado.concurrent
 from tornado import gen
-from addict import Dict
-import six
-from katcp import Sensor, Message
 from prometheus_client import Gauge, Counter
+
+from katcp import Sensor, Message
+import katcp.core
 from katsdptelstate.endpoint import Endpoint
+
 from . import scheduler, sensor_proxy, product_config
 
 
@@ -146,8 +151,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._remove_sensors()
             self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
 
-    def kill(self, driver):
-        # shutdown this task
+    def kill(self, driver, **kwargs):
         self._disconnect()
         super(SDPPhysicalTaskBase, self).kill(driver)
 
@@ -226,6 +230,36 @@ class SDPConfigMixin(object):
             config = product_config.override(config, overrides)
         logger.debug('Config for %s: %s', self.name, config)
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
+
+
+class ProgramBlockStateObserver(object):
+    """Watches a program-block-state sensor in a child."""
+    def __init__(self, sensor, loop):
+        self._ready = trollius.Event(loop=loop)
+        self._sensor = sensor
+        self.update(sensor, sensor.reading())
+        sensor.attach(self)
+
+    def update(self, sensor, reading):
+        if reading.status in [Sensor.NOMINAL, Sensor.WARN, Sensor.ERROR]:
+            try:
+                value = json.loads(reading.value)
+            except ValueError:
+                logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
+            else:
+                if not isinstance(value, dict):
+                    logger.warning('%s is not a dict: %r', sensor.name, reading.value)
+                else:
+                    logger.info('%s has %d remaining program blocks', sensor.name, len(value))
+                    if not value:
+                        self._ready.set()
+
+    @trollius.coroutine
+    def wait_empty(self):
+        yield From(self._ready.wait())
+
+    def close(self):
+        self._sensor.detach(self)
 
 
 class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
@@ -324,6 +358,31 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
             logger.warning(msg)
         raise Return((reply, informs))
+
+    @trollius.coroutine
+    def graceful_kill(self, driver, **kwargs):
+        force_kill = True
+        try:
+            if self.katcp_connection is None:
+                logger.warning('Cannot do graceful stop on %s because there is no katcp connection',
+                               self.name)
+            else:
+                sensor = yield From(to_trollius_future(
+                    self.katcp_connection.future_get_sensor('program-block-status')))
+                if sensor is not None:
+                    observer = ProgramBlockStateObserver(self.name, sensor, loop)
+                    with contextlib.closing(observer):
+                        yield From(observer.wait_empty())
+        except Exception:
+            logger.exception('Exception in graceful shutdown of %s, killing it', req, self.name)
+        super(SDPPhysicalTask, self).kill(driver, **kwargs)
+
+    def kill(self, driver, **kwargs):
+        force = kwargs.pop('force', False)
+        if not force:
+            trollius.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
+        else:
+            super(SDPPhysicalTask, self).kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):

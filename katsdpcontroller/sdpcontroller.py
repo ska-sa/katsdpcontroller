@@ -564,6 +564,38 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     def __init__(self, *args, **kwargs):
         super(SDPSubarrayProductInterface, self).__init__(*args, **kwargs)
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
+        sensors = self._interface_mode_sensors.sensors
+        self._program_block_states = [
+            sensor for sensor in sensors.values() if sensor.name.endswith('.program-block-state')]
+
+    def _update_program_block_state(self, program_block_id, state):
+        """Update the simulated *.program-block-state sensors.
+
+        The dictionary that is JSON-encoded in the sensor value is updated to
+        set the value associated with the key `program_block_id`. If `state` is
+        `None`, the key is removed instead.
+        """
+        for name, sensor in self._interface_mode_sensors.sensors.items():
+            if name.endswith('.program-block-state'):
+                states = json.loads(sensor.value())
+                if state is None:
+                    states.pop(program_block_id, None)
+                else:
+                    states[program_block_id] = state
+                sensor.set_value(json.dumps(states))
+
+    @trollius.coroutine
+    def capture_init_impl(self, program_block):
+        self._update_program_block_state(program_block.name, 'CAPTURING')
+
+    @trollius.coroutine
+    def capture_done_impl(self, program_block):
+        self._update_program_block_state(program_block.name, 'PROCESSING')
+
+    @trollius.coroutine
+    def postprocess_impl(self, program_block):
+        yield From(trollius.sleep(0.1, loop=self.loop))
+        self._update_program_block_state(program_block.name, None)
 
     @trollius.coroutine
     def configure_impl(self, req):
@@ -767,11 +799,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         return True
 
     @trollius.coroutine
-    def _shutdown(self):
+    def _shutdown(self, force):
         try:
             # TODO: provide for graceful burndown here
             # TODO: issue progress reports as tasks stop
-            yield From(self.sched.kill(self.physical_graph))
+            yield From(self.sched.kill(self.physical_graph, force=force))
         finally:
             if hasattr(self.resolver, 'resources'):
                 self.resolver.resources.close()
@@ -811,7 +843,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             except Exception:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 exc_info = sys.exc_info()
-                yield From(self._shutdown())
+                yield From(self._shutdown(force=True))
                 six.reraise(*exc_info)
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(
@@ -821,7 +853,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     @trollius.coroutine
     def deconfigure_impl(self, force, ready):
-        yield From(self._shutdown())
+        yield From(self._shutdown(force=force))
 
 
 def async_request(func):
@@ -1676,6 +1708,11 @@ class InterfaceModeSensors(object):
                 sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for html_port',
                 initial_status=Sensor.NOMINAL),
+            'cal.sdp_l0.1.program-block-state': dict(
+                default='{}',
+                sensor_type=Sensor.STRING,
+                description='JSON dict with the state of each program block',
+                initial_status=Sensor.NOMINAL)
         }
 
         sensors_added = False

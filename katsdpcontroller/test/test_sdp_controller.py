@@ -168,7 +168,8 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         ('filewriter.sdp_l0.1.filename', '', '', 'string'),
         ('ingest.sdp_l0.1.capture-active', '', '', 'boolean'),
         ('timeplot.sdp_l0.1.gui-urls', '', '', 'string'),
-        ('timeplot.sdp_l0.1.html_port', '', '', 'address')
+        ('timeplot.sdp_l0.1.html_port', '', '', 'address'),
+        ('cal.sdp_l0.1.program-block-state', '', '', 'string')
 ))
 
 EXPECTED_REQUEST_LIST = [
@@ -515,15 +516,15 @@ class TestSDPController(unittest.TestCase):
         yield From(trollius.gather(*futures, loop=self.loop))
 
     @trollius.coroutine
-    def _kill(self, graph, nodes=None):
+    def _kill(self, graph, nodes=None, **kwargs):
         """Mock implementation of Scheduler.kill."""
         if nodes is not None:
             kill_graph = graph.subgraph(nodes)
         else:
             kill_graph = graph
         for node in kill_graph:
-            if scheduler.TaskState.STARTED <= node.state < scheduler.TaskState.KILLED:
-                node.kill(self.driver)
+            if scheduler.TaskState.STARTED <= node.state <= scheduler.TaskState.KILLED:
+                node.kill(self.driver, **kwargs)
             node.set_state(scheduler.TaskState.DEAD)
 
     def _future_request(self, msg, *args, **kwargs):
@@ -615,7 +616,7 @@ class TestSDPController(unittest.TestCase):
         self.telstate_class.side_effect = redis.ConnectionError
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Must not have created the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
 
@@ -625,7 +626,7 @@ class TestSDPController(unittest.TestCase):
         self.client.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.telstate_class.assert_called_once_with('host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Must have cleaned up the subarray product internally
         self.assertEqual({}, self.controller.subarray_products)
 
@@ -645,7 +646,7 @@ class TestSDPController(unittest.TestCase):
         self._configure_subarray(SUBARRAY_PRODUCT1)
         self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1)
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=False)
         # Verify the state
         self.assertEqual({}, self.controller.subarray_products)
 
@@ -677,7 +678,7 @@ class TestSDPController(unittest.TestCase):
         with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1, '1')
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Verify the state
         self.assertEqual({}, self.controller.subarray_products)
 
@@ -686,7 +687,7 @@ class TestSDPController(unittest.TestCase):
         with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self.client.assert_request_succeeds("product-deconfigure", SUBARRAY_PRODUCT1, '1')
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Verify the state
         self.assertEqual({}, self.controller.subarray_products)
 
@@ -719,7 +720,7 @@ class TestSDPController(unittest.TestCase):
             }''')
         self.client.assert_request_succeeds('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=False)
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         # Check that the override took effect
         ts = self.telstate_class.return_value
@@ -862,7 +863,7 @@ class TestSDPController(unittest.TestCase):
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.katcp_client.future_request.assert_called_with(
             Message.request('capture-done'), timeout=mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         self.assertEqual({}, self.controller.subarray_products)
 
     def test_deconfigure_on_exit_busy(self):
@@ -871,7 +872,7 @@ class TestSDPController(unittest.TestCase):
         self._configure_subarray(SUBARRAY_PRODUCT1)
         with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self._async_deconfigure_on_exit()
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         self.assertEqual({}, self.controller.subarray_products)
 
     def test_deconfigure_on_exit_cancel(self):
@@ -880,7 +881,7 @@ class TestSDPController(unittest.TestCase):
         with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             self._async_deconfigure_on_exit()
         # We must have killed off the partially-launched graph
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
 
     def test_telstate_endpoint_all(self):
         """Test telstate-endpoint without a subarray_product_id argument"""
@@ -949,7 +950,7 @@ class TestSDPController(unittest.TestCase):
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.katcp_client.future_request.assert_called_with(
             Message.request('capture-done'), timeout=mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY)
+        self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.
         calls = self.sched.launch.call_args_list

@@ -1473,13 +1473,21 @@ class PhysicalNode(object):
             self._ready_waiter.cancel()
             self._ready_waiter = None
 
-    def kill(self, driver):
+    def kill(self, driver, **kwargs):
         """Start killing off the node. This is guaranteed to be called only if
         the task made it to at least :const:`TaskState.STARTED` and it is not
-        in :const:`TaskState.DEAD`.
+        in state :const:`TaskState.DEAD`. Note that it might be called more
+        than once, with different keyword args.
 
         This function should not manipulate the task state; the caller will
         set the state to :const:`TaskState.KILLED`.
+
+        Parameters
+        ----------
+        driver : :class:`pymesos.MesosSchedulerDriver`
+            Scheduler driver
+        kwargs : dict
+            Extra arguments passed to :meth:`.Scheduler.kill`.
         """
         pass
 
@@ -1755,12 +1763,12 @@ class PhysicalTask(PhysicalNode):
         args['resolver'] = resolver
         return args
 
-    def kill(self, driver):
+    def kill(self, driver, **kwargs):
         # TODO: according to the Mesos docs, killing a task is not reliable,
         # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
-        super(PhysicalTask, self).kill(driver)
+        super(PhysicalTask, self).kill(driver, **kwargs)
 
 
 def instantiate(logical_graph, loop):
@@ -2359,7 +2367,7 @@ class Scheduler(pymesos.Scheduler):
             raise
 
     @trollius.coroutine
-    def kill(self, graph, nodes=None):
+    def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
         from any state. Dependencies specified with `depends_kill` will be
         honoured, leaving nodes alive until all nodes that depend on them are
@@ -2374,6 +2382,9 @@ class Scheduler(pymesos.Scheduler):
         nodes : list, optional
             If specified, the nodes to kill. The default is to kill all nodes
             in the graph.
+        kwargs : dict
+            Any other keyword arguments are passed to the tasks's
+            :meth:`~.PhysicalTask.kill` method.
 
         Raises
         ------
@@ -2384,13 +2395,13 @@ class Scheduler(pymesos.Scheduler):
         def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
                 node.set_state(TaskState.DEAD)
-            elif node.state < TaskState.KILLED:
+            elif node.state <= TaskState.KILLED:
                 for src in graph.predecessors(node):
                     yield From(src.dead_event.wait())
                 # Re-check state because it might have changed while waiting
-                if node.state < TaskState.KILLED:
+                if node.state <= TaskState.KILLED:
                     logger.debug('Killing %s', node.name)
-                    node.kill(self._driver)
+                    node.kill(self._driver, **kwargs)
                     node.set_state(TaskState.KILLED)
             yield From(node.dead_event.wait())
 
