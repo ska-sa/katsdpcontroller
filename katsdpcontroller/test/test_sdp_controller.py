@@ -19,6 +19,7 @@ from trollius import From
 import katcp
 import redis
 import pymesos
+import networkx
 import netifaces
 import requests
 
@@ -496,7 +497,8 @@ class TestSDPController(unittest.TestCase):
                         interface = mock.Mock()
                         interface.name = 'em1'
                         node.interfaces[request.network] = interface
-        for node in nodes:
+        order_graph = scheduler.subgraph(graph, scheduler.DEPENDS_RESOLVE, nodes)
+        for node in networkx.topological_sort(order_graph, reverse=True):
             if node.state < scheduler.TaskState.RUNNING:
                 yield From(node.resolve(resolver, graph, self.loop))
                 if node.logical_node.name in self.fail_launches:
@@ -795,7 +797,7 @@ class TestSDPController(unittest.TestCase):
         """
         self.client.assert_request_succeeds("product-configure",SUBARRAY_PRODUCT4,CONFIG)
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
-        for node in sa.graph.physical_graph:
+        for node in sa.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
                 node.status = Dict(state='TASK_FAILED')

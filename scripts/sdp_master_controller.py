@@ -117,6 +117,8 @@ if __name__ == "__main__":
                         help='File containing JSON describing related GUIs, or directory with .json files (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
+    parser.add_argument('--write-graphs', metavar='DIR',
+                        help='Write visualisations of the processing graph to directory')
     parser.add_argument('--role', default='katsdpcontroller',
                         help='Mesos role for the framework (default: %(default)s)')
     parser.add_argument('--principal', default='katsdpcontroller',
@@ -198,7 +200,8 @@ if __name__ == "__main__":
         image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr,
-        gui_urls=gui_urls)
+        gui_urls=gui_urls,
+        graph_dir=opts.write_graphs)
 
     if manhole:
         manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})

@@ -1077,6 +1077,35 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(scheduler.InsufficientResourcesError, type(cm.exception))
 
 
+class TestSubgraph(object):
+    """Tests for :func:`katsdpcontroller.scheduler.subgraph`"""
+    def setup(self):
+        g = networkx.MultiDiGraph()
+        g.add_nodes_from(['a', 'b', 'c'])
+        g.add_edge('a', 'b', key1=True, key2=False)
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c', key1=False)
+        g.add_edge('c', 'a', key2=123)
+        g.add_edge('c', 'b', key1=True, key2=True)
+        self.g = g
+
+    def test_simple(self):
+        """Test with string filter and all nodes"""
+        out = scheduler.subgraph(self.g, 'key2')
+        assert_equal({('c', 'a'), ('c', 'b')}, set(out.edges()))
+        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+
+    def test_restrict_nodes(self):
+        out = scheduler.subgraph(self.g, 'key2', {'a', 'c'})
+        assert_equal({('c', 'a')}, set(out.edges()))
+        assert_equal({'a', 'c'}, set(out.nodes()))
+
+    def test_callable_filter(self):
+        out = scheduler.subgraph(self.g, lambda data: 'key1' in data)
+        assert_equal({('a', 'b'), ('b', 'c'), ('c', 'b')}, set(out.edges()))
+        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+
+
 class TestScheduler(object):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
     def _make_offer(self, resources, agent_num=0, attrs=()):
@@ -1130,8 +1159,9 @@ class TestScheduler(object):
         self.task_ids = ['test-00000001', 'test-00000000', None]
         self.logical_graph = networkx.MultiDiGraph()
         self.logical_graph.add_nodes_from([node0, node1, node2])
-        self.logical_graph.add_edge(node1, node0, port='port', order='strong')
-        self.logical_graph.add_edge(node1, node2, port='foo', order='strong')
+        self.logical_graph.add_edge(node1, node0, port='port',
+                                    depends_ready=True, depends_kill=True)
+        self.logical_graph.add_edge(node1, node2, port='foo', depends_ready=True, depends_kill=True)
         self.numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.agent0_attrs = [
             _make_json_attr('katsdpcontroller.gpus', [
@@ -1187,14 +1217,14 @@ class TestScheduler(object):
 
     @run_with_self_event_loop
     def test_launch_cycle(self):
-        """Launch raises CycleError if there is a cycle of strong edges"""
+        """Launch raises CycleError if there is a cycle of depends_ready edges"""
         nodes = [scheduler.LogicalExternal('node{}'.format(i)) for i in range(4)]
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
-        logical_graph.add_edge(nodes[1], nodes[0], order='strong')
-        logical_graph.add_edge(nodes[1], nodes[2], order='strong')
-        logical_graph.add_edge(nodes[2], nodes[3], order='strong')
-        logical_graph.add_edge(nodes[3], nodes[1], order='strong')
+        logical_graph.add_edge(nodes[1], nodes[0], depends_ready=True)
+        logical_graph.add_edge(nodes[1], nodes[2], depends_ready=True)
+        logical_graph.add_edge(nodes[2], nodes[3], depends_ready=True)
+        logical_graph.add_edge(nodes[3], nodes[1], depends_ready=True)
         physical_graph = scheduler.instantiate(logical_graph, self.loop)
         with assert_raises(scheduler.CycleError):
             yield From(self.sched.launch(physical_graph, self.resolver))
@@ -1207,7 +1237,7 @@ class TestScheduler(object):
         nodes = [scheduler.LogicalExternal('node{}'.format(i)) for i in range(2)]
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
-        logical_graph.add_edge(nodes[1], nodes[0])
+        logical_graph.add_edge(nodes[1], nodes[0], depends_resources=True)
         physical_graph = scheduler.instantiate(logical_graph, self.loop)
         target = [node for node in physical_graph if node.name == 'node1']
         with assert_raises(scheduler.DependencyError):

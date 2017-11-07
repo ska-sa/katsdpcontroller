@@ -26,6 +26,7 @@ setup (
         'jsonschema',
         'rfc3987',           # Used by jsonschema to validate URLs
         'networkx<2.0',
+        'pydotplus',
         'netifaces',
         'enum34',
         'ipaddress',
