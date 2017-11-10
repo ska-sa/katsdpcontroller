@@ -25,7 +25,7 @@ setup (
         'docker',
         'jsonschema',
         'rfc3987',           # Used by jsonschema to validate URLs
-        'networkx<2.0',
+        'networkx>=2.0',
         'pydotplus',
         'netifaces',
         'enum34',

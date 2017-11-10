@@ -880,7 +880,7 @@ def build_logical_graph(config):
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
     telstate_extra = 0
-    for node, data in g.nodes_iter(True):
+    for node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):

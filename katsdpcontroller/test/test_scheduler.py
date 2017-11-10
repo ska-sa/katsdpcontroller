@@ -1155,8 +1155,8 @@ class TestScheduler(object):
         node1.cores = ['core0', 'core1']
         node2 = scheduler.LogicalExternal('node2')
         node2.wait_ports = []
-        # The reverse ordering is an artifact of the sorting done in _launch_group
-        self.task_ids = ['test-00000001', 'test-00000000', None]
+        # The order is determined by the lexicographical_topological_sort done in _launch_group
+        self.task_ids = ['test-00000000', 'test-00000001', None]
         self.logical_graph = networkx.MultiDiGraph()
         self.logical_graph.add_nodes_from([node0, node1, node2])
         self.logical_graph.add_edge(node1, node0, port='port',

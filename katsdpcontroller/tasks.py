@@ -213,7 +213,7 @@ class SDPConfigMixin(object):
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
         for name, value in six.iteritems(self.ports):
             config[name] = value
-        for src, trg, attr in graph.out_edges_iter(self, data=True):
+        for src, trg, attr in graph.out_edges(self, data=True):
             endpoint = None
             if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr['port']
