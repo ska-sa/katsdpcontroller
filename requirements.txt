@@ -6,7 +6,7 @@ decorator==4.1.2           # networkx requires >= 4.1, katsdpdockerbase is curre
 docker-pycreds==0.2.1
 docker==2.0.2
 enum34
-fakeredis
+fakenewsredis
 faulthandler==2.4
 functools32==3.2.3-2
 future
