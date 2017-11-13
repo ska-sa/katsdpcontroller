@@ -498,7 +498,7 @@ class TestSDPController(unittest.TestCase):
                         interface.name = 'em1'
                         node.interfaces[request.network] = interface
         order_graph = scheduler.subgraph(graph, scheduler.DEPENDS_RESOLVE, nodes)
-        for node in networkx.topological_sort(order_graph, reverse=True):
+        for node in reversed(list(networkx.topological_sort(order_graph))):
             if node.state < scheduler.TaskState.RUNNING:
                 yield From(node.resolve(resolver, graph, self.loop))
                 if node.logical_node.name in self.fail_launches:

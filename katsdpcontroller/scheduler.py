@@ -1405,7 +1405,7 @@ class PhysicalNode(object):
             Current event loop
         """
         self.depends_ready = []
-        for src, trg, attr in graph.out_edges_iter([self], data=True):
+        for src, trg, attr in graph.out_edges([self], data=True):
             if attr.get(DEPENDS_READY):
                 self.depends_ready.append(trg)
 
@@ -1601,7 +1601,7 @@ class PhysicalTask(PhysicalNode):
             Current event loop
         """
         yield From(super(PhysicalTask, self).resolve(resolver, graph, loop))
-        for src, trg, attr in graph.out_edges_iter([self], data=True):
+        for src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
@@ -1857,7 +1857,7 @@ def subgraph(graph, edge_filter, nodes=None):
         attr = edge_filter
         edge_filter = lambda data: bool(data.get(attr))
     nodes = set(nodes)
-    out = networkx.create_empty_copy(graph, with_nodes=False)
+    out = graph.__class__()
     out.add_nodes_from(nodes)
     for a, b, data in graph.edges(nodes, data=True):
         if b in nodes and edge_filter(data):
@@ -2212,7 +2212,11 @@ class Scheduler(pymesos.Scheduler):
                         node.allocate(allocation)
                     logger.debug('Performing resolution')
                     order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
-                    for node in networkx.topological_sort(order_graph, reverse=True):
+                    # Lexicographical sorting isn't required for
+                    # functionality, but the unit tests depend on it to get
+                    # predictable task IDs.
+                    for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
+                                                                          key=lambda x: x.name):
                         logger.debug('Resolving %s', node.name)
                         yield From(node.resolve(group.resolver, group.graph, self._loop))
                     # Launch the tasks
@@ -2329,7 +2333,7 @@ class Scheduler(pymesos.Scheduler):
         remaining_set = set(remaining)
         depends_ready_graph = subgraph(graph, DEPENDS_READY, remaining_set)
         depends_resolve_graph = subgraph(graph, DEPENDS_RESOLVE, remaining_set)
-        for src, trg, data in graph.out_edges_iter(remaining, data=True):
+        for src, trg, data in graph.out_edges(remaining, data=True):
             if trg not in remaining_set and trg.state == TaskState.NOT_READY:
                 if self.depends_resources(data):
                     raise DependencyError('{} depends on {} but it is neither'

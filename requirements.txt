@@ -2,7 +2,7 @@ addict==1.1.0
 backports-abc
 backports.ssl-match-hostname
 certifi
-decorator
+decorator==4.1.2           # networkx requires >= 4.1, katsdpdockerbase is currently 4.0.4
 docker-pycreds==0.2.1
 docker==2.0.2
 enum34
@@ -20,7 +20,7 @@ kazoo==2.2.1
 linecache2
 manhole
 netifaces
-networkx==1.10
+networkx==2.0
 numpy
 pkginfo
 ply

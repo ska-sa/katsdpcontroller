@@ -477,20 +477,23 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """
         # Create a copy of the graph containing only dependency edges.
         deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
-        if reverse:
+        # Reverse it
+        if not reverse:
             deps_graph = deps_graph.reverse(copy=False)
 
         tasks = {}     # Keyed by node
         # We grab the ioloop of the first task we create.
         loop = None
-        for node in networkx.topological_sort(deps_graph, reverse=True):
+        # Lexicographical tie-breaking isn't strictly required, but it makes
+        # behaviour predictable.
+        for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
             req = None
             try:
                 req = node.get_transition(old_state, new_state)
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
-            deps = [tasks[trg] for trg in deps_graph.successors(node) if trg in tasks]
+            deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
                 task = trollius.ensure_future(self._exec_node_transition(node, req, deps),
                                               loop=node.loop)
