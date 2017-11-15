@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 import math
 import logging
 import re
+import time
 
 import networkx
 import trollius
@@ -35,6 +36,8 @@ IMAGES = frozenset([
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
+#: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
+_N16_32 = 16 * 17 * 2 * 32768
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
@@ -314,66 +317,29 @@ def _make_cam2telstate(g, config, name):
 
 
 def _make_cbf_simulator(g, config, name):
-    sim = SDPLogicalTask('sim.' + name)
-    sim.image = 'katcbfsim'
-
     type_ = config['inputs'][name]['type']
     assert type_ in ('cbf.baseline_correlation_products', 'cbf.tied_array_channelised_voltage')
-    # create-*-stream is passed on the command-line instead of telstate
-    # for now due to SR-462.
+    # Determine number of simulators to run.
+    n_sim = 1
     if type_ == 'cbf.baseline_correlation_products':
         info = BaselineCorrelationProductsInfo(config, name)
-        sim.command = ['cbfsim.py', '--create-fx-stream', name]
-        # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
-        # 16 antennas, 32K, and cap it there (threads for compute and network).
-        # cbf_vis is an overestimate since the simulator is not constrained to
-        # power-of-two antenna counts like the real CBF.
-        scale = info.n_vis / (16 * 17 * 2 * 32768)
-        sim.cpus = 2 * min(1.0, scale)
-        # 4 entries per Jones matrix, complex64 each
-        gains_size = info.n_antennas * info.n_channels * 4 * 8
-        # Factor of 4 is conservative; only actually double-buffered
-        sim.mem = 4 * _mb(info.size) + _mb(gains_size) + 512
-        sim.cores = [None, None]
-        sim.gpus = [scheduler.GPURequest()]
-        # Scale for 20% at 16 ant, 32K channels
-        sim.gpus[0].compute = min(1.0, 0.2 * scale)
-        sim.gpus[0].mem = 2 * _mb(info.size) + _mb(gains_size) + 256
+        while info.n_vis / n_sim > _N32_32:
+            n_sim *= 2
     else:
         info = TiedArrayChannelisedVoltageInfo(config, name)
-        sim.command = ['cbfsim.py', '--create-beamformer-stream', name]
-        # The beamformer simulator only simulates data shape, not content. The
-        # CPU load thus scales only with network bandwidth. Scale for 2 CPUs at
-        # L band, and cap it there since there are only 2 threads. Using 1.999
-        # instead of 2.0 is to ensure rounding errors don't cause a tiny fraction
-        # extra of CPU to be used.
-        sim.cpus = min(2.0, 1.999 * info.size / info.int_time / 1712000000.0)
-        sim.mem = 4 * _mb(info.size) + 512
-
-    sim.ports = ['port']
     ibv = not is_develop(config)
-    if ibv:
-        # The verbs send interface seems to create a large number of
-        # file handles per stream, easily exceeding the default of
-        # 1024.
-        sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
-    sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
-    sim.interfaces[0].bandwidth_out = info.net_bandwidth
-    sim.transitions = {
-        (State.IDLE, State.CAPTURING): ['capture-start', name],
-        (State.CAPTURING, State.IDLE): ['capture-stop', name]
-    }
-    substreams = info.n_channels // info.n_channels_per_substream
 
     def make_config(task, resolver):
+        substreams = info.n_channels // info.n_channels_per_substream
         conf = {
             'cbf_channels': info.n_channels,
             'cbf_adc_sample_rate': info.adc_sample_rate,
             'cbf_bandwidth': info.bandwidth,
             'cbf_substreams': substreams,
-            'cbf_interface': task.interfaces['cbf'].name,
             'cbf_ibv': ibv,
-            'antenna_mask': ','.join(info.antennas)
+            'cbf_sync_time': time.time(),
+            'antenna_mask': ','.join(info.antennas),
+            'servers': n_sim,
         }
         if type_ == 'cbf.baseline_correlation_products':
             conf.update({
@@ -386,12 +352,66 @@ def _make_cbf_simulator(g, config, name):
             })
         return conf
 
-    g.add_node(sim, config=make_config)
+    sim_group = LogicalGroup('sim.' + name)
+    g.add_node(sim_group, config=make_config)
     multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(sim, multicast, port='spead', depends_resolve=True,
+    g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
         config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
-    g.add_edge(multicast, sim, depends_init=True, depends_ready=True)
-    return sim
+    g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
+
+    for i in range(n_sim):
+        sim = SDPLogicalTask('sim.{}.{}'.format(name, i + 1))
+        sim.image = 'katcbfsim'
+        # create-*-stream is passed on the command-line instead of telstate
+        # for now due to SR-462.
+        if type_ == 'cbf.baseline_correlation_products':
+            sim.command = ['cbfsim.py', '--create-fx-stream', name]
+            # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
+            # 16 antennas, 32K, and cap it there (threads for compute and network).
+            # cbf_vis is an overestimate since the simulator is not constrained to
+            # power-of-two antenna counts like the real CBF.
+            scale = info.n_vis / n_sim / _N16_32
+            sim.cpus = 2 * min(1.0, scale)
+            # 4 entries per Jones matrix, complex64 each
+            gains_size = info.n_antennas * info.n_channels * 4 * 8
+            # Factor of 4 is conservative; only actually double-buffered
+            sim.mem = (4 * _mb(info.size) + _mb(gains_size)) / n_sim + 512
+            sim.cores = [None, None]
+            sim.gpus = [scheduler.GPURequest()]
+            # Scale for 20% at 16 ant, 32K channels
+            sim.gpus[0].compute = min(1.0, 0.2 * scale)
+            sim.gpus[0].mem = (2 * _mb(info.size) + _mb(gains_size)) / n_sim + 256
+        else:
+            info = TiedArrayChannelisedVoltageInfo(config, name)
+            sim.command = ['cbfsim.py', '--create-beamformer-stream', name]
+            # The beamformer simulator only simulates data shape, not content. The
+            # CPU load thus scales only with network bandwidth. Scale for 2 CPUs at
+            # L band, and cap it there since there are only 2 threads. Using 1.999
+            # instead of 2.0 is to ensure rounding errors don't cause a tiny fraction
+            # extra of CPU to be used.
+            sim.cpus = min(2.0, 1.999 * info.size / info.int_time / 1712000000.0 / n_sim)
+            sim.mem = 4 * _mb(info.size) / n_sim + 512
+
+        sim.ports = ['port']
+        if ibv:
+            # The verbs send interface seems to create a large number of
+            # file handles per stream, easily exceeding the default of
+            # 1024.
+            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+        sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        sim.interfaces[0].bandwidth_out = info.net_bandwidth
+        sim.transitions = {
+            (State.IDLE, State.CAPTURING): ['capture-start', name],
+            (State.CAPTURING, State.IDLE): ['capture-stop', name]
+        }
+
+        g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {
+            'cbf_interface': task.interfaces['cbf'].name,
+            'server_id': server_id
+        })
+        g.add_edge(sim_group, sim, depends_ready=True, depends_init=True)
+        g.add_edge(sim, sim_group, depends_resources=True)
+    return sim_group
 
 
 def _make_timeplot(g, config, spectral_name):
@@ -662,7 +682,7 @@ def _make_filewriter(g, config, name):
     # Don't yet have a good idea of real CPU usage. For now assume that 16
     # antennas, 32K channels requires two CPUs (one for capture, one for
     # writing) and scale from there.
-    filewriter.cpus = 2 * info.n_vis / (16 * 17 * 2 * 32768)
+    filewriter.cpus = 2 * info.n_vis / _N16_32
     # Memory pool has 8 entries, plus the socket buffer, but allocate 12 to be
     # safe.
     filewriter.mem = 12 * _mb(info.size) + 256
