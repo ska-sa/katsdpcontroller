@@ -552,7 +552,7 @@ class TestSDPController(unittest.TestCase):
         return ("product-configure", subarray_product, CONFIG)
 
     def _configure_subarray(self, subarray_product):
-        self.client.assert_request_succeeds(*self._configure_args(subarray_product))
+        return self.client.assert_request_succeeds(*self._configure_args(subarray_product))
 
     def test_product_configure_success(self):
         """A ?product-configure request must wait for the tasks to come up, then indicate success."""
@@ -571,12 +571,13 @@ class TestSDPController(unittest.TestCase):
                     }
                 }
             }''')
-        self._configure_subarray(SUBARRAY_PRODUCT4)
+        name = self._configure_subarray(SUBARRAY_PRODUCT4)[0]
+        self.assertEqual(SUBARRAY_PRODUCT4, name)
         self.telstate_class.assert_called_once_with('host.telstate:20000')
 
         # Verify the telescope state
         ts = self.telstate_class.return_value
-        # Print the list so assist in debugging if the assert fails
+        # Print the list to assist in debugging if the assert fails
         print(ts.add.call_args_list)
         # This is not a complete list of calls. It check that each category of stuff
         # is covered: base_params, per node, per edge
@@ -596,6 +597,16 @@ class TestSDPController(unittest.TestCase):
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
+
+    def test_product_configure_generate_names(self):
+        """Name with trailing * must generate lowest-numbered name"""
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_0', name)
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_1', name)
+        self.client.assert_request_succeeds('product-deconfigure', 'prefix_0')
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_0', name)
 
     def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
