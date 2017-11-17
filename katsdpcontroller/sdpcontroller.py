@@ -22,6 +22,8 @@ from trollius import From, Return
 import networkx
 import networkx.drawing.nx_pydot
 import six
+import enum
+from decorator import decorator
 
 import jsonschema
 import ipaddress
@@ -47,6 +49,25 @@ REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+
+
+def log_task_exceptions(task, msg):
+    """Add a done callback to a task that logs any exception it raised.
+
+    Parameters
+    ----------
+    task : :class:`trollius.Future`
+        Task (or any future) on which the callback will be added
+    msg : str
+        Message that will be logged
+    """
+    def done_callback(task):
+        if not task.cancelled():
+            try:
+                task.result()
+            except Exception:
+                logger.warning('%s', msg, exc_info=True)
+    task.add_done_callback(done_callback)
 
 
 class CallbackSensor(Sensor):
@@ -182,6 +203,33 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
+class ProgrammeBlock(object):
+    """A programme block is book-ended by a capture-init and a capture-done,
+    although processing on it continues after the capture-done."""
+
+    class State(enum.Enum):
+        INITIALISING = 0
+        CAPTURING = 1
+        POSTPROCESSING = 2
+        DEAD = 3
+
+    def __init__(self, name, loop):
+        self.name = name
+        self._state = ProgrammeBlock.State.INITIALISING
+        self.postprocess_task = None
+        self.dead_event = trollius.Event(loop=loop)
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        self._state = value
+        if value == ProgrammeBlock.State.DEAD:
+            self.dead_event.set()
+
+
 class SDPSubarrayProductBase(object):
     """SDP Subarray Product Base
 
@@ -198,11 +246,20 @@ class SDPSubarrayProductBase(object):
     conditions, changes to :attr:`state` should generally only be made from
     inside the asynchronous tasks.
 
-    .. note::
+    There are some invariants that must hold at yield points:
+    - There is at most one programme block in state CAPTURING.
+    - :attr:`current_programme_block` is the programme block in state
+      CAPTURING, or ``None`` if there isn't one.
+    - :attr:`current_programme_block` is set if and only if the subarray state
+      is CAPTURING.
+    - Keys in :attr:`programme_blocks` also appear in `programme_block_names`.
+    - Elements of :attr:`programme_blocks` are not in state DEAD.
 
-        This can be used directly as a stubbed interface for use in standalone
-        testing and validation.  It conforms to the functional interface, but does
-        not launch tasks or generate data.
+    This is a base class that is intended to be subclassed. The methods whose
+    names end in ``_impl`` are extension points that should be implemented in
+    subclasses to do the real work. These methods are run as part of the
+    asynchronous operations. They need to be cancellation-safe, to allow for
+    forced deconfiguration to abort them.
     """
     def __init__(self, sched, config, resolver, subarray_product_id, loop, sdp_controller):
         self._async_task = None    #: Current background task (can only be one)
@@ -216,6 +273,10 @@ class SDPSubarrayProductBase(object):
         self.logical_graph = generator.build_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
+        self.programme_blocks = {}              # live programme blocks, indexed by name
+        self.programme_block_names = set()      # all programme block names used
+        self.current_programme_block = None     # set between capture_init and capture_done
+        self.dead_event = trollius.Event(loop)  # set when reached state DEAD
         logger.info("Created: {!r}".format(self))
 
     @property
@@ -230,75 +291,188 @@ class SDPSubarrayProductBase(object):
                             'Please wait for it to complete first.'.format(self.subarray_product_id))
 
     @trollius.coroutine
+    def configure_impl(self, req):
+        """Extension point to configure the subarray."""
+        pass
+
+    @trollius.coroutine
+    def deconfigure_impl(self, force, ready):
+        """Extension point to deconfigure the subarray.
+
+        Parameters
+        ----------
+        force : bool
+            Whether to do an abrupt deconfiguration without waiting for
+            postprocessing.
+        ready : :class:`trollius.Event`
+            If the ?product-deconfigure command should return before
+            deconfiguration is complete, this event can be set at that point.
+        """
+        pass
+
+    @trollius.coroutine
+    def capture_init_impl(self, programme_block):
+        """Extension point to start a programme block."""
+        pass
+
+    @trollius.coroutine
+    def capture_done_impl(self, programme_block):
+        """Extension point to stop a programme block.
+
+        This should only do the work needed for the ``capture-done`` master
+        controller request to return. The caller takes care of calling
+        :meth:`postprocess_impl`.
+
+        It needs to be safe to run from DECONFIGURING state, because it may be
+        run as part of forced deconfigure.
+        """
+        pass
+
+    @trollius.coroutine
+    def postprocess_impl(self, programme_block):
+        """Complete the post-processing for a programme block.
+
+        Subclasses should override this if a programme block is not finished when
+        :meth:`_capture_done` returns.
+        """
+        pass
+
+    @trollius.coroutine
     def _configure(self, req):
+        """Asynchronous task that does he configuration."""
+        yield From(self.configure_impl(req))
         self.state = State.IDLE
 
     @trollius.coroutine
-    def _deconfigure(self):
-        """Low-level details of deconfiguring. Subclasses should override this.
+    def _deconfigure(self, force, ready):
+        """Asynchronous task that does the deconfiguration.
 
-        It is run as a separate task, and needs to be cancellation-safe.
+        This handles the entire burndown cycle. The end of the synchronous
+        part (at which point the katcp request returns) is signalled by
+        setting the event `ready`.
         """
+        self.state = State.DECONFIGURING
+        if self.current_programme_block is not None:
+            try:
+                yield From(self._capture_done())
+            except trollius.CancelledError:
+                raise
+            except Exception as error:
+                logger.error("Failed to issue capture-done during shutdown request. "
+                             "Will continue with graph shutdown.", exc_info=True)
+
+        if force:
+            for programme_block in self.programme_blocks.values():
+                if programme_block.postprocess_task is not None:
+                    programme_block.postprocess_task.cancel()
+
+        yield From(self.deconfigure_impl(force, ready))
+
+        # Allow all the postprocessing tasks to finish up
+        while self.programme_blocks:
+            yield From(self.programme_blocks[-1].dead_event.wait())
+            self.programme_blocks[-1].pop()
+
         self.state = State.DEAD
+        ready.set()     # In case deconfigure_impl didn't already do this
+        self.dead_event.set()
+
+    def _programme_block_dead(self, programme_block):
+        """Mark a programme block as dead and remove it from the list."""
+        programme_block.state = ProgrammeBlock.State.DEAD
+        del self.programme_blocks[programme_block.name]
 
     @trollius.coroutine
-    def _capture_init(self):
-        """Low level details of initiating capture. Subclasses should override this.
-
-        It is run as a separate task, and needs to be cancellation-safe.
-        """
+    def _capture_init(self, programme_block):
+        yield From(self.capture_init_impl(programme_block))
+        assert self.current_programme_block is None
         self.state = State.CAPTURING
+        programme_block.state = ProgrammeBlock.State.CAPTURING
+        self.programme_block_names.add(programme_block.name)
+        self.programme_blocks[programme_block.name] = programme_block
+        self.current_programme_block = programme_block
 
     @trollius.coroutine
     def _capture_done(self):
-        """Low level details of terminating capture. Subclasses should override this.
+        """The asynchronous task that handles ?capture-done. See
+        :meth:`capture_done_impl` for additional details.
 
-        It is run as a separate task, and needs to be cancellation-safe.
+        Returns
+        -------
+        The programme block that was stopped
         """
-        self.state = State.IDLE
+        programme_block = self.current_programme_block
+        assert programme_block is not None
+        yield From(self.capture_done_impl(programme_block))
+        if self.state == State.CAPTURING:
+            self.state = State.IDLE
+        assert self.current_programme_block is programme_block
+        self.current_programme_block = None
+        if self.state == State.IDLE:
+            # Don't do post-processing if we're being force-deconfigured
+            programme_block.state = ProgrammeBlock.State.POSTPROCESSING
+            programme_block.postprocessing_task = trollius.ensure_future(
+                self.postprocess_impl(programme_block), loop=self.loop)
+            log_task_exceptions(
+                programme_block.postprocessing_task,
+                "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
+                                                               programme_block.name))
+            programme_block.postprocessing_task.add_done_callback(
+                lambda task: self._programme_block_dead(programme_block))
+        else:
+            self._programme_block_dead(programme_block)
+        raise Return(programme_block)
 
     def _clear_async_task(self, future):
-        """Done callback added to asynchronous tasks.
+        """Clear the current async task.
 
-        It clears the :attr:`_async_task` attribute and logs any exception from the task.
+        Parameters
+        ----------
+        future : :class:`trollius.Future`
+            The expected value of :attr:`_async_task`. If it does not match,
+            it is not cleared (this can happen if another task replaced it
+            already).
         """
-        # The if statement is needed because _replace_async_task replaces _async_task
-        # before cancelling the old task.
         if self._async_task is future:
             self._async_task = None
-        try:
-            future.result()
-        except trollius.CancelledError:
-            pass
-        except Exception:
-            logger.exception('Exception in asynchronous task on %s', self.subarray_product_id)
 
     @trollius.coroutine
     def _replace_async_task(self, new_task):
         """Set the current asynchronous task.
 
-        If there is an existing task, it is atomically replaced then cancelled."""
+        If there is an existing task, it is atomically replaced then cancelled.
+
+        Returns
+        -------
+        bool
+            Whether `new_task` is now the current async task (it might not be
+            if it was replaced after being installed but before we returned).
+        """
         old_task = self._async_task
         self._async_task = new_task
-        if old_task is not None and not old_task.done():
+        if old_task is not None:
             old_task.cancel()
             # Using trollius.wait instead of directly yielding from the task
             # avoids re-raising any exception raised from the task.
             yield From(trollius.wait([old_task], loop=self.loop))
+        raise Return(self._async_task is new_task)
 
     @trollius.coroutine
     def configure(self, req):
-        assert not self.async_busy    # configure should be the first thing to happen
-        if self.state != State.CONFIGURING:
-            raise FailReply('Subarray product {} is already configured'.format(
-                self.subarray_product_id))
+        assert not self.async_busy, "configure should be the first thing to happen"
+        assert self.state == State.CONFIGURING, "configure should be the first thing to happen"
         task = trollius.ensure_future(self._configure(req), loop=self.loop)
-        task.add_done_callback(self._clear_async_task)
+        log_task_exceptions(task, "Configuring subarray product {} failed".format(
+            self.subarray_product_id))
         self._async_task = task
-        yield From(task)
+        try:
+            yield From(task)
+        finally:
+            self._clear_async_task(task)
 
     @trollius.coroutine
     def deconfigure(self, force=False):
+        """Start deconfiguration of the subarray, but does not wait for it to complete."""
         if self.state == State.DEAD:
             return
         if self.async_busy:
@@ -316,21 +490,36 @@ class SDPSubarrayProductBase(object):
                                self.subarray_product_id, self.state.name)
         logger.info("Deconfiguring subarray product %s", self.subarray_product_id)
 
-        task = trollius.ensure_future(self._deconfigure(), loop=self.loop)
+        ready = trollius.Event(self.loop)
+        task = trollius.ensure_future(self._deconfigure(force, ready), loop=self.loop)
+        log_task_exceptions(task, "Deconfiguring {} failed".format(self.subarray_product_id))
         task.add_done_callback(self._clear_async_task)
-        yield From(self._replace_async_task(task))
-        yield From(task)
+        if (yield From(self._replace_async_task(task))):
+            yield From(ready.wait())
+        # We don't wait for task to complete
 
     @trollius.coroutine
-    def capture_init(self):
+    def capture_init(self, programme_block_id):
         self._fail_if_busy()
         if self.state != State.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
-        task = trollius.ensure_future(self._capture_init(), loop=self.loop)
-        task.add_done_callback(self._clear_async_task)
+        if programme_block_id is None:
+            seq = 0
+            while 'pb' + str(seq) in self.programme_block_names:
+                seq += 1
+            programme_block_id = 'pb' + str(seq)
+        elif programme_block_id in self.programme_block_names:
+            raise FailReply('Programme block ID {} has already been used in {}'.format(
+                programme_block_id, self.subarray_product_id))
+
+        programme_block = ProgrammeBlock(programme_block_id, self.loop)
+        task = trollius.ensure_future(self._capture_init(programme_block), loop=self.loop)
         self._async_task = task
-        yield From(task)
+        try:
+            yield From(task)
+        finally:
+            self._clear_async_task(task)
 
     @trollius.coroutine
     def capture_done(self):
@@ -339,9 +528,11 @@ class SDPSubarrayProductBase(object):
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
         task = trollius.ensure_future(self._capture_done(), loop=self.loop)
-        task.add_done_callback(self._clear_async_task)
         self._async_task = task
-        yield From(task)
+        try:
+            yield From(task)
+        finally:
+            self._clear_async_task(task)
 
     def write_graphs(self, output_dir):
         """Write visualisations to `output_dir`."""
@@ -372,16 +563,14 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
 
     @trollius.coroutine
-    def _configure(self, req):
+    def configure_impl(self, req):
         logger.warning("No components will be started - running in interface mode")
         # Add dummy sensors for this product
         self._interface_mode_sensors.add_sensors(self.sdp_controller)
-        self.state = State.IDLE
 
     @trollius.coroutine
-    def _deconfigure(self):
+    def deconfigure_impl(self, force, ready):
         self._interface_mode_sensors.remove_sensors(self.sdp_controller)
-        self.state = State.DEAD
 
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
@@ -503,8 +692,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             yield From(trollius.gather(*tasks.values(), loop=loop))
 
     @trollius.coroutine
-    def _capture_init(self):
-        """Move to capturing state"""
+    def capture_init_impl(self, programme_block):
         if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
@@ -516,16 +704,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
-        yield From(self.exec_transitions(self.state, State.CAPTURING, True))
-        self.state = State.CAPTURING
+        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True))
 
     @trollius.coroutine
-    def _capture_done(self):
-        """Move to idle state. This is used when changing to either
-        State.IDLE or State.DECONFIGURING (the latter only happens when forced).
-        """
-        yield From(self.exec_transitions(self.state, State.IDLE, False))
-        self.state = State.IDLE
+    def capture_done_impl(self, programme_block):
+        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False))
 
     @trollius.coroutine
     def _launch_telstate(self):
@@ -585,7 +768,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 self.resolver.resources.close()
 
     @trollius.coroutine
-    def _configure(self, req):
+    def configure_impl(self, req):
         try:
             try:
                 resolver = self.resolver
@@ -616,8 +799,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
                 self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
                                    immutable=True)
-                # Successfully configured it all
-                self.state = State.IDLE
             except Exception:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 exc_info = sys.exc_info()
@@ -630,18 +811,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             raise FailReply(str(error))
 
     @trollius.coroutine
-    def _deconfigure(self):
-        if self.state == State.CAPTURING:
-            try:
-                yield From(self._capture_done())
-            except trollius.CancelledError:
-                raise
-            except Exception as error:
-                logger.error("Failed to issue capture-done during shutdown request. "
-                             "Will continue with graph shutdown.", exc_info=True)
-        self.state = State.DECONFIGURING
+    def deconfigure_impl(self, force, ready):
         yield From(self._shutdown())
-        self.state = State.DEAD
 
 
 def async_request(func):
@@ -815,6 +986,7 @@ class SDPControllerServer(AsyncDeviceServer):
             `force` is false.
         """
         yield From(product.deconfigure(force=force))
+        yield From(product.dead_event.wait())
         # Product against potential race conditions
         if self.subarray_products.get(product.subarray_product_id) is product:
             del self.subarray_products[product.subarray_product_id]
@@ -1244,7 +1416,7 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        yield to_tornado_future(sa.capture_init(), loop=self.loop)
+        yield to_tornado_future(sa.capture_init(None), loop=self.loop)
         raise gen.Return(('ok','SDP ready'))
 
     @time_request
