@@ -1031,6 +1031,11 @@ class SDPControllerServer(AsyncDeviceServer):
             - If one or more nodes fail to launch (e.g. container not found)
             - If one or more nodes fail to become alive
             - If we fail to establish katcp connection to all nodes requiring them.
+
+        Returns
+        -------
+        str
+            Final name of the subarray-product.
         """
         if subarray_product_id in self.override_dicts:
             odict = self.override_dicts.pop(subarray_product_id)
@@ -1045,11 +1050,21 @@ class SDPControllerServer(AsyncDeviceServer):
                 logger.error(retmsg)
                 raise FailReply(retmsg)
 
-        if subarray_product_id in self.subarray_products:
+        if subarray_product_id.endswith('*'):
+            # Requested a unique name. NB: it is important not to yield
+            # between here and assigning the new product into
+            # self.subarray_products, as doing so would introduce a race
+            # condition.
+            seq = 0
+            base = subarray_product_id[:-1]
+            while base + str(seq) in self.subarray_products:
+                seq += 1
+            subarray_product_id = base + str(seq)
+        elif subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
             if dp.config == config:
                 logger.info("Subarray product with this configuration already exists. Pass.")
-                return
+                raise Return(subarray_product_id)
             else:
                 raise FailReply("A subarray product with this id ({0}) already exists, but has a "
                                 "different configuration. Please deconfigure this product or "
@@ -1092,6 +1107,7 @@ class SDPControllerServer(AsyncDeviceServer):
             if self.subarray_products.get(subarray_product_id) is product:
                 del self.subarray_products[subarray_product_id]
             raise
+        raise Return(subarray_product_id)
 
     @trollius.coroutine
     def deconfigure_on_exit(self):
@@ -1314,17 +1330,21 @@ class SDPControllerServer(AsyncDeviceServer):
         -----------------
         subarray_product_id : string
             The ID to use for this product (an arbitrary string, with
-            characters A-Z, a-z, 0-9 and _).
+            characters A-Z, a-z, 0-9 and _). It may optionally be
+            suffixed with a "*" to request that a unique name is generated
+            by replacing the "*" with a suffix.
         config : string
             A JSON-encoded dictionary of configuration data.
 
         Returns
         -------
         success : {'ok', 'fail'}
+        name : str
+            Actual subarray-product-id
         """
         logger.info("?product-configure called with: {}".format(req_msg))
 
-        if not re.match('^[A-Za-z0-9_]+$', subarray_product_id):
+        if not re.match('^[A-Za-z0-9_]+\*?$', subarray_product_id):
             raise FailReply('Subarray_product_id contains illegal characters')
         try:
             config_dict = json.loads(config)
@@ -1334,9 +1354,9 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg)
 
-        yield to_tornado_future(self.configure_product(req, subarray_product_id, config_dict),
-                                loop=self.loop)
-        raise gen.Return(('ok', ''))
+        subarray_product_id = yield to_tornado_future(
+            self.configure_product(req, subarray_product_id, config_dict), loop=self.loop)
+        raise gen.Return(('ok', subarray_product_id))
 
     @async_request
     @request(Str(), Bool(optional=True, default=False))

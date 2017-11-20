@@ -7,6 +7,7 @@ import concurrent.futures
 import unittest2 as unittest
 import mock
 import json
+import itertools
 
 from addict import Dict
 from katcp.testutils import BlockingTestClient
@@ -552,7 +553,7 @@ class TestSDPController(unittest.TestCase):
         return ("product-configure", subarray_product, CONFIG)
 
     def _configure_subarray(self, subarray_product):
-        self.client.assert_request_succeeds(*self._configure_args(subarray_product))
+        return self.client.assert_request_succeeds(*self._configure_args(subarray_product))
 
     def test_product_configure_success(self):
         """A ?product-configure request must wait for the tasks to come up, then indicate success."""
@@ -571,12 +572,13 @@ class TestSDPController(unittest.TestCase):
                     }
                 }
             }''')
-        self._configure_subarray(SUBARRAY_PRODUCT4)
+        name = self._configure_subarray(SUBARRAY_PRODUCT4)[0]
+        self.assertEqual(SUBARRAY_PRODUCT4, name)
         self.telstate_class.assert_called_once_with('host.telstate:20000')
 
         # Verify the telescope state
         ts = self.telstate_class.return_value
-        # Print the list so assist in debugging if the assert fails
+        # Print the list to assist in debugging if the assert fails
         print(ts.add.call_args_list)
         # This is not a complete list of calls. It check that each category of stuff
         # is covered: base_params, per node, per edge
@@ -596,6 +598,16 @@ class TestSDPController(unittest.TestCase):
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
+
+    def test_product_configure_generate_names(self):
+        """Name with trailing * must generate lowest-numbered name"""
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_0', name)
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_1', name)
+        self.client.assert_request_succeeds('product-deconfigure', 'prefix_0')
+        name = self._configure_subarray('prefix_*')[0]
+        self.assertEqual('prefix_0', name)
 
     def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
@@ -695,7 +707,7 @@ class TestSDPController(unittest.TestCase):
                 },
                 "config": {
                     "service_overrides": {
-                        "sim.i0_baseline_correlation_products": {
+                        "sim.i0_baseline_correlation_products.1": {
                             "taskinfo": {
                                 "command": {
                                     "shell": true
@@ -720,16 +732,16 @@ class TestSDPController(unittest.TestCase):
             'cbf_adc_sample_rate': 1712000000.0,
             'cbf_bandwidth': 856000000.0,
             'cbf_int_time': 0.499,
-            'cbf_interface': 'em1',
-            'port': 20000,
-            'cbf_spead': '239.102.255.0+15:7148'
+            'cbf_sync_time': mock.ANY,
+            'cbf_spead': '239.102.255.0+15:7148',
+            'servers': mock.ANY
         }, immutable=True)
         # Check that the taskinfo override worked
         ts.add.assert_any_call('sdp_task_details', mock.ANY, immutable=True)
         for call in ts.add.call_args_list:
             if call[0][0] == 'sdp_task_details':
                 task_details = call[0][1]
-        self.assertTrue(task_details['sim.i0_baseline_correlation_products']['taskinfo']['command']['shell'])
+        self.assertTrue(task_details['sim.i0_baseline_correlation_products.1']['taskinfo']['command']['shell'])
 
     def test_product_reconfigure_configure_busy(self):
         """Can run product-reconfigure concurrently with another product-configure"""
@@ -755,16 +767,19 @@ class TestSDPController(unittest.TestCase):
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.CAPTURING, sa.state)
-        # Check that the graph transitions succeeded
+        # Check that the graph transitions were called. Each call may be made
+        # multiple times, depending on the number of instances of each child.
+        # We thus collapse them into groups of equal calls and don't worry
+        # about the number, which would otherwise make the test fragile.
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        expected_calls = []
-        expected_calls.append(mock.call(Message.request('configure-subarray-from-telstate')))
-        # 12x ingest, 2x filewriter, beamformer, 4x engineering beamformer, 2x cal
-        expected_calls.extend([
-            mock.call(Message.request('capture-init'), timeout=mock.ANY)] * 21)
-        expected_calls.append(mock.call(Message.request(
-            'capture-start', 'i0_baseline_correlation_products'), timeout=mock.ANY))
-        katcp_client.future_request.assert_has_calls(expected_calls)
+        grouped_calls = [k for k, g in itertools.groupby(katcp_client.future_request.mock_calls)]
+        expected_calls = [
+            mock.call(Message.request('configure-subarray-from-telstate')),
+            mock.call(Message.request('capture-init'), timeout=mock.ANY),
+            mock.call(Message.request('capture-start', 'i0_baseline_correlation_products'),
+                                      timeout=mock.ANY)
+        ]
+        self.assertEqual(grouped_calls, expected_calls)
 
     def test_capture_init_failed_req(self):
         """Capture-init bumbles on even if a child request fails.
