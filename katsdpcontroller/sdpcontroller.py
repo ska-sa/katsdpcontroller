@@ -204,7 +204,7 @@ class SDPResources(object):
 
 
 class ProgrammeBlock(object):
-    """A programme block is book-ended by a capture-init and a capture-done,
+    """A program block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
     class State(enum.Enum):
@@ -247,13 +247,13 @@ class SDPSubarrayProductBase(object):
     inside the asynchronous tasks.
 
     There are some invariants that must hold at yield points:
-    - There is at most one programme block in state CAPTURING.
-    - :attr:`current_programme_block` is the programme block in state
+    - There is at most one program block in state CAPTURING.
+    - :attr:`current_program_block` is the program block in state
       CAPTURING, or ``None`` if there isn't one.
-    - :attr:`current_programme_block` is set if and only if the subarray state
+    - :attr:`current_program_block` is set if and only if the subarray state
       is CAPTURING.
-    - Keys in :attr:`programme_blocks` also appear in `programme_block_names`.
-    - Elements of :attr:`programme_blocks` are not in state DEAD.
+    - Keys in :attr:`program_blocks` also appear in `program_block_names`.
+    - Elements of :attr:`program_blocks` are not in state DEAD.
 
     This is a base class that is intended to be subclassed. The methods whose
     names end in ``_impl`` are extension points that should be implemented in
@@ -273,9 +273,9 @@ class SDPSubarrayProductBase(object):
         self.logical_graph = generator.build_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
-        self.programme_blocks = {}              # live programme blocks, indexed by name
-        self.programme_block_names = set()      # all programme block names used
-        self.current_programme_block = None     # set between capture_init and capture_done
+        self.program_blocks = {}              # live program blocks, indexed by name
+        self.program_block_names = set()      # all program block names used
+        self.current_program_block = None     # set between capture_init and capture_done
         self.dead_event = trollius.Event(loop)  # set when reached state DEAD
         logger.info("Created: {!r}".format(self))
 
@@ -311,13 +311,13 @@ class SDPSubarrayProductBase(object):
         pass
 
     @trollius.coroutine
-    def capture_init_impl(self, programme_block):
-        """Extension point to start a programme block."""
+    def capture_init_impl(self, program_block):
+        """Extension point to start a program block."""
         pass
 
     @trollius.coroutine
-    def capture_done_impl(self, programme_block):
-        """Extension point to stop a programme block.
+    def capture_done_impl(self, program_block):
+        """Extension point to stop a program block.
 
         This should only do the work needed for the ``capture-done`` master
         controller request to return. The caller takes care of calling
@@ -329,10 +329,10 @@ class SDPSubarrayProductBase(object):
         pass
 
     @trollius.coroutine
-    def postprocess_impl(self, programme_block):
-        """Complete the post-processing for a programme block.
+    def postprocess_impl(self, program_block):
+        """Complete the post-processing for a program block.
 
-        Subclasses should override this if a programme block is not finished when
+        Subclasses should override this if a program block is not finished when
         :meth:`_capture_done` returns.
         """
         pass
@@ -352,7 +352,7 @@ class SDPSubarrayProductBase(object):
         setting the event `ready`.
         """
         self.state = State.DECONFIGURING
-        if self.current_programme_block is not None:
+        if self.current_program_block is not None:
             try:
                 yield From(self._capture_done())
             except trollius.CancelledError:
@@ -362,35 +362,35 @@ class SDPSubarrayProductBase(object):
                              "Will continue with graph shutdown.", exc_info=True)
 
         if force:
-            for programme_block in self.programme_blocks.values():
-                if programme_block.postprocess_task is not None:
-                    programme_block.postprocess_task.cancel()
+            for program_block in self.program_blocks.values():
+                if program_block.postprocess_task is not None:
+                    program_block.postprocess_task.cancel()
 
         yield From(self.deconfigure_impl(force, ready))
 
         # Allow all the postprocessing tasks to finish up
-        while self.programme_blocks:
-            yield From(self.programme_blocks[-1].dead_event.wait())
-            self.programme_blocks[-1].pop()
+        while self.program_blocks:
+            yield From(self.program_blocks[-1].dead_event.wait())
+            self.program_blocks[-1].pop()
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
         self.dead_event.set()
 
-    def _programme_block_dead(self, programme_block):
-        """Mark a programme block as dead and remove it from the list."""
-        programme_block.state = ProgrammeBlock.State.DEAD
-        del self.programme_blocks[programme_block.name]
+    def _program_block_dead(self, program_block):
+        """Mark a program block as dead and remove it from the list."""
+        program_block.state = ProgrammeBlock.State.DEAD
+        del self.program_blocks[program_block.name]
 
     @trollius.coroutine
-    def _capture_init(self, programme_block):
-        yield From(self.capture_init_impl(programme_block))
-        assert self.current_programme_block is None
+    def _capture_init(self, program_block):
+        yield From(self.capture_init_impl(program_block))
+        assert self.current_program_block is None
         self.state = State.CAPTURING
-        programme_block.state = ProgrammeBlock.State.CAPTURING
-        self.programme_block_names.add(programme_block.name)
-        self.programme_blocks[programme_block.name] = programme_block
-        self.current_programme_block = programme_block
+        program_block.state = ProgrammeBlock.State.CAPTURING
+        self.program_block_names.add(program_block.name)
+        self.program_blocks[program_block.name] = program_block
+        self.current_program_block = program_block
 
     @trollius.coroutine
     def _capture_done(self):
@@ -399,29 +399,29 @@ class SDPSubarrayProductBase(object):
 
         Returns
         -------
-        The programme block that was stopped
+        The program block that was stopped
         """
-        programme_block = self.current_programme_block
-        assert programme_block is not None
-        yield From(self.capture_done_impl(programme_block))
+        program_block = self.current_program_block
+        assert program_block is not None
+        yield From(self.capture_done_impl(program_block))
         if self.state == State.CAPTURING:
             self.state = State.IDLE
-        assert self.current_programme_block is programme_block
-        self.current_programme_block = None
+        assert self.current_program_block is program_block
+        self.current_program_block = None
         if self.state == State.IDLE:
             # Don't do post-processing if we're being force-deconfigured
-            programme_block.state = ProgrammeBlock.State.POSTPROCESSING
-            programme_block.postprocessing_task = trollius.ensure_future(
-                self.postprocess_impl(programme_block), loop=self.loop)
+            program_block.state = ProgrammeBlock.State.POSTPROCESSING
+            program_block.postprocessing_task = trollius.ensure_future(
+                self.postprocess_impl(program_block), loop=self.loop)
             log_task_exceptions(
-                programme_block.postprocessing_task,
+                program_block.postprocessing_task,
                 "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
-                                                               programme_block.name))
-            programme_block.postprocessing_task.add_done_callback(
-                lambda task: self._programme_block_dead(programme_block))
+                                                               program_block.name))
+            program_block.postprocessing_task.add_done_callback(
+                lambda task: self._program_block_dead(program_block))
         else:
-            self._programme_block_dead(programme_block)
-        raise Return(programme_block)
+            self._program_block_dead(program_block)
+        raise Return(program_block)
 
     def _clear_async_task(self, future):
         """Clear the current async task.
@@ -499,22 +499,22 @@ class SDPSubarrayProductBase(object):
         # We don't wait for task to complete
 
     @trollius.coroutine
-    def capture_init(self, programme_block_id):
+    def capture_init(self, program_block_id):
         self._fail_if_busy()
         if self.state != State.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
-        if programme_block_id is None:
+        if program_block_id is None:
             seq = 0
-            while 'pb' + str(seq) in self.programme_block_names:
+            while 'pb' + str(seq) in self.program_block_names:
                 seq += 1
-            programme_block_id = 'pb' + str(seq)
-        elif programme_block_id in self.programme_block_names:
+            program_block_id = 'pb' + str(seq)
+        elif program_block_id in self.program_block_names:
             raise FailReply('Programme block ID {} has already been used in {}'.format(
-                programme_block_id, self.subarray_product_id))
+                program_block_id, self.subarray_product_id))
 
-        programme_block = ProgrammeBlock(programme_block_id, self.loop)
-        task = trollius.ensure_future(self._capture_init(programme_block), loop=self.loop)
+        program_block = ProgrammeBlock(program_block_id, self.loop)
+        task = trollius.ensure_future(self._capture_init(program_block), loop=self.loop)
         self._async_task = task
         try:
             yield From(task)
@@ -692,7 +692,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             yield From(trollius.gather(*tasks.values(), loop=loop))
 
     @trollius.coroutine
-    def capture_init_impl(self, programme_block):
+    def capture_init_impl(self, program_block):
         if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
@@ -707,7 +707,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True))
 
     @trollius.coroutine
-    def capture_done_impl(self, programme_block):
+    def capture_done_impl(self, program_block):
         yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False))
 
     @trollius.coroutine
