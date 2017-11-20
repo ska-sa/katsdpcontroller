@@ -203,7 +203,7 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
-class ProgrammeBlock(object):
+class ProgramBlock(object):
     """A program block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
@@ -215,7 +215,7 @@ class ProgrammeBlock(object):
 
     def __init__(self, name, loop):
         self.name = name
-        self._state = ProgrammeBlock.State.INITIALISING
+        self._state = ProgramBlock.State.INITIALISING
         self.postprocess_task = None
         self.dead_event = trollius.Event(loop=loop)
 
@@ -226,7 +226,7 @@ class ProgrammeBlock(object):
     @state.setter
     def state(self, value):
         self._state = value
-        if value == ProgrammeBlock.State.DEAD:
+        if value == ProgramBlock.State.DEAD:
             self.dead_event.set()
 
 
@@ -379,7 +379,7 @@ class SDPSubarrayProductBase(object):
 
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
-        program_block.state = ProgrammeBlock.State.DEAD
+        program_block.state = ProgramBlock.State.DEAD
         del self.program_blocks[program_block.name]
 
     @trollius.coroutine
@@ -387,7 +387,7 @@ class SDPSubarrayProductBase(object):
         yield From(self.capture_init_impl(program_block))
         assert self.current_program_block is None
         self.state = State.CAPTURING
-        program_block.state = ProgrammeBlock.State.CAPTURING
+        program_block.state = ProgramBlock.State.CAPTURING
         self.program_block_names.add(program_block.name)
         self.program_blocks[program_block.name] = program_block
         self.current_program_block = program_block
@@ -410,7 +410,7 @@ class SDPSubarrayProductBase(object):
         self.current_program_block = None
         if self.state == State.IDLE:
             # Don't do post-processing if we're being force-deconfigured
-            program_block.state = ProgrammeBlock.State.POSTPROCESSING
+            program_block.state = ProgramBlock.State.POSTPROCESSING
             program_block.postprocessing_task = trollius.ensure_future(
                 self.postprocess_impl(program_block), loop=self.loop)
             log_task_exceptions(
@@ -510,10 +510,10 @@ class SDPSubarrayProductBase(object):
                 seq += 1
             program_block_id = 'pb' + str(seq)
         elif program_block_id in self.program_block_names:
-            raise FailReply('Programme block ID {} has already been used in {}'.format(
+            raise FailReply('Program block ID {} has already been used in {}'.format(
                 program_block_id, self.subarray_product_id))
 
-        program_block = ProgrammeBlock(program_block_id, self.loop)
+        program_block = ProgramBlock(program_block_id, self.loop)
         task = trollius.ensure_future(self._capture_init(program_block), loop=self.loop)
         self._async_task = task
         try:
