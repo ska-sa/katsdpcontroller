@@ -237,7 +237,7 @@ class ProgramBlockStateObserver(object):
     def __init__(self, sensor, loop):
         self._ready = trollius.Event(loop=loop)
         self._sensor = sensor
-        self.update(sensor, sensor.reading())
+        self.update(sensor, sensor.read())
         sensor.attach(self)
 
     def update(self, sensor, reading):
@@ -363,18 +363,15 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     def graceful_kill(self, driver, **kwargs):
         force_kill = True
         try:
-            if self.katcp_connection is None:
-                logger.warning('Cannot do graceful stop on %s because there is no katcp connection',
-                               self.name)
-            else:
+            if self.katcp_connection is not None:
                 sensor = yield From(to_trollius_future(
-                    self.katcp_connection.future_get_sensor('program-block-status')))
+                    self.katcp_connection.future_get_sensor('program-block-state')))
                 if sensor is not None:
-                    observer = ProgramBlockStateObserver(self.name, sensor, loop)
+                    observer = ProgramBlockStateObserver(sensor, self.loop)
                     with contextlib.closing(observer):
                         yield From(observer.wait_empty())
         except Exception:
-            logger.exception('Exception in graceful shutdown of %s, killing it', req, self.name)
+            logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         super(SDPPhysicalTask, self).kill(driver, **kwargs)
 
     def kill(self, driver, **kwargs):
