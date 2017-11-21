@@ -369,9 +369,12 @@ class SDPSubarrayProductBase(object):
         yield From(self.deconfigure_impl(force, ready))
 
         # Allow all the postprocessing tasks to finish up
+        # Note: this needs to be done carefully, because self.program_blocks
+        # can change during the yield.
         while self.program_blocks:
-            yield From(self.program_blocks[-1].dead_event.wait())
-            self.program_blocks[-1].pop()
+            name, program_block = next(self.program_blocks.iteritems())
+            yield From(program_block.dead_event.wait())
+            self.program_blocks.pop(name, None)
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
