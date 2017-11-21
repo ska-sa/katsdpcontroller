@@ -356,6 +356,10 @@ class SDPSubarrayProductBase(object):
             try:
                 yield From(self._capture_done())
             except trollius.CancelledError:
+                # Our deconfigure has been preempted by another deconfigure.
+                # Just wipe out current_program_block so that we give up on
+                # trying to do a capture_done.
+                self.current_program_block = None
                 raise
             except Exception as error:
                 logger.error("Failed to issue capture-done during shutdown request. "
