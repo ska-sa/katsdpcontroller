@@ -142,15 +142,6 @@ class GraphResolver(object):
              # default graph name is to split out the trailing name from the subarray product id specifier
         return base_graph_name
 
-    def get_subarray_numeric_id(self, subarray_product_id):
-        """Returns the numeric subarray identifier string from the specified subarray product id.
-           e.g. array_1_c856M4k => 1
-        """
-        matched_group = re.match(r'^\w+\_(\d+)\_[a-zA-Z0-9]+$',subarray_product_id)
-         # should match the last underscore delimited group of digits
-        if matched_group: return int(matched_group.group(1))
-        return None
-
 
 class MulticastIPResources(object):
     def __init__(self, network):
