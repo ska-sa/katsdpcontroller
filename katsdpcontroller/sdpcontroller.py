@@ -345,21 +345,24 @@ class SDPSubarrayProductBase(object):
         self.state = State.DECONFIGURING
         if self.current_program_block is not None:
             try:
-                yield From(self._capture_done())
-            except trollius.CancelledError:
-                # Our deconfigure has been preempted by another deconfigure.
-                # Just wipe out current_program_block so that we give up on
-                # trying to do a capture_done.
+                program_block = self.current_program_block
+                # To prevent trying again if we get a second forced-deconfigure.
                 self.current_program_block = None
+                yield From(self.capture_done_impl(program_block))
+            except trollius.CancelledError:
                 raise
             except Exception as error:
                 logger.error("Failed to issue capture-done during shutdown request. "
                              "Will continue with graph shutdown.", exc_info=True)
 
         if force:
-            for program_block in self.program_blocks.values():
+            for program_block in list(self.program_blocks.values()):
                 if program_block.postprocess_task is not None:
+                    logger.warning('Cancelling postprocessing for program block %s',
+                                   program_block.name)
                     program_block.postprocess_task.cancel()
+                else:
+                    self._program_block_dead(program_block)
 
         yield From(self.deconfigure_impl(force, ready))
 
@@ -368,6 +371,7 @@ class SDPSubarrayProductBase(object):
         # can change during the yield.
         while self.program_blocks:
             name, program_block = next(self.program_blocks.iteritems())
+            logging.info('Waiting for program block %s to terminate', name)
             yield From(program_block.dead_event.wait())
             self.program_blocks.pop(name, None)
 
@@ -378,7 +382,10 @@ class SDPSubarrayProductBase(object):
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
         program_block.state = ProgramBlock.State.DEAD
-        del self.program_blocks[program_block.name]
+        try:
+            del self.program_blocks[program_block.name]
+        except KeyError:
+            pass      # Allows this function to be called twice
 
     @trollius.coroutine
     def _capture_init(self, program_block):
@@ -395,6 +402,9 @@ class SDPSubarrayProductBase(object):
         """The asynchronous task that handles ?capture-done. See
         :meth:`capture_done_impl` for additional details.
 
+        This is only called for a "normal" capture-done. Forced deconfigures
+        call :meth:`capture_done_impl` directly.
+
         Returns
         -------
         The program block that was stopped
@@ -402,23 +412,19 @@ class SDPSubarrayProductBase(object):
         program_block = self.current_program_block
         assert program_block is not None
         yield From(self.capture_done_impl(program_block))
-        if self.state == State.CAPTURING:
-            self.state = State.IDLE
+        assert self.state == State.CAPTURING
         assert self.current_program_block is program_block
+        self.state = State.IDLE
         self.current_program_block = None
-        if self.state == State.IDLE:
-            # Don't do post-processing if we're being force-deconfigured
-            program_block.state = ProgramBlock.State.POSTPROCESSING
-            program_block.postprocessing_task = trollius.ensure_future(
-                self.postprocess_impl(program_block), loop=self.loop)
-            log_task_exceptions(
-                program_block.postprocessing_task,
-                "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
-                                                               program_block.name))
-            program_block.postprocessing_task.add_done_callback(
-                lambda task: self._program_block_dead(program_block))
-        else:
-            self._program_block_dead(program_block)
+        program_block.state = ProgramBlock.State.POSTPROCESSING
+        program_block.postprocessing_task = trollius.ensure_future(
+            self.postprocess_impl(program_block), loop=self.loop)
+        log_task_exceptions(
+            program_block.postprocessing_task,
+            "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
+                                                           program_block.name))
+        program_block.postprocessing_task.add_done_callback(
+            lambda task: self._program_block_dead(program_block))
         raise Return(program_block)
 
     def _clear_async_task(self, future):
@@ -491,10 +497,15 @@ class SDPSubarrayProductBase(object):
         ready = trollius.Event(self.loop)
         task = trollius.ensure_future(self._deconfigure(force, ready), loop=self.loop)
         log_task_exceptions(task, "Deconfiguring {} failed".format(self.subarray_product_id))
+        # Make sure that ready gets unblocked even if task throws.
+        task.add_done_callback(lambda future: ready.set())
         task.add_done_callback(self._clear_async_task)
         if (yield From(self._replace_async_task(task))):
             yield From(ready.wait())
-        # We don't wait for task to complete
+        # We don't wait for task to complete, but if it's already done we
+        # pass back any exceptions.
+        if task.done():
+            yield From(task)
 
     @trollius.coroutine
     def capture_init(self, program_block_id):
