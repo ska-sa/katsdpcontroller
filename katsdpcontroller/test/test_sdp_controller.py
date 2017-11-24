@@ -436,6 +436,7 @@ class TestSDPController(unittest.TestCase):
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.start.return_value = done_future
         sensor_proxy_client.until_synced.return_value = done_future
+        sensor_proxy_client.future_get_sensor.return_value = done_future
         sensor_proxy_client.katcp_client = mock.create_autospec(katcp.AsyncClient, instance=True)
         sensor_proxy_client.katcp_client.future_request.side_effect = self._future_request
         self._create_patch(

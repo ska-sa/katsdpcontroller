@@ -109,6 +109,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # List of dictionaries for a .gui-urls sensor. The fields are expanded
         # using str.format(self).
         self.gui_urls = []
+        # Whether to wait for it to die before returning from product-deconfigure
+        self.deconfigure_wait = True
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -233,10 +235,14 @@ class SDPConfigMixin(object):
 
 
 class ProgramBlockStateObserver(object):
-    """Watches a program-block-state sensor in a child."""
+    """Watches a program-block-state sensor in a child.
+    Users can wait for specific conditions to be satisfied.
+    """
     def __init__(self, sensor, loop):
-        self._ready = trollius.Event(loop=loop)
-        self._sensor = sensor
+        self.sensor = sensor
+        self.loop = loop
+        self._last = {}
+        self._waiters = []    # Each a tuple of a predicate and a future
         self.update(sensor, sensor.read())
         sensor.attach(self)
 
@@ -250,16 +256,49 @@ class ProgramBlockStateObserver(object):
                 if not isinstance(value, dict):
                     logger.warning('%s is not a dict: %r', sensor.name, reading.value)
                 else:
-                    logger.info('%s has %d remaining program blocks', sensor.name, len(value))
-                    if not value:
-                        self._ready.set()
+                    self._last = value
+                    self._trigger()
+
+    def _trigger(self):
+        """Called when the sensor value changes, to wake up waiters"""
+        new_waiters = []
+        for waiter in self._waiters:
+            if not waiter[1].done():   # Skip over cancelled futures
+                if waiter[0](self._last):
+                    waiter[1].set_result(None)
+                else:
+                    new_waiters.append(waiter)  # Not ready yet, keep for later
+        self._waiters = new_waiters
+
+    @trollius.coroutine
+    def wait(self, condition):
+        if condition(self._last):
+            return      # Already satisfied, no need to wait
+        future = trollius.Future(loop=self.loop)
+        self._waiters.append((condition, future))
+        yield From(future)
 
     @trollius.coroutine
     def wait_empty(self):
-        yield From(self._ready.wait())
+        yield From(self.wait(lambda value: not value))
+
+    @trollius.coroutine
+    def wait_program_block_done(self, program_block_id):
+        yield From(self.wait(lambda value: program_block_id not in value))
 
     def close(self):
-        self._sensor.detach(self)
+        """Close down the observer. This should be called when the connection
+        to the server is closed. It sets the program block states list to
+        empty (which will wake up any waiters whose condition is satisfied by
+        this). Any remaining waiters receive a
+        :exc:`.trollius.ConnectionResetError`.
+        """
+        self.sensor.detach(self)
+        self._last = {}
+        self._trigger()   # Give waiters a chance to react to an empty map
+        for waiter in self._waiters:
+            waiter[1].set_exception(trollius.ConnectionResetError())
+        self._waiters = []
 
 
 class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
@@ -276,6 +315,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
         super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
+        self.program_block_state_observer = None
 
     def get_transition(self, old_state, new_state):
         """If this node has a specified state transition action, return it"""
@@ -296,6 +336,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             except RuntimeError:
                 logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
+        if self.program_block_state_observer is not None:
+            self.program_block_state_observer.close()
+            self.program_block_state_observer = None
         if need_inform:
             self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
 
@@ -328,8 +371,13 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     # somehow gets wedged badly enough that katcp can't recover
                     # itself.
                     yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
-                    logging.info("Connected to {}:{} for node {}".format(
+                    logger.info("Connected to {}:{} for node {}".format(
                         self.host, self.ports['port'], self.name))
+                    sensor = yield From(to_trollius_future(self.katcp_connection.future_get_sensor(
+                        'program-block-state'), loop=self.loop))
+                    if sensor is not None:
+                        self.program_block_state_observer = ProgramBlockStateObserver(
+                            sensor, loop=self.loop)
                     return
                 except RuntimeError:
                     self.katcp_connection.stop()
@@ -363,13 +411,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     def graceful_kill(self, driver, **kwargs):
         force_kill = True
         try:
-            if self.katcp_connection is not None:
-                sensor = yield From(to_trollius_future(
-                    self.katcp_connection.future_get_sensor('program-block-state')))
-                if sensor is not None:
-                    observer = ProgramBlockStateObserver(sensor, self.loop)
-                    with contextlib.closing(observer):
-                        yield From(observer.wait_empty())
+            if self.program_block_state_observer is not None:
+                yield From(self.program_block_state_observer.wait_empty())
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         super(SDPPhysicalTask, self).kill(driver, **kwargs)

@@ -747,6 +747,14 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False, program_block))
 
     @trollius.coroutine
+    def postprocess_impl(self, program_block):
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTask):
+                observer = node.program_block_state_observer
+                if observer is not None:
+                    yield From(observer.wait_program_block_done(program_block.name))
+
+    @trollius.coroutine
     def _launch_telstate(self):
         """Make sure the telstate node is launched"""
         boot = [self.telstate_node]
@@ -796,7 +804,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     @trollius.coroutine
     def _shutdown(self, force):
         try:
-            # TODO: provide for graceful burndown here
             # TODO: issue progress reports as tasks stop
             yield From(self.sched.kill(self.physical_graph, force=force))
         finally:
@@ -848,7 +855,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     @trollius.coroutine
     def deconfigure_impl(self, force, ready):
-        yield From(self._shutdown(force=force))
+        if force:
+            yield From(self._shutdown(force=force))
+            ready.set()
+        else:
+            def must_wait(node):
+                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
+                        and node.logical_node.deconfigure_wait)
+            # Start the shutdown in a separate task, so that we can monitor
+            # for task shutdown.
+            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
+            shutdown_task = trollius.ensure_future(self._shutdown(force=force), loop=self.loop)
+            yield From(trollius.gather(*wait_tasks, loop=self.loop))
+            ready.set()
+            yield From(shutdown_task)
 
 
 def async_request(func):
@@ -1021,12 +1041,18 @@ class SDPControllerServer(AsyncDeviceServer):
             if an asynchronous operation is is progress on the subarray product and
             `force` is false.
         """
+        def remove_product(future):
+            # Product against potential race conditions
+            if self.subarray_products.get(product.subarray_product_id) is product:
+                del self.subarray_products[product.subarray_product_id]
+                logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
+
         yield From(product.deconfigure(force=force))
-        yield From(product.dead_event.wait())
-        # Product against potential race conditions
-        if self.subarray_products.get(product.subarray_product_id) is product:
-            del self.subarray_products[product.subarray_product_id]
-            logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
+        # The above returns before cal etc have wound up. Use an asynchronous
+        # task to deal with removing it from the table.
+        future = trollius.ensure_future(product.dead_event.wait())
+        log_task_exceptions(future, "Error waiting for product to completely die")
+        future.add_done_callback(remove_product)
 
     @trollius.coroutine
     def deconfigure_product(self, subarray_product_id, force=False):
