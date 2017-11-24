@@ -654,7 +654,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 yield From(node.issue_req(req[0], req[1:], timeout=300))
 
     @trollius.coroutine
-    def exec_transitions(self, old_state, new_state, reverse):
+    def exec_transitions(self, old_state, new_state, reverse, program_block):
         """Issue requests to nodes on state transitions.
 
         The requests are made in parallel, but respects `depends_init`
@@ -670,6 +670,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             If there is a `depends_init` edge from A to B in the graph, A's
             request will be made first if `reverse` is false, otherwise B's
             request will be made first.
+        program_block : :class:`ProgramBlock`
+            The program block is that being transitioned
         """
         # Create a copy of the graph containing only dependency edges.
         deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
@@ -689,6 +691,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
+            if req is not None:
+                # Apply {} substitutions to request data
+                subst = dict(program_block_id=program_block.name)
+                req = [field.format(**subst) for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
                 task = trollius.ensure_future(self._exec_node_transition(node, req, deps),
@@ -711,11 +717,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
-        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True))
+        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True, program_block))
 
     @trollius.coroutine
     def capture_done_impl(self, program_block):
-        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False))
+        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False, program_block))
 
     @trollius.coroutine
     def _launch_telstate(self):
@@ -1417,10 +1423,10 @@ class SDPControllerServer(AsyncDeviceServer):
             raise FailReply("This product id has no current configuration.")
 
     @async_request
-    @request(Str())
+    @request(Str(), Str(optional=True))
     @return_reply(Str())
     @gen.coroutine
-    def request_capture_init(self, req, subarray_product_id):
+    def request_capture_init(self, req, subarray_product_id, program_block_id=None):
         """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data
@@ -1432,8 +1438,10 @@ class SDPControllerServer(AsyncDeviceServer):
         Request Arguments
         -----------------
         subarray_product_id : string
-            The id of the subarray product to initialise. This must have already been
-            configured via the data-product-configure command.
+            The ID of the subarray product to initialise. This must have already been
+            configured via the product-configure command.
+        program_block_id : string
+            The ID of the program block being started.
 
         Returns
         -------
@@ -1443,7 +1451,7 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        yield to_tornado_future(sa.capture_init(None), loop=self.loop)
+        yield to_tornado_future(sa.capture_init(program_block_id), loop=self.loop)
         raise gen.Return(('ok','SDP ready'))
 
     @time_request

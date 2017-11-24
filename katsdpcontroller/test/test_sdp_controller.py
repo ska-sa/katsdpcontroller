@@ -762,7 +762,7 @@ class TestSDPController(unittest.TestCase):
     def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
         self._configure_subarray(SUBARRAY_PRODUCT4)
-        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4)
+        self.client.assert_request_succeeds("capture-init", SUBARRAY_PRODUCT4, "my_pb")
         # check that the subarray is in an appropriate state
         sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
@@ -775,7 +775,7 @@ class TestSDPController(unittest.TestCase):
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.future_request.mock_calls)]
         expected_calls = [
             mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-init'), timeout=mock.ANY),
+            mock.call(Message.request('capture-init', 'my_pb'), timeout=mock.ANY),
             mock.call(Message.request('capture-start', 'i0_baseline_correlation_products'),
                                       timeout=mock.ANY)
         ]
