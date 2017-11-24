@@ -267,7 +267,7 @@ class SDPSubarrayProductBase(object):
         self.program_blocks = {}              # live program blocks, indexed by name
         self.program_block_names = set()      # all program block names used
         self.current_program_block = None     # set between capture_init and capture_done
-        self.dead_event = trollius.Event(loop)  # set when reached state DEAD
+        self.dead_callback = lambda product: None  # called when reached state DEAD
         logger.info("Created: {!r}".format(self))
 
     @property
@@ -373,7 +373,7 @@ class SDPSubarrayProductBase(object):
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
-        self.dead_event.set()
+        self.dead_callback(self)
 
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
@@ -1038,21 +1038,10 @@ class SDPControllerServer(AsyncDeviceServer):
         Raises
         ------
         FailReply
-            if an asynchronous operation is is progress on the subarray product and
+            if an asynchronous operation is in progress on the subarray product and
             `force` is false.
         """
-        def remove_product(future):
-            # Product against potential race conditions
-            if self.subarray_products.get(product.subarray_product_id) is product:
-                del self.subarray_products[product.subarray_product_id]
-                logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
-
         yield From(product.deconfigure(force=force))
-        # The above returns before cal etc have wound up. Use an asynchronous
-        # task to deal with removing it from the table.
-        future = trollius.ensure_future(product.dead_event.wait())
-        log_task_exceptions(future, "Error waiting for product to completely die")
-        future.add_done_callback(remove_product)
 
     @trollius.coroutine
     def deconfigure_product(self, subarray_product_id, force=False):
@@ -1099,6 +1088,12 @@ class SDPControllerServer(AsyncDeviceServer):
         str
             Final name of the subarray-product.
         """
+        def remove_product(product):
+            # Protect against potential race conditions
+            if self.subarray_products.get(product.subarray_product_id) is product:
+                del self.subarray_products[product.subarray_product_id]
+                logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
+
         if subarray_product_id in self.override_dicts:
             odict = self.override_dicts.pop(subarray_product_id)
              # this is a use-once set of overrides
@@ -1161,13 +1156,11 @@ class SDPControllerServer(AsyncDeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
+        product.dead_callback = remove_product
         try:
             yield From(product.configure(req))
         except Exception:
-            # Safety check in case a deconfigure-cancellation has already
-            # removed the product.
-            if self.subarray_products.get(subarray_product_id) is product:
-                del self.subarray_products[subarray_product_id]
+            remove_product(product)
             raise
         raise Return(subarray_product_id)
 
