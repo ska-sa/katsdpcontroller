@@ -11,7 +11,7 @@ import addict
 import six
 from six.moves import urllib
 
-from katsdptelstate.endpoint import Endpoint
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import (
@@ -108,6 +108,14 @@ def is_develop(config):
 def _mb(value):
     """Convert bytes to mebibytes"""
     return value / 1024**2
+
+
+def _round_down(value, period):
+    return value // period * period
+
+
+def _round_up(value, period):
+    return _round_down(value - 1, period) + 1
 
 
 def _bandwidth(size, time, ratio=1.05, overhead=2048):
@@ -754,6 +762,13 @@ def _make_beamformer_engineering(g, config, name):
         output_channels = output.get('output_channels')
         if output_channels is None:
             output_channels = (0, info.n_channels)
+        # Round to fit the endpoints, as required by bf_ingest.
+        src_multicast = find_node(g, 'multicast.' + src)
+        n_endpoints = len(endpoint_list_parser(None)(src_multicast.endpoint.host))
+        channels_per_endpoint = info.n_channels // n_endpoints
+        output_channels = (_round_down(output_channels[0], channels_per_endpoint),
+                           _round_up(output_channels[1], channels_per_endpoint))
+
         fraction = (output_channels[1] - output_channels[0]) / info.n_channels
 
         bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
@@ -789,7 +804,7 @@ def _make_beamformer_engineering(g, config, name):
             'stream_name': src,
             'channels': '{}:{}'.format(*output_channels)
         })
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+        g.add_edge(bf_ingest, src_multicast, port='spead',
                    depends_resolve=True, depends_init=True, depends_ready=True,
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
         nodes.append(bf_ingest)

@@ -196,13 +196,6 @@ class TestValidate(object):
         with assert_raises(ValueError):
             product_config.validate(self.config)
 
-    def test_misaligned_channel_range(self):
-        """Beamformer channel range is not aligned to the endpoints"""
-        self.config["outputs"]["beamformer_engineering"]["output_channels"] = [256, 4096]
-        with assert_raises(ValueError) as cm:
-            product_config.validate(self.config)
-        assert_in("not aligned to endpoints", str(cm.exception))
-
     def test_multiple_cam_http(self):
         self.config["inputs"]["camdata2"] = self.config["inputs"]["camdata"]
         with assert_raises(ValueError) as cm:

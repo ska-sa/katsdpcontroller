@@ -136,14 +136,6 @@ def validate(config):
                     if not 0 <= c[0] < c[1] <= acv['n_chans']:
                         raise ValueError('Channel range {}:{} for {} is invalid'.format(
                             c[0], c[1], name))
-                    # beamformer_engineering requires alignment to multicast addresses
-                    if output['type'] == 'sdp.beamformer_engineering':
-                        n_endpoints = input_endpoints[src_name]
-                        n_chans_per_endpoint = acv['n_chans'] // n_endpoints
-                        if c[0] % n_chans_per_endpoint != 0 or c[1] % n_chans_per_endpoint != 0:
-                            raise ValueError(
-                                'Channel range {}:{} for {} is not aligned to endpoints'.format(
-                                    c[0], c[1], name))
 
 
 def parse(config_bytes):
