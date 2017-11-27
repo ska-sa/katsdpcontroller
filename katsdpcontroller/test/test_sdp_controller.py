@@ -524,7 +524,7 @@ class TestSDPController(unittest.TestCase):
         else:
             kill_graph = graph
         for node in kill_graph:
-            if scheduler.TaskState.STARTED <= node.state <= scheduler.TaskState.KILLED:
+            if scheduler.TaskState.STARTED <= node.state <= scheduler.TaskState.KILLING:
                 node.kill(self.driver, **kwargs)
             node.set_state(scheduler.TaskState.DEAD)
 

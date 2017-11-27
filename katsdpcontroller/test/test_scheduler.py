@@ -1433,7 +1433,7 @@ class TestScheduler(object):
         -------
         launch, kill : :class:`trollius.Task`
             Asynchronous tasks for launching and killing the graph. If
-            `target_state` is not :const:`TaskState.KILLED` or
+            `target_state` is not :const:`TaskState.KILLING` or
             :const:`TaskState.DEAD`, then `kill` is ``None``
         """
         assert target_state > TaskState.NOT_READY
@@ -1479,8 +1479,8 @@ class TestScheduler(object):
                             kill = trollius.async(self.sched.kill(
                                 self.physical_graph, nodes), loop=self.loop)
                             yield From(defer(loop=self.loop))
-                            assert_equal(TaskState.KILLED, self.nodes[0].state)
-                            if target_state > TaskState.KILLED:
+                            assert_equal(TaskState.KILLING, self.nodes[0].state)
+                            if target_state > TaskState.KILLING:
                                 self._status_update(task_id, 'TASK_KILLED')
                             yield From(defer(loop=self.loop))
         self.driver.reset_mock()
@@ -1587,7 +1587,7 @@ class TestScheduler(object):
                               loop=self.loop)
         yield From(defer(loop=self.loop))
         if state > TaskState.STARTING:
-            assert_equal(TaskState.KILLED, self.nodes[0].state)
+            assert_equal(TaskState.KILLING, self.nodes[0].state)
             status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
             yield From(defer(loop=self.loop))
             assert_is(status, self.nodes[0].status)
@@ -1617,8 +1617,8 @@ class TestScheduler(object):
 
     @run_with_self_event_loop
     def test_kill_while_killed(self):
-        """Test killing a node while in state KILLED"""
-        yield From(self._test_kill_in_state(TaskState.KILLED))
+        """Test killing a node while in state KILLING"""
+        yield From(self._test_kill_in_state(TaskState.KILLING))
 
     @trollius.coroutine
     def _test_die_in_state(self, state):
@@ -1657,7 +1657,7 @@ class TestScheduler(object):
         assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
                      self.driver.mock_calls)
         assert_equal(TaskState.READY, self.nodes[0].state)
-        assert_equal(TaskState.KILLED, self.nodes[1].state)
+        assert_equal(TaskState.KILLING, self.nodes[1].state)
         assert_equal(TaskState.READY, self.nodes[2].state)
         self.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
@@ -1667,7 +1667,7 @@ class TestScheduler(object):
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status)]),
             self.driver.mock_calls)
-        assert_equal(TaskState.KILLED, self.nodes[0].state)
+        assert_equal(TaskState.KILLING, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
         assert_equal(TaskState.DEAD, self.nodes[2].state)
         assert_false(kill.done())
