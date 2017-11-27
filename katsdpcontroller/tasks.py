@@ -409,7 +409,6 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
 
     @trollius.coroutine
     def graceful_kill(self, driver, **kwargs):
-        force_kill = True
         try:
             if self.program_block_state_observer is not None:
                 yield From(self.program_block_state_observer.wait_empty())
