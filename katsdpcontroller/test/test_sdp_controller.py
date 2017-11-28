@@ -736,6 +736,7 @@ class TestSDPController(unittest.TestCase):
             'cbf_int_time': 0.499,
             'cbf_sync_time': mock.ANY,
             'cbf_spead': '239.102.255.0+15:7148',
+            'max_packet_size': mock.ANY,
             'servers': mock.ANY
         }, immutable=True)
         # Check that the taskinfo override worked
