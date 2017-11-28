@@ -1335,7 +1335,7 @@ class TaskState(OrderedEnum):
     STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
     RUNNING = 3              #: Process is running, but we're waiting for ports to open
     READY = 4                #: Node is completely ready
-    KILLED = 5               #: We have asked Mesos to kill it, but do not yet have confirmation
+    KILLING = 5              #: We have asked the task to kill itself, but do not yet have confirmation
     DEAD = 6                 #: Have received terminal status message
 
 
@@ -1473,13 +1473,21 @@ class PhysicalNode(object):
             self._ready_waiter.cancel()
             self._ready_waiter = None
 
-    def kill(self, driver):
+    def kill(self, driver, **kwargs):
         """Start killing off the node. This is guaranteed to be called only if
         the task made it to at least :const:`TaskState.STARTED` and it is not
-        in :const:`TaskState.DEAD`.
+        in state :const:`TaskState.DEAD`. Note that it might be called more
+        than once, with different keyword args.
 
         This function should not manipulate the task state; the caller will
-        set the state to :const:`TaskState.KILLED`.
+        set the state to :const:`TaskState.KILLING`.
+
+        Parameters
+        ----------
+        driver : :class:`pymesos.MesosSchedulerDriver`
+            Scheduler driver
+        kwargs : dict
+            Extra arguments passed to :meth:`.Scheduler.kill`.
         """
         pass
 
@@ -1487,13 +1495,13 @@ class PhysicalNode(object):
 class PhysicalExternal(PhysicalNode):
     """External service with a hostname and ports. The service moves
     automatically from :const:`TaskState.STARTED` to
-    :const:`TaskState.RUNNING`, and from :const:`TaskState.KILLED` to
+    :const:`TaskState.RUNNING`, and from :const:`TaskState.KILLING` to
     :const:`TaskState.DEAD`.
     """
     def set_state(self, state):
         if state >= TaskState.STARTED and state < TaskState.READY:
             state = TaskState.RUNNING
-        elif state == TaskState.KILLED:
+        elif state == TaskState.KILLING:
             state = TaskState.DEAD
         super(PhysicalExternal, self).set_state(state)
 
@@ -1755,12 +1763,12 @@ class PhysicalTask(PhysicalNode):
         args['resolver'] = resolver
         return args
 
-    def kill(self, driver):
+    def kill(self, driver, **kwargs):
         # TODO: according to the Mesos docs, killing a task is not reliable,
         # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
-        super(PhysicalTask, self).kill(driver)
+        super(PhysicalTask, self).kill(driver, **kwargs)
 
 
 def instantiate(logical_graph, loop):
@@ -1907,9 +1915,11 @@ class Scheduler(pymesos.Scheduler):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
-        self._retry_launch = trollius.Event(loop=self._loop)  #: set when it's time to retry a launch
+        #: set when it's time to retry a launch
+        self._retry_launch = trollius.Event(loop=self._loop)
         self._pending = deque()     #: node groups for which we do not yet have resources
-        self._active = {}           #: (task, graph) for tasks that have been launched (STARTED to KILLED), indexed by task ID
+        #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
+        self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
@@ -2359,7 +2369,7 @@ class Scheduler(pymesos.Scheduler):
             raise
 
     @trollius.coroutine
-    def kill(self, graph, nodes=None):
+    def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
         from any state. Dependencies specified with `depends_kill` will be
         honoured, leaving nodes alive until all nodes that depend on them are
@@ -2374,6 +2384,9 @@ class Scheduler(pymesos.Scheduler):
         nodes : list, optional
             If specified, the nodes to kill. The default is to kill all nodes
             in the graph.
+        kwargs : dict
+            Any other keyword arguments are passed to the tasks's
+            :meth:`~.PhysicalTask.kill` method.
 
         Raises
         ------
@@ -2384,14 +2397,14 @@ class Scheduler(pymesos.Scheduler):
         def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
                 node.set_state(TaskState.DEAD)
-            elif node.state < TaskState.KILLED:
+            elif node.state <= TaskState.KILLING:
                 for src in graph.predecessors(node):
                     yield From(src.dead_event.wait())
                 # Re-check state because it might have changed while waiting
-                if node.state < TaskState.KILLED:
+                if node.state <= TaskState.KILLING:
                     logger.debug('Killing %s', node.name)
-                    node.kill(self._driver)
-                    node.set_state(TaskState.KILLED)
+                    node.kill(self._driver, **kwargs)
+                    node.set_state(TaskState.KILLING)
             yield From(node.dead_event.wait())
 
         kill_graph = subgraph(graph, DEPENDS_KILL, nodes)

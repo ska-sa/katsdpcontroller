@@ -297,6 +297,7 @@ def _make_telstate(g, config):
     # Run it in /mnt/mesos/sandbox so that the dump.rdb ends up there.
     telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
     telstate.physical_factory = TelstateTask
+    telstate.deconfigure_wait = False
     g.add_node(telstate)
     return telstate
 
@@ -659,6 +660,7 @@ def _make_cal(g, config, name):
     cal.interfaces[0].bandwidth_in = info.net_bandwidth
     cal.ports = ['port']
     cal.transitions = CAPTURE_TRANSITIONS
+    cal.deconfigure_wait = False
     g.add_node(cal, telstate_extra=telstate_extra, config=lambda task, resolver: {
         'buffer_maxsize': buffer_size,
         'workers': workers,
