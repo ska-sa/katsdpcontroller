@@ -196,6 +196,18 @@ class TestValidate(object):
         with assert_raises(ValueError):
             product_config.validate(self.config)
 
+    def test_bad_continuum_factor(self):
+        self.config["outputs"]["l0"]["continuum_factor"] = 3
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("not a multiple of continuum_factor", str(cm.exception))
+
+    def test_too_few_continuum_channels(self):
+        self.config["outputs"]["l0"]["continuum_factor"] = 4096
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("not a multiple of number of ingests", str(cm.exception))
+
     def test_multiple_cam_http(self):
         self.config["inputs"]["camdata2"] = self.config["inputs"]["camdata"]
         with assert_raises(ValueError) as cm:

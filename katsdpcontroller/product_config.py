@@ -46,6 +46,27 @@ def override(config, overrides):
         return overrides
 
 
+def _url_n_endpoints(url):
+    """Return the number of endpoints in a ``spead://`` URL.
+
+    Parameters
+    ----------
+    url : str
+        URL of the form spead://host[+N]:port
+
+    Raises
+    ------
+    ValueError
+        if `url` is not a valid URL, not a SPEAD url, or is missing a port.
+    """
+    url_parts = urllib.parse.urlsplit(url)
+    if url_parts.scheme != 'spead':
+        raise ValueError('non-spead URL {}'.format(url))
+    if url_parts.port is None:
+        raise ValueError('URL {} has no port'.format(url))
+    return len(endpoint_list_parser(None)(url_parts.netloc))
+
+
 def validate(config):
     """Validates a config dict.
 
@@ -58,6 +79,7 @@ def validate(config):
     ValueError
         if semantic constraints are violated
     """
+    from . import generator     # Imported locally to break circular import
     # Error messages for the oneOf parts of the schema are not helpful by
     # default, because it doesn't know which branch is the relevant one. The
     # "not" branches are generally just there to make validation conditional
@@ -99,43 +121,58 @@ def validate(config):
 
     input_endpoints = {}
     for name, stream in six.iteritems(config['inputs']):
-        if stream['type'] in ['cbf.baseline_correlation_products',
-                              'cbf.tied_array_channelised_voltage']:
-            url_parts = urllib.parse.urlsplit(stream['url'])
-            if url_parts.scheme != 'spead':
-                raise ValueError('{}: non-spead URL {}'.format(name, stream['url']))
-            if url_parts.port is None:
-                raise ValueError('{}: URL {} has no port'.format(name, stream['url']))
-            n_endpoints = len(endpoint_list_parser(None)(url_parts.netloc))
-            input_endpoints[name] = n_endpoints
-            src_stream = stream['src_streams'][0]
-            n_chans = config['inputs'][src_stream]['n_chans']
-            n_chans_per_substream = stream['n_chans_per_substream']
-            if n_chans % n_endpoints != 0:
-                raise ValueError(
-                    '{}: n_chans ({}) not a multiple of endpoints ({})'.format(
-                        name, n_chans, n_endpoints))
-            n_chans_per_endpoint = n_chans // n_endpoints
-            if n_chans_per_endpoint % n_chans_per_substream != 0:
-                raise ValueError(
-                    '{}: channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
-                    .format(name, n_chans_per_endpoint, n_chans_per_substream))
+        try:
+            if stream['type'] in ['cbf.baseline_correlation_products',
+                                  'cbf.tied_array_channelised_voltage']:
+                n_endpoints = _url_n_endpoints(stream['url'])
+                input_endpoints[name] = n_endpoints
+                src_stream = stream['src_streams'][0]
+                n_chans = config['inputs'][src_stream]['n_chans']
+                n_chans_per_substream = stream['n_chans_per_substream']
+                if n_chans % n_endpoints != 0:
+                    raise ValueError(
+                        'n_chans ({}) not a multiple of endpoints ({})'.format(
+                            n_chans, n_endpoints))
+                n_chans_per_endpoint = n_chans // n_endpoints
+                if n_chans_per_endpoint % n_chans_per_substream != 0:
+                    raise ValueError(
+                        'channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
+                        .format(n_chans_per_endpoint, n_chans_per_substream))
+        except ValueError as error:
+            six.raise_from(ValueError('{}: {}'.format(name, error)), error)
 
     for name, output in six.iteritems(config['outputs']):
-        # Names of inputs and outputs must be disjoint
-        if name in config['inputs']:
-            raise ValueError('{} cannot be both an input and an output'.format(name))
+        try:
+            # Names of inputs and outputs must be disjoint
+            if name in config['inputs']:
+                raise ValueError('cannot be both an input and an output')
 
-        # Channel ranges must be non-empty and not overflow
-        if output['type'] in ['sdp.l0', 'sdp.beamformer_engineering']:
-            if 'output_channels' in output:
-                c = output['output_channels']
-                for src_name in output['src_streams']:
-                    src = config['inputs'][src_name]
-                    acv = config['inputs'][src['src_streams'][0]]
-                    if not 0 <= c[0] < c[1] <= acv['n_chans']:
-                        raise ValueError('Channel range {}:{} for {} is invalid'.format(
-                            c[0], c[1], name))
+            # Channel ranges must be non-empty and not overflow
+            if output['type'] in ['sdp.l0', 'sdp.beamformer_engineering']:
+                if 'output_channels' in output:
+                    c = output['output_channels']
+                    for src_name in output['src_streams']:
+                        src = config['inputs'][src_name]
+                        acv = config['inputs'][src['src_streams'][0]]
+                        if not 0 <= c[0] < c[1] <= acv['n_chans']:
+                            raise ValueError('Channel range {}:{} is invalid'.format(c[0], c[1]))
+
+            if output['type'] == 'sdp.l0':
+                continuum_factor = output['continuum_factor']
+                src = config['inputs'][output['src_streams'][0]]
+                acv = config['inputs'][src['src_streams'][0]]
+                n_chans = acv['n_chans']
+                if n_chans % continuum_factor != 0:
+                    raise ValueError('n_chans ({}) not a multiple of continuum_factor ({})'.format(
+                        n_chans, continuum_factor))
+                n_chans //= continuum_factor
+                n_ingest = generator.n_ingest_nodes(config, name)
+                if n_chans % n_ingest != 0:
+                    raise ValueError(
+                        'continuum channels ({}) not a multiple of number of ingests ({})'.format(
+                            n_chans, n_ingest))
+        except ValueError as error:
+            six.raise_from(ValueError('{}: {}'.format(name, error)), error)
 
 
 def parse(config_bytes):

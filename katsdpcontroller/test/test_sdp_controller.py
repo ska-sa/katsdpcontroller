@@ -122,7 +122,8 @@ CONFIG = '''{
             "type": "sdp.l0",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 2.1,
-            "continuum_factor": 16
+            "continuum_factor": 16,
+            "output_channels": [117, 3472]
         },
         "sdp_beamformer": {
             "type": "sdp.beamformer",
@@ -591,6 +592,23 @@ class TestSDPController(unittest.TestCase):
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
             'override_test': 'value'
+        }, immutable=True)
+        # Test that the output channel rounding was done correctly
+        ts.add.assert_any_call('config.ingest.sdp_l0_continuum_only', {
+            'antenna_mask': mock.ANY,
+            'cbf_spead': mock.ANY,
+            'cbf_ibv': False,
+            'continuum_factor': 16,
+            'l0_continuum_spead': mock.ANY,
+            'l0_continuum_name': 'sdp_l0_continuum_only',
+            'l0_spectral_name': None,
+            'sd_continuum_factor': 16,
+            'sd_spead_rate': mock.ANY,
+            'sd_output_channels': '96:3488',
+            'sd_int_time': 1.996,
+            'output_int_time': 1.996,
+            'output_channels': '96:3488',
+            'servers': 2
         }, immutable=True)
 
         # Verify the state of the subarray
