@@ -345,11 +345,12 @@ def _make_cbf_simulator(g, config, name):
         if type_ == 'cbf.baseline_correlation_products':
             conf.update({
                 'cbf_int_time': info.int_time,
+                'max_packet_size': 2088
             })
         else:
             conf.update({
                 'beamformer-timesteps': info.raw['spectra_per_heap'],
-                'beamformer-bits': info.raw['beng_out_bits_per_sample'],
+                'beamformer-bits': info.raw['beng_out_bits_per_sample']
             })
         return conf
 
