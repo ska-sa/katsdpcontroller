@@ -517,7 +517,9 @@ def _adjust_ingest_output_channels(config, names):
     assigned = [_round_down(requested[0], alignment), _round_up(requested[1], alignment)]
     # Should always succeed if product_config.validate passed
     assert 0 <= assigned[0] < assigned[1] <= n_chans, "Aligning channels caused an overflow"
-    for output in outputs:
+    for name, output in zip(names, outputs):
+        if assigned != requested:
+            logger.info('Rounding output channels for %s to %s', name, assigned)
         output['output_channels'] = assigned
 
 
