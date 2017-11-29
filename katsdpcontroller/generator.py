@@ -519,7 +519,8 @@ def _adjust_ingest_output_channels(config, names):
     assert 0 <= assigned[0] < assigned[1] <= n_chans, "Aligning channels caused an overflow"
     for name, output in zip(names, outputs):
         if assigned != requested:
-            logger.info('Rounding output channels for %s to %s', name, assigned)
+            logger.info('Rounding output channels for %s from %s to %s',
+                        name, requested, assigned)
         output['output_channels'] = assigned
 
 
@@ -803,15 +804,16 @@ def _make_beamformer_engineering(g, config, name):
     nodes = []
     for i, src in enumerate(srcs):
         info = TiedArrayChannelisedVoltageInfo(config, src)
-        output_channels = output.get('output_channels')
-        if output_channels is None:
-            output_channels = (0, info.n_channels)
+        requested_channels = output.get('output_channels', [0, info.n_channels])
         # Round to fit the endpoints, as required by bf_ingest.
         src_multicast = find_node(g, 'multicast.' + src)
         n_endpoints = len(endpoint_list_parser(None)(src_multicast.endpoint.host))
         channels_per_endpoint = info.n_channels // n_endpoints
-        output_channels = (_round_down(output_channels[0], channels_per_endpoint),
-                           _round_up(output_channels[1], channels_per_endpoint))
+        output_channels = [_round_down(requested_channels[0], channels_per_endpoint),
+                           _round_up(requested_channels[1], channels_per_endpoint)]
+        if output_channels != requested_channels:
+            logger.info('Rounding output channels for %s from %s to %s',
+                        name, requested_channels, output_channels)
 
         fraction = (output_channels[1] - output_channels[0]) / info.n_channels
 
