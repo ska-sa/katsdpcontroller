@@ -413,7 +413,7 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
-            (State.IDLE, State.CAPTURING): ['capture-start', name],
+            (State.IDLE, State.CAPTURING): ['capture-start', name, '{time}'],
             (State.CAPTURING, State.IDLE): ['capture-stop', name]
         }
 
