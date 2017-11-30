@@ -3,6 +3,8 @@ import math
 import logging
 import re
 import time
+import copy
+import fractions
 
 import networkx
 import trollius
@@ -11,7 +13,7 @@ import addict
 import six
 from six.moves import urllib
 
-from katsdptelstate.endpoint import Endpoint
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import (
@@ -108,6 +110,14 @@ def is_develop(config):
 def _mb(value):
     """Convert bytes to mebibytes"""
     return value / 1024**2
+
+
+def _round_down(value, period):
+    return value // period * period
+
+
+def _round_up(value, period):
+    return _round_down(value - 1, period) + period
 
 
 def _bandwidth(size, time, ratio=1.05, overhead=2048):
@@ -472,24 +482,67 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
     return ans
 
 
+def n_ingest_nodes(config, name):
+    """Number of processes used to implement ingest for a particular output."""
+    # TODO: adjust based on the number of antennas and channels
+    return 4 if not config['config'].get('develop', False) else 2
+
+
+def _adjust_ingest_output_channels(config, names):
+    """Modify the config dictionary to set output channels for ingest.
+
+    The range is set to the full band if not currently set; otherwise, it
+    is widened where necessary to meet alignment requirements.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    names : list of str
+        The names of the ingest output products. These must match i.e. be the
+        same other than for continuum_factor.
+    """
+    def lcm(a, b):
+        return a // fractions.gcd(a, b) * b
+
+    n_ingest = n_ingest_nodes(config, names[0])
+    outputs = [config['outputs'][name] for name in names]
+    src = config['inputs'][outputs[0]['src_streams'][0]]
+    acv = config['inputs'][src['src_streams'][0]]
+    n_chans = acv['n_chans']
+    requested = outputs[0].get('output_channels', [0, n_chans])
+    alignment = 1
+    # This is somewhat stricter than katsdpingest actually requires, which is
+    # simply that each ingest node is aligned to the continuum factor.
+    for output in outputs:
+        alignment = lcm(alignment, n_ingest * output['continuum_factor'])
+    assigned = [_round_down(requested[0], alignment), _round_up(requested[1], alignment)]
+    # Should always succeed if product_config.validate passed
+    assert 0 <= assigned[0] < assigned[1] <= n_chans, "Aligning channels caused an overflow"
+    for name, output in zip(names, outputs):
+        if assigned != requested:
+            logger.info('Rounding output channels for %s from %s to %s',
+                        name, requested, assigned)
+        output['output_channels'] = assigned
+
+
 def _make_ingest(g, config, spectral_name, continuum_name):
     develop = is_develop(config)
-    # Number of ingest nodes.
-    # TODO: adjust based on the number of channels requested
-    n_ingest = 4 if not develop else 2
 
     if not spectral_name and not continuum_name:
         raise ValueError('At least one of spectral_name or continuum_name must be given')
     continuum_info = L0Info(config, continuum_name) if continuum_name else None
     spectral_info = L0Info(config, spectral_name) if spectral_name else None
     if spectral_info is None:
-        spectral_info = continuum_info
+        spectral_info = copy.copy(continuum_info)
         # Make a copy of the info, then override continuum_factor
         spectral_info.raw = dict(spectral_info.raw)
         spectral_info.raw['continuum_factor'] = 1
     name = spectral_name if spectral_name else continuum_name
     src = spectral_info.raw['src_streams'][0]
     src_info = spectral_info.src_info
+    # Number of ingest nodes.
+    n_ingest = n_ingest_nodes(config, name)
 
     # Virtual ingest node which depends on the real ingest nodes, so that other
     # services can declare dependencies on ingest rather than individual nodes.
@@ -754,9 +807,17 @@ def _make_beamformer_engineering(g, config, name):
     nodes = []
     for i, src in enumerate(srcs):
         info = TiedArrayChannelisedVoltageInfo(config, src)
-        output_channels = output.get('output_channels')
-        if output_channels is None:
-            output_channels = (0, info.n_channels)
+        requested_channels = output.get('output_channels', [0, info.n_channels])
+        # Round to fit the endpoints, as required by bf_ingest.
+        src_multicast = find_node(g, 'multicast.' + src)
+        n_endpoints = len(endpoint_list_parser(None)(src_multicast.endpoint.host))
+        channels_per_endpoint = info.n_channels // n_endpoints
+        output_channels = [_round_down(requested_channels[0], channels_per_endpoint),
+                           _round_up(requested_channels[1], channels_per_endpoint)]
+        if output_channels != requested_channels:
+            logger.info('Rounding output channels for %s from %s to %s',
+                        name, requested_channels, output_channels)
+
         fraction = (output_channels[1] - output_channels[0]) / info.n_channels
 
         bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
@@ -792,7 +853,7 @@ def _make_beamformer_engineering(g, config, name):
             'stream_name': src,
             'channels': '{}:{}'.format(*output_channels)
         })
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
+        g.add_edge(bf_ingest, src_multicast, port='spead',
                    depends_resolve=True, depends_init=True, depends_ready=True,
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
         nodes.append(bf_ingest)
@@ -804,6 +865,9 @@ def build_logical_graph(config):
     # stream=stream. This is needed because capturing a loop-local variable in
     # a lambda captures only the final value of the variable, not the value it
     # had in the loop iteration where the lambda occurred.
+
+    # Copy the config, because we make some changes to it as we go
+    config = copy.deepcopy(config)
 
     g = networkx.MultiDiGraph(config=lambda resolver: {
         'cal_refant': '',
@@ -870,6 +934,7 @@ def build_logical_graph(config):
                     match = (config['outputs'][name] == config['outputs'][name2])
                     config['outputs'][name2]['continuum_factor'] = cont_factor
                     if match:
+                        _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
                         ingest = _make_ingest(g, config, name, name2)
                         _make_cal(g, config, name)
@@ -884,6 +949,7 @@ def build_logical_graph(config):
             l0_spectral_only = True
         else:
             l0_continuum_only = True
+        _adjust_ingest_output_channels(config, [name])
         if is_spectral:
             _make_timeplot(g, config, name)
             ingest = _make_ingest(g, config, name, None)
