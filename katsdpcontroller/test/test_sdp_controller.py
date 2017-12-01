@@ -794,11 +794,14 @@ class TestSDPController(unittest.TestCase):
         # about the number, which would otherwise make the test fragile.
         katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.future_request.mock_calls)]
+        # The Message constructor stringifies all its arguments, so it needs a
+        # bit more work to get a mock.ANY into it.
+        capture_start = Message.request('capture-start', 'i0_baseline_correlation_products', '')
+        capture_start.arguments[-1] = mock.ANY
         expected_calls = [
             mock.call(Message.request('configure-subarray-from-telstate')),
             mock.call(Message.request('capture-init', 'my_pb'), timeout=mock.ANY),
-            mock.call(Message.request('capture-start', 'i0_baseline_correlation_products'),
-                                      timeout=mock.ANY)
+            mock.call(capture_start, timeout=mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
 

@@ -718,6 +718,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         loop = None
         # Lexicographical tie-breaking isn't strictly required, but it makes
         # behaviour predictable.
+        now = time.time()   # Outside loop to be consistent across all nodes
         for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
             req = None
             try:
@@ -727,7 +728,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 pass
             if req is not None:
                 # Apply {} substitutions to request data
-                subst = dict(program_block_id=program_block.name)
+                subst = dict(program_block_id=program_block.name,
+                             time=now)
                 req = [field.format(**subst) for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
