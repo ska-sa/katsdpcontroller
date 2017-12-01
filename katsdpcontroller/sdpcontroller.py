@@ -270,7 +270,7 @@ class SDPSubarrayProductBase(object):
         self.program_blocks = {}              # live program blocks, indexed by name
         self.program_block_names = set()      # all program block names used
         self.current_program_block = None     # set between capture_init and capture_done
-        self.dead_callback = lambda product: None  # called when reached state DEAD
+        self.dead_future = trollius.Future(loop)   # Set to None when reached state DEAD
         self._state = None
         self.program_block_sensor = Sensor.string(
             subarray_product_id + ".program-block-state",
@@ -399,7 +399,7 @@ class SDPSubarrayProductBase(object):
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
-        self.dead_callback(self)
+        self.dead_future.set_result(None)
 
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
@@ -749,6 +749,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         loop = None
         # Lexicographical tie-breaking isn't strictly required, but it makes
         # behaviour predictable.
+        now = time.time()   # Outside loop to be consistent across all nodes
         for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
             req = None
             try:
@@ -758,7 +759,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 pass
             if req is not None:
                 # Apply {} substitutions to request data
-                subst = dict(program_block_id=program_block.name)
+                subst = dict(program_block_id=program_block.name,
+                             time=now)
                 req = [field.format(**subst) for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
@@ -1202,7 +1204,7 @@ class SDPControllerServer(AsyncDeviceServer):
         self.subarray_products[subarray_product_id] = product
         self.add_sensor(product.state_sensor)
         self.add_sensor(product.program_block_sensor)
-        product.dead_callback = remove_product
+        product.dead_future.add_done_callback(lambda future: remove_product(product))
         try:
             yield From(product.configure(req))
         except Exception:
@@ -1275,6 +1277,9 @@ class SDPControllerServer(AsyncDeviceServer):
             msg = "Unable to deconfigure as part of reconfigure"
             logger.error(msg, exc_info=True)
             raise FailReply("{}. {}".format(msg, error))
+
+        logger.info("Waiting for {} to disappear".format(subarray_product_id))
+        yield From(trollius.shield(product.dead_future))
 
         logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
         try:
