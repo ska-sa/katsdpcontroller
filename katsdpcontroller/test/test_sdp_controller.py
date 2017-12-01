@@ -170,7 +170,8 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         ('ingest.sdp_l0.1.capture-active', '', '', 'boolean'),
         ('timeplot.sdp_l0.1.gui-urls', '', '', 'string'),
         ('timeplot.sdp_l0.1.html_port', '', '', 'address'),
-        ('cal.sdp_l0.1.program-block-state', '', '', 'string')
+        ('cal.sdp_l0.1.program-block-state', '', '', 'string'),
+        ('state', '', '', 'discrete', 'configuring', 'idle', 'capturing', 'deconfiguring', 'dead')
 ))
 
 EXPECTED_REQUEST_LIST = [
