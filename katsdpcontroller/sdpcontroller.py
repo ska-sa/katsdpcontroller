@@ -418,14 +418,19 @@ class SDPSubarrayProductBase(object):
 
     @trollius.coroutine
     def _capture_init(self, program_block):
-        yield From(self.capture_init_impl(program_block))
-        assert self.current_program_block is None
-        self.state = State.CAPTURING
         self.program_block_names.add(program_block.name)
         self.program_blocks[program_block.name] = program_block
-        self.current_program_block = program_block
-        # Set the state, which triggers a sensor update
         program_block.state_change_callback = self._update_program_block_sensor
+        # Update the sensor with the INITIALISING state
+        self._update_program_block_sensor()
+        try:
+            yield From(self.capture_init_impl(program_block))
+        except Exception:
+            self._program_block_dead(program_block)
+            raise
+        assert self.current_program_block is None
+        self.state = State.CAPTURING
+        self.current_program_block = program_block
         program_block.state = ProgramBlock.State.CAPTURING
 
     @trollius.coroutine
