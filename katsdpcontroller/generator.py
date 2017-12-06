@@ -321,8 +321,7 @@ def _make_cam2telstate(g, config, name):
     cam2telstate.ports = ['port']
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
-        'url': url,
-        'collapse_streams': True
+        'url': url
     })
     return cam2telstate
 
