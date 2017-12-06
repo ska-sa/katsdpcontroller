@@ -563,6 +563,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         'sd_continuum_factor': sd_continuum_factor,
         'sd_spead_rate': sd_spead_rate / n_ingest,
         'cbf_ibv': not develop,
+        'cbf_name': src,
         'servers': n_ingest,
         'l0_spectral_name': spectral_name,
         'l0_continuum_name': continuum_name,
