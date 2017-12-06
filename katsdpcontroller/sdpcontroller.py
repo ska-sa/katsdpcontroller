@@ -209,6 +209,7 @@ class ProgramBlock(object):
         self._state = ProgramBlock.State.INITIALISING
         self.postprocess_task = None
         self.dead_event = trollius.Event(loop=loop)
+        self.state_change_callback = None
 
     @property
     def state(self):
@@ -216,9 +217,12 @@ class ProgramBlock(object):
 
     @state.setter
     def state(self, value):
-        self._state = value
-        if value == ProgramBlock.State.DEAD:
-            self.dead_event.set()
+        if self._state != value:
+            self._state = value
+            if value == ProgramBlock.State.DEAD:
+                self.dead_event.set()
+            if self.state_change_callback is not None:
+                self.state_change_callback()
 
 
 class SDPSubarrayProductBase(object):
@@ -254,7 +258,6 @@ class SDPSubarrayProductBase(object):
     """
     def __init__(self, sched, config, resolver, subarray_product_id, loop, sdp_controller):
         self._async_task = None    #: Current background task (can only be one)
-        self.state = State.CONFIGURING
         self.sched = sched
         self.config = config
         self.resolver = resolver
@@ -273,7 +276,26 @@ class SDPSubarrayProductBase(object):
         # necessary to react immediately rather than waiting for next time
         # around the event loop. Each callback takes self as the argument.
         self.dead_callbacks = [lambda product: product.dead_event.set()]
+        self._state = None
+        self.program_block_sensor = Sensor.string(
+            subarray_product_id + ".program-block-state",
+            "JSON dictionary of program block states for active program blocks",
+            default="{}", initial_status=Sensor.NOMINAL)
+        self.state_sensor = Sensor.discrete(
+            subarray_product_id + ".state",
+            "State of the subarray product state machine",
+            params=[member.lower() for member in State.__members__])
+        self.state = State.CONFIGURING   # This sets the sensor
         logger.info("Created: {!r}".format(self))
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        self._state = value
+        self.state_sensor.set_value(value.name.lower())
 
     @property
     def async_busy(self):
@@ -388,21 +410,35 @@ class SDPSubarrayProductBase(object):
 
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
-        program_block.state = ProgramBlock.State.DEAD
         try:
             del self.program_blocks[program_block.name]
         except KeyError:
             pass      # Allows this function to be called twice
+        # Setting the state will trigger _update_program_block_sensor, which
+        # will update the sensor with the value removed
+        program_block.state = ProgramBlock.State.DEAD
+
+    def _update_program_block_sensor(self):
+        value = {name: program_block.state.name.lower()
+                 for name, program_block in six.iteritems(self.program_blocks)}
+        self.program_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     @trollius.coroutine
     def _capture_init(self, program_block):
-        yield From(self.capture_init_impl(program_block))
-        assert self.current_program_block is None
-        self.state = State.CAPTURING
-        program_block.state = ProgramBlock.State.CAPTURING
         self.program_block_names.add(program_block.name)
         self.program_blocks[program_block.name] = program_block
+        program_block.state_change_callback = self._update_program_block_sensor
+        # Update the sensor with the INITIALISING state
+        self._update_program_block_sensor()
+        try:
+            yield From(self.capture_init_impl(program_block))
+        except Exception:
+            self._program_block_dead(program_block)
+            raise
+        assert self.current_program_block is None
+        self.state = State.CAPTURING
         self.current_program_block = program_block
+        program_block.state = ProgramBlock.State.CAPTURING
 
     @trollius.coroutine
     def _capture_done(self):
@@ -1112,6 +1148,8 @@ class SDPControllerServer(AsyncDeviceServer):
             # Protect against potential race conditions
             if self.subarray_products.get(product.subarray_product_id) is product:
                 del self.subarray_products[product.subarray_product_id]
+                self.remove_sensor(product.state_sensor)
+                self.remove_sensor(product.program_block_sensor)
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:
@@ -1176,6 +1214,8 @@ class SDPControllerServer(AsyncDeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
+        self.add_sensor(product.state_sensor)
+        self.add_sensor(product.program_block_sensor)
         product.dead_callbacks.append(remove_product)
         try:
             yield From(product.configure(req))
