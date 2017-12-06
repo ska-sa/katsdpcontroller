@@ -267,7 +267,12 @@ class SDPSubarrayProductBase(object):
         self.program_blocks = {}              # live program blocks, indexed by name
         self.program_block_names = set()      # all program block names used
         self.current_program_block = None     # set between capture_init and capture_done
-        self.dead_future = trollius.Future(loop)   # Set to None when reached state DEAD
+        self.dead_event = trollius.Event(loop)   # Set when reached state DEAD
+        # Callbacks that are called when we reach state DEAD. These are
+        # provided in addition to dead_event, because sometimes it's
+        # necessary to react immediately rather than waiting for next time
+        # around the event loop. Each callback takes self as the argument.
+        self.dead_callbacks = [lambda product: product.dead_event.set()]
         logger.info("Created: {!r}".format(self))
 
     @property
@@ -377,7 +382,9 @@ class SDPSubarrayProductBase(object):
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
-        self.dead_future.set_result(None)
+        # Setting dead_event is done by the first callback
+        for callback in self.dead_callbacks:
+            callback(self)
 
     def _program_block_dead(self, program_block):
         """Mark a program block as dead and remove it from the list."""
@@ -1169,7 +1176,7 @@ class SDPControllerServer(AsyncDeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
-        product.dead_future.add_done_callback(lambda future: remove_product(product))
+        product.dead_callbacks.append(remove_product)
         try:
             yield From(product.configure(req))
         except Exception:
@@ -1244,7 +1251,7 @@ class SDPControllerServer(AsyncDeviceServer):
             raise FailReply("{}. {}".format(msg, error))
 
         logger.info("Waiting for {} to disappear".format(subarray_product_id))
-        yield From(trollius.shield(product.dead_future))
+        yield to_tornado_future(product.dead_event.wait(), loop=self.loop)
 
         logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
         try:
