@@ -602,6 +602,7 @@ class TestSDPController(unittest.TestCase):
             'antenna_mask': mock.ANY,
             'cbf_spead': mock.ANY,
             'cbf_ibv': False,
+            'cbf_name': 'i0_baseline_correlation_products',
             'continuum_factor': 16,
             'l0_continuum_spead': mock.ANY,
             'l0_continuum_name': 'sdp_l0_continuum_only',
