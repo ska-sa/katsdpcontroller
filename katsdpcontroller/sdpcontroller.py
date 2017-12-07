@@ -824,7 +824,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # specific sensors are easier to mock.
         for name, stream in six.iteritems(self.config['inputs']):
             if stream['type'].startswith('cbf.'):
-                prefix = 'cbf_' + name + '_'
+                prefix = name + '_'
                 for suffix in ['src_streams', 'instrument_dev_name']:
                     if suffix in stream:
                         base_params[prefix + suffix] = stream[suffix]
