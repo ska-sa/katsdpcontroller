@@ -51,9 +51,6 @@ _add_prometheus_sensor('last_dump_timestamp',
 
 _add_prometheus_sensor('accumulator_batches',
                        'Number of batches completed by the accumulator', Counter)
-# No longer used in cal, but kept around for now in case an old version is run
-_add_prometheus_sensor('accumulate_buffer_filled',
-                       'Fraction of buffer that the current accumulation has written to', Gauge)
 _add_prometheus_sensor('slots', 'Total number of buffer slots', Gauge)
 _add_prometheus_sensor('accumulator_slots',
                         'Number of buffer slots the current accumulation has written to', Gauge)
@@ -69,6 +66,8 @@ _add_prometheus_sensor('pipeline_last_slots',
                        'Number of slots filled in the most recent buffer', Gauge)
 _add_prometheus_sensor('pipeline_last_time',
                        'Time taken to process the most recent buffer', Gauge)
+_add_prometheus_sensor('pipeline_exceptions',
+                       'Number of times the pipeline threw an exception', Counter),
 _add_prometheus_sensor('report_last_time',
                        'Elapsed time to generate most recent report', Gauge)
 _add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
