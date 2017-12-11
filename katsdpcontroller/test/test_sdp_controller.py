@@ -23,6 +23,7 @@ import pymesos
 import networkx
 import netifaces
 import requests
+import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
     SDPControllerServer, SDPCommonResources, SDPResources, State)
@@ -434,7 +435,10 @@ class TestSDPController(unittest.TestCase):
         # Future that is already resolved with no return value
         done_future = tornado.concurrent.Future()
         done_future.set_result(None)
+        # Mock TelescopeState, but preserve SEPARATOR in the mock
+        separator = katsdptelstate.TelescopeState.SEPARATOR
         self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
+        self.telstate_class.SEPARATOR = separator
         self.sensor_proxy_client_class = self._create_patch('katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.start.return_value = done_future

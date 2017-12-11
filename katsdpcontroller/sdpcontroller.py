@@ -824,7 +824,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # specific sensors are easier to mock.
         for name, stream in six.iteritems(self.config['inputs']):
             if stream['type'].startswith('cbf.'):
-                prefix = name + '_'
+                prefix = name + katsdptelstate.TelescopeState.SEPARATOR
                 for suffix in ['src_streams', 'instrument_dev_name']:
                     if suffix in stream:
                         base_params[prefix + suffix] = stream[suffix]
