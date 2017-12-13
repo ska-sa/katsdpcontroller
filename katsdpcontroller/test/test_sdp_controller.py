@@ -171,9 +171,9 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         ('ingest.sdp_l0.1.capture-active', '', '', 'boolean'),
         ('timeplot.sdp_l0.1.gui-urls', '', '', 'string'),
         ('timeplot.sdp_l0.1.html_port', '', '', 'address'),
-        ('cal.sdp_l0.1.program-block-state', '', '', 'string'),
+        ('cal.sdp_l0.1.capture-block-state', '', '', 'string'),
         ('state', '', '', 'discrete', 'configuring', 'idle', 'capturing', 'deconfiguring', 'dead'),
-        ('program-block-state', '', '', 'string')
+        ('capture-block-state', '', '', 'string')
 ))
 
 EXPECTED_REQUEST_LIST = [
@@ -807,7 +807,7 @@ class TestSDPController(unittest.TestCase):
         capture_start.arguments[-1] = mock.ANY
         expected_calls = [
             mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-init', 'my_pb'), timeout=mock.ANY),
+            mock.call(Message.request('capture-init', 'my_pb-00000'), timeout=mock.ANY),
             mock.call(capture_start, timeout=mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
