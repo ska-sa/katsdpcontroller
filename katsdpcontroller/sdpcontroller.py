@@ -194,8 +194,8 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
-class ProgramBlock(object):
-    """A program block is book-ended by a capture-init and a capture-done,
+class CaptureBlock(object):
+    """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
     class State(enum.Enum):
@@ -206,7 +206,7 @@ class ProgramBlock(object):
 
     def __init__(self, name, loop):
         self.name = name
-        self._state = ProgramBlock.State.INITIALISING
+        self._state = CaptureBlock.State.INITIALISING
         self.postprocess_task = None
         self.dead_event = trollius.Event(loop=loop)
         self.state_change_callback = None
@@ -219,7 +219,7 @@ class ProgramBlock(object):
     def state(self, value):
         if self._state != value:
             self._state = value
-            if value == ProgramBlock.State.DEAD:
+            if value == CaptureBlock.State.DEAD:
                 self.dead_event.set()
             if self.state_change_callback is not None:
                 self.state_change_callback()
@@ -242,13 +242,13 @@ class SDPSubarrayProductBase(object):
     inside the asynchronous tasks.
 
     There are some invariants that must hold at yield points:
-    - There is at most one program block in state CAPTURING.
-    - :attr:`current_program_block` is the program block in state
+    - There is at most one capture block in state CAPTURING.
+    - :attr:`current_capture_block` is the capture block in state
       CAPTURING, or ``None`` if there isn't one.
-    - :attr:`current_program_block` is set if and only if the subarray state
+    - :attr:`current_capture_block` is set if and only if the subarray state
       is CAPTURING.
-    - Keys in :attr:`program_blocks` also appear in `program_block_names`.
-    - Elements of :attr:`program_blocks` are not in state DEAD.
+    - Keys in :attr:`capture_blocks` also appear in `capture_block_names`.
+    - Elements of :attr:`capture_blocks` are not in state DEAD.
 
     This is a base class that is intended to be subclassed. The methods whose
     names end in ``_impl`` are extension points that should be implemented in
@@ -267,9 +267,9 @@ class SDPSubarrayProductBase(object):
         self.logical_graph = generator.build_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
-        self.program_blocks = {}              # live program blocks, indexed by name
-        self.program_block_names = set()      # all program block names used
-        self.current_program_block = None     # set between capture_init and capture_done
+        self.capture_blocks = {}              # live capture blocks, indexed by name
+        self.capture_block_names = set()      # all capture block names used
+        self.current_capture_block = None     # set between capture_init and capture_done
         self.dead_event = trollius.Event(loop)   # Set when reached state DEAD
         # Callbacks that are called when we reach state DEAD. These are
         # provided in addition to dead_event, because sometimes it's
@@ -277,9 +277,9 @@ class SDPSubarrayProductBase(object):
         # around the event loop. Each callback takes self as the argument.
         self.dead_callbacks = [lambda product: product.dead_event.set()]
         self._state = None
-        self.program_block_sensor = Sensor.string(
-            subarray_product_id + ".program-block-state",
-            "JSON dictionary of program block states for active program blocks",
+        self.capture_block_sensor = Sensor.string(
+            subarray_product_id + ".capture-block-state",
+            "JSON dictionary of capture block states for active capture blocks",
             default="{}", initial_status=Sensor.NOMINAL)
         self.state_sensor = Sensor.discrete(
             subarray_product_id + ".state",
@@ -329,13 +329,13 @@ class SDPSubarrayProductBase(object):
         pass
 
     @trollius.coroutine
-    def capture_init_impl(self, program_block):
-        """Extension point to start a program block."""
+    def capture_init_impl(self, capture_block):
+        """Extension point to start a capture block."""
         pass
 
     @trollius.coroutine
-    def capture_done_impl(self, program_block):
-        """Extension point to stop a program block.
+    def capture_done_impl(self, capture_block):
+        """Extension point to stop a capture block.
 
         This should only do the work needed for the ``capture-done`` master
         controller request to return. The caller takes care of calling
@@ -347,10 +347,10 @@ class SDPSubarrayProductBase(object):
         pass
 
     @trollius.coroutine
-    def postprocess_impl(self, program_block):
-        """Complete the post-processing for a program block.
+    def postprocess_impl(self, capture_block):
+        """Complete the post-processing for a capture block.
 
-        Subclasses should override this if a program block is not finished when
+        Subclasses should override this if a capture block is not finished when
         :meth:`_capture_done` returns.
         """
         pass
@@ -370,12 +370,12 @@ class SDPSubarrayProductBase(object):
         setting the event `ready`.
         """
         self.state = State.DECONFIGURING
-        if self.current_program_block is not None:
+        if self.current_capture_block is not None:
             try:
-                program_block = self.current_program_block
+                capture_block = self.current_capture_block
                 # To prevent trying again if we get a second forced-deconfigure.
-                self.current_program_block = None
-                yield From(self.capture_done_impl(program_block))
+                self.current_capture_block = None
+                yield From(self.capture_done_impl(capture_block))
             except trollius.CancelledError:
                 raise
             except Exception as error:
@@ -383,24 +383,24 @@ class SDPSubarrayProductBase(object):
                              "Will continue with graph shutdown.", exc_info=True)
 
         if force:
-            for program_block in list(self.program_blocks.values()):
-                if program_block.postprocess_task is not None:
-                    logger.warning('Cancelling postprocessing for program block %s',
-                                   program_block.name)
-                    program_block.postprocess_task.cancel()
+            for capture_block in list(self.capture_blocks.values()):
+                if capture_block.postprocess_task is not None:
+                    logger.warning('Cancelling postprocessing for capture block %s',
+                                   capture_block.name)
+                    capture_block.postprocess_task.cancel()
                 else:
-                    self._program_block_dead(program_block)
+                    self._capture_block_dead(capture_block)
 
         yield From(self.deconfigure_impl(force, ready))
 
         # Allow all the postprocessing tasks to finish up
-        # Note: this needs to be done carefully, because self.program_blocks
+        # Note: this needs to be done carefully, because self.capture_blocks
         # can change during the yield.
-        while self.program_blocks:
-            name, program_block = next(self.program_blocks.iteritems())
-            logging.info('Waiting for program block %s to terminate', name)
-            yield From(program_block.dead_event.wait())
-            self.program_blocks.pop(name, None)
+        while self.capture_blocks:
+            name, capture_block = next(self.capture_blocks.iteritems())
+            logging.info('Waiting for capture block %s to terminate', name)
+            yield From(capture_block.dead_event.wait())
+            self.capture_blocks.pop(name, None)
 
         self.state = State.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
@@ -408,37 +408,37 @@ class SDPSubarrayProductBase(object):
         for callback in self.dead_callbacks:
             callback(self)
 
-    def _program_block_dead(self, program_block):
-        """Mark a program block as dead and remove it from the list."""
+    def _capture_block_dead(self, capture_block):
+        """Mark a capture block as dead and remove it from the list."""
         try:
-            del self.program_blocks[program_block.name]
+            del self.capture_blocks[capture_block.name]
         except KeyError:
             pass      # Allows this function to be called twice
-        # Setting the state will trigger _update_program_block_sensor, which
+        # Setting the state will trigger _update_capture_block_sensor, which
         # will update the sensor with the value removed
-        program_block.state = ProgramBlock.State.DEAD
+        capture_block.state = CaptureBlock.State.DEAD
 
-    def _update_program_block_sensor(self):
-        value = {name: program_block.state.name.lower()
-                 for name, program_block in six.iteritems(self.program_blocks)}
-        self.program_block_sensor.set_value(json.dumps(value, sort_keys=True))
+    def _update_capture_block_sensor(self):
+        value = {name: capture_block.state.name.lower()
+                 for name, capture_block in six.iteritems(self.capture_blocks)}
+        self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     @trollius.coroutine
-    def _capture_init(self, program_block):
-        self.program_block_names.add(program_block.name)
-        self.program_blocks[program_block.name] = program_block
-        program_block.state_change_callback = self._update_program_block_sensor
+    def _capture_init(self, capture_block):
+        self.capture_block_names.add(capture_block.name)
+        self.capture_blocks[capture_block.name] = capture_block
+        capture_block.state_change_callback = self._update_capture_block_sensor
         # Update the sensor with the INITIALISING state
-        self._update_program_block_sensor()
+        self._update_capture_block_sensor()
         try:
-            yield From(self.capture_init_impl(program_block))
+            yield From(self.capture_init_impl(capture_block))
         except Exception:
-            self._program_block_dead(program_block)
+            self._capture_block_dead(capture_block)
             raise
-        assert self.current_program_block is None
+        assert self.current_capture_block is None
         self.state = State.CAPTURING
-        self.current_program_block = program_block
-        program_block.state = ProgramBlock.State.CAPTURING
+        self.current_capture_block = capture_block
+        capture_block.state = CaptureBlock.State.CAPTURING
 
     @trollius.coroutine
     def _capture_done(self):
@@ -450,25 +450,25 @@ class SDPSubarrayProductBase(object):
 
         Returns
         -------
-        The program block that was stopped
+        The capture block that was stopped
         """
-        program_block = self.current_program_block
-        assert program_block is not None
-        yield From(self.capture_done_impl(program_block))
+        capture_block = self.current_capture_block
+        assert capture_block is not None
+        yield From(self.capture_done_impl(capture_block))
         assert self.state == State.CAPTURING
-        assert self.current_program_block is program_block
+        assert self.current_capture_block is capture_block
         self.state = State.IDLE
-        self.current_program_block = None
-        program_block.state = ProgramBlock.State.POSTPROCESSING
-        program_block.postprocessing_task = trollius.ensure_future(
-            self.postprocess_impl(program_block), loop=self.loop)
+        self.current_capture_block = None
+        capture_block.state = CaptureBlock.State.POSTPROCESSING
+        capture_block.postprocessing_task = trollius.ensure_future(
+            self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
-            program_block.postprocessing_task,
+            capture_block.postprocessing_task,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
-                                                           program_block.name))
-        program_block.postprocessing_task.add_done_callback(
-            lambda task: self._program_block_dead(program_block))
-        raise Return(program_block)
+                                                           capture_block.name))
+        capture_block.postprocessing_task.add_done_callback(
+            lambda task: self._capture_block_dead(capture_block))
+        raise Return(capture_block)
 
     def _clear_async_task(self, future):
         """Clear the current async task.
@@ -552,21 +552,25 @@ class SDPSubarrayProductBase(object):
 
     @trollius.coroutine
     def capture_init(self, program_block_id):
+        def format_cbid(seq):
+            return '{}-{:05}'.format(program_block_id, seq)
+
         self._fail_if_busy()
         if self.state != State.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
         if program_block_id is None:
-            seq = 0
-            while 'pb' + str(seq) in self.program_block_names:
-                seq += 1
-            program_block_id = 'pb' + str(seq)
-        elif program_block_id in self.program_block_names:
-            raise FailReply('Program block ID {} has already been used in {}'.format(
-                program_block_id, self.subarray_product_id))
+            # Match the layout of program block IDs
+            program_block_id = '00000000-00000'
+        # Find first unique capture block ID for that PB ID
+        seq = 0
+        while format_cbid(seq) in self.capture_block_names:
+            seq += 1
+        capture_block_id = format_cbid(seq)
+        logger.info('Using capture block ID %s', capture_block_id)
 
-        program_block = ProgramBlock(program_block_id, self.loop)
-        task = trollius.ensure_future(self._capture_init(program_block), loop=self.loop)
+        capture_block = CaptureBlock(capture_block_id, self.loop)
+        task = trollius.ensure_future(self._capture_init(capture_block), loop=self.loop)
         self._async_task = task
         try:
             yield From(task)
@@ -614,37 +618,37 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         super(SDPSubarrayProductInterface, self).__init__(*args, **kwargs)
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
         sensors = self._interface_mode_sensors.sensors
-        self._program_block_states = [
-            sensor for sensor in sensors.values() if sensor.name.endswith('.program-block-state')]
+        self._capture_block_states = [
+            sensor for sensor in sensors.values() if sensor.name.endswith('.capture-block-state')]
 
-    def _update_program_block_state(self, program_block_id, state):
-        """Update the simulated *.program-block-state sensors.
+    def _update_capture_block_state(self, capture_block_id, state):
+        """Update the simulated *.capture-block-state sensors.
 
         The dictionary that is JSON-encoded in the sensor value is updated to
-        set the value associated with the key `program_block_id`. If `state` is
+        set the value associated with the key `capture_block_id`. If `state` is
         `None`, the key is removed instead.
         """
         for name, sensor in self._interface_mode_sensors.sensors.items():
-            if name.endswith('.program-block-state'):
+            if name.endswith('.capture-block-state'):
                 states = json.loads(sensor.value())
                 if state is None:
-                    states.pop(program_block_id, None)
+                    states.pop(capture_block_id, None)
                 else:
-                    states[program_block_id] = state
+                    states[capture_block_id] = state
                 sensor.set_value(json.dumps(states))
 
     @trollius.coroutine
-    def capture_init_impl(self, program_block):
-        self._update_program_block_state(program_block.name, 'CAPTURING')
+    def capture_init_impl(self, capture_block):
+        self._update_capture_block_state(capture_block.name, 'CAPTURING')
 
     @trollius.coroutine
-    def capture_done_impl(self, program_block):
-        self._update_program_block_state(program_block.name, 'PROCESSING')
+    def capture_done_impl(self, capture_block):
+        self._update_capture_block_state(capture_block.name, 'PROCESSING')
 
     @trollius.coroutine
-    def postprocess_impl(self, program_block):
+    def postprocess_impl(self, capture_block):
         yield From(trollius.sleep(0.1, loop=self.loop))
-        self._update_program_block_state(program_block.name, None)
+        self._update_capture_block_state(capture_block.name, None)
 
     @trollius.coroutine
     def configure_impl(self, req):
@@ -731,7 +735,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 yield From(node.issue_req(req[0], req[1:], timeout=300))
 
     @trollius.coroutine
-    def exec_transitions(self, old_state, new_state, reverse, program_block):
+    def exec_transitions(self, old_state, new_state, reverse, capture_block):
         """Issue requests to nodes on state transitions.
 
         The requests are made in parallel, but respects `depends_init`
@@ -747,8 +751,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             If there is a `depends_init` edge from A to B in the graph, A's
             request will be made first if `reverse` is false, otherwise B's
             request will be made first.
-        program_block : :class:`ProgramBlock`
-            The program block is that being transitioned
+        capture_block : :class:`CaptureBlock`
+            The capture block is that being transitioned
         """
         # Create a copy of the graph containing only dependency edges.
         deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
@@ -771,7 +775,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 pass
             if req is not None:
                 # Apply {} substitutions to request data
-                subst = dict(program_block_id=program_block.name,
+                subst = dict(capture_block_id=capture_block.name,
                              time=now)
                 req = [field.format(**subst) for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
@@ -784,7 +788,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             yield From(trollius.gather(*tasks.values(), loop=loop))
 
     @trollius.coroutine
-    def capture_init_impl(self, program_block):
+    def capture_init_impl(self, capture_block):
         if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
@@ -796,19 +800,19 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
-        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True, program_block))
+        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True, capture_block))
 
     @trollius.coroutine
-    def capture_done_impl(self, program_block):
-        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False, program_block))
+    def capture_done_impl(self, capture_block):
+        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False, capture_block))
 
     @trollius.coroutine
-    def postprocess_impl(self, program_block):
+    def postprocess_impl(self, capture_block):
         for node in self.physical_graph:
             if isinstance(node, tasks.SDPPhysicalTask):
-                observer = node.program_block_state_observer
+                observer = node.capture_block_state_observer
                 if observer is not None:
-                    yield From(observer.wait_program_block_done(program_block.name))
+                    yield From(observer.wait_capture_block_done(capture_block.name))
 
     @trollius.coroutine
     def _launch_telstate(self):
@@ -1149,7 +1153,7 @@ class SDPControllerServer(AsyncDeviceServer):
             if self.subarray_products.get(product.subarray_product_id) is product:
                 del self.subarray_products[product.subarray_product_id]
                 self.remove_sensor(product.state_sensor)
-                self.remove_sensor(product.program_block_sensor)
+                self.remove_sensor(product.capture_block_sensor)
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:
@@ -1215,7 +1219,7 @@ class SDPControllerServer(AsyncDeviceServer):
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
         self.add_sensor(product.state_sensor)
-        self.add_sensor(product.program_block_sensor)
+        self.add_sensor(product.capture_block_sensor)
         product.dead_callbacks.append(remove_product)
         try:
             yield From(product.configure(req))
@@ -1785,10 +1789,10 @@ class InterfaceModeSensors(object):
                 sensor_type=Sensor.ADDRESS,
                 description='IP endpoint for html_port',
                 initial_status=Sensor.NOMINAL),
-            'cal.sdp_l0.1.program-block-state': dict(
+            'cal.sdp_l0.1.capture-block-state': dict(
                 default='{}',
                 sensor_type=Sensor.STRING,
-                description='JSON dict with the state of each program block',
+                description='JSON dict with the state of each capture block',
                 initial_status=Sensor.NOMINAL)
         }
 

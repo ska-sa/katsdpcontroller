@@ -233,8 +233,8 @@ class SDPConfigMixin(object):
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 
-class ProgramBlockStateObserver(object):
-    """Watches a program-block-state sensor in a child.
+class CaptureBlockStateObserver(object):
+    """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """
     def __init__(self, sensor, loop):
@@ -282,12 +282,12 @@ class ProgramBlockStateObserver(object):
         yield From(self.wait(lambda value: not value))
 
     @trollius.coroutine
-    def wait_program_block_done(self, program_block_id):
-        yield From(self.wait(lambda value: program_block_id not in value))
+    def wait_capture_block_done(self, capture_block_id):
+        yield From(self.wait(lambda value: capture_block_id not in value))
 
     def close(self):
         """Close down the observer. This should be called when the connection
-        to the server is closed. It sets the program block states list to
+        to the server is closed. It sets the capture block states list to
         empty (which will wake up any waiters whose condition is satisfied by
         this). Any remaining waiters receive a
         :exc:`.trollius.ConnectionResetError`.
@@ -314,7 +314,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
         super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
-        self.program_block_state_observer = None
+        self.capture_block_state_observer = None
 
     def get_transition(self, old_state, new_state):
         """If this node has a specified state transition action, return it"""
@@ -335,9 +335,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             except RuntimeError:
                 logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
-        if self.program_block_state_observer is not None:
-            self.program_block_state_observer.close()
-            self.program_block_state_observer = None
+        if self.capture_block_state_observer is not None:
+            self.capture_block_state_observer.close()
+            self.capture_block_state_observer = None
         if need_inform:
             self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
 
@@ -373,9 +373,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     logger.info("Connected to {}:{} for node {}".format(
                         self.host, self.ports['port'], self.name))
                     sensor = yield From(to_trollius_future(self.katcp_connection.future_get_sensor(
-                        'program-block-state'), loop=self.loop))
+                        'capture-block-state'), loop=self.loop))
                     if sensor is not None:
-                        self.program_block_state_observer = ProgramBlockStateObserver(
+                        self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, loop=self.loop)
                     return
                 except RuntimeError:
@@ -409,8 +409,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     @trollius.coroutine
     def graceful_kill(self, driver, **kwargs):
         try:
-            if self.program_block_state_observer is not None:
-                yield From(self.program_block_state_observer.wait_empty())
+            if self.capture_block_state_observer is not None:
+                yield From(self.capture_block_state_observer.wait_empty())
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         super(SDPPhysicalTask, self).kill(driver, **kwargs)

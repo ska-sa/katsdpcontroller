@@ -22,7 +22,7 @@ from katsdpcontroller.tasks import (
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
-    (State.IDLE, State.CAPTURING): ['capture-init', '{program_block_id}'],
+    (State.IDLE, State.CAPTURING): ['capture-init', '{capture_block_id}'],
     (State.CAPTURING, State.IDLE): ['capture-done']
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
