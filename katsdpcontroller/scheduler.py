@@ -1528,9 +1528,9 @@ class PhysicalTask(PhysicalNode):
         :class:`LogicalTask.interfaces` to :class:`AgentInterface`s.
     taskinfo : :class:`mesos_pb2.TaskInfo`
         Task info for Mesos to run the task
-    allocation : class:`ResourceAllocation`
+    allocation : :class:`ResourceAllocation`
         Resources allocated to this task.
-    status : class:`mesos_pb2.TaskStatus`
+    status : :class:`mesos_pb2.TaskStatus`
         Last Mesos status allocated to this task. This should agree with with
         :attr:`state`, but if we receive notifications out-of-order from Mesos
         then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
