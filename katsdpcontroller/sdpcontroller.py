@@ -567,6 +567,7 @@ class SDPSubarrayProductBase(object):
         while format_cbid(seq) in self.capture_block_names:
             seq += 1
         capture_block_id = format_cbid(seq)
+        logger.info('Using capture block ID %s', capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, self.loop)
         task = trollius.ensure_future(self._capture_init(capture_block), loop=self.loop)
