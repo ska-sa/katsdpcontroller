@@ -6,13 +6,13 @@ import logging
 import uuid
 import threading
 import http.server
-import mock
+from unittest import mock
 import requests_mock
 from nose.tools import *
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
 import ipaddress
-import six
+import functools
 import requests
 import asyncio
 import tornado.platform.asyncio
@@ -30,7 +30,7 @@ def run_with_event_loop(func):
     """
     func = asyncio.coroutine(func)
 
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         loop = asyncio.new_event_loop()
         with contextlib.closing(loop):
@@ -45,7 +45,7 @@ def run_with_self_event_loop(func):
     """
     func = asyncio.coroutine(func)
 
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
         self.ioloop.run_sync(lambda: to_tornado_future(func(self, *args, **kwargs), loop=self.loop))
     return wrapper
@@ -257,17 +257,14 @@ class TestTaskState(object):
         assert_false(TaskState.RUNNING != TaskState.RUNNING)
 
     def test_compare_other(self):
-        # Python 2 allows ordering comparisons between any objects, so
-        # only test this on Python 3
-        if six.PY3:
-            with assert_raises(TypeError):
-                TaskState.RUNNING < 3
-            with assert_raises(TypeError):
-                TaskState.RUNNING > 3
-            with assert_raises(TypeError):
-                TaskState.RUNNING <= 3
-            with assert_raises(TypeError):
-                TaskState.RUNNING >= 3
+        with assert_raises(TypeError):
+            TaskState.RUNNING < 3
+        with assert_raises(TypeError):
+            TaskState.RUNNING > 3
+        with assert_raises(TypeError):
+            TaskState.RUNNING <= 3
+        with assert_raises(TypeError):
+            TaskState.RUNNING >= 3
 
 
 class TestImageResolver(object):
@@ -388,7 +385,7 @@ class TestTaskIDAllocator(object):
 
 def _make_resources(resources):
     out = AnyOrderList()
-    for name, value in six.iteritems(resources):
+    for name, value in resources.items():
         resource = Dict()
         resource.name = name
         if isinstance(value, (int, float)):

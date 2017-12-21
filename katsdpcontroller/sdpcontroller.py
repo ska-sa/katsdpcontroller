@@ -13,6 +13,7 @@ import sys
 import os.path
 from collections import deque
 import asyncio
+import functools
 
 from tornado import gen
 import tornado.platform.asyncio
@@ -21,7 +22,6 @@ import tornado.concurrent
 
 import networkx
 import networkx.drawing.nx_pydot
-import six
 import enum
 from decorator import decorator
 
@@ -420,7 +420,7 @@ class SDPSubarrayProductBase(object):
 
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
-                 for name, capture_block in six.iteritems(self.capture_blocks)}
+                 for name, capture_block in self.capture_blocks.items()}
         self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     @asyncio.coroutine
@@ -826,7 +826,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
-        for name, stream in six.iteritems(self.config['inputs']):
+        for name, stream in self.config['inputs'].items():
             if stream['type'].startswith('cbf.'):
                 prefix = name + katsdptelstate.TelescopeState.SEPARATOR
                 for suffix in ['src_streams', 'instrument_dev_name']:
@@ -902,11 +902,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
                 self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
                                    immutable=True)
-            except Exception:
+            except Exception as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
-                exc_info = sys.exc_info()
                 yield from self._shutdown(force=True)
-                six.reraise(*exc_info)
+                raise exc
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(
                 self.subarray_product_id, error))
@@ -941,7 +940,7 @@ def async_request(func):
     a typical order of decorators is async_request, request, return_reply,
     gen.coroutine.
     """
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(self, req, msg):
         # Note that this will run the coroutine until it first yields. The initial
         # code until the first yield thus happens synchronously.
@@ -976,7 +975,7 @@ def time_request(func):
         Only suitable for use on synchronous request handlers. Asynchronous
         handlers get the functionality as part of :func:`async_request`.
     """
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(self, req, msg):
         with REQUEST_TIME.labels(msg.name).time():
             return func(self, req, msg)

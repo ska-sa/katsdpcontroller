@@ -139,13 +139,12 @@ import copy
 from collections import namedtuple, deque
 from enum import Enum
 import asyncio
+import urllib
 
 import pkg_resources
 import ipaddress
 import requests
 import docker
-import six
-from six.moves import urllib
 import networkx
 import jsonschema
 from decorator import decorator
@@ -393,7 +392,7 @@ class RangeResource(object):
             self.add_range(r.begin, r.end + 1)   # Mesos has inclusive ranges
 
     def __iter__(self):
-        return itertools.chain(*[six.moves.range(start, stop) for (start, stop) in self._ranges])
+        return itertools.chain(*[range(start, stop) for (start, stop) in self._ranges])
 
     def remove(self, item):
         for i, (start, stop) in enumerate(self._ranges):
@@ -615,8 +614,8 @@ class ImageResolver(object):
                     response.raise_for_status()
                     return response.headers['Docker-Content-Digest']
                 except requests.exceptions.RequestException as error:
-                    six.raise_from(ImageError('Failed to get digest from {}: {}'.format(url, error)),
-                                   error)
+                    raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
+                        from error
                 except KeyError:
                     raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
                 finally:
@@ -659,7 +658,7 @@ class ImageResolverFactory(object):
         args = dict(self._args)
         args.update(kwargs)
         image_resolver = ImageResolver(**args)
-        for name, path in six.iteritems(self._overrides):
+        for name, path in self._overrides.items():
             image_resolver.override(name, path)
         return image_resolver
 
@@ -1414,7 +1413,7 @@ class PhysicalNode(object):
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
-            wait_ports = list(six.itervalues(self.ports))
+            wait_ports = list(self.ports.values())
         if wait_ports:
             yield from poll_ports(self.host, wait_ports, self.loop)
 
@@ -1735,7 +1734,7 @@ class PhysicalTask(PhysicalNode):
         taskinfo.discovery.visibility = 'EXTERNAL'
         taskinfo.discovery.name = self.name
         taskinfo.discovery.ports.ports = []
-        for port_name, port_number in six.iteritems(self.ports):
+        for port_name, port_number in self.ports.items():
             # TODO: need a way to indicate non-TCP
             taskinfo.discovery.ports.ports.append(
                 Dict(number=port_number,
@@ -1950,8 +1949,8 @@ class Scheduler(pymesos.Scheduler):
             return (0, 0, 0, 0, node.name)
 
     def _clear_offers(self):
-        for offers in six.itervalues(self._offers):
-            self._driver.acceptOffers([offer.id for offer in six.itervalues(offers)], [])
+        for offers in self._offers.values():
+            self._driver.acceptOffers([offer.id for offer in offers.values()], [])
         self._offers = {}
         self._driver.suppressOffers()
 
@@ -1984,7 +1983,7 @@ class Scheduler(pymesos.Scheduler):
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
-        for agent_id, offers in six.iteritems(self._offers):
+        for agent_id, offers in self._offers.items():
             if offer_id.value in offers:
                 self._remove_offer(agent_id, offer_id.value)
 
@@ -2057,7 +2056,7 @@ class Scheduler(pymesos.Scheduler):
         for agent in agents:
             for interface in agent.interfaces:
                 networks.setdefault(interface.network, []).append(interface)
-        for network, interfaces in six.iteritems(networks):
+        for network, interfaces in networks.items():
             max_interface_resources[network] = {}
             total_interface_resources[network] = {}
             for r in INTERFACE_SCALAR_RESOURCES:
@@ -2124,7 +2123,7 @@ class Scheduler(pymesos.Scheduler):
             need = sum(getattr(request, r) for node in nodes for request in node.logical_node.gpus)
             if need > total_gpu_resources[r]:
                 raise GroupInsufficientGPUResourcesError(r, need, total_gpu_resources[r])
-        for network in six.iterkeys(networks):
+        for network in networks:
             for r in INTERFACE_SCALAR_RESOURCES:
                 need = sum(getattr(request, r)
                            for node in nodes for request in node.logical_node.interfaces
@@ -2176,8 +2175,8 @@ class Scheduler(pymesos.Scheduler):
                     # the state of the tasks since they were put onto the
                     # pending list (e.g. by killing them). Filter those out.
                     nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                    agents = [Agent(list(six.itervalues(offers)), self._min_ports.get(agent_id, 0))
-                              for agent_id, offers in six.iteritems(self._offers)]
+                    agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
+                              for agent_id, offers in self._offers.items()]
                     # Back up the original agents so that if allocation fails we can
                     # diagnose it.
                     orig_agents = copy.deepcopy(agents)
@@ -2426,7 +2425,7 @@ class Scheduler(pymesos.Scheduler):
         self.http_server.stop()
         # Find the graphs that are still running
         graphs = set()
-        for (task, graph) in six.itervalues(self._active):
+        for (task, graph) in self._active.values():
             graphs.add(graph)
         for group in self._pending:
             graphs.add(group.graph)
@@ -2454,7 +2453,7 @@ class Scheduler(pymesos.Scheduler):
             master_host = urllib.parse.urlsplit(url).hostname
             return master_host, [slave['hostname'] for slave in slaves]
         except (KeyError, TypeError) as error:
-            six.raise_from(ValueError('Malformed response'), error)
+            raise ValueError('Malformed response') from error
 
     @asyncio.coroutine
     def get_master_and_slaves(self, timeout=None):

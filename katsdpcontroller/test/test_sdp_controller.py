@@ -5,7 +5,7 @@ import threading
 import contextlib
 import concurrent.futures
 import unittest
-import mock
+from unittest import mock
 import json
 import itertools
 import asyncio

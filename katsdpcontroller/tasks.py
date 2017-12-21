@@ -3,7 +3,6 @@ import json
 import contextlib
 import asyncio
 
-import six
 from addict import Dict
 
 import tornado.concurrent
@@ -160,8 +159,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         gui_urls = []
         for entry in self.logical_node.gui_urls:
             gui_urls.append({})
-            for key, value in six.iteritems(entry):
-                if isinstance(value, six.string_types):
+            for key, value in entry.items():
+                if isinstance(value, str):
                     gui_urls[-1][key] = value.format(self)
                 else:
                     gui_urls[-1][key] = value
@@ -170,7 +169,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
 
-        for key, value in six.iteritems(self.ports):
+        for key, value in self.ports.items():
             endpoint_sensor = Sensor.address(
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
             endpoint_sensor.set_value((self.host, value))
@@ -213,7 +212,7 @@ class SDPConfigMixin(object):
     def resolve(self, resolver, graph, loop):
         yield from super(SDPConfigMixin, self).resolve(resolver, graph, loop)
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
-        for name, value in six.iteritems(self.ports):
+        for name, value in self.ports.items():
             config[name] = value
         for src, trg, attr in graph.out_edges(self, data=True):
             endpoint = None

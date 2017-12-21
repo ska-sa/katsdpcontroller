@@ -5,9 +5,8 @@ import logging
 import copy
 import itertools
 import json
+import urllib
 
-import six
-from six.moves import urllib
 import jsonschema
 
 from katsdptelstate.endpoint import endpoint_list_parser
@@ -34,7 +33,7 @@ def override(config, overrides):
     """
     if isinstance(config, dict) and isinstance(overrides, dict):
         new_config = dict(config)
-        for key, value in six.iteritems(overrides):
+        for key, value in overrides.items():
             if value is None:
                 new_config.pop(key, None)
             else:
@@ -100,8 +99,8 @@ def validate(config):
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage']
     }
-    for name, stream in itertools.chain(six.iteritems(config['inputs']),
-                                        six.iteritems(config['outputs'])):
+    for name, stream in itertools.chain(config['inputs'].items(),
+                                        config['outputs'].items()):
         src_streams = stream.get('src_streams', [])
         for src in src_streams:
             if src not in config['inputs']:
@@ -112,13 +111,13 @@ def validate(config):
                     raise ValueError('Source {} has wrong type for {}'.format(src, name))
 
     # Can only have one cam.http stream
-    cam_http = [name for (name, stream) in six.iteritems(config['inputs'])
+    cam_http = [name for (name, stream) in config['inputs'].items()
                 if stream['type'] == 'cam.http']
     if len(cam_http) > 1:
         raise ValueError('Cannot have more than one cam.http stream')
 
     input_endpoints = {}
-    for name, stream in six.iteritems(config['inputs']):
+    for name, stream in config['inputs'].items():
         try:
             if stream['type'] in ['cbf.baseline_correlation_products',
                                   'cbf.tied_array_channelised_voltage']:
@@ -137,9 +136,9 @@ def validate(config):
                         'channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
                         .format(n_chans_per_endpoint, n_chans_per_substream))
         except ValueError as error:
-            six.raise_from(ValueError('{}: {}'.format(name, error)), error)
+            raise ValueError('{}: {}'.format(name, error)) from error
 
-    for name, output in six.iteritems(config['outputs']):
+    for name, output in config['outputs'].items():
         try:
             # Names of inputs and outputs must be disjoint
             if name in config['inputs']:
@@ -170,7 +169,7 @@ def validate(config):
                         'continuum channels ({}) not a multiple of number of ingests ({})'.format(
                             n_chans, n_ingest))
         except ValueError as error:
-            six.raise_from(ValueError('{}: {}'.format(name, error)), error)
+            raise ValueError('{}: {}'.format(name, error)) from error
 
 
 def parse(config_bytes):

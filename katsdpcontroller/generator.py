@@ -5,12 +5,11 @@ import time
 import copy
 import fractions
 import asyncio
+import urllib
 
 import networkx
 
 import addict
-import six
-from six.moves import urllib
 
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
@@ -883,7 +882,7 @@ def build_logical_graph(config):
     # the graph.
     inputs = {}
     input_multicast = []
-    for name, input_ in six.iteritems(config['inputs']):
+    for name, input_ in config['inputs'].items():
         inputs.setdefault(input_['type'], []).append(name)
         url = input_['url']
         parts = urllib.parse.urlsplit(url)
@@ -905,7 +904,7 @@ def build_logical_graph(config):
     # direct dependencies are gathered because those are the only ones that
     # can have the simulate flag anyway.
     inputs_used = set()
-    for output in six.itervalues(config['outputs']):
+    for output in config['outputs'].values():
         inputs_used.update(output['src_streams'])
 
     # Simulators for input streams where requested
@@ -917,7 +916,7 @@ def build_logical_graph(config):
 
     # Group outputs by type
     outputs = {}
-    for name, output in six.iteritems(config['outputs']):
+    for name, output in config['outputs'].items():
         outputs.setdefault(output['type'], []).append(name)
 
     # Pair up spectral and continuum L0 outputs
