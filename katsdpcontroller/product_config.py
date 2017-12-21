@@ -1,7 +1,5 @@
 """Support for manipulating product config dictionaries."""
 
-from __future__ import print_function, division, absolute_import, unicode_literals
-
 import re
 import logging
 import copy

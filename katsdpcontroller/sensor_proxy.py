@@ -1,6 +1,5 @@
 """Class for katcp connections that proxies sensors into a server"""
 
-from __future__ import print_function, division, absolute_import
 import logging
 import katcp
 from katcp.inspecting_client import InspectingClientAsync
@@ -139,7 +138,7 @@ class SensorProxyClient(InspectingClientAsync):
         self.server.mass_inform(katcp.Message.inform('interface-changed', 'sensor-list'))
 
     def stop(self, timeout=None):
-        for name, observer in self._observers.iteritems():
+        for name, observer in self._observers.items():
             if observer is not None:
                 observer.close()
             self.server.remove_sensor(self.qualify_name(name))

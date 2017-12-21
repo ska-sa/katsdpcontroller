@@ -1,14 +1,13 @@
-from __future__ import print_function, division, absolute_import
 import math
 import logging
 import re
 import time
 import copy
 import fractions
+import asyncio
 
 import networkx
-import trollius
-from trollius import From
+
 import addict
 import six
 from six.moves import urllib
@@ -59,9 +58,9 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
-    @trollius.coroutine
+    @asyncio.coroutine
     def resolve(self, resolver, graph, loop):
-        yield From(super(PhysicalMulticast, self).resolve(resolver, graph, loop))
+        yield from super(PhysicalMulticast, self).resolve(resolver, graph, loop)
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
@@ -71,9 +70,9 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 
 class TelstateTask(SDPPhysicalTaskBase):
-    @trollius.coroutine
+    @asyncio.coroutine
     def resolve(self, resolver, graph, loop):
-        yield From(super(TelstateTask, self).resolve(resolver, graph, loop))
+        yield from super(TelstateTask, self).resolve(resolver, graph, loop)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
         portmap = addict.Dict()
@@ -84,9 +83,9 @@ class TelstateTask(SDPPhysicalTaskBase):
 
 
 class IngestTask(SDPPhysicalTask):
-    @trollius.coroutine
+    @asyncio.coroutine
     def resolve(self, resolver, graph, loop):
-        yield From(super(IngestTask, self).resolve(resolver, graph, loop))
+        yield from super(IngestTask, self).resolve(resolver, graph, loop)
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image. If it is the standard GPU, don't try to override
         # anything, but otherwise synthesize an image name by mangling the
@@ -98,7 +97,7 @@ class IngestTask(SDPPhysicalTask):
             # allow uppercase in image names).
             mangled = re.sub('[- ]', '_', gpu.name.lower())
             mangled = re.sub('[^a-z0-9_]', '', mangled)
-            image_path = yield From(resolver.image_resolver('katsdpingest_' + mangled, loop))
+            image_path = yield from resolver.image_resolver('katsdpingest_' + mangled, loop)
             self.taskinfo.container.docker.image = image_path
             logger.info('Develop mode: using %s for ingest', image_path)
 

@@ -4,10 +4,11 @@ import time
 import threading
 import contextlib
 import concurrent.futures
-import unittest2 as unittest
+import unittest
 import mock
 import json
 import itertools
+import asyncio
 
 from addict import Dict
 from katcp.testutils import BlockingTestClient
@@ -15,8 +16,6 @@ from katcp import Message
 import tornado.concurrent
 import tornado.gen
 from tornado.platform.asyncio import AsyncIOLoop
-import trollius
-from trollius import From
 import katcp
 import redis
 import pymesos
@@ -469,7 +468,7 @@ class TestSDPController(unittest.TestCase):
         self.addCleanup(self.client.join)
         self.addCleanup(self.client.stop)
         self.loop = self.thread.loop
-        master_and_slaves_future = trollius.Future(loop=self.loop)
+        master_and_slaves_future = asyncio.Future(loop=self.loop)
         master_and_slaves_future.set_result(('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
         self.sched.get_master_and_slaves.return_value = master_and_slaves_future
         # Dict mapping task name to Mesos task status string
@@ -477,7 +476,7 @@ class TestSDPController(unittest.TestCase):
         # Set of katcp requests to return failures for
         self.fail_requests = set()
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _launch(self, graph, resolver, nodes=None):
         """Mock implementation of Scheduler.launch."""
         if nodes is None:
@@ -510,7 +509,7 @@ class TestSDPController(unittest.TestCase):
         order_graph = scheduler.subgraph(graph, scheduler.DEPENDS_RESOLVE, nodes)
         for node in reversed(list(networkx.topological_sort(order_graph))):
             if node.state < scheduler.TaskState.RUNNING:
-                yield From(node.resolve(resolver, graph, self.loop))
+                yield from node.resolve(resolver, graph, self.loop)
                 if node.logical_node.name in self.fail_launches:
                     node.set_state(scheduler.TaskState.DEAD)
                     # This may need to be fleshed out if sdp_controller looks
@@ -521,9 +520,9 @@ class TestSDPController(unittest.TestCase):
         futures = []
         for node in nodes:
             futures.append(node.ready_event.wait())
-        yield From(trollius.gather(*futures, loop=self.loop))
+        yield from asyncio.gather(*futures, loop=self.loop)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _kill(self, graph, nodes=None, **kwargs):
         """Mock implementation of Scheduler.kill."""
         if nodes is not None:
@@ -874,13 +873,13 @@ class TestSDPController(unittest.TestCase):
 
     def _async_deconfigure_on_exit(self):
         """Call deconfigure_on_exit from the IOLoop"""
-        @trollius.coroutine
+        @asyncio.coroutine
         def shutdown(future):
-            yield From(self.controller.deconfigure_on_exit())
+            yield from self.controller.deconfigure_on_exit()
             future.set_result(None)
         deconfigured_future = concurrent.futures.Future()
         self.controller.loop.call_soon_threadsafe(
-            trollius.ensure_future, shutdown(deconfigured_future), self.controller.loop)
+            asyncio.ensure_future, shutdown(deconfigured_future), self.controller.loop)
         deconfigured_future.result()
 
     def test_deconfigure_on_exit(self):
@@ -992,7 +991,7 @@ class TestSDPController(unittest.TestCase):
 
     def test_sdp_shutdown_slaves_error(self):
         """Test sdp-shutdown when get_master_and_slaves fails"""
-        future = trollius.Future(loop=self.loop)
+        future = asyncio.Future(loop=self.loop)
         future.set_exception(requests.exceptions.Timeout())
         self.sched.get_master_and_slaves.return_value = future
         self.client.assert_request_fails('sdp-shutdown')

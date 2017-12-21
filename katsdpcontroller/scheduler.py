@@ -1,6 +1,6 @@
 """
 Mesos-based scheduler for launching collections of inter-dependent tasks. It
-uses trollius for asynchronous execution. It is **not** thread-safe.
+uses asyncio for asynchronous execution. It is **not** thread-safe.
 
 Graphs
 ------
@@ -127,8 +127,6 @@ changing resources or attributes and restarting.
 .. _recovery: http://mesos.apache.org/documentation/latest/agent-recovery/
 """
 
-
-from __future__ import print_function, division, absolute_import
 import os.path
 import logging
 import json
@@ -140,6 +138,7 @@ import contextlib
 import copy
 from collections import namedtuple, deque
 from enum import Enum
+import asyncio
 
 import pkg_resources
 import ipaddress
@@ -152,9 +151,6 @@ import jsonschema
 from decorator import decorator
 from addict import Dict
 import pymesos
-
-import trollius
-from trollius import From, Return
 
 import tornado.web
 import tornado.netutil
@@ -316,7 +312,7 @@ class OrderedEnum(Enum):
         return NotImplemented
 
 
-@trollius.coroutine
+@asyncio.coroutine
 def poll_ports(host, ports, loop):
     """Waits until a set of TCP ports are accepting connections on a host.
 
@@ -331,7 +327,7 @@ def poll_ports(host, ports, loop):
         Hostname or IP address
     ports : list
         Port numbers to connect to
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         The event loop used for socket operations
 
     Raises
@@ -344,14 +340,14 @@ def poll_ports(host, ports, loop):
     # indefinitely and higher level timeouts will be needed
     while True:
         try:
-            addrs = yield From(loop.getaddrinfo(
+            addrs = yield from (loop.getaddrinfo(
                 host=host, port=None,
                 type=socket.SOCK_STREAM,
                 proto=socket.IPPROTO_TCP,
                 flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
         except socket.gaierror as error:
             logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error)
-            yield From(trollius.sleep(5, loop=loop))
+            yield from asyncio.sleep(5, loop=loop)
         else:
             break
 
@@ -364,10 +360,10 @@ def poll_ports(host, ports, loop):
             with contextlib.closing(sock):
                 sock.setblocking(False)
                 try:
-                    yield From(loop.sock_connect(sock, (sockaddr[0], port)))
+                    yield from loop.sock_connect(sock, (sockaddr[0], port))
                 except OSError as error:
                     logger.debug('Port %d on %s not ready: %s', port, host, error)
-                    yield From(trollius.sleep(1, loop=loop))
+                    yield from asyncio.sleep(1, loop=loop)
                 else:
                     break
         logger.debug('Port %d on %s ready', port, host)
@@ -575,12 +571,12 @@ class ImageResolver(object):
     def override(self, name, path):
         self._overrides[name] = path
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def __call__(self, name, loop):
         if name in self._overrides:
-            raise Return(self._overrides[name])
+            return self._overrides[name]
         elif name in self._cache:
-            raise Return(self._cache[name])
+            return self._cache[name]
 
         orig_name = name
         colon = name.rfind(':')
@@ -627,7 +623,7 @@ class ImageResolver(object):
                     if response is not None:
                         response.close()
 
-            digest = yield From(loop.run_in_executor(None, do_request))
+            digest = yield from loop.run_in_executor(None, do_request)
             resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
         else:
             resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
@@ -640,7 +636,7 @@ class ImageResolver(object):
         else:
             logger.debug('ImageResolver resolved %s to %s', name, resolved)
             self._cache[name] = resolved
-        raise Return(resolved)
+        return resolved
 
 
 class ImageResolverFactory(object):
@@ -1034,12 +1030,9 @@ class AgentInterface(ResourceCollector):
             setattr(self, r, 0.0)
 
 
-def _decode_json_base64(text):
-    """Decodes a object that has been encoded with JSON then url-safe base64.
-    It gets a bit complicated because the text is unicode, but base64 expects
-    bytes (in Python 2; Python 3 allows bytes), and returns bytes, and JSON
-    decode expects text."""
-    json_bytes = base64.urlsafe_b64decode(text.encode('us-ascii'))
+def _decode_json_base64(value):
+    """Decodes a object that has been encoded with JSON then url-safe base64."""
+    json_bytes = base64.urlsafe_b64decode(value)
     return json.loads(json_bytes.decode('utf-8'))
 
 
@@ -1346,14 +1339,14 @@ class PhysicalNode(object):
     ----------
     logical_node : :class:`LogicalNode`
         The logical node from which this physical node is constructed
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         The event loop used for constructing futures etc
 
     Attributes
     ----------
     logical_node : :class:`LogicalNode`
         The logical node passed to the constructor
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         The event loop used for constructing futures etc
     host : str
         Host on which this node is operating (if any).
@@ -1362,17 +1355,17 @@ class PhysicalNode(object):
     state : :class:`TaskState`
         The current state of the task (see :class:`TaskState`). Do not
         modify this directly; use :meth:`set_state` instead.
-    ready_event : :class:`trollius.Event`
+    ready_event : :class:`asyncio.Event`
         An event that becomes set once the task reaches either
         :class:`~TaskState.READY` or :class:`~TaskState.DEAD`. It is never
         unset.
-    dead_event : :class:`trollius.Event`
+    dead_event : :class:`asyncio.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
-    _ready_waiter : :class:`trollius.Task`
+    _ready_waiter : :class:`asyncio.Task`
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
     """
@@ -1386,12 +1379,12 @@ class PhysicalNode(object):
             pass
         self.ports = {}
         self.state = TaskState.NOT_READY
-        self.ready_event = trollius.Event(loop=loop)
-        self.dead_event = trollius.Event(loop=loop)
+        self.ready_event = asyncio.Event(loop=loop)
+        self.dead_event = asyncio.Event(loop=loop)
         self.loop = loop
         self._ready_waiter = None
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def resolve(self, resolver, graph, loop):
         """Make final preparations immediately before starting.
 
@@ -1401,7 +1394,7 @@ class PhysicalNode(object):
             Resolver for images etc.
         graph : :class:`networkx.MultiDiGraph`
             Physical graph containing the task
-        loop : :class:`trollius.BaseEventLoop`
+        loop : :class:`asyncio.BaseEventLoop`
             Current event loop
         """
         self.depends_ready = []
@@ -1409,7 +1402,7 @@ class PhysicalNode(object):
             if attr.get(DEPENDS_READY):
                 self.depends_ready.append(trg)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def wait_ready(self):
         """Wait for the task to be ready for dependent tasks to communicate
         with, by polling the ports and waiting for dependent tasks. This method
@@ -1417,13 +1410,13 @@ class PhysicalNode(object):
         cancellation-safe.
         """
         for dep in self.depends_ready:
-            yield From(dep.ready_event.wait())
+            yield from dep.ready_event.wait()
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
             wait_ports = list(six.itervalues(self.ports))
         if wait_ports:
-            yield From(poll_ports(self.host, wait_ports, self.loop))
+            yield from poll_ports(self.host, wait_ports, self.loop)
 
     def _ready_callback(self, future):
         """This callback is called when the waiter is either finished or
@@ -1437,7 +1430,7 @@ class PhysicalNode(object):
             future.result()  # throw the exception, if any
             if self.state < TaskState.READY:
                 self.set_state(TaskState.READY)
-        except trollius.CancelledError:
+        except asyncio.CancelledError:
             pass
         except Exception:
             logger.error('exception while waiting for task %s to be ready', self.name,
@@ -1467,7 +1460,7 @@ class PhysicalNode(object):
         elif state == TaskState.READY:
             self.ready_event.set()
         elif state == TaskState.RUNNING and self._ready_waiter is None:
-            self._ready_waiter = trollius.async(self.wait_ready(), loop=self.loop)
+            self._ready_waiter = asyncio.ensure_future(self.wait_ready(), loop=self.loop)
             self._ready_waiter.add_done_callback(self._ready_callback)
         if state > TaskState.READY and self._ready_waiter is not None:
             self._ready_waiter.cancel()
@@ -1518,7 +1511,7 @@ class PhysicalTask(PhysicalNode):
     ----------
     logical_task : :class:`LogicalTask`
         Logical task forming the template for this physical task
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         The event loop used for constructing futures etc
 
     Attributes
@@ -1594,7 +1587,7 @@ class PhysicalTask(PhysicalNode):
                     d[name] = value
             setattr(self, r, d)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def resolve(self, resolver, graph, loop):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
         At this point all dependencies are guaranteed to have resources allocated.
@@ -1605,10 +1598,10 @@ class PhysicalTask(PhysicalNode):
             Resolver to allocate resources like task IDs
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
-        loop : :class:`trollius.BaseEventLoop`
+        loop : :class:`asyncio.BaseEventLoop`
             Current event loop
         """
-        yield From(super(PhysicalTask, self).resolve(resolver, graph, loop))
+        yield from super(PhysicalTask, self).resolve(resolver, graph, loop)
         for src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
@@ -1648,7 +1641,7 @@ class PhysicalTask(PhysicalNode):
             taskinfo.command.arguments = command[1:]
         taskinfo.command.shell = False
         taskinfo.container = copy.deepcopy(self.logical_node.container)
-        image_path = yield From(resolver.image_resolver(self.logical_node.image, loop))
+        image_path = yield from resolver.image_resolver(self.logical_node.image, loop)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
@@ -1781,7 +1774,7 @@ def instantiate(logical_graph, loop):
     ----------
     logical_graph : :class:`networkx.MultiDiGraph`
         Logical graph to instantiate
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         Event loop used to create futures
     """
     # Create physical nodes
@@ -1802,7 +1795,7 @@ class _LaunchGroup(object):
         List of :class:`PhysicalNode`s to launch
     resolver : :class:`Resolver`
         Resolver which will be used to launch the nodes
-    started_event : :class:`trollius.Event`
+    started_event : :class:`asyncio.Event`
         An event that is marked ready when the launch group has been removed
         from the pending list (either because the tasks were launched or
         because the launch failed in some way).
@@ -1811,7 +1804,7 @@ class _LaunchGroup(object):
         self.nodes = nodes
         self.graph = graph
         self.resolver = resolver
-        self.started_event = trollius.Event(loop=loop)
+        self.started_event = asyncio.Event(loop=loop)
 
 @decorator
 def run_in_event_loop(func, *args, **kw):
@@ -1889,7 +1882,7 @@ class Scheduler(pymesos.Scheduler):
 
     Parameters
     ----------
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         Event loop
     ioloop : :class:`tornado.platform.asyncio.BaseAsyncIOLoop`
         Event loop for running the Tornado HTTP server (must wrap `loop`)
@@ -1916,7 +1909,7 @@ class Scheduler(pymesos.Scheduler):
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         #: set when it's time to retry a launch
-        self._retry_launch = trollius.Event(loop=self._loop)
+        self._retry_launch = asyncio.Event(loop=self._loop)
         self._pending = deque()     #: node groups for which we do not yet have resources
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
@@ -1954,7 +1947,7 @@ class Scheduler(pymesos.Scheduler):
         if isinstance(node, LogicalTask):
             return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
         else:
-            return (node.name,)
+            return (0, 0, 0, 0, node.name)
 
     def _clear_offers(self):
         for offers in six.itervalues(self._offers):
@@ -2142,7 +2135,7 @@ class Scheduler(pymesos.Scheduler):
         # Not a simple error e.g. due to packing problems
         raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _launch_group(self, group):
         try:
             empty = not self._pending
@@ -2152,7 +2145,7 @@ class Scheduler(pymesos.Scheduler):
                 self._driver.reviveOffers()
             else:
                 # Wait for the previous entry in the queue to be done
-                yield From(self._pending[-2].started_event.wait())
+                yield from self._pending[-2].started_event.wait()
             assert self._pending[0] is group
 
             deadline = self._loop.time() + self.resources_timeout
@@ -2167,15 +2160,15 @@ class Scheduler(pymesos.Scheduler):
                 futures = [node.dead_event.wait() for node in nodes]
                 futures.append(self._retry_launch.wait())
                 # Make sure these are real futures, not coroutines
-                futures = [trollius.ensure_future(future, loop=self._loop)
+                futures = [asyncio.ensure_future(future, loop=self._loop)
                            for future in futures]
-                done_futures, pending_futures = yield From(trollius.wait(
+                done_futures, pending_futures = yield from (asyncio.wait(
                     futures, loop=self._loop, timeout=remaining,
-                    return_when=trollius.FIRST_COMPLETED))
+                    return_when=asyncio.FIRST_COMPLETED))
                 for future in pending_futures:
                     future.cancel()
                 if not done_futures:
-                    # We hit the timeout (trollius.wait does not throw TimeoutError)
+                    # We hit the timeout (asyncio.wait does not throw TimeoutError)
                     raise last_insufficient
                 self._retry_launch.clear()
                 try:
@@ -2228,7 +2221,7 @@ class Scheduler(pymesos.Scheduler):
                     for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
                                                                           key=lambda x: x.name):
                         logger.debug('Resolving %s', node.name)
-                        yield From(node.resolve(group.resolver, group.graph, self._loop))
+                        yield from node.resolve(group.resolver, group.graph, self._loop)
                     # Launch the tasks
                     new_min_ports = {}
                     taskinfos = {agent: [] for agent in agents}
@@ -2262,7 +2255,7 @@ class Scheduler(pymesos.Scheduler):
 
         # Note: don't use "nodes" here: we have to wait for everything to start
         ready_futures = [node.ready_event.wait() for node in group.nodes]
-        yield From(trollius.gather(*ready_futures, loop=self._loop))
+        yield from asyncio.gather(*ready_futures, loop=self._loop)
 
     @classmethod
     def depends_resources(cls, data):
@@ -2274,7 +2267,7 @@ class Scheduler(pymesos.Scheduler):
         keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
         return any(data.get(key) for key in keys)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def launch(self, graph, resolver, nodes=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
         a coroutine that returns only once the nodes are ready.
@@ -2283,7 +2276,7 @@ class Scheduler(pymesos.Scheduler):
         :meth:`launch`. They will not be re-launched, but this call will wait
         until they are ready.
 
-        It is safe to run this coroutine as a trollius task and cancel it.
+        It is safe to run this coroutine as a asyncio task and cancel it.
         However, some of the nodes may have been started already. If the
         launch is cancelled, it is recommended to kill the nodes to reach a
         known state.
@@ -2314,7 +2307,7 @@ class Scheduler(pymesos.Scheduler):
 
         Raises
         ------
-        trollius.InvalidStateError
+        asyncio.InvalidStateError
             If :meth:`close` has been called.
         InsufficientResourcesError
             If, once a launch request reached the head of the queue, no
@@ -2331,7 +2324,7 @@ class Scheduler(pymesos.Scheduler):
             :const:`TaskState.NOT_READY`.
         """
         if self._closing:
-            raise trollius.InvalidStateError('Cannot launch tasks while shutting down')
+            raise asyncio.InvalidStateError('Cannot launch tasks while shutting down')
         if nodes is None:
             nodes = graph.nodes()
         # Create a startup schedule. The nodes are partitioned into groups that can
@@ -2357,7 +2350,7 @@ class Scheduler(pymesos.Scheduler):
             node.state = TaskState.STARTING
         pending = _LaunchGroup(graph, remaining, resolver, self._loop)
         try:
-            yield From(self._launch_group(pending))
+            yield from self._launch_group(pending)
         except Exception:
             logger.debug('Exception in launching group', exc_info=True)
             # Could be either an InsufficientResourcesError from
@@ -2368,7 +2361,7 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.NOT_READY)
             raise
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
         from any state. Dependencies specified with `depends_kill` will be
@@ -2393,29 +2386,29 @@ class Scheduler(pymesos.Scheduler):
         CycleError
             If there is a cyclic dependency within the set of nodes to kill.
         """
-        @trollius.coroutine
+        @asyncio.coroutine
         def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
                 node.set_state(TaskState.DEAD)
             elif node.state <= TaskState.KILLING:
                 for src in graph.predecessors(node):
-                    yield From(src.dead_event.wait())
+                    yield from src.dead_event.wait()
                 # Re-check state because it might have changed while waiting
                 if node.state <= TaskState.KILLING:
                     logger.debug('Killing %s', node.name)
                     node.kill(self._driver, **kwargs)
                     node.set_state(TaskState.KILLING)
-            yield From(node.dead_event.wait())
+            yield from node.dead_event.wait()
 
         kill_graph = subgraph(graph, DEPENDS_KILL, nodes)
         if not networkx.is_directed_acyclic_graph(kill_graph):
             raise CycleError('cycle between depends_kill dependencies')
         futures = []
         for node in kill_graph:
-            futures.append(trollius.async(kill_one(node, kill_graph), loop=self._loop))
-        yield From(trollius.gather(*futures, loop=self._loop))
+            futures.append(asyncio.ensure_future(kill_one(node, kill_graph), loop=self._loop))
+        yield from asyncio.gather(*futures, loop=self._loop)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def close(self):
         """Shut down the scheduler. This is a coroutine that kills any graphs
         with running tasks or pending launches, and joins the driver thread. It
@@ -2438,13 +2431,16 @@ class Scheduler(pymesos.Scheduler):
         for group in self._pending:
             graphs.add(group.graph)
         for graph in graphs:
-            yield From(self.kill(graph))
+            yield from self.kill(graph)
         if self._pending:
-            yield From(self._pending[-1].started_event.wait())
+            yield from self._pending[-1].started_event.wait()
         assert not self._pending
         self._driver.stop()
-        status = yield From(self._loop.run_in_executor(None, self._driver.join))
-        raise Return(status)
+        # If self._driver is a mock, then asyncio incorrect complains about passing
+        # self._driver.join directly, due to
+        # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
+        status = yield from self._loop.run_in_executor(None, lambda: self._driver.join())
+        return status
 
     def _get_master_and_slaves(self, master, timeout):
         """Implementation of :meth:`get_master_slaves`, which is run on a separate
@@ -2460,7 +2456,7 @@ class Scheduler(pymesos.Scheduler):
         except (KeyError, TypeError) as error:
             six.raise_from(ValueError('Malformed response'), error)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def get_master_and_slaves(self, timeout=None):
         """Obtain a list of slave hostnames from the master.
 
@@ -2492,9 +2488,9 @@ class Scheduler(pymesos.Scheduler):
         master = self._driver.master
         if master is None:
             raise ValueError('No master is set')
-        result = yield From(self._loop.run_in_executor(
-            None, self._get_master_and_slaves, master, timeout))
-        raise Return(result)
+        result = yield from self._loop.run_in_executor(
+            None, self._get_master_and_slaves, master, timeout)
+        return result
 
     def get_task(self, task_id, return_graph=False):
         try:

@@ -1,7 +1,5 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
-from __future__ import print_function, division, absolute_import, unicode_literals
-
 import jsonschema
 from nose.tools import assert_equal, assert_in, assert_raises
 

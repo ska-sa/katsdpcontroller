@@ -1,4 +1,3 @@
-from __future__ import print_function, division, absolute_import
 import json
 import base64
 import socket
@@ -6,7 +5,7 @@ import contextlib
 import logging
 import uuid
 import threading
-import BaseHTTPServer
+import http.server
 import mock
 import requests_mock
 from nose.tools import *
@@ -15,29 +14,25 @@ from katsdpcontroller.scheduler import TaskState
 import ipaddress
 import six
 import requests
-import trollius
+import asyncio
 import tornado.platform.asyncio
 import tornado.httpclient
 from katsdpservices.asyncio import to_tornado_future
 import networkx
 import pymesos
 from addict import Dict
-from trollius import From, Return
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import unittest
 
 
 def run_with_event_loop(func):
     """Decorator to mark a function as a coroutine. When the wrapper is called,
     it creates an event loop and runs the function on it.
     """
-    func = trollius.coroutine(func)
+    func = asyncio.coroutine(func)
 
     @six.wraps(func)
     def wrapper(*args, **kwargs):
-        loop = trollius.new_event_loop()
+        loop = asyncio.new_event_loop()
         with contextlib.closing(loop):
             args2 = args + (loop,)
             loop.run_until_complete(func(*args2, **kwargs))
@@ -48,7 +43,7 @@ def run_with_self_event_loop(func):
     """Like :meth:`run_with_event_loop`, but instead of creating an event loop,
     it uses one provided by the containing object.
     """
-    func = trollius.coroutine(func)
+    func = asyncio.coroutine(func)
 
     @six.wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -60,7 +55,7 @@ def defer(depth=50, loop=None):
     """Returns a future which is signalled in the very near future.
 
     Specifically, it tries to wait until the event loop is otherwise idle. It
-    does that by using :meth:`trollius.BaseEventLoop.call_soon` to defer
+    does that by using :meth:`asyncio.BaseEventLoop.call_soon` to defer
     completing the future, and does this `depth` times.
     """
     def callback(future, depth):
@@ -69,7 +64,7 @@ def defer(depth=50, loop=None):
                 future.set_result(None)
         else:
             loop.call_soon(callback, future, depth - 1)
-    future = trollius.Future(loop=loop)
+    future = asyncio.Future(loop=loop)
     loop.call_soon(callback, future, depth - 1)
     return future
 
@@ -196,28 +191,30 @@ class TestPollPorts(object):
 
     @run_with_event_loop
     def test_normal(self, loop):
-        future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
+                                       loop=loop)
         # Sleep for while, give poll_ports time to poll a few times
-        yield From(trollius.sleep(1, loop=loop))
+        yield from asyncio.sleep(1, loop=loop)
         assert_false(future.done())
         self.sock.listen(1)
-        yield From(trollius.wait_for(future, timeout=5, loop=loop))
+        yield from asyncio.wait_for(future, timeout=5, loop=loop)
 
     @run_with_event_loop
     def test_cancel(self, loop):
         """poll_ports must be able to be cancelled gracefully"""
-        future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
-        yield From(trollius.sleep(0.2, loop=loop))
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
+                                       loop=loop)
+        yield from asyncio.sleep(0.2, loop=loop)
         future.cancel()
-        with assert_raises(trollius.CancelledError):
-            yield From(future)
+        with assert_raises(asyncio.CancelledError):
+            yield from future
 
     @run_with_event_loop
     def test_temporary_dns_failure(self, loop):
         """Test poll ports against a temporary DNS failure."""
         with mock.patch.object(loop, 'getaddrinfo', autospec=True) as getaddrinfo:
             test_address = socket.getaddrinfo('127.0.0.1', self.port)
-            legit_future = trollius.Future(loop=loop)
+            legit_future = asyncio.Future(loop=loop)
             legit_future.set_result(test_address)
              # create a legitimate return future for getaddrinfo
 
@@ -225,11 +222,12 @@ class TestPollPorts(object):
              # sequential calls to getaddrinfo produce failure and success
 
             self.sock.listen(1)
-            future = trollius.async(scheduler.poll_ports('127.0.0.1', [self.port], loop), loop=loop)
-            yield From(trollius.sleep(1, loop=loop))
+            future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
+                                           loop=loop)
+            yield from asyncio.sleep(1, loop=loop)
             assert_false(future.done())
              # temporary DNS failure
-            yield From(trollius.sleep(6, loop=loop))
+            yield from asyncio.sleep(6, loop=loop)
              # wait for retry loop (currently 5s)
             assert_true(future.done())
 
@@ -279,18 +277,18 @@ class TestImageResolver(object):
         """Test the base case"""
         resolver = scheduler.ImageResolver()
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('sdp/test1:latest', (yield From(resolver('test1', loop))))
-        assert_equal('sdp/test1:tagged', (yield From(resolver('test1:tagged', loop))))
-        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
+        assert_equal('sdp/test1:latest', (yield from resolver('test1', loop)))
+        assert_equal('sdp/test1:tagged', (yield from resolver('test1:tagged', loop)))
+        assert_equal('my-registry:5000/bar:custom', (yield from(resolver('foo', loop))))
 
     @run_with_event_loop
     def test_private_registry(self, loop):
         """Test with a private registry"""
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:latest', (yield From(resolver('test1', loop))))
-        assert_equal('my-registry:5000/test1:tagged', (yield From(resolver('test1:tagged', loop))))
-        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
+        assert_equal('my-registry:5000/test1:latest', (yield from resolver('test1', loop)))
+        assert_equal('my-registry:5000/test1:tagged', (yield from resolver('test1:tagged', loop)))
+        assert_equal('my-registry:5000/bar:custom', (yield from(resolver('foo', loop))))
 
     @mock.patch('docker.auth.load_config', autospec=True)
     @run_with_event_loop
@@ -314,7 +312,8 @@ class TestImageResolver(object):
             rmock.head(
                 'https://registry.invalid:5000/v2/myimage/manifests/latest',
                 request_headers={
-                    'Authorization': 'Basic ' + base64.urlsafe_b64encode('myuser:mypassword'),
+                    'Authorization': 'Basic ' \
+                    + base64.urlsafe_b64encode(b'myuser:mypassword').decode('ascii'),
                     'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
                 },
                 headers={
@@ -328,44 +327,44 @@ class TestImageResolver(object):
                 })
             # This format isn't documented, but inferred from examining the real value
             load_config_mock.return_value = {
-                u'registry.invalid:5000' : {
+                'registry.invalid:5000': {
                     'email': None,
-                    'username': u'myuser',
-                    'password': u'mypassword',
-                    'serveraddress': u'registry.invalid:5000'
+                    'username': 'myuser',
+                    'password': 'mypassword',
+                    'serveraddress': 'registry.invalid:5000'
                 }
             }
             resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
-            image = yield From(resolver('myimage', loop))
+            image = yield from resolver('myimage', loop)
         assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
-    @mock.patch('__builtin__.open', autospec=file)
+    @mock.patch('builtins.open', autospec=open)
     @run_with_event_loop
     def test_tag_file(self, open_mock, loop):
         """Test with a tag file"""
-        open_mock.return_value.__enter__.return_value.read.return_value = b'tag1\n'
+        open_mock.return_value.__enter__.return_value.read.return_value = 'tag1\n'
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
                                            tag_file='tag_file', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         open_mock.assert_called_once_with('tag_file', 'r')
-        assert_equal('my-registry:5000/test1:tag1', (yield From(resolver('test1', loop))))
-        assert_equal('my-registry:5000/test1:tagged', (yield From(resolver('test1:tagged', loop))))
-        assert_equal('my-registry:5000/bar:custom', (yield From(resolver('foo', loop))))
+        assert_equal('my-registry:5000/test1:tag1', (yield from resolver('test1', loop)))
+        assert_equal('my-registry:5000/test1:tagged', (yield from resolver('test1:tagged', loop)))
+        assert_equal('my-registry:5000/bar:custom', (yield from resolver('foo', loop)))
 
-    @mock.patch('__builtin__.open', autospec=file)
+    @mock.patch('builtins.open', autospec=open)
     def test_bad_tag_file(self, open_mock):
         """A ValueError is raised if the tag file contains illegal content"""
-        open_mock.return_value.__enter__.return_value.read.return_value = b'not a good :tag\n'
+        open_mock.return_value.__enter__.return_value.read.return_value = 'not a good :tag\n'
         with assert_raises(ValueError):
             scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
 
-    @mock.patch('__builtin__.open', autospec=file)
+    @mock.patch('builtins.open', autospec=open)
     @run_with_event_loop
     def test_tag(self, open_mock, loop):
         """Test with an explicit tag"""
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
                                            tag_file='tag_file', tag='mytag', use_digests=False)
-        assert_equal('my-registry:5000/test1:mytag', (yield From(resolver('test1', loop))))
+        assert_equal('my-registry:5000/test1:mytag', (yield from resolver('test1', loop)))
         open_mock.assert_not_called()
 
 
@@ -413,7 +412,7 @@ def _make_text_attr(name, value):
 
 
 def _make_json_attr(name, value):
-    return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value)))
+    return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode('utf-8')))
 
 
 def _make_offer(framework_id, agent_id, host, resources, attrs=()):
@@ -452,7 +451,7 @@ class TestAgent(unittest.TestCase):
                 'numa_node': 1, 'infiniband_devices': ['/dev/infiniband/foo']}])
         self.if_attr_bad_json = _make_text_attr(
             'katsdpcontroller.interfaces',
-            base64.urlsafe_b64encode('{not valid json'))
+            base64.urlsafe_b64encode(b'{not valid json'))
         self.if_attr_bad_schema = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth1'}])
@@ -509,7 +508,7 @@ class TestAgent(unittest.TestCase):
         assert_equal(1, len(agent.interfaces))
         assert_equal('eth0', agent.interfaces[0].name)
         assert_equal('net0', agent.interfaces[0].network)
-        assert_equal(ipaddress.IPv4Address(u'192.168.254.254'), agent.interfaces[0].ipv4_address)
+        assert_equal(ipaddress.IPv4Address('192.168.254.254'), agent.interfaces[0].ipv4_address)
         assert_equal(1, agent.interfaces[0].numa_node)
         assert_equal(11e8, agent.interfaces[0].bandwidth_in)
         assert_equal(12e8, agent.interfaces[0].bandwidth_out)
@@ -822,11 +821,11 @@ class TestPhysicalTask(object):
         assert_is(self.allocation, physical_task.allocation)
         assert_in('net0', physical_task.interfaces)
         assert_equal('eth0', physical_task.interfaces['net0'].name)
-        assert_equal(ipaddress.IPv4Address(u'192.168.1.1'),
+        assert_equal(ipaddress.IPv4Address('192.168.1.1'),
                      physical_task.interfaces['net0'].ipv4_address)
         assert_in('net1', physical_task.interfaces)
         assert_equal('eth1', physical_task.interfaces['net1'].name)
-        assert_equal(ipaddress.IPv4Address(u'192.168.2.1'),
+        assert_equal(ipaddress.IPv4Address('192.168.2.1'),
                      physical_task.interfaces['net1'].ipv4_address)
         assert_equal({}, physical_task.endpoints)
         assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
@@ -1207,7 +1206,7 @@ class TestScheduler(object):
             self._make_offer({'cpus': 1.5}, 0)
         ]
         self.sched.resourceOffers(self.driver, offers)
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(
             AnyOrderList([
                 mock.call.acceptOffers(AnyOrderList([offers[0].id, offers[2].id]), []),
@@ -1227,7 +1226,7 @@ class TestScheduler(object):
         logical_graph.add_edge(nodes[3], nodes[1], depends_ready=True)
         physical_graph = scheduler.instantiate(logical_graph, self.loop)
         with assert_raises(scheduler.CycleError):
-            yield From(self.sched.launch(physical_graph, self.resolver))
+            yield from self.sched.launch(physical_graph, self.resolver)
 
     @run_with_self_event_loop
     def test_launch_omit_dependency(self):
@@ -1241,16 +1240,16 @@ class TestScheduler(object):
         physical_graph = scheduler.instantiate(logical_graph, self.loop)
         target = [node for node in physical_graph if node.name == 'node1']
         with assert_raises(scheduler.DependencyError):
-            yield From(self.sched.launch(physical_graph, self.resolver, target))
+            yield from self.sched.launch(physical_graph, self.resolver, target)
 
     @run_with_self_event_loop
     def test_launch_closing(self):
-        """Launch raises trollius.InvalidStateError if close has been called"""
-        yield From(self.sched.close())
-        with assert_raises(trollius.InvalidStateError):
+        """Launch raises asyncio.InvalidStateError if close has been called"""
+        yield from self.sched.close()
+        with assert_raises(asyncio.InvalidStateError):
             # Timeout is just to ensure the test won't hang
-            yield From(trollius.wait_for(self.sched.launch(self.physical_graph, self.resolver),
-                                         timeout=1, loop=self.loop))
+            yield from asyncio.wait_for(self.sched.launch(self.physical_graph, self.resolver),
+                                        timeout=1, loop=self.loop)
 
     @run_with_self_event_loop
     def test_launch_serial(self):
@@ -1332,9 +1331,9 @@ class TestScheduler(object):
         expected_taskinfo1.discovery.name = 'node1'
         expected_taskinfo1.discovery.ports.ports = []
 
-        launch = trollius.async(self.sched.launch(
+        launch = asyncio.ensure_future(self.sched.launch(
             self.physical_graph, self.resolver), loop=self.loop)
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         # The tasks must be in state STARTING, but not yet RUNNING because
         # there are no offers.
         for node in self.nodes:
@@ -1346,7 +1345,7 @@ class TestScheduler(object):
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
         self.sched.resourceOffers(self.driver, [offer1])
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal([], self.driver.mock_calls)
         for node in self.nodes:
             assert_equal(TaskState.STARTING, node.state)
@@ -1355,7 +1354,7 @@ class TestScheduler(object):
         # Provide offer suitable for launching node0. At this point all nodes
         # should launch.
         self.sched.resourceOffers(self.driver, [offer0])
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
 
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
@@ -1380,7 +1379,7 @@ class TestScheduler(object):
         # Tell scheduler that node1 is now running. It should go to RUNNING
         # but not READY, because node0 isn't ready yet.
         status = self._status_update(self.task_ids[1], 'TASK_RUNNING')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.RUNNING, self.nodes[1].state)
         assert_equal(status, self.nodes[1].status)
         assert_equal([mock.call.acknowledgeStatusUpdate(status)],
@@ -1392,16 +1391,16 @@ class TestScheduler(object):
         client = tornado.httpclient.AsyncHTTPClient(io_loop=self.ioloop)
         response = client.fetch('http://localhost:{}/tasks/{}/wait_start'.format(
                                 self.sched.http_port, self.task_ids[1]))
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_false(response.done())
 
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = trollius.Future(self.loop)
+            poll_future = asyncio.Future(loop=self.loop)
             poll_ports.return_value = poll_future
             status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
-            yield From(defer(loop=self.loop))
+            yield from defer(loop=self.loop)
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
             assert_equal(status, self.nodes[0].status)
             assert_equal([mock.call.acknowledgeStatusUpdate(status)],
@@ -1412,16 +1411,16 @@ class TestScheduler(object):
         # Make poll_ports ready. Node 0 should now become ready, which will
         # make node 1 ready too.
         poll_future.set_result(None)
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.READY, self.nodes[0].state)
         assert_true(response.done())
         response = response.result()
         assert_equal(200, response.code)
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_true(launch.done())
-        yield From(launch)
+        yield from launch
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _transition_node0(self, target_state, nodes=None, ports=None):
         """Launch the graph and proceed until node0 is in `target_state`.
 
@@ -1431,7 +1430,7 @@ class TestScheduler(object):
 
         Returns
         -------
-        launch, kill : :class:`trollius.Task`
+        launch, kill : :class:`asyncio.Task`
             Asynchronous tasks for launching and killing the graph. If
             `target_state` is not :const:`TaskState.KILLING` or
             :const:`TaskState.DEAD`, then `kill` is ``None``
@@ -1454,77 +1453,77 @@ class TestScheduler(object):
                 'cores': [(0, 8)]
             }, 1, [self.numa_attr])
         ]
-        launch = trollius.async(self.sched.launch(self.physical_graph, self.resolver, nodes),
-                                loop=self.loop)
+        launch = asyncio.ensure_future(self.sched.launch(self.physical_graph, self.resolver, nodes),
+                                       loop=self.loop)
         kill = None
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = trollius.Future(self.loop)
+            poll_future = asyncio.Future(loop=self.loop)
             poll_ports.return_value = poll_future
             if target_state > TaskState.STARTING:
                 self.sched.resourceOffers(self.driver, offers)
-                yield From(defer(loop=self.loop))
+                yield from defer(loop=self.loop)
                 assert_equal(TaskState.STARTED, self.nodes[0].state)
                 task_id = self.nodes[0].taskinfo.task_id.value
                 if target_state > TaskState.STARTED:
                     self._status_update(task_id, 'TASK_RUNNING')
-                    yield From(defer(loop=self.loop))
+                    yield from defer(loop=self.loop)
                     assert_equal(TaskState.RUNNING, self.nodes[0].state)
                     if target_state > TaskState.RUNNING:
                         poll_future.set_result(None)   # Mark ports as ready
-                        yield From(defer(loop=self.loop))
+                        yield from defer(loop=self.loop)
                         assert_equal(TaskState.READY, self.nodes[0].state)
                         if target_state > TaskState.READY:
-                            kill = trollius.async(self.sched.kill(
+                            kill = asyncio.ensure_future(self.sched.kill(
                                 self.physical_graph, nodes), loop=self.loop)
-                            yield From(defer(loop=self.loop))
+                            yield from defer(loop=self.loop)
                             assert_equal(TaskState.KILLING, self.nodes[0].state)
                             if target_state > TaskState.KILLING:
                                 self._status_update(task_id, 'TASK_KILLED')
-                            yield From(defer(loop=self.loop))
+                            yield from defer(loop=self.loop)
         self.driver.reset_mock()
         assert_equal(target_state, self.nodes[0].state)
-        raise Return((launch, kill))
+        return (launch, kill)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _ready_graph(self):
         """Gets the whole graph to READY state"""
-        launch, kill = yield From(self._transition_node0(TaskState.READY))
+        launch, kill = yield from self._transition_node0(TaskState.READY)
         offer = self._make_offer(
             {'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)], 'cores': [(0, 8)]}, 1,
             [_make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])])
         self.sched.resourceOffers(self.driver, [offer])
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_true(launch.done())  # Ensures the next line won't hang the test
-        yield From(launch)
+        yield from launch
         self.driver.reset_mock()
 
     @run_with_self_event_loop
     def test_launch_port_recycle(self):
         """Tests that ports are recycled only when necessary"""
         ports = [(30000, 30002)]
-        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
+        yield from self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
         assert_equal(30000, self.nodes[0].ports['port'])
         # Build a new physical graph
         self._make_physical()
-        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
+        yield from self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
         assert_equal(30001, self.nodes[0].ports['port'])
         # Do it again, check that it cycles back to the start
         self._make_physical()
-        yield From(self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports))
+        yield from self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
         assert_equal(30000, self.nodes[0].ports['port'])
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _test_launch_cancel(self, target_state):
-        launch, kill = yield From(self._transition_node0(target_state))
+        launch, kill = yield from self._transition_node0(target_state)
         assert_false(launch.done())
         # Now cancel and check that nodes go back to NOT_READY if they were
         # in STARTED, otherwise keep their state.
         launch.cancel()
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         if target_state == TaskState.STARTING:
             for node in self.nodes:
                 assert_equal(TaskState.NOT_READY, node.state)
@@ -1534,20 +1533,20 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_launch_cancel_wait_task(self):
         """Test cancelling a launch while waiting for a task to become READY"""
-        yield From(self._test_launch_cancel(TaskState.RUNNING))
+        yield from self._test_launch_cancel(TaskState.RUNNING)
 
     @run_with_self_event_loop
     def test_launch_cancel_wait_resource(self):
         """Test cancelling a launch while waiting for resources"""
-        yield From(self._test_launch_cancel(TaskState.STARTING))
+        yield from self._test_launch_cancel(TaskState.STARTING)
 
     @run_with_self_event_loop
     def test_launch_resources_timeout(self):
         """Test a launch failing due to insufficient resources within the timeout"""
         self.sched.resources_timeout = 0.01
-        launch, kill = yield From(self._transition_node0(TaskState.STARTING))
+        launch, kill = yield from self._transition_node0(TaskState.STARTING)
         with assert_raises(scheduler.InsufficientResourcesError):
-            yield From(launch)
+            yield from launch
         assert_equal(TaskState.NOT_READY, self.nodes[0].state)
         assert_equal(TaskState.NOT_READY, self.nodes[1].state)
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
@@ -1557,11 +1556,11 @@ class TestScheduler(object):
     @run_with_self_event_loop
     def test_offer_rescinded(self):
         """Test offerRescinded"""
-        launch, kill = yield From(self._transition_node0(TaskState.STARTING, [self.nodes[0]]))
+        launch, kill = yield from self._transition_node0(TaskState.STARTING, [self.nodes[0]])
         # Provide an offer that is insufficient
         offer0 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.resourceOffers(self.driver, [offer0])
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         # Rescind the offer
         self.sched.offerRescinded(self.driver, offer0.id)
@@ -1569,91 +1568,91 @@ class TestScheduler(object):
         # original one would have been sufficient.
         offer1 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.resourceOffers(self.driver, [offer1])
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         # Rescind an unknown offer. This can happen if an offer was accepted at
         # the same time as it was rescinded.
         offer2 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.offerRescinded(self.driver, offer2.id)
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal([], self.driver.mock_calls)
         launch.cancel()
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _test_kill_in_state(self, state):
         """Test killing a node while it is in the given state"""
-        launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
-        kill = trollius.async(self.sched.kill(self.physical_graph, [self.nodes[0]]),
-                              loop=self.loop)
-        yield From(defer(loop=self.loop))
+        launch, kill = yield from self._transition_node0(state, [self.nodes[0]])
+        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, [self.nodes[0]]),
+                                     loop=self.loop)
+        yield from defer(loop=self.loop)
         if state > TaskState.STARTING:
             assert_equal(TaskState.KILLING, self.nodes[0].state)
             status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
-            yield From(defer(loop=self.loop))
+            yield from defer(loop=self.loop)
             assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
-        yield From(launch)
-        yield From(kill)
+        yield from launch
+        yield from kill
 
     @run_with_self_event_loop
     def test_kill_while_starting(self):
         """Test killing a node while in state STARTING"""
-        yield From(self._test_kill_in_state(TaskState.STARTING))
+        yield from self._test_kill_in_state(TaskState.STARTING)
 
     @run_with_self_event_loop
     def test_kill_while_started(self):
         """Test killing a node while in state STARTED"""
-        yield From(self._test_kill_in_state(TaskState.STARTED))
+        yield from self._test_kill_in_state(TaskState.STARTED)
 
     @run_with_self_event_loop
     def test_kill_while_running(self):
         """Test killing a node while in state RUNNING"""
-        yield From(self._test_kill_in_state(TaskState.RUNNING))
+        yield from self._test_kill_in_state(TaskState.RUNNING)
 
     @run_with_self_event_loop
     def test_kill_while_ready(self):
         """Test killing a node while in state READY"""
-        yield From(self._test_kill_in_state(TaskState.READY))
+        yield from self._test_kill_in_state(TaskState.READY)
 
     @run_with_self_event_loop
     def test_kill_while_killed(self):
         """Test killing a node while in state KILLING"""
-        yield From(self._test_kill_in_state(TaskState.KILLING))
+        yield from self._test_kill_in_state(TaskState.KILLING)
 
-    @trollius.coroutine
+    @asyncio.coroutine
     def _test_die_in_state(self, state):
         """Test a node dying on its own while it is in the given state"""
-        launch, kill = yield From(self._transition_node0(state, [self.nodes[0]]))
+        launch, kill = yield from self._transition_node0(state, [self.nodes[0]])
         status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_is(status, self.nodes[0].status)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
         assert_true(self.nodes[0].ready_event.is_set())
         assert_true(self.nodes[0].dead_event.is_set())
-        yield From(launch)
+        yield from launch
 
     @run_with_self_event_loop
     def test_die_while_started(self):
         """Test a process dying on its own while in state STARTED"""
-        yield From(self._test_die_in_state(TaskState.STARTED))
+        yield from self._test_die_in_state(TaskState.STARTED)
 
     @run_with_self_event_loop
     def test_die_while_running(self):
         """Test a process dying on its own while in state RUNNING"""
-        yield From(self._test_die_in_state(TaskState.RUNNING))
+        yield from self._test_die_in_state(TaskState.RUNNING)
 
     @run_with_self_event_loop
     def test_die_while_ready(self):
         """Test a process dying on its own while in state READY"""
-        yield From(self._test_die_in_state(TaskState.READY))
+        yield from self._test_die_in_state(TaskState.READY)
 
     @run_with_self_event_loop
     def test_kill_order(self):
         """Kill must respect dependency ordering"""
-        yield From(self._ready_graph())
+        yield from self._ready_graph()
         # Now kill it. node1 must be dead before node0, node2 get killed
-        kill = trollius.async(self.sched.kill(self.physical_graph), loop=self.loop)
-        yield From(defer(loop=self.loop))
+        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph), loop=self.loop)
+        yield from defer(loop=self.loop)
         assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
                      self.driver.mock_calls)
         assert_equal(TaskState.READY, self.nodes[0].state)
@@ -1662,7 +1661,7 @@ class TestScheduler(object):
         self.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
         status = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(AnyOrderList([
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status)]),
@@ -1673,29 +1672,30 @@ class TestScheduler(object):
         assert_false(kill.done())
         # node0 now dies, to finish the cleanup
         self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
         assert_equal(TaskState.DEAD, self.nodes[2].state)
         assert_true(kill.done())
-        yield From(kill)
+        yield from kill
 
     @run_with_self_event_loop
     def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
-        yield From(self._ready_graph())
+        yield from self._ready_graph()
         # Start launching a second graph, but do not give it resources
         physical_graph2 = scheduler.instantiate(self.logical_graph, self.loop)
-        launch = trollius.async(self.sched.launch(physical_graph2, self.resolver), loop=self.loop)
-        yield From(defer(loop=self.loop))
-        close = trollius.async(self.sched.close(), loop=self.loop)
-        yield From(defer(loop=self.loop))
+        launch = asyncio.ensure_future(self.sched.launch(physical_graph2, self.resolver),
+                                       loop=self.loop)
+        yield from defer(loop=self.loop)
+        close = asyncio.ensure_future(self.sched.close(), loop=self.loop)
+        yield from defer(loop=self.loop)
         status1 = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
-        yield From(defer(loop=self.loop))
+        yield from defer(loop=self.loop)
         status0 = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         # defer is insufficient here, because close() uses run_in_executor to
         # join the driver thread. Wait up to 5 seconds for that to happen.
-        yield From(trollius.wait_for(close, 5, loop=self.loop))
+        yield from asyncio.wait_for(close, 5, loop=self.loop)
         for node in self.physical_graph:
             assert_equal(TaskState.DEAD, node.state)
         for node in physical_graph2:
@@ -1717,7 +1717,7 @@ class TestScheduler(object):
             mock.call.join()
             ], self.driver.mock_calls)
         assert_true(launch.done())
-        yield From(launch)
+        yield from launch
 
     @run_with_self_event_loop
     def test_status_unknown_task_id(self):
@@ -1731,7 +1731,7 @@ class TestScheduler(object):
             rmock.get('http://master.invalid:5050/slaves',
                       text=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')
             self.driver.master = 'master.invalid:5050'
-            master, slaves = yield From(self.sched.get_master_and_slaves())
+            master, slaves = yield from self.sched.get_master_and_slaves()
             assert_equal('master.invalid', master)
             assert_equal(AnyOrderList(['192.168.6.198', '192.168.6.188', '192.168.6.206']), slaves)
 
@@ -1740,7 +1740,7 @@ class TestScheduler(object):
         # Guaranteed not to be a valid domain name (RFC2606)
         self.driver.master = 'example.invalid:5050'
         with assert_raises(requests.exceptions.RequestException):
-            yield From(self.sched.get_master_and_slaves())
+            yield from self.sched.get_master_and_slaves()
 
     @run_with_self_event_loop
     def test_get_master_and_slaves_bad_response(self):
@@ -1748,7 +1748,7 @@ class TestScheduler(object):
             rmock.get('http://master.invalid:5050/slaves', text='', status_code=404)
             self.driver.master = 'master.invalid:5050'
             with assert_raises(requests.exceptions.RequestException):
-                yield From(self.sched.get_master_and_slaves())
+                yield from self.sched.get_master_and_slaves()
 
     @run_with_self_event_loop
     def test_get_master_and_slaves_bad_json(self):
@@ -1762,4 +1762,4 @@ class TestScheduler(object):
                 rmock.get('http://master.invalid:5050/slaves', text=response)
                 self.driver.master = 'master.invalid:5050'
                 with assert_raises(ValueError):
-                    yield From(self.sched.get_master_and_slaves())
+                    yield from self.sched.get_master_and_slaves()
