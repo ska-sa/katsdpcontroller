@@ -24,7 +24,7 @@ networkx==2.0
 numpy
 pkginfo
 ply
-prometheus_client==0.0.18
+prometheus_client==0.1.0
 pydotplus==2.0.2
 pymesos==0.2.13
 pyparsing==2.2.0       # for pydotplus
@@ -36,5 +36,6 @@ six
 tornado
 trollius
 websocket-client==0.40.0
-git+ssh://git@github.com/ska-sa/katsdptelstate
-git+ssh://git@github.com/ska-sa/katsdpservices
+git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
+git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
+git+ssh://git@github.com/ska-sa/aiokatcp@client#egg=aiokatcp

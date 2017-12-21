@@ -140,6 +140,7 @@ from collections import namedtuple, deque
 from enum import Enum
 import asyncio
 import urllib
+import functools
 
 import pkg_resources
 import ipaddress
@@ -151,12 +152,9 @@ from decorator import decorator
 from addict import Dict
 import pymesos
 
-import tornado.web
-import tornado.netutil
-import tornado.httpserver
+import aiohttp.web
 
 from katsdptelstate.endpoint import Endpoint
-from katsdpservices.asyncio import to_tornado_future
 
 from . import schemas
 
@@ -311,8 +309,7 @@ class OrderedEnum(Enum):
         return NotImplemented
 
 
-@asyncio.coroutine
-def poll_ports(host, ports, loop):
+async def poll_ports(host, ports, loop):
     """Waits until a set of TCP ports are accepting connections on a host.
 
     It repeatedly tries to connect to each port until a connection is
@@ -339,14 +336,14 @@ def poll_ports(host, ports, loop):
     # indefinitely and higher level timeouts will be needed
     while True:
         try:
-            addrs = yield from (loop.getaddrinfo(
+            addrs = await (loop.getaddrinfo(
                 host=host, port=None,
                 type=socket.SOCK_STREAM,
                 proto=socket.IPPROTO_TCP,
                 flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
         except socket.gaierror as error:
             logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error)
-            yield from asyncio.sleep(5, loop=loop)
+            await asyncio.sleep(5, loop=loop)
         else:
             break
 
@@ -359,10 +356,10 @@ def poll_ports(host, ports, loop):
             with contextlib.closing(sock):
                 sock.setblocking(False)
                 try:
-                    yield from loop.sock_connect(sock, (sockaddr[0], port))
+                    await loop.sock_connect(sock, (sockaddr[0], port))
                 except OSError as error:
                     logger.debug('Port %d on %s not ready: %s', port, host, error)
-                    yield from asyncio.sleep(1, loop=loop)
+                    await asyncio.sleep(1, loop=loop)
                 else:
                     break
         logger.debug('Port %d on %s ready', port, host)
@@ -570,8 +567,7 @@ class ImageResolver(object):
     def override(self, name, path):
         self._overrides[name] = path
 
-    @asyncio.coroutine
-    def __call__(self, name, loop):
+    async def __call__(self, name, loop):
         if name in self._overrides:
             return self._overrides[name]
         elif name in self._cache:
@@ -622,7 +618,7 @@ class ImageResolver(object):
                     if response is not None:
                         response.close()
 
-            digest = yield from loop.run_in_executor(None, do_request)
+            digest = await loop.run_in_executor(None, do_request)
             resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
         else:
             resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
@@ -1383,8 +1379,7 @@ class PhysicalNode(object):
         self.loop = loop
         self._ready_waiter = None
 
-    @asyncio.coroutine
-    def resolve(self, resolver, graph, loop):
+    async def resolve(self, resolver, graph, loop):
         """Make final preparations immediately before starting.
 
         Parameters
@@ -1401,21 +1396,20 @@ class PhysicalNode(object):
             if attr.get(DEPENDS_READY):
                 self.depends_ready.append(trg)
 
-    @asyncio.coroutine
-    def wait_ready(self):
+    async def wait_ready(self):
         """Wait for the task to be ready for dependent tasks to communicate
         with, by polling the ports and waiting for dependent tasks. This method
         may be overloaded to implement other checks, but it must be
         cancellation-safe.
         """
         for dep in self.depends_ready:
-            yield from dep.ready_event.wait()
+            await dep.ready_event.wait()
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
             wait_ports = list(self.ports.values())
         if wait_ports:
-            yield from poll_ports(self.host, wait_ports, self.loop)
+            await poll_ports(self.host, wait_ports, self.loop)
 
     def _ready_callback(self, future):
         """This callback is called when the waiter is either finished or
@@ -1586,8 +1580,7 @@ class PhysicalTask(PhysicalNode):
                     d[name] = value
             setattr(self, r, d)
 
-    @asyncio.coroutine
-    def resolve(self, resolver, graph, loop):
+    async def resolve(self, resolver, graph, loop):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
@@ -1600,7 +1593,7 @@ class PhysicalTask(PhysicalNode):
         loop : :class:`asyncio.BaseEventLoop`
             Current event loop
         """
-        yield from super(PhysicalTask, self).resolve(resolver, graph, loop)
+        await super(PhysicalTask, self).resolve(resolver, graph, loop)
         for src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
@@ -1640,7 +1633,7 @@ class PhysicalTask(PhysicalNode):
             taskinfo.command.arguments = command[1:]
         taskinfo.command.shell = False
         taskinfo.container = copy.deepcopy(self.logical_node.container)
-        image_path = yield from resolver.image_resolver(self.logical_node.image, loop)
+        image_path = await resolver.image_resolver(self.logical_node.image, loop)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
@@ -1810,26 +1803,28 @@ def run_in_event_loop(func, *args, **kw):
     args[0]._loop.call_soon_threadsafe(func, *args, **kw)
 
 
-class WaitStartHandler(tornado.web.RequestHandler):
-    def initialize(self, scheduler, loop):
-        self.scheduler = scheduler
-        self.loop = loop
-
-    @tornado.gen.coroutine
-    def get(self, task_id):
-        self.set_header('Content-Type', 'text/plain; charset="utf-8"')
-        task, graph = self.scheduler.get_task(task_id, return_graph=True)
-        if task is None:
-            self.set_status(requests.codes.NOT_FOUND)
-            self.write('Task ID {} not active\n'.format(task_id))
+async def wait_start_handler(scheduler, request):
+    task_id = request.match_info['id']
+    response_kwargs = dict(content_type='text/plain', charset='utf-8')
+    response = aiohttp.web.Response()
+    task, graph = scheduler.get_task(task_id, return_graph=True)
+    if task is None:
+        return aiohttp.web.Response(
+            status=requests.codes.NOT_FOUND,
+            body='Task ID {} not active\n'.format(task_id),
+            **response_kwargs)
+    else:
+        try:
+            for dep in task.depends_ready:
+                await dep.ready_event.wait()
+        except Exception as error:
+            logger.exception('Exception while waiting for dependencies')
+            return aiohttp.web.Response(
+                status=requests.codes.SERVER_ERROR,
+                body='Exception while waiting for dependencies:\n{}\n'.format(error),
+                **response_kwargs)
         else:
-            try:
-                for dep in task.depends_ready:
-                    yield to_tornado_future(dep.ready_event.wait(), loop=self.loop)
-            except Exception as error:
-                logger.exception('Exception while waiting for dependencies')
-                self.set_status(requests.codes.SERVER_ERROR)
-                self.write('Exception while waiting for dependencies:\n{}\n'.format(error))
+            return aiohttp.web.Response(body='', **response_kwargs)
 
 
 def subgraph(graph, edge_filter, nodes=None):
@@ -1883,8 +1878,6 @@ class Scheduler(pymesos.Scheduler):
     ----------
     loop : :class:`asyncio.BaseEventLoop`
         Event loop
-    ioloop : :class:`tornado.platform.asyncio.BaseAsyncIOLoop`
-        Event loop for running the Tornado HTTP server (must wrap `loop`)
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
@@ -1897,13 +1890,15 @@ class Scheduler(pymesos.Scheduler):
         Time limit for resources to become available one a task is ready to
         launch.
     http_port : int
-        Actual HTTP port used by `http_server`
-    http_server : :class:`tornado.httpserver.HTTPServer`
+        Actual HTTP port used by :attr:`http_server` (after :meth:`start`)
+    http_handler : :class:`aiohttp.web.Server`
+        Web server connection handler (after :meth:`start`)
+    http_url : str
+        Actual URL to use for :attr:`http_server` (after :meth:`start`)
+    http_server : :class:`asyncio.Server`
         Embedded HTTP server
     """
-    def __init__(self, loop, ioloop, http_port, http_url=None):
-        if ioloop.asyncio_loop is not loop:
-            raise ValueError('ioloop does not match loop')
+    def __init__(self, loop, http_port, http_url=None):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
@@ -1916,21 +1911,27 @@ class Scheduler(pymesos.Scheduler):
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
-
-        app = tornado.web.Application(
-            [(r'/tasks/([^/]+)/wait_start', WaitStartHandler, dict(scheduler=self, loop=loop))],
-            static_path=pkg_resources.resource_filename('katsdpcontroller', 'static'))
-        sockets = tornado.netutil.bind_sockets(http_port)
-        self.http_server = tornado.httpserver.HTTPServer(app, io_loop=ioloop)
-        self.http_server.add_sockets(sockets)
-        if not http_port:
-            http_port = sockets[0].getsockname()[1]
+        self.http_server = None
+        self.http_handler = None
         self.http_port = http_port
-        if http_url is None:
+        self.http_url = http_url
+
+    async def start(self):
+        """Start the internal HTTP server running. This must be called before any launches."""
+        if self.http_server:
+            raise RuntimeError('Already started')
+        app = aiohttp.web.Application(loop=self._loop)
+        app.router.add_get('/tasks/{id}/wait_start',
+                           functools.partial(wait_start_handler, self))
+        app.router.add_static('/static',
+                              pkg_resources.resource_filename('katsdpcontroller', 'static'))
+        self.http_handler = app.make_handler()
+        self.http_server = await self._loop.create_server(self.http_handler, '', self.http_port)
+        if not self.http_port:
+            self.http_port = self.http_server.sockets[0].getsockname()[1]
+        if self.http_url is None:
             netloc = '{}:{}'.format(socket.getfqdn(), http_port)
             self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
-        else:
-            self.http_url = http_url
         logger.info('Internal HTTP server at %s', self.http_url)
 
     @classmethod
@@ -2134,8 +2135,7 @@ class Scheduler(pymesos.Scheduler):
         # Not a simple error e.g. due to packing problems
         raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
-    @asyncio.coroutine
-    def _launch_group(self, group):
+    async def _launch_group(self, group):
         try:
             empty = not self._pending
             self._pending.append(group)
@@ -2144,7 +2144,7 @@ class Scheduler(pymesos.Scheduler):
                 self._driver.reviveOffers()
             else:
                 # Wait for the previous entry in the queue to be done
-                yield from self._pending[-2].started_event.wait()
+                await self._pending[-2].started_event.wait()
             assert self._pending[0] is group
 
             deadline = self._loop.time() + self.resources_timeout
@@ -2161,7 +2161,7 @@ class Scheduler(pymesos.Scheduler):
                 # Make sure these are real futures, not coroutines
                 futures = [asyncio.ensure_future(future, loop=self._loop)
                            for future in futures]
-                done_futures, pending_futures = yield from (asyncio.wait(
+                done_futures, pending_futures = await (asyncio.wait(
                     futures, loop=self._loop, timeout=remaining,
                     return_when=asyncio.FIRST_COMPLETED))
                 for future in pending_futures:
@@ -2220,7 +2220,7 @@ class Scheduler(pymesos.Scheduler):
                     for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
                                                                           key=lambda x: x.name):
                         logger.debug('Resolving %s', node.name)
-                        yield from node.resolve(group.resolver, group.graph, self._loop)
+                        await node.resolve(group.resolver, group.graph, self._loop)
                     # Launch the tasks
                     new_min_ports = {}
                     taskinfos = {agent: [] for agent in agents}
@@ -2254,7 +2254,7 @@ class Scheduler(pymesos.Scheduler):
 
         # Note: don't use "nodes" here: we have to wait for everything to start
         ready_futures = [node.ready_event.wait() for node in group.nodes]
-        yield from asyncio.gather(*ready_futures, loop=self._loop)
+        await asyncio.gather(*ready_futures, loop=self._loop)
 
     @classmethod
     def depends_resources(cls, data):
@@ -2266,8 +2266,7 @@ class Scheduler(pymesos.Scheduler):
         keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
         return any(data.get(key) for key in keys)
 
-    @asyncio.coroutine
-    def launch(self, graph, resolver, nodes=None):
+    async def launch(self, graph, resolver, nodes=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
         a coroutine that returns only once the nodes are ready.
 
@@ -2349,7 +2348,7 @@ class Scheduler(pymesos.Scheduler):
             node.state = TaskState.STARTING
         pending = _LaunchGroup(graph, remaining, resolver, self._loop)
         try:
-            yield from self._launch_group(pending)
+            await self._launch_group(pending)
         except Exception:
             logger.debug('Exception in launching group', exc_info=True)
             # Could be either an InsufficientResourcesError from
@@ -2360,8 +2359,7 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.NOT_READY)
             raise
 
-    @asyncio.coroutine
-    def kill(self, graph, nodes=None, **kwargs):
+    async def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
         from any state. Dependencies specified with `depends_kill` will be
         honoured, leaving nodes alive until all nodes that depend on them are
@@ -2385,19 +2383,18 @@ class Scheduler(pymesos.Scheduler):
         CycleError
             If there is a cyclic dependency within the set of nodes to kill.
         """
-        @asyncio.coroutine
-        def kill_one(node, graph):
+        async def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
                 node.set_state(TaskState.DEAD)
             elif node.state <= TaskState.KILLING:
                 for src in graph.predecessors(node):
-                    yield from src.dead_event.wait()
+                    await src.dead_event.wait()
                 # Re-check state because it might have changed while waiting
                 if node.state <= TaskState.KILLING:
                     logger.debug('Killing %s', node.name)
                     node.kill(self._driver, **kwargs)
                     node.set_state(TaskState.KILLING)
-            yield from node.dead_event.wait()
+            await node.dead_event.wait()
 
         kill_graph = subgraph(graph, DEPENDS_KILL, nodes)
         if not networkx.is_directed_acyclic_graph(kill_graph):
@@ -2405,10 +2402,9 @@ class Scheduler(pymesos.Scheduler):
         futures = []
         for node in kill_graph:
             futures.append(asyncio.ensure_future(kill_one(node, kill_graph), loop=self._loop))
-        yield from asyncio.gather(*futures, loop=self._loop)
+        await asyncio.gather(*futures, loop=self._loop)
 
-    @asyncio.coroutine
-    def close(self):
+    async def close(self):
         """Shut down the scheduler. This is a coroutine that kills any graphs
         with running tasks or pending launches, and joins the driver thread. It
         is an error to make any further calls to the scheduler after calling
@@ -2422,7 +2418,10 @@ class Scheduler(pymesos.Scheduler):
         """
         # TODO: do we need to explicitly decline outstanding offers?
         self._closing = True    # Prevents concurrent launches
-        self.http_server.stop()
+        if self.http_server is not None:
+            self.http_server.close()
+            await self.http_handler.shutdown(1)
+            await self.http_server.wait_closed()
         # Find the graphs that are still running
         graphs = set()
         for (task, graph) in self._active.values():
@@ -2430,15 +2429,15 @@ class Scheduler(pymesos.Scheduler):
         for group in self._pending:
             graphs.add(group.graph)
         for graph in graphs:
-            yield from self.kill(graph)
+            await self.kill(graph)
         if self._pending:
-            yield from self._pending[-1].started_event.wait()
+            await self._pending[-1].started_event.wait()
         assert not self._pending
         self._driver.stop()
         # If self._driver is a mock, then asyncio incorrect complains about passing
         # self._driver.join directly, due to
         # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
-        status = yield from self._loop.run_in_executor(None, lambda: self._driver.join())
+        status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
 
     def _get_master_and_slaves(self, master, timeout):
@@ -2455,8 +2454,7 @@ class Scheduler(pymesos.Scheduler):
         except (KeyError, TypeError) as error:
             raise ValueError('Malformed response') from error
 
-    @asyncio.coroutine
-    def get_master_and_slaves(self, timeout=None):
+    async def get_master_and_slaves(self, timeout=None):
         """Obtain a list of slave hostnames from the master.
 
         Parameters
@@ -2487,7 +2485,7 @@ class Scheduler(pymesos.Scheduler):
         master = self._driver.master
         if master is None:
             raise ValueError('No master is set')
-        result = yield from self._loop.run_in_executor(
+        result = await self._loop.run_in_executor(
             None, self._get_master_and_slaves, master, timeout)
         return result
 

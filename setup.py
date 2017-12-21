@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['nose', 'futures', 'requests_mock']
+tests_require = ['nose', 'futures', 'requests_mock', 'asynctest']
 
 setup (
     name = "katsdpcontroller",
@@ -20,6 +20,7 @@ setup (
     install_requires = [
         'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
         'addict!=2.0.*',
+        'aiohttp',
         'decorator',
         'docker',
         'jsonschema',
@@ -28,8 +29,7 @@ setup (
         'pydotplus',
         'netifaces',
         'requests',
-        'katcp',
-        'tornado',
+        'aiokatcp',
         'katsdptelstate',
         'katsdpservices',
         'faulthandler',
