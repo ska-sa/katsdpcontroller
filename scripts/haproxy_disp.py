@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Run haproxy to reverse-proxy signal displays. To use it, run as
@@ -9,7 +9,6 @@ Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get th
 displays from that subarray-product. If they aren't running, haproxy will return a 503 error.
 """
 
-from __future__ import print_function, division, absolute_import
 import re
 import argparse
 import signal

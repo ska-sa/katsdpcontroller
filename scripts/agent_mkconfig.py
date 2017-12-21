@@ -1,10 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Sets up an agent with resources and attributes for the katsdpcontroller
 scheduler. See :mod:`katsdpcontroller.scheduler` for details.
 """
 
-from __future__ import print_function, division, absolute_import
 import argparse
 import subprocess
 import contextlib
@@ -18,7 +17,6 @@ from collections import OrderedDict
 import xml.etree.ElementTree
 import netifaces
 import psutil
-import six
 try:
     import pynvml
     import pycuda.driver
@@ -68,8 +66,8 @@ class GPU(object):
         cuda_device = pycuda.driver.Device(pci_bus_id)
         self.compute_capability = cuda_device.compute_capability()
         self.device_attributes = {}
-        for key, value in six.iteritems(cuda_device.get_attributes()):
-            if isinstance(value, (six.integer_types, six.string_types, float)):
+        for key, value in cuda_device.get_attributes().items():
+            if isinstance(value, (int, float, str)):
                 # Some of the attributes use Boost.Python's enum, which is
                 # derived from int but which leads to invalid JSON when passed
                 # to json.dumps.
@@ -315,7 +313,7 @@ def write_dict(name, path, args, d, do_encode=False):
             converted = json.loads(json.dumps(d))
         else:
             converted = d
-        for key, value in six.iteritems(converted):
+        for key, value in converted.items():
             print('    {}:{}'.format(key, value))
     else:
         try:
@@ -327,7 +325,7 @@ def write_dict(name, path, args, d, do_encode=False):
         else:
             # The path didn't exist
             changed = True
-        for key, value in d.iteritems():
+        for key, value in d.items():
             filename = os.path.join(path, key)
             content = encode(value) if do_encode else value
             content = '{}\n'.format(content)

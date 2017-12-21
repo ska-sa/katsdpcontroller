@@ -20,7 +20,6 @@ setup (
     install_requires = [
         'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
         'addict!=2.0.*',
-        'trollius',
         'decorator',
         'docker',
         'jsonschema',
@@ -28,8 +27,6 @@ setup (
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'enum34',
-        'ipaddress',
         'requests',
         'katcp',
         'tornado',

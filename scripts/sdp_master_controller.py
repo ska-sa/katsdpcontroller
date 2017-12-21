@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Script for launching the Science Data Processor Master Controller.
 
@@ -15,8 +15,7 @@ import tornado.gen
 import argparse
 import logging
 import addict
-import trollius
-from trollius import From
+import asyncio
 from tornado.platform.asyncio import AsyncIOMainLoop
 import tornado.netutil
 from prometheus_client import start_http_server
@@ -30,12 +29,12 @@ except ImportError:
     manhole = None
 
 
-@trollius.coroutine
+@asyncio.coroutine
 def on_shutdown(loop, server):
     loop.remove_signal_handler(signal.SIGINT)
     loop.remove_signal_handler(signal.SIGTERM)
      # in case the exit code below borks, we allow shutdown via traditional means
-    yield From(server.async_stop())
+    yield from server.async_stop()
     ioloop.stop()
     loop.stop()
 
@@ -131,7 +130,7 @@ if __name__ == "__main__":
 
     def die(msg=None):
         if msg:
-            print msg
+            print(msg)
         else:
             parser.print_help()
         sys.exit(1)
@@ -179,7 +178,7 @@ if __name__ == "__main__":
     framework_info.principal = opts.principal
     framework_info.role = opts.role
 
-    loop = trollius.get_event_loop()
+    loop = asyncio.get_event_loop()
     ioloop = AsyncIOMainLoop()
     ioloop.install()
     if opts.interface_mode:
@@ -214,6 +213,6 @@ if __name__ == "__main__":
          # expose any prometheus metrics that we create
 
     for sig in [signal.SIGINT, signal.SIGTERM]:
-        loop.add_signal_handler(sig, lambda: trollius.ensure_future(on_shutdown(loop, server)))
+        loop.add_signal_handler(sig, lambda: asyncio.ensure_future(on_shutdown(loop, server)))
     ioloop.add_callback(server.start)
     ioloop.start()
