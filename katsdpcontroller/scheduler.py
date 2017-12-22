@@ -1926,9 +1926,16 @@ class Scheduler(pymesos.Scheduler):
         app.router.add_static('/static',
                               pkg_resources.resource_filename('katsdpcontroller', 'static'))
         self.http_handler = app.make_handler()
-        self.http_server = await self._loop.create_server(self.http_handler, '', self.http_port)
+        # We want a single port serving both IPv4 and IPv6. By default asyncio
+        # will create a separate socket for each, and if http_port is 0 (used
+        # by unit tests) they end up with different ports.
+        # See https://stackoverflow.com/questions/45907833 for more details.
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.bind(('::', self.http_port))
+        self.http_server = await self._loop.create_server(
+            self.http_handler, sock=sock)
         if not self.http_port:
-            self.http_port = self.http_server.sockets[0].getsockname()[1]
+            self.http_port = sock.getsockname()[1]
         if self.http_url is None:
             netloc = '{}:{}'.format(socket.getfqdn(), http_port)
             self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
