@@ -1106,6 +1106,13 @@ class TestScheduler(asynctest.TestCase):
         self.nodes[2].host = 'remotehost'
         self.nodes[2].ports['foo'] = 10000
 
+    async def _wait_request(self, task_id):
+        async with aiohttp.ClientSession(loop=self.loop) as session:
+            async with session.get('http://localhost:{}/tasks/{}/wait_start'.format(
+                    self.sched.http_port, task_id)) as resp:
+                resp.raise_for_status()
+                await resp.read()
+
     async def setUp(self):
         self.framework_id = 'frameworkid'
         # Normally TaskIDAllocator's constructor returns a singleton to keep
@@ -1356,13 +1363,9 @@ class TestScheduler(asynctest.TestCase):
 
         # A real node1 would issue an HTTP request back to the scheduler. Fake
         # it instead, to check the timing.
-        async with aiohttp.ClientSession(loop=self.loop) as session:
-            async with session.get('http://localhost:{}/tasks/{}/wait_start'.format(
-                    self.sched.http_port, self.task_ids[1])) as resp:
-                resp.raise_for_status()
-                await resp.data()
+        wait_request = self.loop.create_task(self._wait_request(self.task_ids[1]))
         await asynctest.exhaust_callbacks(self.loop)
-        assert_false(response.done())
+        assert_false(wait_request.done())
 
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
@@ -1383,9 +1386,7 @@ class TestScheduler(asynctest.TestCase):
         poll_future.set_result(None)
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.READY, self.nodes[0].state)
-        assert_true(response.done())
-        response = response.result()
-        assert_equal(200, response.code)
+        await wait_request
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_true(launch.done())
         await launch
