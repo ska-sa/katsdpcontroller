@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['nose', 'futures', 'requests_mock', 'asynctest']
+tests_require = ['nose', 'requests_mock', 'asynctest']
 
 setup (
     name = "katsdpcontroller",
@@ -32,9 +32,7 @@ setup (
         'aiokatcp',
         'katsdptelstate',
         'katsdpservices',
-        'faulthandler',
         'kazoo',
-        'tornado>=4.3',
         'prometheus_client'
     ],
     tests_require = tests_require,

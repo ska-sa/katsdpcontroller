@@ -7,14 +7,12 @@ docker-pycreds==0.2.1
 docker==2.0.2
 enum34
 fakenewsredis
-faulthandler==2.4
 functools32==3.2.3-2
 future
 futures
 http-parser==0.8.3
 ipaddress
 jsonschema==2.6.0
-katcp
 katversion
 kazoo==2.2.1
 linecache2
@@ -26,7 +24,7 @@ pkginfo
 ply
 prometheus_client==0.1.0
 pydotplus==2.0.2
-pymesos==0.2.13
+pymesos==0.2.15
 pyparsing==2.2.0       # for pydotplus
 redis
 requests==2.8.1
