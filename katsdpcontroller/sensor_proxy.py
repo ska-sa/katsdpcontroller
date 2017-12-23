@@ -18,7 +18,7 @@ SENSOR_TYPES = {
     'timestamp': aiokatcp.Timestamp,
     'discrete': None,    # Type is constructed dynamically
     'address': aiokatcp.Address,
-    'string': str
+    'string': bytes      # Allows passing through arbitrary values even if not UTF-8
 }
 logger = logging.getLogger(__name__)
 
