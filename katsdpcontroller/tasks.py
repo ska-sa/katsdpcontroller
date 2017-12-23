@@ -5,12 +5,10 @@ import asyncio
 
 from addict import Dict
 
-import tornado.concurrent
-from tornado import gen
+import aiokatcp
+from aiokatcp import FailReply, InvalidReply, Sensor
 from prometheus_client import Gauge, Counter
 
-from katcp import Sensor, Message
-import katcp.core
 from katsdptelstate.endpoint import Endpoint
 
 from . import scheduler, sensor_proxy, product_config
@@ -124,7 +122,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """
         self.sensors[sensor.name] = sensor
         if self.sdp_controller:
-            self.sdp_controller.add_sensor(sensor)
+            self.sdp_controller.sensors.add(sensor)
         else:
             logger.warning("Attempted to add sensor {} to node {}, but the node has "
                            "no SDP controller available.".format(sensor.name, self.name))
@@ -135,7 +133,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """
         for sensor_name in self.sensors.keys():
             logger.debug("Removing sensor {}".format(sensor_name))
-            self.sdp_controller.remove_sensor(sensor_name)
+            del self.sdp_controller.sensors[sensor_name]
         self.sensors = {}
 
     def _disconnect(self):
@@ -146,15 +144,14 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """
         if self.sensors:
             self._remove_sensors()
-            self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def kill(self, driver, **kwargs):
         self._disconnect()
         super(SDPPhysicalTaskBase, self).kill(driver)
 
-    @asyncio.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield from super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph, loop):
+        await super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop)
 
         gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -165,12 +162,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
                 else:
                     gui_urls[-1][key] = value
         if gui_urls:
-            gui_urls_sensor = Sensor.string(self.name + '.gui-urls', 'URLs for GUIs')
+            gui_urls_sensor = Sensor(str, self.name + '.gui-urls', 'URLs for GUIs')
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
 
         for key, value in self.ports.items():
-            endpoint_sensor = Sensor.address(
+            endpoint_sensor = Sensor(aiokatcp.Address,
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
             endpoint_sensor.set_value((self.host, value))
             self._add_sensor(endpoint_sensor)
@@ -195,7 +192,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
-        version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
+        version_sensor = Sensor(str, self.name + '.version', "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
         self._add_sensor(version_sensor)
 
@@ -208,9 +205,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
 class SDPConfigMixin(object):
     """Mixin class that takes config information from the graph and sets it in telstate."""
-    @asyncio.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield from super(SDPConfigMixin, self).resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph, loop):
+        await super(SDPConfigMixin, self).resolve(resolver, graph, loop)
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
         for name, value in self.ports.items():
             config[name] = value
@@ -238,10 +234,10 @@ class CaptureBlockStateObserver(object):
         self.loop = loop
         self._last = {}
         self._waiters = []    # Each a tuple of a predicate and a future
-        self.update(sensor, sensor.read())
+        self(sensor, sensor.reading)
         sensor.attach(self)
 
-    def update(self, sensor, reading):
+    def __call__(self, sensor, reading):
         if reading.status in [Sensor.NOMINAL, Sensor.WARN, Sensor.ERROR]:
             try:
                 value = json.loads(reading.value)
@@ -265,21 +261,18 @@ class CaptureBlockStateObserver(object):
                     new_waiters.append(waiter)  # Not ready yet, keep for later
         self._waiters = new_waiters
 
-    @asyncio.coroutine
-    def wait(self, condition):
+    async def wait(self, condition):
         if condition(self._last):
             return      # Already satisfied, no need to wait
         future = asyncio.Future(loop=self.loop)
         self._waiters.append((condition, future))
-        yield from future
+        await future
 
-    @asyncio.coroutine
-    def wait_empty(self):
-        yield from self.wait(lambda value: not value)
+    async def wait_empty(self):
+        await self.wait(lambda value: not value)
 
-    @asyncio.coroutine
-    def wait_capture_block_done(self, capture_block_id):
-        yield from self.wait(lambda value: capture_block_id not in value)
+    async def wait_capture_block_done(self, capture_block_id):
+        await self.wait(lambda value: capture_block_id not in value)
 
     def close(self):
         """Close down the observer. This should be called when the connection
@@ -326,7 +319,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             need_inform = True
         if self.katcp_connection is not None:
             try:
-                self.katcp_connection.stop()
+                self.katcp_connection.close()
                 need_inform = False  # katcp_connection.stop() sends an inform itself
             except RuntimeError:
                 logger.error('Failed to shut down katcp connection to %s', self.name)
@@ -335,11 +328,10 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             self.capture_block_state_observer.close()
             self.capture_block_state_observer = None
         if need_inform:
-            self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
-    @asyncio.coroutine
-    def wait_ready(self):
-        yield from super(SDPPhysicalTask, self).wait_ready()
+    async def wait_ready(self):
+        await super(SDPPhysicalTask, self).wait_ready()
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
@@ -350,63 +342,49 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
                     PROMETHEUS_SENSORS, labels,
-                    host=self.host, port=self.ports['port'])
+                    host=self.host, port=self.ports['port'], loop=self.loop)
                 try:
-                    yield from to_asyncio_future(self.katcp_connection.start(), loop=self.loop)
-                    # The design of wait_ready is that it shouldn't time out,
-                    # instead relying on higher-level timeouts to decide
-                    # whether to cancel it. We use a timeout here, together
-                    # with the while True loop, rather than letting
-                    # until_synced run forever, because Tornado futures have no
-                    # concept of cancellation. If wait_ready is cancelled, then
-                    # it will stop the connection immediately, but the Tornado
-                    # future will hang around until it times out.
-                    #
-                    # Timing out also allows recovery if the TCP connection
-                    # somehow gets wedged badly enough that katcp can't recover
-                    # itself.
-                    yield from to_asyncio_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop)
+                    await self.katcp_connection.wait_synced()
                     logger.info("Connected to {}:{} for node {}".format(
                         self.host, self.ports['port'], self.name))
-                    sensor = yield from to_asyncio_future(self.katcp_connection.future_get_sensor(
-                        'capture-block-state'), loop=self.loop)
+                    sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, loop=self.loop)
                     return
                 except RuntimeError:
-                    self.katcp_connection.stop()
+                    self.katcp_connection.close()
+                    await self.katcp_connection.wait_closed()
                     self.katcp_connection = None
                      # no need for these to lurk around
                     logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
                                  self.name, self.host, self.ports['port'], exc_info=True)
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
-                    yield from asyncio.sleep(1.0, loop=self.loop)
+                    await asyncio.sleep(1.0, loop=self.loop)
 
-    @asyncio.coroutine
-    def issue_req(self, req, args=[], **kwargs):
+    async def issue_req(self, req, args=[]):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
-        message is printed.
+        message is printed and FailReply is raised.
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
         logger.info("Issued request {} {} to node {}".format(req, args, self.name))
-        reply, informs = yield from to_asyncio_future(
-            self.katcp_connection.katcp_client.future_request(Message.request(req, *args), **kwargs),
-            loop=self.loop)
-        if not reply.reply_ok():
-            msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
-            logger.warning(msg)
-        return (reply, informs)
+        try:
+            await self.katcp_connection.wait_connected()
+            reply, informs = await self.katcp_connection.request(req, *args)
+            return (reply, informs)
+        except (FailReply, InvalidReply, OSError) as error:
+            msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
+            logger.warning('%s', msg)
+            raise FailReply(msg) from error
 
-    @asyncio.coroutine
-    def graceful_kill(self, driver, **kwargs):
+    async def graceful_kill(self, driver, **kwargs):
         try:
             if self.capture_block_state_observer is not None:
-                yield from self.capture_block_state_observer.wait_empty()
+                await self.capture_block_state_observer.wait_empty()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         super(SDPPhysicalTask, self).kill(driver, **kwargs)
