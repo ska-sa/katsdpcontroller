@@ -5,11 +5,9 @@
 import time
 import logging
 import subprocess
-import shlex
 import json
 import signal
 import re
-import sys
 import os.path
 from collections import deque
 import asyncio
@@ -18,7 +16,6 @@ import functools
 import networkx
 import networkx.drawing.nx_pydot
 import enum
-from decorator import decorator
 
 import async_timeout
 import jsonschema
@@ -28,10 +25,9 @@ import faulthandler
 
 from prometheus_client import Histogram
 
-from aiokatcp import DeviceServer, Sensor, FailReply, Message, Address
+from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
-from katsdptelstate.endpoint import endpoint_list_parser
 from . import scheduler, tasks, product_config, generator
 from .tasks import State, DEPENDS_INIT
 
@@ -79,7 +75,7 @@ class GraphResolver(object):
        overrides : list, optional
             A list of override strings in the form <subarray_product_id>:<override_graph_name>
        """
-    def __init__(self, overrides=[]):
+    def __init__(self, overrides=()):
         self._overrides = {}
 
         for override in overrides:
@@ -96,12 +92,13 @@ class GraphResolver(object):
         """
         try:
             base_graph_name = self._overrides[subarray_product_id]
+            # if an override is set use this instead, but warn the user about this.
             logger.warning("Graph name specified by subarray_product_id (%s) has been overridden "
                            "to %s", subarray_product_id, base_graph_name)
-             # if an override is set use this instead, but warn the user about this
         except KeyError:
+            # default graph name is to split out the trailing name from the
+            # subarray product id specifier
             base_graph_name = subarray_product_id.split("_")[-1]
-             # default graph name is to split out the trailing name from the subarray product id specifier
         return base_graph_name
 
 
@@ -113,7 +110,7 @@ class MulticastIPResources(object):
         try:
             ip = str(next(self._hosts))
             if n_addresses > 1:
-                for i in range(1, n_addresses):
+                for _ in range(1, n_addresses):
                     next(self._hosts)
                 ip = '{}+{}'.format(ip, n_addresses - 1)
             return ip
@@ -267,7 +264,8 @@ class SDPSubarrayProductBase(object):
         """Raise a FailReply if there is an asynchronous operation in progress."""
         if self.async_busy:
             raise FailReply('Subarray product {} is busy with an operation. '
-                            'Please wait for it to complete first.'.format(self.subarray_product_id))
+                            'Please wait for it to complete first.'.format(
+                                self.subarray_product_id))
 
     async def configure_impl(self, ctx):
         """Extension point to configure the subarray."""
@@ -475,12 +473,13 @@ class SDPSubarrayProductBase(object):
             if not force:
                 self._fail_if_busy()
             else:
-                logger.warning('Subarray product %s is busy with an operation, but deconfiguring anyway',
-                               self.subarray_product_id)
+                logger.warning('Subarray product %s is busy with an operation, '
+                               'but deconfiguring anyway', self.subarray_product_id)
 
         if self.state != State.IDLE:
             if not force:
-                raise FailReply('Subarray product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
+                raise FailReply('Subarray product is not idle and thus cannot be deconfigured. '
+                                'Please issue capture_done first.')
             else:
                 logger.warning('Subarray product %s is in state %s, but deconfiguring anyway',
                                self.subarray_product_id, self.state.name)
@@ -655,9 +654,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     and node.logical_node.name != node_type):
                 continue
             reply, informs = await node.issue_req(req, args)
-            ret_args += "," + reply[-1]
+            ret_args += "," + (reply[-1] if reply else 'ok')
         if ret_args == "":
-            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(req, node_type)
+            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(
+                req, node_type)
         return ret_args
 
     async def _exec_node_transition(self, node, req, deps):
@@ -669,7 +669,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                                req, node.name)
             else:
                 # TODO: should handle katcp exceptions or failed replies
-                await node.issue_req(req[0], req[1:])
+                try:
+                    await node.issue_req(req[0], req[1:])
+                except FailReply:
+                    pass   # Callee logs a warning
 
     async def exec_transitions(self, old_state, new_state, reverse, capture_block):
         """Issue requests to nodes on state transitions.
@@ -717,7 +720,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
                 task = asyncio.ensure_future(self._exec_node_transition(node, req, deps),
-                                              loop=node.loop)
+                                             loop=node.loop)
                 loop = node.loop
                 tasks[node] = task
         if tasks:
@@ -768,16 +771,16 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
         await self.sched.launch(self.physical_graph, self.resolver, boot)
-         # encode metadata into the telescope state for use
-         # in component configuration
-         # connect to telstate store
+        # encode metadata into the telescope state for use
+        # in component configuration
+        # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
         self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         self.resolver.telstate = self.telstate
 
         logger.debug("base params: %s", base_params)
-         # set the configuration
+        # set the configuration
         for k, v in base_params.items():
             self.telstate.add(k, v, immutable=True)
 
@@ -811,13 +814,14 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 # launch the telescope state for this graph
                 await self._launch_telstate()
                 ctx.inform("Telstate launched. [{}]".format(self.telstate_endpoint))
-                 # launch containers for those nodes that require them
+                # launch containers for those nodes that require them
                 await self.sched.launch(self.physical_graph, self.resolver)
                 ctx.inform("All nodes launched")
                 alive = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
-                    ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+                    ret_msg = ("Some nodes in the graph failed to start. "
+                               "Check the error log for specific details.")
                     logger.error(ret_msg)
                     raise FailReply(ret_msg)
                 # Record the TaskInfo for each task in telstate, as well as details
@@ -832,7 +836,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 self.telstate.add('sdp_task_details', details, immutable=True)
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
                 self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                   immutable=True)
+                                  immutable=True)
             except Exception as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 await self._shutdown(force=True)
@@ -883,27 +887,33 @@ class SDPControllerServer(DeviceServer):
                  simulate=False, develop=False, interface_mode=False, wrapper=None,
                  graph_resolver=None, image_resolver_factory=None,
                  gui_urls=None, graph_dir=None):
-         # setup sensors
+        # setup sensors
         self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
         self._api_version_sensor = Sensor(str, "api-version", "SDP Controller API version.")
-        self._device_status_sensor = Sensor(DeviceStatus, "device-status", "Devices status of the SDP Master Controller")
+        self._device_status_sensor = Sensor(DeviceStatus, "device-status",
+                                            "Devices status of the SDP Master Controller")
         self._gui_urls_sensor = Sensor(str, "gui-urls", "Links to associated GUIs")
+        # example FMECA sensor. In this case something to keep track of issues
+        # arising from launching to many processes.
+        # TODO: Add more sensors exposing resource usage and currently executing graphs
         self._fmeca_sensors = {}
         self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
-         # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
-         # TODO: Add more sensors exposing resource usage and currently executing graphs
         # TODO: Fix up CallbackSensor
-        self._ntp_sensor = Sensor(bool, "time-synchronised", "SDP Controller container (and host) is synchronised to NTP")
+        self._ntp_sensor = Sensor(bool, "time-synchronised",
+                                  "SDP Controller container (and host) is synchronised to NTP")
 
         self.simulate = simulate
         if self.simulate:
-            logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
+            logger.warning("Note: Running in simulation mode. "
+                           "This will simulate certain external components such as the CBF.")
         self.develop = develop
         if self.develop:
             logger.warning("Note: Running in developer mode. This will relax some constraints.")
         self.interface_mode = interface_mode
         if self.interface_mode:
-            logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
+            logger.warning("Note: Running master controller in interface mode. "
+                           "This allows testing of the interface only, "
+                           "no actual command logic will be enacted.")
         self.wrapper = wrapper
         if self.wrapper is not None:
             logger.warning('Note: Using wrapper %s in all containers. This may alter behaviour.',
@@ -919,16 +929,14 @@ class SDPControllerServer(DeviceServer):
             image_resolver_factory = scheduler.ImageResolver
         self.image_resolver_factory = image_resolver_factory
 
+        # create a new resource pool.
         logger.debug("Building initial resource pool")
         self.resources = SDPCommonResources(safe_multicast_cidr)
-         # create a new resource pool.
 
+        # dict of currently configured SDP subarray_products
         self.subarray_products = {}
-         # dict of currently configured SDP subarray_products
+        # per subarray product dictionaries used to override internal config
         self.override_dicts = {}
-         # per subarray product dictionaries used to override internal config
-        self.tasks = {}
-         # dict of currently managed SDP tasks
 
         super(SDPControllerServer, self).__init__(host, port)
 
@@ -945,16 +953,17 @@ class SDPControllerServer(DeviceServer):
         # TODO self._ntp_sensor.set_read_callback(self._check_ntp_status)
         self.sensors.add(self._ntp_sensor)
 
-          # until we know any better, failure modes are all inactive
+        # until we know any better, failure modes are all inactive
         for s in self._fmeca_sensors.values():
             s.set_value(0)
             self.sensors.add(s)
 
     def _check_ntp_status(self):
         try:
-            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0 and '1' or '0', Sensor.NOMINAL, time.time())
+            return (subprocess.check_output(["/usr/bin/ntpq", "-p"]).find('*') > 0 and '1' or '0',
+                    Sensor.Status.NOMINAL, time.time())
         except OSError:
-            return ('0', Sensor.NOMINAL, time.time())
+            return ('0', Sensor.Status.NOMINAL, time.time())
 
     async def deregister_product(self, product, force=False):
         """Deregister a subarray product and remove it form the list of products.
@@ -997,7 +1006,8 @@ class SDPControllerServer(DeviceServer):
             if a configure/deconfigure is in progress
         FailReply
             If any of the following occur
-            - The specified subarray product id already exists, but the config differs from that specified
+            - The specified subarray product id already exists, but the config
+              differs from that specified
             - If docker python libraries are not installed and we are not using interface mode
             - There are insufficient resources to launch
             - A docker image could not be found
@@ -1019,9 +1029,10 @@ class SDPControllerServer(DeviceServer):
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:
+            # this is a use-once set of overrides
             odict = self.override_dicts.pop(subarray_product_id)
-             # this is a use-once set of overrides
-            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            logger.warning("Setting overrides on {} for the following: {}".format(
+                subarray_product_id, odict))
             config = product_config.override(config, odict)
             # Re-validate, since the override may have broken it
             try:
@@ -1054,13 +1065,13 @@ class SDPControllerServer(DeviceServer):
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))
         ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
-            .format(subarray_product_id))
+                   .format(subarray_product_id))
 
         image_tag = config['config'].get('image_tag')
         if image_tag is not None:
-            resolver_factory_args=dict(tag=image_tag)
+            resolver_factory_args = dict(tag=image_tag)
         else:
-            resolver_factory_args={}
+            resolver_factory_args = {}
         resolver = scheduler.Resolver(self.image_resolver_factory(**resolver_factory_args),
                                       scheduler.TaskIDAllocator(subarray_product_id + '-'),
                                       self.sched.http_url if self.sched else '')
@@ -1115,34 +1126,41 @@ class SDPControllerServer(DeviceServer):
 
         An existing override for this subarry product will be completely overwritten.
 
-        The override will only persist until a successful configure has been called on the subarray product.
+        The override will only persist until a successful configure has been
+        called on the subarray product.
 
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID of the subarray product to set overrides for in the form <subarray_name>_<data_product_name>.
+            The ID of the subarray product to set overrides for in the form
+            <subarray_name>_<data_product_name>.
         override_dict_json : string
             A json string containing a dict of config key:value overrides to use.
         """
-        logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
+        logger.info("?set-config-override called on {} with {}"
+                    .format(subarray_product_id, override_dict_json))
         try:
             odict = json.loads(override_dict_json)
             if type(odict) is not dict:
                 raise ValueError
-            logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
+            logger.info("Set override for subarray product {} for the following: {}"
+                        .format(subarray_product_id, odict))
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
-            msg = "The supplied override string {} does not appear to be a valid json string containing a dict. {}".format(override_dict_json, e)
+            msg = ("The supplied override string {} does not appear to be a valid json string "
+                   "containing a dict. {}".format(override_dict_json, e))
             logger.error(msg)
             raise FailReply(msg)
-        return "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id)
+        return "Set {} override keys for subarray product {}".format(
+            len(self.override_dicts[subarray_product_id]), subarray_product_id)
 
     async def _product_reconfigure(self, ctx, subarray_product_id):
         logger.info("?product-reconfigure called on {}".format(subarray_product_id))
         try:
             product = self.subarray_products[subarray_product_id]
         except KeyError:
-            raise FailReply("The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
+            raise FailReply("The specified subarray product id {} has no existing configuration "
+                            "and thus cannot be reconfigured.".format(subarray_product_id))
         config = product.config
 
         logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
@@ -1156,7 +1174,8 @@ class SDPControllerServer(DeviceServer):
         logger.info("Waiting for {} to disappear".format(subarray_product_id))
         await product.dead_event.wait()
 
-        logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+        logger.info("Issuing new configure for {} as part of reconfigure request."
+                    .format(subarray_product_id))
         try:
             await self.configure_product(ctx, subarray_product_id, config)
         except Exception as error:
@@ -1171,8 +1190,9 @@ class SDPControllerServer(DeviceServer):
            The primary use of this command is to restart the SDP components for a particular
            subarray without having to reconfigure the rest of the system.
 
-           Essentially this runs a deconfigure() followed by a configure() with the same parameters as originally
-           specified via the product-configure katcp request.
+           Essentially this runs a deconfigure() followed by a configure() with
+           the same parameters as originally specified via the
+           product-configure katcp request.
 
            Request Arguments
            -----------------
@@ -1239,8 +1259,8 @@ class SDPControllerServer(DeviceServer):
         -------
         success : {'ok', 'fail'}
         """
+        # INFO for now, but should be DEBUG post integration
         logger.info("?data-product-configure called with: {}".format(ctx.req))
-         # INFO for now, but should be DEBUG post integration
         if antennas is None:
             if subarray_product_id is None:
                 for (subarray_product_id, subarray_product) in self.subarray_products.items():
@@ -1253,18 +1273,20 @@ class SDPControllerServer(DeviceServer):
                 raise FailReply("This subarray product id has no current configuration.")
 
         if antennas == "0" or antennas == "":
-            ctx.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
+            ctx.inform("Starting deconfiguration of {}. This may take a few minutes..."
+                       .format(subarray_product_id))
             await self.deconfigure_product(subarray_product_id)
             return ''
 
         logger.info("Using '{}' as antenna mask".format(antennas))
-        antennas = antennas.replace(" ",",")
-         # temp hack to make sure we have a comma delimited set of antennas
+        # temp hack to make sure we have a comma delimited set of antennas
+        antennas = antennas.replace(" ", ",")
         antennas = antennas.split(',')
 
         # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
+            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams "
+                            "and appropriate spead stream sources to configure a subarray product")
 
         graph_name = self.graph_resolver(subarray_product_id)
         try:
@@ -1272,7 +1294,7 @@ class SDPControllerServer(DeviceServer):
             config = product_config.convert(graph_name, streams_dict, antennas, dump_rate,
                                             self.simulate, self.develop, self.wrapper)
         except (ValueError, jsonschema.ValidationError) as error:
-             # something is definitely wrong with these
+            # something is definitely wrong with these
             retmsg = "Failed to process source stream specifiers: {}".format(error)
             logger.error(retmsg)
             raise FailReply(retmsg)
@@ -1344,7 +1366,8 @@ class SDPControllerServer(DeviceServer):
         -------
         success : {'ok', 'fail'}
         """
-        ctx.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
+        ctx.inform("Starting deconfiguration of {}. This may take a few minutes..."
+                   .format(subarray_product_id))
         await self.deconfigure_product(subarray_product_id, force)
 
     @time_request
@@ -1364,8 +1387,8 @@ class SDPControllerServer(DeviceServer):
             Number of subarray products listed
         """
         if subarray_product_id is None:
-            ctx.informs((subarray_product_id, str(subarray_product))
-                for (subarray_product_id, subarray_product) in self.subarray_products.items())
+            ctx.informs((product_id, str(product))
+                        for (product_id, product) in self.subarray_products.items())
         elif subarray_product_id in self.subarray_products:
             ctx.informs([(subarray_product_id,
                           str(self.subarray_products[subarray_product_id]))])
@@ -1418,10 +1441,9 @@ class SDPControllerServer(DeviceServer):
         state : str
         """
         if not subarray_product_id:
-            ctx.informs((subarray_product_id, subarray_product.telstate_endpoint)
-                for (subarray_product_id,subarray_product) in self.subarray_products.items())
+            ctx.informs((product_id, product.telstate_endpoint)
+                        for (product_id, product) in self.subarray_products.items())
             return   # ctx.informs sends the reply
-
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         return self.subarray_products[subarray_product_id].telstate_endpoint
@@ -1441,8 +1463,8 @@ class SDPControllerServer(DeviceServer):
         state : str
         """
         if not subarray_product_id:
-            ctx.informs((subarray_product_id, subarray_product.state)
-                for (subarray_product_id, subarray_product) in self.subarray_products.items())
+            ctx.informs((product_id, product.state)
+                        for (product_id, product) in self.subarray_products.items())
             return   # ctx.informs sends the reply
 
         if subarray_product_id not in self.subarray_products:
@@ -1482,9 +1504,9 @@ class SDPControllerServer(DeviceServer):
         """
         logger.info("SDP Shutdown called.")
 
+        # attempt to deconfigure any existing subarrays
+        # will always succeed even if some deconfigure fails
         await self.deconfigure_on_exit()
-         # attempt to deconfigure any existing subarrays
-         # will always succeed even if some deconfigure fails
         try:
             master, slaves = await self.sched.get_master_and_slaves(timeout=5)
         except Exception as error:
@@ -1506,21 +1528,21 @@ class SDPControllerServer(DeviceServer):
         master_addresses = set()
         for interface in netifaces.interfaces():
             ifaddresses = netifaces.ifaddresses(interface)
-            addresses = ifaddresses.get(netifaces.AF_INET, []) + \
-                        ifaddresses.get(netifaces.AF_INET6, [])
+            addresses = (ifaddresses.get(netifaces.AF_INET, [])
+                         + ifaddresses.get(netifaces.AF_INET6, []))
             for entry in addresses:
                 address = entry.get('addr', '')
                 if address:
                     master_addresses.add(address)
         addresses = await self.loop.getaddrinfo(master, 0)
-        for (family, type_, proto, canonname, sockaddr) in addresses:
+        for (_family, _type, _proto, _canonname, sockaddr) in addresses:
             master_addresses.add(sockaddr[0])
         logger.debug('Master IP addresses: %s', ','.join(master_addresses))
         non_master = []
         for node in physical_graph:
             is_master = False
             addresses = await self.loop.getaddrinfo(node.logical_node.host, 0)
-            for (family, type_, proto, canonname, sockaddr) in addresses:
+            for (_family, _type, _proto, _canonname, sockaddr) in addresses:
                 if sockaddr[0] in master_addresses:
                     is_master = True
                     break

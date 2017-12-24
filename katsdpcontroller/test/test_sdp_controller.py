@@ -1,6 +1,5 @@
 """Tests for the sdp controller module."""
 
-import time
 import concurrent.futures
 import unittest
 from unittest import mock
@@ -8,11 +7,13 @@ import json
 import itertools
 import asyncio
 
-import aiohttp
+import requests
 import asynctest
+from nose.tools import assert_raises, assert_equal
 from addict import Dict
 import aiokatcp
-from aiokatcp import Message
+from aiokatcp import Message, FailReply
+from aiokatcp.test.test_utils import timelimit
 import redis
 import pymesos
 import networkx
@@ -166,9 +167,10 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
         (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
         (b'cal.sdp_l0.1.capture-block-state', b'', b'string'),
-        (b'state', b'', b'discrete', b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead'),
+        (b'state', b'', b'discrete',
+         b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead'),
         (b'capture-block-state', b'', b'string')
-))
+    ))
 
 EXPECTED_REQUEST_LIST = [
     'data-product-configure',
@@ -190,11 +192,10 @@ EXPECTED_REQUEST_LIST = [
 ]
 
 
-class TestSDPControllerInterface(asynctest.TestCase):
-    """Testing of the SDP controller in interface mode."""
-    async def setUp(self):
-        self.server = SDPControllerServer('127.0.0.1', 0, None, simulate=True, interface_mode=True,
-                                          safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+class BaseTestSDPController(asynctest.TestCase):
+    """Utilities for test classes"""
+    async def setup_server(self, *server_args, **server_kwargs):
+        self.server = SDPControllerServer(*server_args, **server_kwargs)
         await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = self.server.server.sockets[0].getsockname()
@@ -215,9 +216,17 @@ class TestSDPControllerInterface(asynctest.TestCase):
             actual[inform.arguments[0]] = tuple(inform.arguments[2:])
         self.assertEqual(expected, actual)
 
+
+@timelimit
+class TestSDPControllerInterface(BaseTestSDPController):
+    """Testing of the SDP controller in interface mode."""
+    async def setUp(self):
+        await self.setup_server('127.0.0.1', 0, None, simulate=True, interface_mode=True,
+                                safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+
     async def test_capture_init(self):
         await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
-        await self.client.request("product-configure", SUBARRAY_PRODUCT1,CONFIG)
+        await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
         await self.client.request("capture-init", SUBARRAY_PRODUCT1)
 
         reply, informs = await self.client.request("capture-status", SUBARRAY_PRODUCT1)
@@ -242,20 +251,20 @@ class TestSDPControllerInterface(asynctest.TestCase):
 
     async def test_capture_done(self):
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
-        await self.client.request("product-configure", SUBARRAY_PRODUCT2,CONFIG)
-        await self.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
+        await self.client.request("product-configure", SUBARRAY_PRODUCT2, CONFIG)
+        await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
-        await self.client.request("capture-init",SUBARRAY_PRODUCT2)
-        await self.client.request("capture-done",SUBARRAY_PRODUCT2)
-        await self.assert_request_fails("capture-done",SUBARRAY_PRODUCT2)
+        await self.client.request("capture-init", SUBARRAY_PRODUCT2)
+        await self.client.request("capture-done", SUBARRAY_PRODUCT2)
+        await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
     async def test_deconfigure_subarray_product_legacy(self):
         await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT3, "")
         await self.client.request(
             "data-product-configure", SUBARRAY_PRODUCT3, ANTENNAS, "4096", "2.1", "0", STREAMS)
         await self.client.request("capture-init", SUBARRAY_PRODUCT3)
+        # should not be able to deconfigure when not in idle state
         await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT3, "")
-         # should not be able to deconfigure when not in idle state
         await self.client.request("capture-done", SUBARRAY_PRODUCT3)
         await self.client.request("data-product-configure", SUBARRAY_PRODUCT3, "")
 
@@ -263,8 +272,8 @@ class TestSDPControllerInterface(asynctest.TestCase):
         await self.assert_request_fails("product-configure", SUBARRAY_PRODUCT3)
         await self.client.request("product-configure", SUBARRAY_PRODUCT3, CONFIG)
         await self.client.request("capture-init", SUBARRAY_PRODUCT3)
+        # should not be able to deconfigure when not in idle state
         await self.assert_request_fails("product-configure", SUBARRAY_PRODUCT3)
-         # should not be able to deconfigure when not in idle state
         await self.client.request("capture-done", SUBARRAY_PRODUCT3)
         await self.client.request("product-list", SUBARRAY_PRODUCT3)
 
@@ -277,7 +286,7 @@ class TestSDPControllerInterface(asynctest.TestCase):
             "data-product-configure", SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.1", "0", STREAMS)
         await self.assert_request_fails(
             "data-product-configure", SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.2", "0", STREAMS)
-        await self.client.request("data-product-configure",SUBARRAY_PRODUCT4)
+        await self.client.request("data-product-configure", SUBARRAY_PRODUCT4)
 
         reply, informs = await self.client.request("data-product-configure")
         self.assertEqual(reply, [b'1'])
@@ -303,19 +312,20 @@ class TestSDPControllerInterface(asynctest.TestCase):
         reply, informs = await self.client.request('product-list')
         self.assertEqual(reply, [b'1'])
 
-        await self.client.request("product-deconfigure",SUBARRAY_PRODUCT4)
-        await self.assert_request_fails("product-list",SUBARRAY_PRODUCT4)
+        await self.client.request("product-deconfigure", SUBARRAY_PRODUCT4)
+        await self.assert_request_fails("product-list", SUBARRAY_PRODUCT4)
 
     async def test_reconfigure_subarray_product_legacy(self):
         await self.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
-        await self.client.request("data-product-configure",SUBARRAY_PRODUCT4,ANTENNAS,"4096","2.1","0",STREAMS)
+        await self.client.request("data-product-configure",
+                                  SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.1", "0", STREAMS)
         await self.client.request("data-product-reconfigure", SUBARRAY_PRODUCT4)
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         await self.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
 
     async def test_reconfigure_subarray_product(self):
         await self.assert_request_fails("product-reconfigure", SUBARRAY_PRODUCT4)
-        await self.client.request("product-configure",SUBARRAY_PRODUCT4,CONFIG)
+        await self.client.request("product-configure", SUBARRAY_PRODUCT4, CONFIG)
         await self.client.request("product-reconfigure", SUBARRAY_PRODUCT4)
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         await self.assert_request_fails("product-reconfigure", SUBARRAY_PRODUCT4)
@@ -348,7 +358,7 @@ class DelayedManager:
         mock.side_effect = self._side_effect
         self._request_task = loop.create_task(coro)
 
-    def _side_effect(self):
+    def _side_effect(self, *args, **kwargs):
         self._started.set_result(None)
         self.mock.side_effect = self._old_side_effect
         return self._result
@@ -359,20 +369,22 @@ class DelayedManager:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         # Unblock the mock call
-        self._result.set_result(self._return_value)
+        if not self._result.cancelled():
+            self._result.set_result(self.return_value)
         if exc_type:
             # If we already have an exception, don't make more assertions
             self._request_task.cancel()
             return
-        if self._cancelled:
-            with self.assertRaises(FailReply) as cm:
+        if self.cancelled:
+            with assert_raises(FailReply) as cm:
                 await self._request_task
-            self.assertEqual('request was cancelled', str(cm))
+            assert_equal('request cancelled', str(cm.exception))
         else:
             await self._request_task     # Will raise if it failed
 
 
-class TestSDPController(asynctest.TestCase):
+@timelimit
+class TestSDPController(BaseTestSDPController):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
     mocking of the scheduler.
     """
@@ -382,7 +394,7 @@ class TestSDPController(asynctest.TestCase):
         self.addCleanup(patcher.stop)
         return mock_obj
 
-    def _capture_init_slow(self, subarray_product):
+    def _capture_init_slow(self, subarray_product, cancelled=False):
         """Asynchronous context manager that runs its block with a capture-init
         in progress. The subarray product must already be configured.
         """
@@ -411,31 +423,29 @@ class TestSDPController(asynctest.TestCase):
         separator = katsdptelstate.TelescopeState.SEPARATOR
         self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
         self.telstate_class.SEPARATOR = separator
-        self.sensor_proxy_client_class = self._create_patch('katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
+        self.sensor_proxy_client_class = self._create_patch(
+            'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.wait_connected.return_value = done_future
         sensor_proxy_client.wait_synced.return_value = done_future
+        sensor_proxy_client.wait_closed.return_value = done_future
         sensor_proxy_client.request.side_effect = self._request
         self._create_patch(
-            'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=None)
+            'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future)
         self._create_patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
         self._create_patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill
+        self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
-        self.server = SDPControllerServer(
+        await self.setup_server(
             '127.0.0.1', 0, self.sched, simulate=True,
             safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
-        await self.server.start()
-        self.addCleanup(self.server.stop)
-        bind_address = self.server.server.sockets[0].getsockname()
-        self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
-        self.addCleanup(self.client.wait_closed)
-        self.addCleanup(self.client.close)
         master_and_slaves_future = asyncio.Future(loop=self.loop)
-        master_and_slaves_future.set_result(('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
+        master_and_slaves_future.set_result(
+            ('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
         self.sched.get_master_and_slaves.return_value = master_and_slaves_future
         # Dict mapping task name to Mesos task status string
         self.fail_launches = {}
@@ -500,7 +510,7 @@ class TestSDPController(asynctest.TestCase):
 
     async def _request(self, msg, *args, **kwargs):
         """Mock implementation of aiokatcp.Client.request"""
-        if msg.name in self.fail_requests:
+        if msg in self.fail_requests:
             raise FailReply('dummy failure')
         else:
             return [], []
@@ -508,12 +518,15 @@ class TestSDPController(asynctest.TestCase):
     def _ifaddresses(self, interface):
         if interface == 'lo':
             return {
-                netifaces.AF_INET: [{'addr': '127.0.0.1', 'netmask': '255.0.0.0', 'peer': '127.0.0.1'}],
-                netifaces.AF_INET6: [{'addr': '::1', 'netmask': 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128'}],
+                netifaces.AF_INET: [{
+                    'addr': '127.0.0.1', 'netmask': '255.0.0.0', 'peer': '127.0.0.1'}],
+                netifaces.AF_INET6: [{
+                    'addr': '::1', 'netmask': 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128'}],
             }
         elif interface == 'em1':
             return {
-                netifaces.AF_INET: [{'addr': '10.0.0.2', 'broadcast': '10.255.255.255', 'netmask': '255.0.0.0'}],
+                netifaces.AF_INET: [{
+                    'addr': '10.0.0.2', 'broadcast': '10.255.255.255', 'netmask': '255.0.0.0'}],
             }
         else:
             raise ValueError('You must specify a valid interface name')
@@ -522,10 +535,13 @@ class TestSDPController(asynctest.TestCase):
         return ("product-configure", subarray_product, CONFIG)
 
     async def _configure_subarray(self, subarray_product):
-        return await self.client.request(*self._configure_args(subarray_product))
+        reply, informs = await self.client.request(*self._configure_args(subarray_product))
+        return reply[0]
 
     async def test_product_configure_success(self):
-        """A ?product-configure request must wait for the tasks to come up, then indicate success."""
+        """A ?product-configure request must wait for the tasks to come up,
+        then indicate success.
+        """
         await self.client.request(
             'set-config-override', SUBARRAY_PRODUCT4,
             '''
@@ -541,8 +557,8 @@ class TestSDPController(asynctest.TestCase):
                     }
                 }
             }''')
-        name = (await self._configure_subarray(SUBARRAY_PRODUCT4))[0]
-        self.assertEqual(SUBARRAY_PRODUCT4, name)
+        name = await self._configure_subarray(SUBARRAY_PRODUCT4)
+        self.assertEqual(SUBARRAY_PRODUCT4.encode('utf-8'), name)
         self.telstate_class.assert_called_once_with('host.telstate:20000')
 
         # Verify the telescope state
@@ -581,20 +597,20 @@ class TestSDPController(asynctest.TestCase):
         }, immutable=True)
 
         # Verify the state of the subarray
-        self.assertEqual({}, self.controller.override_dicts)
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        self.assertEqual({}, self.server.override_dicts)
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
 
     async def test_product_configure_generate_names(self):
         """Name with trailing * must generate lowest-numbered name"""
-        name = (await self._configure_subarray('prefix_*'))[0]
-        self.assertEqual('prefix_0', name)
-        name = (await self._configure_subarray('prefix_*'))[0]
-        self.assertEqual('prefix_1', name)
+        name = await self._configure_subarray('prefix_*')
+        self.assertEqual(b'prefix_0', name)
+        name = await self._configure_subarray('prefix_*')
+        self.assertEqual(b'prefix_1', name)
         await self.client.request('product-deconfigure', 'prefix_0')
-        name = (await self._configure_subarray('prefix_*'))[0]
-        self.assertEqual('prefix_0', name)
+        name = await self._configure_subarray('prefix_*')
+        self.assertEqual(b'prefix_0', name)
 
     async def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
@@ -604,7 +620,7 @@ class TestSDPController(asynctest.TestCase):
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Must not have created the subarray product internally
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_product_configure_task_fail(self):
         """If a task other than telstate fails, product-configure must fail"""
@@ -614,7 +630,7 @@ class TestSDPController(asynctest.TestCase):
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Must have cleaned up the subarray product internally
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_product_configure_parallel(self):
         """Can configure two subarray products at the same time"""
@@ -634,7 +650,7 @@ class TestSDPController(asynctest.TestCase):
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY, force=False)
         # Verify the state
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_product_deconfigure_capturing(self):
         """product-deconfigure must fail while capturing"""
@@ -654,7 +670,7 @@ class TestSDPController(asynctest.TestCase):
         async with self._capture_init_slow(SUBARRAY_PRODUCT1):
             await self.assert_request_fails('product-deconfigure', SUBARRAY_PRODUCT1, '0')
         # Check that the subarray still exists and has the right state
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT1]
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.CAPTURING, sa.state)
 
@@ -666,7 +682,7 @@ class TestSDPController(asynctest.TestCase):
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Verify the state
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_product_deconfigure_while_configuring_force(self):
         """forced product-deconfigure must succeed while in product-configure"""
@@ -675,7 +691,7 @@ class TestSDPController(asynctest.TestCase):
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Verify the state
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_product_reconfigure(self):
         """Checks success path of product_reconfigure"""
@@ -729,7 +745,8 @@ class TestSDPController(asynctest.TestCase):
         for call in ts.add.call_args_list:
             if call[0][0] == 'sdp_task_details':
                 task_details = call[0][1]
-        self.assertTrue(task_details['sim.i0_baseline_correlation_products.1']['taskinfo']['command']['shell'])
+        self.assertTrue(
+            task_details['sim.i0_baseline_correlation_products.1']['taskinfo']['command']['shell'])
 
     async def test_product_reconfigure_configure_busy(self):
         """Can run product-reconfigure concurrently with another product-configure"""
@@ -743,7 +760,7 @@ class TestSDPController(asynctest.TestCase):
         self.fail_launches['telstate'] = 'TASK_FAILED'
         await self.assert_request_fails('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the subarray was deconfigured cleanly
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     # TODO: test that reconfigure with override dict picks up the override dict
 
@@ -752,23 +769,19 @@ class TestSDPController(asynctest.TestCase):
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         await self.client.request("capture-init", SUBARRAY_PRODUCT4, "my_pb")
         # check that the subarray is in an appropriate state
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.CAPTURING, sa.state)
         # Check that the graph transitions were called. Each call may be made
         # multiple times, depending on the number of instances of each child.
         # We thus collapse them into groups of equal calls and don't worry
         # about the number, which would otherwise make the test fragile.
-        katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        grouped_calls = [k for k, g in itertools.groupby(katcp_client.future_request.mock_calls)]
-        # The Message constructor stringifies all its arguments, so it needs a
-        # bit more work to get a mock.ANY into it.
-        capture_start = Message.request('capture-start', 'i0_baseline_correlation_products', '')
-        capture_start.arguments[-1] = mock.ANY
+        katcp_client = self.sensor_proxy_client_class.return_value
+        grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
-            mock.call(Message.request('configure-subarray-from-telstate')),
-            mock.call(Message.request('capture-init', 'my_pb-00000'), timeout=mock.ANY),
-            mock.call(capture_start, timeout=mock.ANY)
+            mock.call('configure-subarray-from-telstate'),
+            mock.call('capture-init', 'my_pb-00000'),
+            mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
 
@@ -778,15 +791,16 @@ class TestSDPController(asynctest.TestCase):
         TODO: that's probably not really the behaviour we want.
         """
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
         self.fail_requests.add('capture-init')
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(State.CAPTURING, sa.state)
 
     async def _test_busy(self, command, *args):
-        """Test that a command fails if issued while ?capture-init or ?product-configure is in progress"""
+        """Test that a command fails if issued while ?capture-init or
+        ?product-configure is in progress
+        """
         async with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
             await self.assert_request_fails(command, *args)
         async with self._capture_init_slow(SUBARRAY_PRODUCT1):
@@ -801,8 +815,8 @@ class TestSDPController(asynctest.TestCase):
 
         TODO: that's probably not really the behaviour we want.
         """
-        await self.client.request("product-configure",SUBARRAY_PRODUCT4,CONFIG)
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        await self.client.request("product-configure", SUBARRAY_PRODUCT4, CONFIG)
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         for node in sa.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
@@ -820,55 +834,43 @@ class TestSDPController(asynctest.TestCase):
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        sa = self.controller.subarray_products[SUBARRAY_PRODUCT4]
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(State.IDLE, sa.state)
         # Check that the graph transitions succeeded
-        katcp_client = self.sensor_proxy_client_class.return_value.katcp_client
-        katcp_client.future_request.assert_called_with(
-            Message.request('capture-done'), timeout=mock.ANY)
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_called_with('capture-done')
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-done", SUBARRAY_PRODUCT1)
-
-    async def _async_deconfigure_on_exit(self):
-        """Call deconfigure_on_exit from the IOLoop"""
-        async def shutdown(future):
-            await self.controller.deconfigure_on_exit()
-            future.set_result(None)
-        deconfigured_future = concurrent.futures.Future()
-        self.controller.loop.call_soon_threadsafe(
-            asyncio.ensure_future, shutdown(deconfigured_future), self.controller.loop)
-        deconfigured_future.result()
 
     async def test_deconfigure_on_exit(self):
         """Calling deconfigure_on_exit will force-deconfigure existing
         subarrays, even if capturing."""
         await self._configure_subarray(SUBARRAY_PRODUCT1)
         await self.client.request('capture-init', SUBARRAY_PRODUCT1)
-        self._async_deconfigure_on_exit()
+        await self.server.deconfigure_on_exit()
 
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        sensor_proxy_client.katcp_client.future_request.assert_called_with(
-            Message.request('capture-done'), timeout=mock.ANY)
+        sensor_proxy_client.request.assert_called_with('capture-done')
         self.sched.kill.assert_called_with(mock.ANY, force=True)
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_deconfigure_on_exit_busy(self):
         """Calling deconfigure_on_exit while a capture-init or capture-done
         is busy kills off the graph anyway."""
         await self._configure_subarray(SUBARRAY_PRODUCT1)
         async with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
-            await self._async_deconfigure_on_exit()
+            await self.server.deconfigure_on_exit()
         self.sched.kill.assert_called_with(mock.ANY, force=True)
-        self.assertEqual({}, self.controller.subarray_products)
+        self.assertEqual({}, self.server.subarray_products)
 
     async def test_deconfigure_on_exit_cancel(self):
         """Calling deconfigure_on_exit while a configure is in process cancels
         that configure and kills off the graph."""
         async with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
-            await self._async_deconfigure_on_exit()
+            await self.server.deconfigure_on_exit()
         # We must have killed off the partially-launched graph
         self.sched.kill.assert_called_with(mock.ANY, force=True)
 
@@ -880,8 +882,8 @@ class TestSDPController(asynctest.TestCase):
         # Need to compare just arguments, because the message objects have message IDs
         informs = [tuple(msg.arguments) for msg in informs]
         self.assertEqual(AnyOrderList([
-            (SUBARRAY_PRODUCT1, 'host.telstate:20000'),
-            (SUBARRAY_PRODUCT2, 'host.telstate:20000')
+            (SUBARRAY_PRODUCT1.encode('utf-8'), b'host.telstate:20000'),
+            (SUBARRAY_PRODUCT2.encode('utf-8'), b'host.telstate:20000')
         ]), informs)
 
     async def test_telstate_endpoint_one(self):
@@ -904,8 +906,8 @@ class TestSDPController(asynctest.TestCase):
         # Need to compare just arguments, because the message objects have message IDs
         informs = [tuple(msg.arguments) for msg in informs]
         self.assertEqual(AnyOrderList([
-            (SUBARRAY_PRODUCT1, 'IDLE'),
-            (SUBARRAY_PRODUCT2, 'CAPTURING')
+            (SUBARRAY_PRODUCT1.encode('utf-8'), b'idle'),
+            (SUBARRAY_PRODUCT2.encode('utf-8'), b'capturing')
         ]), informs)
 
     async def test_capture_status_one(self):
@@ -933,8 +935,7 @@ class TestSDPController(asynctest.TestCase):
         await self.client.request('sdp-shutdown')
         # Check that the subarray was stopped then shut down
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        sensor_proxy_client.katcp_client.future_request.assert_called_with(
-            Message.request('capture-done'), timeout=mock.ANY)
+        sensor_proxy_client.request.assert_called_with('capture-done')
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.
