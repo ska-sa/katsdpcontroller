@@ -5,14 +5,13 @@ import contextlib
 import logging
 import uuid
 from unittest import mock
-import requests_mock
+import aioresponses
 from nose.tools import *
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
 import ipaddress
 import functools
 import inspect
-import requests
 import asyncio
 import networkx
 import pymesos
@@ -289,14 +288,9 @@ class TestImageResolver(object):
             }
         }
         # Response headers are modelled on an actual registry response
-        with requests_mock.mock(case_sensitive=True) as rmock:
+        with aioresponses.aioresponses() as rmock:
             rmock.head(
                 'https://registry.invalid:5000/v2/myimage/manifests/latest',
-                request_headers={
-                    'Authorization': 'Basic ' \
-                    + base64.urlsafe_b64encode(b'myuser:mypassword').decode('ascii'),
-                    'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
-                },
                 headers={
                     'Content-Length': '1234',
                     'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
@@ -1675,10 +1669,10 @@ class TestScheduler(asynctest.TestCase):
         self._status_update('test-01234567', 'TASK_LOST')
 
     async def test_get_master_and_slaves(self):
-        with requests_mock.mock(case_sensitive=True) as rmock:
+        with aioresponses.aioresponses() as rmock:
             # An actual response scraped from a real Mesos server
             rmock.get('http://master.invalid:5050/slaves',
-                      text=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')
+                      body=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')
             self.driver.master = 'master.invalid:5050'
             master, slaves = await self.sched.get_master_and_slaves()
             assert_equal('master.invalid', master)
@@ -1687,14 +1681,14 @@ class TestScheduler(asynctest.TestCase):
     async def test_get_master_and_slaves_connect_failed(self):
         # Guaranteed not to be a valid domain name (RFC2606)
         self.driver.master = 'example.invalid:5050'
-        with assert_raises(requests.exceptions.RequestException):
+        with assert_raises(aiohttp.client.ClientConnectionError):
             await self.sched.get_master_and_slaves()
 
     async def test_get_master_and_slaves_bad_response(self):
-        with requests_mock.mock(case_sensitive=True) as rmock:
-            rmock.get('http://master.invalid:5050/slaves', text='', status_code=404)
+        with aioresponses.aioresponses() as rmock:
+            rmock.get('http://master.invalid:5050/slaves', body='', status=404)
             self.driver.master = 'master.invalid:5050'
-            with assert_raises(requests.exceptions.RequestException):
+            with assert_raises(aiohttp.client.ClientResponseError):
                 await self.sched.get_master_and_slaves()
 
     async def test_get_master_and_slaves_bad_json(self):
@@ -1704,8 +1698,8 @@ class TestScheduler(asynctest.TestCase):
             '{"no_slaves": 4}',
             '{"slaves": "not an array"}']
         for response in responses:
-            with requests_mock.mock(case_sensitive=True) as rmock:
-                rmock.get('http://master.invalid:5050/slaves', text=response)
+            with aioresponses.aioresponses() as rmock:
+                rmock.get('http://master.invalid:5050/slaves', body=response)
                 self.driver.master = 'master.invalid:5050'
                 with assert_raises(ValueError):
                     await self.sched.get_master_and_slaves()

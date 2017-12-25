@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['nose', 'requests_mock', 'asynctest']
+tests_require = ['nose', 'aioresponses', 'asynctest']
 
 setup (
     name = "katsdpcontroller",
@@ -29,7 +29,6 @@ setup (
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'requests',
         'aiokatcp',
         'katsdptelstate',
         'katsdpservices',

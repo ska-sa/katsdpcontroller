@@ -7,7 +7,6 @@ import json
 import itertools
 import asyncio
 
-import requests
 import asynctest
 from nose.tools import assert_raises, assert_equal
 from addict import Dict
@@ -949,7 +948,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_sdp_shutdown_slaves_error(self):
         """Test sdp-shutdown when get_master_and_slaves fails"""
         future = asyncio.Future(loop=self.loop)
-        future.set_exception(requests.exceptions.Timeout())
+        future.set_exception(asyncio.TimeoutError())
         self.sched.get_master_and_slaves.return_value = future
         await self.assert_request_fails('sdp-shutdown')
 

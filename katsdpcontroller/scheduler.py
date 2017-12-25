@@ -141,10 +141,10 @@ from enum import Enum
 import asyncio
 import urllib
 import functools
+import ssl
 
 import pkg_resources
 import ipaddress
-import requests
 import docker
 import networkx
 import jsonschema
@@ -552,7 +552,7 @@ class ImageResolver(object):
             if authdata is None:
                 self._auth = None
             else:
-                self._auth = (authdata['username'], authdata['password'])
+                self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
         else:
             self._auth = None
 
@@ -594,31 +594,26 @@ class ImageResolver(object):
             if not url.startswith('http'):
                 # If no scheme is specified, assume https
                 url = 'https://' + url
-            # Use a low timeout, so that we don't wedge the entire launch if
-            # there is a connection problem.
             kwargs = dict(
                 headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
-                auth=self._auth,
-                timeout=5)
-            if os.path.exists('/etc/ssl/certs/ca-certificates.crt'):
-                kwargs['verify'] = '/etc/ssl/certs/ca-certificates.crt'
-
-            def do_request():
-                response = None
+                auth=self._auth)
+            cafile = '/etc/ssl/certs/ca-certificates.crt'
+            if os.path.exists(cafile):
+                ssl_context = ssl.create_default_context(cafile=cafile)
+            else:
+                ssl_context = None
+            with aiohttp.ClientSession(loop=loop, **kwargs) as session:
                 try:
-                    response = requests.head(url, **kwargs)
-                    response.raise_for_status()
-                    return response.headers['Docker-Content-Digest']
-                except requests.exceptions.RequestException as error:
+                    # Use a low timeout, so that we don't wedge the entire launch if
+                    # there is a connection problem.
+                    async with session.head(url, timeout=5, ssl_context=ssl_context) as response:
+                        response.raise_for_status()
+                        digest = response.headers['Docker-Content-Digest']
+                except aiohttp.client.ClientError as error:
                     raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
                         from error
                 except KeyError:
                     raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-                finally:
-                    if response is not None:
-                        response.close()
-
-            digest = await loop.run_in_executor(None, do_request)
             resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
         else:
             resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
@@ -1809,8 +1804,7 @@ async def wait_start_handler(scheduler, request):
     response = aiohttp.web.Response()
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        return aiohttp.web.Response(
-            status=requests.codes.NOT_FOUND,
+        return aiohttp.web.HTTPNotFound(
             body='Task ID {} not active\n'.format(task_id),
             **response_kwargs)
     else:
@@ -1819,8 +1813,7 @@ async def wait_start_handler(scheduler, request):
                 await dep.ready_event.wait()
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
-            return aiohttp.web.Response(
-                status=requests.codes.SERVER_ERROR,
+            return aiohttp.web.HTTPInternalServerError(
                 body='Exception while waiting for dependencies:\n{}\n'.format(error),
                 **response_kwargs)
         else:
@@ -2447,20 +2440,6 @@ class Scheduler(pymesos.Scheduler):
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
 
-    def _get_master_and_slaves(self, master, timeout):
-        """Implementation of :meth:`get_master_slaves`, which is run on a separate
-        thread since the requests library is blocking.
-        """
-        url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
-        r = requests.get(url, timeout=timeout)
-        r.raise_for_status()
-        try:
-            slaves = r.json()['slaves']
-            master_host = urllib.parse.urlsplit(url).hostname
-            return master_host, [slave['hostname'] for slave in slaves]
-        except (KeyError, TypeError) as error:
-            raise ValueError('Malformed response') from error
-
     async def get_master_and_slaves(self, timeout=None):
         """Obtain a list of slave hostnames from the master.
 
@@ -2471,7 +2450,7 @@ class Scheduler(pymesos.Scheduler):
 
         Raises
         ------
-        requests.exceptions.RequestException
+        aiohttp.client.ClientError
             If there was an HTTP connection problem (including timeout)
         ValueError
             If the HTTP response from the master was malformed
@@ -2492,8 +2471,17 @@ class Scheduler(pymesos.Scheduler):
         master = self._driver.master
         if master is None:
             raise ValueError('No master is set')
-        result = await self._loop.run_in_executor(
-            None, self._get_master_and_slaves, master, timeout)
+        url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
+        with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=timeout) as r:
+                r.raise_for_status()
+                data = await r.json()
+                try:
+                    slaves = data['slaves']
+                    master_host = urllib.parse.urlsplit(url).hostname
+                    return master_host, [slave['hostname'] for slave in slaves]
+                except (KeyError, TypeError) as error:
+                    raise ValueError('Malformed response') from error
         return result
 
     def get_task(self, task_id, return_graph=False):
