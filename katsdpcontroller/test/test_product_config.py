@@ -160,7 +160,8 @@ class TestValidate(object):
 
     def test_input_bad_n_endpoints(self):
         """Number of endpoints doesn't divide into number of channels"""
-        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = "spead://239.9.3.1+14:7148"
+        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = \
+            "spead://239.9.3.1+14:7148"
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("not a multiple of endpoints", str(cm.exception))
@@ -343,7 +344,7 @@ class TestConvert(object):
         """No beamformer"""
         config = product_config.convert("c856M4k", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": self.expected_l0,
@@ -355,7 +356,7 @@ class TestConvert(object):
         """PTUSE beamformer capture"""
         config = product_config.convert("bc856M4k", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ptuse),
@@ -367,7 +368,7 @@ class TestConvert(object):
         """HDF5 beamformer capture"""
         config = product_config.convert("bec856M4kssd", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ssd),

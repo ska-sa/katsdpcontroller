@@ -1,6 +1,5 @@
 """Tests for the sdp controller module."""
 
-import concurrent.futures
 import unittest
 from unittest import mock
 import json

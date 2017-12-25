@@ -142,9 +142,9 @@ import asyncio
 import urllib
 import functools
 import ssl
+import ipaddress
 
 import pkg_resources
-import ipaddress
 import docker
 import networkx
 import jsonschema
@@ -194,6 +194,7 @@ host_path : str
 numa_node : int, optional
     Index of the NUMA socket to which the storage is connected
 """
+
 
 class GPURequest(object):
     """Request for resources on a single GPU. These resources are not isolated,
@@ -342,7 +343,8 @@ async def poll_ports(host, ports, loop):
                 proto=socket.IPPROTO_TCP,
                 flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED))
         except socket.gaierror as error:
-            logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error)
+            logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.',
+                         host, error)
             await asyncio.sleep(5, loop=loop)
         else:
             break
@@ -442,7 +444,7 @@ class RangeResource(object):
         IndexError
             If no such element exists
         """
-        for i, (start, stop) in enumerate(self._ranges):
+        for _, (start, stop) in enumerate(self._ranges):
             if stop > bound:
                 value = max(start, bound)
                 self.remove(value)
@@ -573,7 +575,6 @@ class ImageResolver(object):
         elif name in self._cache:
             return self._cache[name]
 
-        orig_name = name
         colon = name.rfind(':')
         if colon != -1:
             # A tag was already specified in the graph
@@ -1114,7 +1115,7 @@ class Agent(ResourceCollector):
                     if resource_name in INTERFACE_SCALAR_RESOURCES:
                         self.interfaces[index].inc_attr(resource_name, resource.scalar.value)
         if self.priority is None:
-            self.priority = float(len(self.gpus) + 
+            self.priority = float(len(self.gpus) +
                                   len(self.interfaces) +
                                   len(self.volumes))
         logger.debug('Agent %s has priority %f', self.agent_id, self.priority)
@@ -1172,7 +1173,8 @@ class Agent(ResourceCollector):
                     use = j
                     break
             if use is None:
-                raise InsufficientResourcesError('No suitable {} found for request {}'.format(msg, i))
+                raise InsufficientResourcesError('No suitable {} found for request {}'
+                                                 .format(msg, i))
             assign[use] = i
         return assign
 
@@ -1215,19 +1217,19 @@ class Agent(ResourceCollector):
             setattr(alloc, r, need)
         for r in RANGE_RESOURCES:
             if r == 'cores':
-                for name in logical_task.cores:
+                for _name in logical_task.cores:
                     value = cores.popleft()
                     alloc.cores.append(value)
                     self.cores.remove(value)
             elif r == 'ports':
-                for name in logical_task.ports:
+                for _name in logical_task.ports:
                     try:
                         value = self.ports.popleft_min(self._min_port)
                     except IndexError:
                         value = self.ports.popleft()
                     alloc.ports.append(value)
             else:
-                for name in getattr(logical_task, r):
+                for _name in getattr(logical_task, r):
                     value = getattr(self, r).popleft()
                     getattr(alloc, r).append(value)
 
@@ -1313,13 +1315,13 @@ class TaskState(OrderedEnum):
     may be cancelled while still waiting for resources for the task, in which
     case it moves from :const:`STARTING` to :const:`NOT_READY`.
     """
-    NOT_READY = 0            #: We have not yet started it
-    STARTING = 1             #: We have been asked to start, but have not yet asked Mesos
-    STARTED = 2              #: We have asked Mesos to start it, but it is not yet running
-    RUNNING = 3              #: Process is running, but we're waiting for ports to open
-    READY = 4                #: Node is completely ready
-    KILLING = 5              #: We have asked the task to kill itself, but do not yet have confirmation
-    DEAD = 6                 #: Have received terminal status message
+    NOT_READY = 0    #: We have not yet started it
+    STARTING = 1     #: We have been asked to start, but have not yet asked Mesos
+    STARTED = 2      #: We have asked Mesos to start it, but it is not yet running
+    RUNNING = 3      #: Process is running, but we're waiting for ports to open
+    READY = 4        #: Node is completely ready
+    KILLING = 5      #: We have asked the task to kill itself, but do not yet have confirmation
+    DEAD = 6         #: Have received terminal status message
 
 
 class PhysicalNode(object):
@@ -1387,7 +1389,7 @@ class PhysicalNode(object):
             Current event loop
         """
         self.depends_ready = []
-        for src, trg, attr in graph.out_edges([self], data=True):
+        for _src, trg, attr in graph.out_edges([self], data=True):
             if attr.get(DEPENDS_READY):
                 self.depends_ready.append(trg)
 
@@ -1589,7 +1591,7 @@ class PhysicalTask(PhysicalNode):
             Current event loop
         """
         await super(PhysicalTask, self).resolve(resolver, graph, loop)
-        for src, trg, attr in graph.out_edges([self], data=True):
+        for _src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
                 endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
@@ -1656,7 +1658,8 @@ class PhysicalTask(PhysicalNode):
             docker_parameters.append({'key': 'cpuset-cpus', 'value': core_list})
 
         any_infiniband = False
-        for request, interface_alloc in zip(self.logical_node.interfaces, self.allocation.interfaces):
+        for request, interface_alloc in zip(self.logical_node.interfaces,
+                                            self.allocation.interfaces):
             for r in INTERFACE_SCALAR_RESOURCES:
                 value = getattr(interface_alloc, r)
                 if value:
@@ -1793,6 +1796,7 @@ class _LaunchGroup(object):
         self.resolver = resolver
         self.started_event = asyncio.Event(loop=loop)
 
+
 @decorator
 def run_in_event_loop(func, *args, **kw):
     args[0]._loop.call_soon_threadsafe(func, *args, **kw)
@@ -1801,7 +1805,6 @@ def run_in_event_loop(func, *args, **kw):
 async def wait_start_handler(scheduler, request):
     task_id = request.match_info['id']
     response_kwargs = dict(content_type='text/plain', charset='utf-8')
-    response = aiohttp.web.Response()
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
         return aiohttp.web.HTTPNotFound(
@@ -1930,7 +1933,7 @@ class Scheduler(pymesos.Scheduler):
         if not self.http_port:
             self.http_port = sock.getsockname()[1]
         if self.http_url is None:
-            netloc = '{}:{}'.format(socket.getfqdn(), http_port)
+            netloc = '{}:{}'.format(socket.getfqdn(), self.http_port)
             self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
         logger.info('Internal HTTP server at %s', self.http_url)
 
@@ -2241,7 +2244,8 @@ class Scheduler(pymesos.Scheduler):
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
                             self._remove_offer(agent.agent_id, offer_id.value)
-                        logger.info('Launched %d tasks on %s', len(taskinfos[agent]), agent.agent_id)
+                        logger.info('Launched %d tasks on %s',
+                                    len(taskinfos[agent]), agent.agent_id)
                     for node in nodes:
                         node.set_state(TaskState.STARTED)
                     break
@@ -2341,7 +2345,7 @@ class Scheduler(pymesos.Scheduler):
                                           'started nor scheduled'.format(src.name, trg.name))
         if not networkx.is_directed_acyclic_graph(depends_ready_graph):
             raise CycleError('cycle between depends_ready dependencies')
-        if not networkx.is_directed_acyclic_graph(depends_ready_graph):
+        if not networkx.is_directed_acyclic_graph(depends_resolve_graph):
             raise CycleError('cycle between depends_resolve dependencies')
 
         for node in remaining:
@@ -2424,7 +2428,7 @@ class Scheduler(pymesos.Scheduler):
             await self.http_server.wait_closed()
         # Find the graphs that are still running
         graphs = set()
-        for (task, graph) in self._active.values():
+        for (_task, graph) in self._active.values():
             graphs.add(graph)
         for group in self._pending:
             graphs.add(group.graph)
@@ -2482,7 +2486,6 @@ class Scheduler(pymesos.Scheduler):
                     return master_host, [slave['hostname'] for slave in slaves]
                 except (KeyError, TypeError) as error:
                     raise ValueError('Malformed response') from error
-        return result
 
     def get_task(self, task_id, return_graph=False):
         try:

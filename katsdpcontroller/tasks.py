@@ -1,6 +1,5 @@
 import logging
 import json
-import contextlib
 import asyncio
 
 from addict import Dict
@@ -17,7 +16,8 @@ from . import scheduler, sensor_proxy, product_config
 def _add_prometheus_sensor(name, description, class_):
     PROMETHEUS_SENSORS[name] = (
         class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
-        Gauge('katsdpcontroller_' + name + '_status', 'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
+        Gauge('katsdpcontroller_' + name + '_status',
+              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
     )
 
 
@@ -47,7 +47,7 @@ _add_prometheus_sensor('accumulator_batches',
                        'Number of batches completed by the accumulator', Counter)
 _add_prometheus_sensor('slots', 'Total number of buffer slots', Gauge)
 _add_prometheus_sensor('accumulator_slots',
-                        'Number of buffer slots the current accumulation has written to', Gauge)
+                       'Number of buffer slots the current accumulation has written to', Gauge)
 _add_prometheus_sensor('free_slots', 'Number of unused buffer slots', Gauge)
 _add_prometheus_sensor('pipeline_slots', 'Number of buffer slots in use by the pipeline', Gauge)
 _add_prometheus_sensor('accumulator_capture_active', 'Whether an observation is in progress', Gauge)
@@ -85,15 +85,6 @@ class State(scheduler.OrderedEnum):
     DEAD = 4
 
 
-def to_asyncio_future(tornado_future, loop=None):
-    """Variant of :func:`tornado.platform.asyncio.to_asyncio_future` that
-    allows a custom event loop to be specified."""
-    tornado_future = gen.convert_yielded(tornado_future)
-    af = asyncio.Future(loop=loop)
-    tornado.concurrent.chain_future(tornado_future, af)
-    return af
-
-
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
         super(SDPLogicalTask, self).__init__(*args, **kwargs)
@@ -113,8 +104,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
         self.sdp_controller = sdp_controller
         self.subarray_product_id = subarray_product_id
+        # list of exposed KATCP sensors
         self.sensors = {}
-         # list of exposed KATCP sensors
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -167,7 +158,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._add_sensor(gui_urls_sensor)
 
         for key, value in self.ports.items():
-            endpoint_sensor = Sensor(aiokatcp.Address,
+            endpoint_sensor = Sensor(
+                aiokatcp.Address,
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
             endpoint_sensor.set_value((self.host, value))
             self._add_sensor(endpoint_sensor)
@@ -176,9 +168,11 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             {'key': 'label',
              'value': 'za.ac.kat.sdp.katsdpcontroller.task={}'.format(self.logical_node.name)},
             {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'.format(self.taskinfo.task_id.value)},
+             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'
+                      .format(self.taskinfo.task_id.value)},
             {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'.format(self.subarray_product_id)}
+             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'
+                      .format(self.subarray_product_id)}
         ])
         # Request SDP services to escape newlines, for the benefit of
         # logstash.
@@ -210,7 +204,7 @@ class SDPConfigMixin(object):
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
         for name, value in self.ports.items():
             config[name] = value
-        for src, trg, attr in graph.out_edges(self, data=True):
+        for _src, trg, attr in graph.out_edges(self, data=True):
             endpoint = None
             if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr['port']
@@ -301,7 +295,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
       sdp.array_1.ingest.1.input_rate
     """
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
+        super().__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
@@ -355,15 +349,16 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
+                    # no need for these to lurk around
                     self.katcp_connection = None
-                     # no need for these to lurk around
-                    logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
+                    logger.error("Failed to connect to %s via katcp on %s:%d. "
+                                 "Check to see if networking issues could be to blame.",
                                  self.name, self.host, self.ports['port'], exc_info=True)
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0, loop=self.loop)
 
-    async def issue_req(self, req, args=[]):
+    async def issue_req(self, req, args=()):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log

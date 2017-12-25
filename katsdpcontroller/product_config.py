@@ -77,6 +77,7 @@ def validate(config):
         if semantic constraints are violated
     """
     from . import generator     # Imported locally to break circular import
+
     # Error messages for the oneOf parts of the schema are not helpful by
     # default, because it doesn't know which branch is the relevant one. The
     # "not" branches are generally just there to make validation conditional

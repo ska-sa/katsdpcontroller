@@ -365,7 +365,7 @@ def _make_cbf_simulator(g, config, name):
     g.add_node(sim_group, config=make_config)
     multicast = find_node(g, 'multicast.' + name)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
-        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
 
     for i in range(n_sim):
@@ -934,7 +934,7 @@ def build_logical_graph(config):
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
-                        ingest = _make_ingest(g, config, name, name2)
+                        _make_ingest(g, config, name, name2)
                         _make_cal(g, config, name)
                         _make_filewriter(g, config, name)
                         l0_done.add(name)
@@ -950,7 +950,7 @@ def build_logical_graph(config):
         _adjust_ingest_output_channels(config, [name])
         if is_spectral:
             _make_timeplot(g, config, name)
-            ingest = _make_ingest(g, config, name, None)
+            _make_ingest(g, config, name, None)
             _make_cal(g, config, name)
             _make_filewriter(g, config, name)
         else:
@@ -967,7 +967,7 @@ def build_logical_graph(config):
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
     telstate_extra = 0
-    for node, data in g.nodes(True):
+    for _node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):

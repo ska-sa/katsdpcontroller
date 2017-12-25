@@ -4,21 +4,23 @@ import socket
 import contextlib
 import logging
 import uuid
-from unittest import mock
-import aioresponses
-from nose.tools import *
-from katsdpcontroller import scheduler
-from katsdpcontroller.scheduler import TaskState
-import ipaddress
 import functools
-import inspect
 import asyncio
+import ipaddress
+import unittest
+from unittest import mock
+
+from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
+                        assert_is, assert_is_not, assert_is_none)
 import networkx
 import pymesos
 from addict import Dict
-import unittest
 import asynctest
+import aioresponses
 import aiohttp
+
+from katsdpcontroller import scheduler
+from katsdpcontroller.scheduler import TaskState
 
 
 def run_with_event_loop(func):
@@ -127,7 +129,7 @@ class TestRangeResource(object):
         rr.add_range(9, 10)
         rr.add_range(5, 8)
         out = []
-        for i in range(4):
+        for _ in range(4):
             out.append(rr.popleft())
         assert_false(rr)
         assert_equal([9, 5, 6, 7], out)
@@ -138,7 +140,7 @@ class TestRangeResource(object):
         rr.add_range(9, 10)
         rr.add_range(5, 8)
         out = []
-        for i in range(4):
+        for _ in range(4):
             out.append(rr.pop())
         assert_false(rr)
         assert_equal([7, 6, 5, 9], out)
@@ -197,21 +199,21 @@ class TestPollPorts(object):
         """Test poll ports against a temporary DNS failure."""
         with mock.patch.object(loop, 'getaddrinfo', autospec=True) as getaddrinfo:
             test_address = socket.getaddrinfo('127.0.0.1', self.port)
+            # create a legitimate return future for getaddrinfo
             legit_future = asyncio.Future(loop=loop)
             legit_future.set_result(test_address)
-             # create a legitimate return future for getaddrinfo
 
+            # sequential calls to getaddrinfo produce failure and success
             getaddrinfo.side_effect = [socket.gaierror("Failed to resolve"), legit_future]
-             # sequential calls to getaddrinfo produce failure and success
 
             self.sock.listen(1)
             future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
                                            loop=loop)
             await asyncio.sleep(1, loop=loop)
+            # temporary DNS failure
             assert_false(future.done())
-             # temporary DNS failure
+            # wait for retry loop (currently 5s) (TODO: use ClockedTestCase)
             await asyncio.sleep(6, loop=loop)
-             # wait for retry loop (currently 5s)
             assert_true(future.done())
 
 
@@ -275,18 +277,6 @@ class TestImageResolver(object):
     async def test_private_registry_digests(self, load_config_mock, loop):
         """Test with a private registry, looking up a digest"""
         digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
-        # Based on an actual registry response
-        headers = {
-            '/v2/myimage/manifests/latest': {
-                'Content-Length': '1234',
-                'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
-                'Docker-Content-Digest': digest,
-                'Docker-Distribution-Api-Version': 'registry/2.0',
-                'Etag': '"{}"'.format(digest),
-                'X-Content-Type-Options': 'nosniff',
-                'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
-            }
-        }
         # Response headers are modelled on an actual registry response
         with aioresponses.aioresponses() as rmock:
             rmock.head(
@@ -436,8 +426,12 @@ class TestAgent(unittest.TestCase):
              {'name': 'vol2', 'host_path': '/host2', 'numa_node': 1}])
         self.gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
-            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'], 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 1},
-             {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'], 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 0}])
+            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 1},
+             {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 0}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.priority_attr = Dict()
@@ -755,7 +749,7 @@ class TestPhysicalTask(object):
                 {"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}
             ]),
             _make_json_attr('katsdpcontroller.volumes',
-                [{"name": "vol0", "host_path": "/host0", "numa_node": 1}])
+                            [{"name": "vol0", "host_path": "/host0", "numa_node": 1}])
         ]
         offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
@@ -820,11 +814,12 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         # Create a number of agents, each of which has a large quantity of
         # some resource but not much of others. This makes it easier to
         # control which resources are plentiful in the simulated cluster.
-        framework_id = 'frameworkid'
         numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
-            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'], 'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2), 'numa_node': 1}])
+            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 1}])
         interface_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
@@ -1219,13 +1214,12 @@ class TestScheduler(asynctest.TestCase):
         with assert_raises(asyncio.InvalidStateError):
             # Timeout is just to ensure the test won't hang
             await asyncio.wait_for(self.sched.launch(self.physical_graph, self.resolver),
-                                        timeout=1, loop=self.loop)
+                                   timeout=1, loop=self.loop)
 
     async def test_launch_serial(self):
         """Test launch on the success path, with no concurrent calls."""
         # TODO: still need to extend this to test:
         # - custom wait_ports
-        numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         offer0 = self._make_offer({
             'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)],
             'katsdpcontroller.gpu.0.compute': 0.25,
@@ -1672,7 +1666,7 @@ class TestScheduler(asynctest.TestCase):
         with aioresponses.aioresponses() as rmock:
             # An actual response scraped from a real Mesos server
             rmock.get('http://master.invalid:5050/slaves',
-                      body=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')
+                      body=r'{"slaves":[{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S13","pid":"slave(1)@192.168.6.198:5051","hostname":"192.168.6.198","registered_time":1485252612.46216,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S12","pid":"slave(1)@192.168.6.188:5051","hostname":"192.168.6.188","registered_time":1485252591.10345,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]},{"id":"001fe2cf-cd21-464e-9b38-e043535aa29e-S11","pid":"slave(1)@192.168.6.206:5051","hostname":"192.168.6.206","registered_time":1485252564.45196,"resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"used_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"offered_resources":{"disk":0.0,"mem":0.0,"gpus":0.0,"cpus":0.0},"reserved_resources":{},"unreserved_resources":{"disk":34080.0,"mem":15023.0,"gpus":0.0,"cpus":4.0,"ports":"[31000-32000]"},"attributes":{},"active":true,"version":"1.1.0","reserved_resources_full":{},"used_resources_full":[],"offered_resources_full":[]}]}')  # noqa: E501
             self.driver.master = 'master.invalid:5050'
             master, slaves = await self.sched.get_master_and_slaves()
             assert_equal('master.invalid', master)

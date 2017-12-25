@@ -12,16 +12,16 @@ import os.path
 from collections import deque
 import asyncio
 import functools
+import enum
+import ipaddress
+import faulthandler
 
 import networkx
 import networkx.drawing.nx_pydot
-import enum
 
 import async_timeout
 import jsonschema
-import ipaddress
 import netifaces
-import faulthandler
 
 from prometheus_client import Histogram
 
@@ -624,7 +624,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
 
-    async def _issue_req(self, req, args=[], node_type='ingest'):
+    async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical
         usage is to issue a command such as 'capture-init' to all ingest nodes.
         A single failure is treated as terminal.

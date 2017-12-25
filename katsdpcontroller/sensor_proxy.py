@@ -213,7 +213,7 @@ class SensorProxyClient(aiokatcp.Client):
                                                        for i in range(4)]
                 if type_name not in SENSOR_TYPES:
                     logger.warning('Type %s is not recognised, skipping sensor %s',
-                                        type_name, name)
+                                   type_name, name)
                     continue
                 full_name = self.qualify_name(name)
                 stype = self._make_type(type_name, inform.arguments[4:])
