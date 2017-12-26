@@ -10,6 +10,7 @@ fakenewsredis              # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
 idna==2.6                  # via requests
+ipaddress                  # via katsdptelstate
 jsonschema==2.6.0
 katversion
 kazoo==2.4.0
@@ -27,7 +28,7 @@ redis                      # via katsdptelstate
 requests==2.18.4           # via docker
 rfc3987==1.3.7
 six                        # via docker and others
-urllib3                    # via requests
+urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 yarl==0.16.0               # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
