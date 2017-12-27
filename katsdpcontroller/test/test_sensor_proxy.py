@@ -10,6 +10,7 @@ Still TODO:
 
 import asyncio
 import enum
+from unittest import mock
 
 import aiokatcp
 from aiokatcp import Sensor, Address
@@ -17,7 +18,6 @@ from aiokatcp.test.test_utils import timelimit
 import prometheus_client
 
 import asynctest
-import mock
 
 from katsdpcontroller.sensor_proxy import SensorProxyClient
 
