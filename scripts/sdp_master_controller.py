@@ -61,13 +61,12 @@ def load_gui_urls_dir(dirname):
     return gui_urls
 
 
-@asyncio.coroutine
-def run(loop, sched, server):
-    yield from sched.start()
-    yield from server.start()
+async def run(loop, sched, server):
+    await sched.start()
+    await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
-    yield from server.join()
+    await server.join()
 
 
 if __name__ == "__main__":
