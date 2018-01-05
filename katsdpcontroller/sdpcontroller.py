@@ -843,7 +843,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 raise exc
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(
-                self.subarray_product_id, error))
+                self.subarray_product_id, error)) from error
         except scheduler.ImageError as error:
             raise FailReply(str(error)) from error
 
