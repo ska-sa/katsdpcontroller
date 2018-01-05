@@ -845,7 +845,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             raise FailReply('Insufficient resources to launch {}: {}'.format(
                 self.subarray_product_id, error))
         except scheduler.ImageError as error:
-            raise FailReply(str(error))
+            raise FailReply(str(error)) from error
 
     async def deconfigure_impl(self, force, ready):
         if force:
@@ -1111,12 +1111,12 @@ class SDPControllerServer(DeviceServer):
                 logger.warning("Failed to deconfigure product %s during master controller exit. "
                                "Forging ahead...", subarray_product_id, exc_info=True)
 
-    async def stop(self):
-        await super().stop()
+    async def stop(self, cancel: bool = True):
         # TODO: set a flag to prevent new async requests being entertained
         await self.deconfigure_on_exit()
         if self.sched is not None:
             await self.sched.close()
+        await super().stop(cancel)
 
     @time_request
     async def request_set_config_override(

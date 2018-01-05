@@ -62,7 +62,7 @@ def load_gui_urls_dir(dirname):
 
 
 @asyncio.coroutine
-def run(self, loop, sched, server):
+def run(loop, sched, server):
     yield from sched.start()
     yield from server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
