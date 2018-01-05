@@ -35,7 +35,7 @@ class PrometheusObserver(object):
     def __call__(self, sensor, reading):
         valid = reading.status in VALID_STATUS
         value = float(reading.value) if valid else 0.0
-        self._status_metric.set(reading.status)
+        self._status_metric.set(reading.status.value)
         # Detecting the type of the metric is tricky, because Counter and
         # Gauge aren't actually classes (they're functions). So we have to
         # use introspection.
@@ -62,7 +62,7 @@ class PrometheusObserver(object):
     def close(self):
         """Shut down observing"""
         self._sensor.detach(self)
-        self._status_metric.set(aiokatcp.Sensor.Status.UNREACHABLE)
+        self._status_metric.set(aiokatcp.Sensor.Status.UNREACHABLE.value)
 
 
 class DiscreteMixin:

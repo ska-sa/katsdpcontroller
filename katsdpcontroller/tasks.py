@@ -232,9 +232,9 @@ class CaptureBlockStateObserver(object):
         sensor.attach(self)
 
     def __call__(self, sensor, reading):
-        if reading.status in [Sensor.NOMINAL, Sensor.WARN, Sensor.ERROR]:
+        if reading.status in [Sensor.Status.NOMINAL, Sensor.Status.WARN, Sensor.Status.ERROR]:
             try:
-                value = json.loads(reading.value)
+                value = json.loads(reading.value.decode('utf-8'))
             except ValueError:
                 logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
             else:
