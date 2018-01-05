@@ -37,7 +37,7 @@ setup (
     ],
     tests_require = tests_require,
     extras_require = {
-        'agent': ['psutil', 'nvidia-ml-py', 'pycuda'],
+        'agent': ['psutil', 'py3nvml', 'pycuda'],
         'test': tests_require
     },
     use_katversion = True,
