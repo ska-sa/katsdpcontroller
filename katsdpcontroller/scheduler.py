@@ -1804,12 +1804,9 @@ def run_in_event_loop(func, *args, **kw):
 
 async def wait_start_handler(scheduler, request):
     task_id = request.match_info['id']
-    response_kwargs = dict(content_type='text/plain', charset='utf-8')
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        return aiohttp.web.HTTPNotFound(
-            body='Task ID {} not active\n'.format(task_id),
-            **response_kwargs)
+        return aiohttp.web.HTTPNotFound(reason='Task ID {} not active\n'.format(task_id))
     else:
         try:
             for dep in task.depends_ready:
@@ -1817,10 +1814,9 @@ async def wait_start_handler(scheduler, request):
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
             return aiohttp.web.HTTPInternalServerError(
-                body='Exception while waiting for dependencies:\n{}\n'.format(error),
-                **response_kwargs)
+                reason='Exception while waiting for dependencies:\n{}\n'.format(error))
         else:
-            return aiohttp.web.Response(body='', **response_kwargs)
+            return aiohttp.web.Response(body='')
 
 
 def subgraph(graph, edge_filter, nodes=None):

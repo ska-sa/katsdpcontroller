@@ -279,7 +279,7 @@ class CaptureBlockStateObserver(object):
         self._last = {}
         self._trigger()   # Give waiters a chance to react to an empty map
         for waiter in self._waiters:
-            waiter[1].set_exception(asyncio.ConnectionResetError())
+            waiter[1].set_exception(ConnectionResetError())
         self._waiters = []
 
 
