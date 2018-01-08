@@ -709,7 +709,7 @@ class NoOffersError(InsufficientResourcesError):
     received before the timeout.
     """
     def __init__(self):
-        super(NoOffersError, self).__init__("No offers were received")
+        super().__init__("No offers were received")
 
 
 class TaskNoAgentError(InsufficientResourcesError):
@@ -727,7 +727,7 @@ class TaskInsufficientResourcesError(TaskNoAgentError):
     """Indicates that a specific task required more of some resource than
     were available on any agent."""
     def __init__(self, node, resource, needed, available):
-        super(TaskInsufficientResourcesError, self).__init__(node)
+        super().__init__(node)
         self.resource = resource
         self.needed = needed
         self.available = available
@@ -741,7 +741,7 @@ class TaskInsufficientGPUResourcesError(TaskNoAgentError):
     """Indicates that a specific task GPU request needed more of some resource
     than was available on any agent GPU."""
     def __init__(self, node, request_index, resource, needed, available):
-        super(TaskInsufficientGPUResourcesError, self).__init__(node)
+        super().__init__(node)
         self.request_index = request_index
         self.resource = resource
         self.needed = needed
@@ -756,7 +756,7 @@ class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
     """Indicates that a specific task interface request needed more of some
     resource than was available on any agent interface."""
     def __init__(self, node, request, resource, needed, available):
-        super(TaskInsufficientInterfaceResourcesError, self).__init__(node)
+        super().__init__(node)
         self.request = request
         self.resource = resource
         self.needed = needed
@@ -770,7 +770,7 @@ class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
 class TaskNoInterfaceError(TaskNoAgentError):
     """Indicates that a task required a network interface that was not present on any agent."""
     def __init__(self, node, request):
-        super(TaskNoInterfaceError, self).__init__(node)
+        super().__init__(node)
         self.request = request
 
     def __str__(self):
@@ -781,7 +781,7 @@ class TaskNoInterfaceError(TaskNoAgentError):
 class TaskNoVolumeError(TaskNoAgentError):
     """Indicates that a task required a volume that was not present on any agent."""
     def __init__(self, node, request):
-        super(TaskNoVolumeError, self).__init__(node)
+        super().__init__(node)
         self.request = request
 
     def __str__(self):
@@ -792,7 +792,7 @@ class TaskNoVolumeError(TaskNoAgentError):
 class TaskNoGPUError(TaskNoAgentError):
     """Indicates that a task required a GPU that did not match any agent"""
     def __init__(self, node, request_index):
-        super(TaskNoGPUError, self).__init__(node)
+        super().__init__(node)
         self.request_index = request_index
 
     def __str__(self):
@@ -803,7 +803,7 @@ class GroupInsufficientResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     resource than were available between all the agents."""
     def __init__(self, resource, needed, available):
-        super(GroupInsufficientResourcesError, self).__init__()
+        super().__init__()
         self.resource = resource
         self.needed = needed
         self.available = available
@@ -817,7 +817,7 @@ class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     GPU resource than were available between all the agents."""
     def __init__(self, resource, needed, available):
-        super(GroupInsufficientGPUResourcesError, self).__init__()
+        super().__init__()
         self.resource = resource
         self.needed = needed
         self.available = available
@@ -831,7 +831,7 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     interface resource than were available between all the agents."""
     def __init__(self, network, resource, needed, available):
-        super(GroupInsufficientInterfaceResourcesError, self).__init__()
+        super().__init__()
         self.network = network
         self.resource = resource
         self.needed = needed
@@ -887,7 +887,7 @@ class LogicalExternal(LogicalNode):
     defaults to an empty :attr:`~LogicalNode.wait_ports`, which must be
     overridden is waiting is desired."""
     def __init__(self, name):
-        super(LogicalExternal, self).__init__(name)
+        super().__init__(name)
         self.physical_factory = PhysicalExternal
         self.wait_ports = []
 
@@ -950,7 +950,7 @@ class LogicalTask(LogicalNode):
         command being passed to it.
     """
     def __init__(self, name):
-        super(LogicalTask, self).__init__(name)
+        super().__init__(name)
         for r in SCALAR_RESOURCES:
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
@@ -1486,7 +1486,7 @@ class PhysicalExternal(PhysicalNode):
             state = TaskState.RUNNING
         elif state == TaskState.KILLING:
             state = TaskState.DEAD
-        super(PhysicalExternal, self).set_state(state)
+        super().set_state(state)
 
 
 class PhysicalTask(PhysicalNode):
@@ -1528,7 +1528,7 @@ class PhysicalTask(PhysicalNode):
         Slave ID of the agent on which this task is running
     """
     def __init__(self, logical_task, loop):
-        super(PhysicalTask, self).__init__(logical_task, loop)
+        super().__init__(logical_task, loop)
         self.interfaces = {}
         self.endpoints = {}
         self.taskinfo = None
@@ -1590,7 +1590,7 @@ class PhysicalTask(PhysicalNode):
         loop : :class:`asyncio.AbstractEventLoop`
             Current event loop
         """
-        await super(PhysicalTask, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
         for _src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
@@ -1751,7 +1751,7 @@ class PhysicalTask(PhysicalNode):
         # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
-        super(PhysicalTask, self).kill(driver, **kwargs)
+        super().kill(driver, **kwargs)
 
 
 def instantiate(logical_graph, loop):

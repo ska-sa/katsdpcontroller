@@ -561,7 +561,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     actually run anything.
     """
     def __init__(self, *args, **kwargs):
-        super(SDPSubarrayProductInterface, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
         sensors = self._interface_mode_sensors.sensors
         self._capture_block_states = [
@@ -614,8 +614,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def __init__(self, sched, config, resolver, subarray_product_id, loop,
                  sdp_controller, telstate_name='telstate'):
-        super(SDPSubarrayProduct, self).__init__(
-            sched, config, resolver, subarray_product_id, loop, sdp_controller)
+        super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
         # generate physical nodes
         mapping = {logical: self._instantiate(logical, sdp_controller)
                    for logical in self.logical_graph}
@@ -938,7 +937,7 @@ class SDPControllerServer(DeviceServer):
         # per subarray product dictionaries used to override internal config
         self.override_dicts = {}
 
-        super(SDPControllerServer, self).__init__(host, port)
+        super().__init__(host, port)
 
         self._build_state_sensor.set_value(self.BUILD_STATE)
         self.sensors.add(self._build_state_sensor)

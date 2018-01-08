@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 class LogicalMulticast(scheduler.LogicalExternal):
     def __init__(self, name, n_addresses=None, endpoint=None):
-        super(LogicalMulticast, self).__init__(name)
+        super().__init__(name)
         self.physical_factory = PhysicalMulticast
         self.n_addresses = n_addresses
         self.endpoint = endpoint
@@ -57,7 +57,7 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
     async def resolve(self, resolver, graph, loop):
-        await super(PhysicalMulticast, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
@@ -68,7 +68,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 class TelstateTask(SDPPhysicalTaskBase):
     async def resolve(self, resolver, graph, loop):
-        await super(TelstateTask, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
         portmap = addict.Dict()
@@ -80,7 +80,7 @@ class TelstateTask(SDPPhysicalTaskBase):
 
 class IngestTask(SDPPhysicalTask):
     async def resolve(self, resolver, graph, loop):
-        await super(IngestTask, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image. If it is the standard GPU, don't try to override
         # anything, but otherwise synthesize an image name by mangling the

@@ -89,7 +89,7 @@ class State(scheduler.OrderedEnum):
 
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
-        super(SDPLogicalTask, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.physical_factory = SDPPhysicalTask
         self.transitions = {}
         # List of dictionaries for a .gui-urls sensor. The fields are expanded
@@ -102,7 +102,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super(SDPPhysicalTaskBase, self).__init__(logical_task, loop)
+        super().__init__(logical_task, loop)
         self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
         self.sdp_controller = sdp_controller
         self.subarray_product_id = subarray_product_id
@@ -141,10 +141,10 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
     def kill(self, driver, **kwargs):
         self._disconnect()
-        super(SDPPhysicalTaskBase, self).kill(driver)
+        super().kill(driver)
 
     async def resolve(self, resolver, graph, loop):
-        await super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
 
         gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -201,7 +201,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
-        super(SDPPhysicalTaskBase, self).set_state(state)
+        super().set_state(state)
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
 
@@ -209,7 +209,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     async def resolve(self, resolver, graph, loop):
-        await super(SDPConfigMixin, self).resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph, loop)
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
         for name, value in self.ports.items():
             config[name] = value
@@ -334,7 +334,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def wait_ready(self):
-        await super(SDPPhysicalTask, self).wait_ready()
+        await super().wait_ready()
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
@@ -391,14 +391,14 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 await self.capture_block_state_observer.wait_empty()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        super(SDPPhysicalTask, self).kill(driver, **kwargs)
+        super().kill(driver, **kwargs)
 
     def kill(self, driver, **kwargs):
         force = kwargs.pop('force', False)
         if not force:
             asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
         else:
-            super(SDPPhysicalTask, self).kill(driver, **kwargs)
+            super().kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):
@@ -409,7 +409,7 @@ class LogicalGroup(scheduler.LogicalExternal):
     to be stored once rather than repeated.
     """
     def __init__(self, name):
-        super(LogicalGroup, self).__init__(name)
+        super().__init__(name)
         self.physical_factory = PhysicalGroup
 
 
@@ -420,7 +420,7 @@ class PhysicalGroup(SDPConfigMixin, scheduler.PhysicalExternal):
 class PoweroffLogicalTask(scheduler.LogicalTask):
     """Logical task for powering off a machine."""
     def __init__(self, host):
-        super(PoweroffLogicalTask, self).__init__('kibisis')
+        super().__init__('kibisis')
         self.host = host
         # Use minimal resources, to reduce chance it that it won't fit
         self.cpus = 0.001
@@ -440,6 +440,6 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
         self.container.docker.parameters.append({'key': 'user', 'value': 'root'})
 
     def valid_agent(self, agent):
-        if not super(PoweroffLogicalTask, self).valid_agent(agent):
+        if not super().valid_agent(agent):
             return False
         return agent.host == self.host
