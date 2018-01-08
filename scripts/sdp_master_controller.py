@@ -12,17 +12,15 @@ import json
 import signal
 import argparse
 import logging
-import addict
 import asyncio
+
+import addict
 from prometheus_client import start_http_server
 import pymesos
+import aiomonitor
 import katsdpservices
-from katsdpcontroller import scheduler, sdpcontroller
 
-try:
-    import manhole
-except ImportError:
-    manhole = None
+from katsdpcontroller import scheduler, sdpcontroller
 
 
 def on_shutdown(loop, server):
@@ -97,6 +95,9 @@ if __name__ == "__main__":
     parser.add_argument('--no-prometheus', dest='prometheus', default=True,
                         action='store_false',
                         help='disable Prometheus client HTTP service')
+    parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
+                        action='store_false',
+                        help='disable aiomonitor debugging server')
     parser.add_argument('-i', '--interface_mode', dest='interface_mode', default=False,
                         action='store_true',
                         help='run the controller in interface only mode for testing integration and ICD compliance. (default: %(default)s)')
@@ -197,15 +198,15 @@ if __name__ == "__main__":
         gui_urls=gui_urls,
         graph_dir=opts.write_graphs)
 
-    if manhole:
-        manhole.install(oneshot_on='USR1', locals={'logger':logger, 'server':server, 'opts':opts})
-         # allow remote debug connections and expose server and opts
-
     logger.info("Starting SDP...")
 
     if opts.prometheus:
         start_http_server(8081)
          # expose any prometheus metrics that we create
 
-    loop.run_until_complete(run(loop, sched, server))
+    if opts.aiomonitor:
+        with aiomonitor.start_monitor(loop=loop):
+            loop.run_until_complete(run(loop, sched, server))
+    else:
+        loop.run_until_complete(run(loop, sched, server))
     loop.close()
