@@ -36,24 +36,6 @@ def run_with_event_loop(func):
     return wrapper
 
 
-def defer(depth=50, loop=None):
-    """Returns a future which is signalled in the very near future.
-
-    Specifically, it tries to wait until the event loop is otherwise idle. It
-    does that by using :meth:`asyncio.BaseEventLoop.call_soon` to defer
-    completing the future, and does this `depth` times.
-    """
-    def callback(future, depth):
-        if depth == 0:
-            if not future.cancelled():
-                future.set_result(None)
-        else:
-            loop.call_soon(callback, future, depth - 1)
-    future = asyncio.Future(loop=loop)
-    loop.call_soon(callback, future, depth - 1)
-    return future
-
-
 class AnyOrderList(list):
     """Used for asserting that a list is present in a call, but without
     constraining the order. It does not require the elements to be hashable.
