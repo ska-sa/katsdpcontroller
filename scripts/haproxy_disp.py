@@ -55,7 +55,7 @@ def terminate():
     main_task.cancel()
 
 
-class Server(object):
+class Server:
     def __init__(self):
         self.html_endpoint = None
 

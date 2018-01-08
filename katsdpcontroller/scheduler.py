@@ -196,7 +196,7 @@ numa_node : int, optional
 """
 
 
-class GPURequest(object):
+class GPURequest:
     """Request for resources on a single GPU. These resources are not isolated,
     so the request functions purely to ensure that the scheduler does not try
     to over-allocate a GPU.
@@ -225,7 +225,7 @@ class GPURequest(object):
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
 
-class InterfaceRequest(object):
+class InterfaceRequest:
     """Request for resources on a network interface. At the moment only
     a logical network name can be specified, but this may be augmented in
     future to allocate bandwidth.
@@ -260,7 +260,7 @@ class InterfaceRequest(object):
         return self.network == interface.network
 
 
-class VolumeRequest(object):
+class VolumeRequest:
     """Request to mount a host directory on the agent.
 
     Attributes
@@ -367,7 +367,7 @@ async def poll_ports(host, ports, loop):
         logger.debug('Port %d on %s ready', port, host)
 
 
-class RangeResource(object):
+class RangeResource:
     """More convenient wrapper over Mesos' presentation of a range resource
     (list of contiguous ranges). It provides Pythonic idioms to allow it
     to be treated similarly to a list, while keeping storage compact.
@@ -461,7 +461,7 @@ class RangeResource(object):
         return ','.join(format_range(rng) for rng in self._ranges)
 
 
-class GPUResourceAllocation(object):
+class GPUResourceAllocation:
     """Collection of specific resources allocated from a single agent GPU.
 
     Attributes
@@ -475,7 +475,7 @@ class GPUResourceAllocation(object):
             setattr(self, r, 0.0)
 
 
-class InterfaceResourceAllocation(object):
+class InterfaceResourceAllocation:
     """Collection of specific resources allocated from a single agent network interface.
 
     Attributes
@@ -489,7 +489,7 @@ class InterfaceResourceAllocation(object):
             setattr(self, r, 0.0)
 
 
-class ResourceAllocation(object):
+class ResourceAllocation:
     """Collection of specific resources allocated from a collection of offers.
 
     Attributes
@@ -508,7 +508,7 @@ class ResourceAllocation(object):
         self.volumes = []
 
 
-class ImageResolver(object):
+class ImageResolver:
     """Class to map an abstract Docker image name to a fully-qualified name.
     If no private registry is specified, it looks up names in the `sdp/`
     namespace, otherwise in the private registry. One can also override
@@ -630,7 +630,7 @@ class ImageResolver(object):
         return resolved
 
 
-class ImageResolverFactory(object):
+class ImageResolverFactory:
     """Factory for generating image resolvers. An :class:`ImageResolver`
     caches lookups, so it is useful to be able to generate a new one to
     receive fresh information.
@@ -655,7 +655,7 @@ class ImageResolverFactory(object):
         return image_resolver
 
 
-class TaskIDAllocator(object):
+class TaskIDAllocator:
     """Allocates unique task IDs, with a custom prefix on the name.
 
     Because IDs must be globally unique (within the framework), the
@@ -683,7 +683,7 @@ class TaskIDAllocator(object):
         return ret
 
 
-class Resolver(object):
+class Resolver:
     """General-purpose base class to connect extra resources to a graph. The
     base implementation contains an :class:`ImageResolver`, a
     :class:`TaskIDAllocator` and the URL for the scheduler's HTTP server.
@@ -859,7 +859,7 @@ class ImageError(RuntimeError):
     pass
 
 
-class LogicalNode(object):
+class LogicalNode:
     """A node in a logical graph. This is a base class. For nodes that
     execute code and use Mesos resources, see :class:`LogicalTask`.
 
@@ -974,7 +974,7 @@ class LogicalTask(LogicalNode):
         return True
 
 
-class ResourceCollector(object):
+class ResourceCollector:
     def inc_attr(self, key, delta):
         setattr(self, key, getattr(self, key) + delta)
 
@@ -1324,7 +1324,7 @@ class TaskState(OrderedEnum):
     DEAD = 6         #: Have received terminal status message
 
 
-class PhysicalNode(object):
+class PhysicalNode:
     """Base class for physical nodes.
 
     Parameters
@@ -1773,7 +1773,7 @@ def instantiate(logical_graph, loop):
     return networkx.relabel_nodes(logical_graph, mapping)
 
 
-class _LaunchGroup(object):
+class _LaunchGroup:
     """Set of tasks that are in state STARTING and waiting for Mesos
     resources.
 

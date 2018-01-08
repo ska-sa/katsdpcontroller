@@ -13,7 +13,7 @@ def merge_dicts(*dicts):
     return out
 
 
-class TestOverride(object):
+class TestOverride:
     """Tests for :func:`~katsdpcontroller.product_config.override`"""
 
     def test_add(self):
@@ -37,7 +37,7 @@ class TestOverride(object):
         assert_equal({"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}, out)
 
 
-class TestValidate(object):
+class TestValidate:
     """Tests for :func:`~katsdpcontroller.product_config.validate`"""
 
     def setup(self):
@@ -220,7 +220,7 @@ class TestValidate(object):
         assert_in("not a multiple of", str(cm.exception))
 
 
-class TestConvert(object):
+class TestConvert:
     """Tests for :func:`~katsdpcontroller.product_config.convert`.
 
     These tests are fragile because there is more than one valid way to skin

@@ -23,7 +23,7 @@ SENSOR_TYPES = {
 logger = logging.getLogger(__name__)
 
 
-class PrometheusObserver(object):
+class PrometheusObserver:
     """Watches a sensor and mirrors updates into a Prometheus Gauge or Counter"""
     def __init__(self, sensor, value_metric, status_metric):
         self._sensor = sensor

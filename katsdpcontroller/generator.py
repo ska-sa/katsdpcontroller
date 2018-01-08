@@ -131,7 +131,7 @@ def _bandwidth(size, time, ratio=1.05, overhead=2048):
     return (size * ratio + overhead) * 8 / time
 
 
-class CBFStreamInfo(object):
+class CBFStreamInfo:
     """Wraps a CBF stream from the config to provide convenient access to
     calculated quantities.
 
@@ -177,7 +177,7 @@ class CBFStreamInfo(object):
         return self.antenna_channelised_voltage['n_samples_between_spectra']
 
 
-class VisInfo(object):
+class VisInfo:
     """Mixin for info classes to compute visibility info from baselines and channels."""
     @property
     def n_vis(self):

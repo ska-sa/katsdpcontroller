@@ -206,7 +206,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._disconnect()
 
 
-class SDPConfigMixin(object):
+class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     async def resolve(self, resolver, graph, loop):
         await super(SDPConfigMixin, self).resolve(resolver, graph, loop)
@@ -228,7 +228,7 @@ class SDPConfigMixin(object):
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 
-class CaptureBlockStateObserver(object):
+class CaptureBlockStateObserver:
     """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """

@@ -77,7 +77,7 @@ class AnyOrderList(list):
         return NotImplemented
 
 
-class TestRangeResource(object):
+class TestRangeResource:
     """Tests for :class:`katsdpcontroller.scheduler.RangeResource`"""
     def test_len(self):
         rr = scheduler.RangeResource()
@@ -164,7 +164,7 @@ class TestRangeResource(object):
         assert_equal('9,5-7', str(rr))
 
 
-class TestPollPorts(object):
+class TestPollPorts:
     """Tests for poll_ports"""
     def setup(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -217,7 +217,7 @@ class TestPollPorts(object):
             assert_true(future.done())
 
 
-class TestTaskState(object):
+class TestTaskState:
     """Tests that TaskState ordering works as expected"""
     def test_compare(self):
         assert_true(TaskState.NOT_READY <= TaskState.RUNNING)
@@ -252,7 +252,7 @@ class TestTaskState(object):
             TaskState.RUNNING >= 3
 
 
-class TestImageResolver(object):
+class TestImageResolver:
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
     @run_with_event_loop
     async def test_simple(self, loop):
@@ -333,7 +333,7 @@ class TestImageResolver(object):
         open_mock.assert_not_called()
 
 
-class TestTaskIDAllocator(object):
+class TestTaskIDAllocator:
     """Tests for :class:`katsdpcontroller.scheduler.TaskIDAllocator`."""
     def test_singleton(self):
         """Allocators with the same prefix are the same object"""
@@ -723,7 +723,7 @@ class TestAgent(unittest.TestCase):
         assert_equal(1024.0, agent.gpus[1].mem)
 
 
-class TestPhysicalTask(object):
+class TestPhysicalTask:
     """Tests for :class:`katsdpcontroller.scheduler.PhysicalTask`"""
 
     def setUp(self):
@@ -1046,7 +1046,7 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(scheduler.InsufficientResourcesError, type(cm.exception))
 
 
-class TestSubgraph(object):
+class TestSubgraph:
     """Tests for :func:`katsdpcontroller.scheduler.subgraph`"""
     def setup(self):
         g = networkx.MultiDiGraph()

@@ -60,7 +60,7 @@ def log_task_exceptions(task, msg):
     task.add_done_callback(done_callback)
 
 
-class GraphResolver(object):
+class GraphResolver:
     """Provides graph name resolution services for use when presented with
        a subarray product id.
 
@@ -102,7 +102,7 @@ class GraphResolver(object):
         return base_graph_name
 
 
-class MulticastIPResources(object):
+class MulticastIPResources:
     def __init__(self, network):
         self._hosts = network.hosts()
 
@@ -118,7 +118,7 @@ class MulticastIPResources(object):
             raise RuntimeError('Multicast IP addresses exhausted')
 
 
-class SDPCommonResources(object):
+class SDPCommonResources:
     """Assigns multicast groups and ports across all subarrays."""
     def __init__(self, safe_multicast_cidr):
         logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
@@ -126,7 +126,7 @@ class SDPCommonResources(object):
             ipaddress.ip_network(safe_multicast_cidr).subnets(new_prefix=24))
 
 
-class SDPResources(object):
+class SDPResources:
     """Helper class to allocate resources for a single subarray-product."""
     def __init__(self, common, subarray_product_id):
         self.subarray_product_id = subarray_product_id
@@ -153,7 +153,7 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
-class CaptureBlock(object):
+class CaptureBlock:
     """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
@@ -184,7 +184,7 @@ class CaptureBlock(object):
                 self.state_change_callback()
 
 
-class SDPSubarrayProductBase(object):
+class SDPSubarrayProductBase:
     """SDP Subarray Product Base
 
     Represents an instance of an SDP subarray product. This includes ingest, an
@@ -1589,7 +1589,7 @@ class SDPControllerServer(DeviceServer):
         return 0
 
 
-class InterfaceModeSensors(object):
+class InterfaceModeSensors:
     def __init__(self, subarray_product_id):
         """Manage dummy subarray product sensors on a SDPControllerServer instance
 
