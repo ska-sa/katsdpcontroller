@@ -897,7 +897,6 @@ class SDPControllerServer(DeviceServer):
         # TODO: Add more sensors exposing resource usage and currently executing graphs
         self._fmeca_sensors = {}
         self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
-        # TODO: Fix up CallbackSensor
         self._ntp_sensor = Sensor(bool, "time-synchronised",
                                   "SDP Controller container (and host) is synchronised to NTP")
 
@@ -949,7 +948,9 @@ class SDPControllerServer(DeviceServer):
         self.sensors.add(self._gui_urls_sensor)
 
         self._ntp_sensor.set_value('0')
-        # TODO self._ntp_sensor.set_read_callback(self._check_ntp_status)
+        # TODO disabled since aiokatcp doesn't support callback sensors. It was
+        # broken anyway.
+        # self._ntp_sensor.set_read_callback(self._check_ntp_status)
         self.sensors.add(self._ntp_sensor)
 
         # until we know any better, failure modes are all inactive
@@ -958,6 +959,7 @@ class SDPControllerServer(DeviceServer):
             self.sensors.add(s)
 
     def _check_ntp_status(self):
+        # Note: currently unused, because it can't talk to the host's NTP anyway
         try:
             return (subprocess.check_output(["/usr/bin/ntpq", "-p"]).find('*') > 0 and '1' or '0',
                     Sensor.Status.NOMINAL, time.time())
