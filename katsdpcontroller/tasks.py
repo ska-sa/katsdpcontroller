@@ -1,6 +1,8 @@
 import logging
 import json
 import asyncio
+import socket
+import ipaddress
 
 from addict import Dict
 
@@ -161,7 +163,14 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             endpoint_sensor = Sensor(
                 aiokatcp.Address,
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
-            endpoint_sensor.set_value((self.host, value))
+            try:
+                addrinfo = await loop.getaddrinfo(self.host, value)
+                host, port = addrinfo[0][4][:2]
+                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
+            except socket.gaierror as error:
+                logger.warn('Could not resolve %s: %s', self.host, error)
+                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
+                                          status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
         # Provide info about which container this is for logspout to collect
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
