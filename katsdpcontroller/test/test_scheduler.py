@@ -23,19 +23,6 @@ from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
 
 
-def run_with_event_loop(func):
-    """Decorator to mark a function as a coroutine. When the wrapper is called,
-    it creates an event loop and runs the function on it.
-    """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        loop = asyncio.new_event_loop()
-        with contextlib.closing(loop):
-            args2 = args + (loop,)
-            loop.run_until_complete(func(*args2, **kwargs))
-    return wrapper
-
-
 class AnyOrderList(list):
     """Used for asserting that a list is present in a call, but without
     constraining the order. It does not require the elements to be hashable.
@@ -146,56 +133,54 @@ class TestRangeResource:
         assert_equal('9,5-7', str(rr))
 
 
-class TestPollPorts:
+class TestPollPorts(asynctest.TestCase):
     """Tests for poll_ports"""
-    def setup(self):
+    def setUp(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(('127.0.0.1', 0))
+        self.addCleanup(self.sock.close)
         self.port = self.sock.getsockname()[1]
 
-    def teardown(self):
-        self.sock.close()
-
-    @run_with_event_loop
-    async def test_normal(self, loop):
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
-                                       loop=loop)
+    async def test_normal(self):
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], self.loop),
+                                       loop=self.loop)
         # Sleep for while, give poll_ports time to poll a few times
-        await asyncio.sleep(1, loop=loop)
+        await asyncio.sleep(1, loop=self.loop)
         assert_false(future.done())
         self.sock.listen(1)
-        await asyncio.wait_for(future, timeout=5, loop=loop)
+        await asyncio.wait_for(future, timeout=5, loop=self.loop)
 
-    @run_with_event_loop
-    async def test_cancel(self, loop):
+    async def test_cancel(self):
         """poll_ports must be able to be cancelled gracefully"""
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
-                                       loop=loop)
-        await asyncio.sleep(0.2, loop=loop)
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], self.loop),
+                                       loop=self.loop)
+        await asyncio.sleep(0.2, loop=self.loop)
         future.cancel()
         with assert_raises(asyncio.CancelledError):
             await future
 
-    @run_with_event_loop
-    async def test_temporary_dns_failure(self, loop):
+    async def test_temporary_dns_failure(self):
         """Test poll ports against a temporary DNS failure."""
-        with mock.patch.object(loop, 'getaddrinfo', autospec=True) as getaddrinfo:
+        with mock.patch.object(self.loop, 'getaddrinfo', autospec=True) as getaddrinfo:
             test_address = socket.getaddrinfo('127.0.0.1', self.port)
             # create a legitimate return future for getaddrinfo
-            legit_future = asyncio.Future(loop=loop)
+            legit_future = asyncio.Future(loop=self.loop)
             legit_future.set_result(test_address)
 
             # sequential calls to getaddrinfo produce failure and success
             getaddrinfo.side_effect = [socket.gaierror("Failed to resolve"), legit_future]
 
             self.sock.listen(1)
-            future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], loop),
-                                           loop=loop)
-            await asyncio.sleep(1, loop=loop)
+            future = asyncio.ensure_future(
+                scheduler.poll_ports('127.0.0.1', [self.port], self.loop), loop=self.loop)
+            await asyncio.sleep(1, loop=self.loop)
             # temporary DNS failure
             assert_false(future.done())
-            # wait for retry loop (currently 5s) (TODO: use ClockedTestCase)
-            await asyncio.sleep(6, loop=loop)
+            # wait for retry loop (currently 5s)
+            # Note: it's tempting to try asynctest.ClockedTestCase, but that
+            # only works if ALL interactions with the outside world are mocked
+            # to be instantaneous.
+            await asyncio.sleep(6, loop=self.loop)
             assert_true(future.done())
 
 
@@ -234,29 +219,26 @@ class TestTaskState:
             TaskState.RUNNING >= 3
 
 
-class TestImageResolver:
+class TestImageResolver(asynctest.TestCase):
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
-    @run_with_event_loop
-    async def test_simple(self, loop):
+    async def test_simple(self):
         """Test the base case"""
         resolver = scheduler.ImageResolver()
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('sdp/test1:latest', (await resolver('test1', loop)))
-        assert_equal('sdp/test1:tagged', (await resolver('test1:tagged', loop)))
-        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', loop))))
+        assert_equal('sdp/test1:latest', (await resolver('test1', self.loop)))
+        assert_equal('sdp/test1:tagged', (await resolver('test1:tagged', self.loop)))
+        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', self.loop))))
 
-    @run_with_event_loop
-    async def test_private_registry(self, loop):
+    async def test_private_registry(self):
         """Test with a private registry"""
         resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:latest', (await resolver('test1', loop)))
-        assert_equal('my-registry:5000/test1:tagged', (await resolver('test1:tagged', loop)))
-        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', loop))))
+        assert_equal('my-registry:5000/test1:latest', (await resolver('test1', self.loop)))
+        assert_equal('my-registry:5000/test1:tagged', (await resolver('test1:tagged', self.loop)))
+        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', self.loop))))
 
     @mock.patch('docker.auth.load_config', autospec=True)
-    @run_with_event_loop
-    async def test_private_registry_digests(self, load_config_mock, loop):
+    async def test_private_registry_digests(self, load_config_mock):
         """Test with a private registry, looking up a digest"""
         digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
         # Response headers are modelled on an actual registry response
@@ -282,37 +264,35 @@ class TestImageResolver:
                 }
             }
             resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
-            image = await resolver('myimage', loop)
+            image = await resolver('myimage', self.loop)
         assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
-    @mock.patch('builtins.open', autospec=open)
-    @run_with_event_loop
-    async def test_tag_file(self, open_mock, loop):
+    async def test_tag_file(self):
         """Test with a tag file"""
-        open_mock.return_value.__enter__.return_value.read.return_value = 'tag1\n'
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', use_digests=False)
-        resolver.override('foo', 'my-registry:5000/bar:custom')
-        open_mock.assert_called_once_with('tag_file', 'r')
-        assert_equal('my-registry:5000/test1:tag1', (await resolver('test1', loop)))
-        assert_equal('my-registry:5000/test1:tagged', (await resolver('test1:tagged', loop)))
-        assert_equal('my-registry:5000/bar:custom', (await resolver('foo', loop)))
+        with mock.patch('builtins.open', autospec=open) as open_mock:
+            open_mock.return_value.__enter__.return_value.read.return_value = 'tag1\n'
+            resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                               tag_file='tag_file', use_digests=False)
+            resolver.override('foo', 'my-registry:5000/bar:custom')
+            open_mock.assert_called_once_with('tag_file', 'r')
+            assert_equal('my-registry:5000/test1:tag1', await resolver('test1', self.loop))
+            assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged', self.loop))
+            assert_equal('my-registry:5000/bar:custom', await resolver('foo', self.loop))
 
-    @mock.patch('builtins.open', autospec=open)
-    def test_bad_tag_file(self, open_mock):
+    async def test_bad_tag_file(self):
         """A ValueError is raised if the tag file contains illegal content"""
-        open_mock.return_value.__enter__.return_value.read.return_value = 'not a good :tag\n'
-        with assert_raises(ValueError):
-            scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+        with mock.patch('builtins.open', autospec=open) as open_mock:
+            open_mock.return_value.__enter__.return_value.read.return_value = 'not a good :tag\n'
+            with assert_raises(ValueError):
+                scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
 
-    @mock.patch('builtins.open', autospec=open)
-    @run_with_event_loop
-    async def test_tag(self, open_mock, loop):
+    async def test_tag(self):
         """Test with an explicit tag"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', tag='mytag', use_digests=False)
-        assert_equal('my-registry:5000/test1:mytag', (await resolver('test1', loop)))
-        open_mock.assert_not_called()
+        with mock.patch('builtins.open', autospec=open) as open_mock:
+            resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                               tag_file='tag_file', tag='mytag', use_digests=False)
+            assert_equal('my-registry:5000/test1:mytag', await resolver('test1', self.loop))
+            open_mock.assert_not_called()
 
 
 class TestTaskIDAllocator:
