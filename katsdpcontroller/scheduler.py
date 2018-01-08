@@ -324,7 +324,7 @@ async def poll_ports(host, ports, loop):
         Hostname or IP address
     ports : list
         Port numbers to connect to
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         The event loop used for socket operations
 
     Raises
@@ -1331,14 +1331,14 @@ class PhysicalNode(object):
     ----------
     logical_node : :class:`LogicalNode`
         The logical node from which this physical node is constructed
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         The event loop used for constructing futures etc
 
     Attributes
     ----------
     logical_node : :class:`LogicalNode`
         The logical node passed to the constructor
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         The event loop used for constructing futures etc
     host : str
         Host on which this node is operating (if any).
@@ -1385,7 +1385,7 @@ class PhysicalNode(object):
             Resolver for images etc.
         graph : :class:`networkx.MultiDiGraph`
             Physical graph containing the task
-        loop : :class:`asyncio.BaseEventLoop`
+        loop : :class:`asyncio.AbstractEventLoop`
             Current event loop
         """
         self.depends_ready = []
@@ -1501,7 +1501,7 @@ class PhysicalTask(PhysicalNode):
     ----------
     logical_task : :class:`LogicalTask`
         Logical task forming the template for this physical task
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         The event loop used for constructing futures etc
 
     Attributes
@@ -1587,7 +1587,7 @@ class PhysicalTask(PhysicalNode):
             Resolver to allocate resources like task IDs
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
-        loop : :class:`asyncio.BaseEventLoop`
+        loop : :class:`asyncio.AbstractEventLoop`
             Current event loop
         """
         await super(PhysicalTask, self).resolve(resolver, graph, loop)
@@ -1764,7 +1764,7 @@ def instantiate(logical_graph, loop):
     ----------
     logical_graph : :class:`networkx.MultiDiGraph`
         Logical graph to instantiate
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         Event loop used to create futures
     """
     # Create physical nodes
@@ -1868,7 +1868,7 @@ class Scheduler(pymesos.Scheduler):
 
     Parameters
     ----------
-    loop : :class:`asyncio.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         Event loop
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
