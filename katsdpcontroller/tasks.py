@@ -323,7 +323,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()
-                need_inform = False  # katcp_connection.stop() sends an inform itself
+                need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
                 logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
