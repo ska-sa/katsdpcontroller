@@ -16,37 +16,43 @@ import logging
 import tempfile
 import textwrap
 from collections import defaultdict
-import tornado.ioloop
-import tornado.gen
-import tornado.process
-import tornado.locks
-import katcp
+import asyncio
+
+import async_timeout
+import aiokatcp
+import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
 
 logger = logging.getLogger(__name__)
 
 
-class Client(katcp.AsyncClient):
+class Client(aiokatcp.Client):
     def __init__(self, wake, *args, **kwargs):
         self.wake = wake
-        super(Client, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
+        self.add_connected_callback(self._notify_connected)
+        self.add_disconnected_callback(self._notify_disconnected)
 
-    def notify_connected(self, connected):
-        logger.debug('Waking open on %s', 'connect' if connected else 'disconnect')
+    def _notify_connected(self):
+        logger.debug('Waking open on connect')
         self.wake.set()
 
-    def inform_interface_changed(self, msg):
+    def _notify_disconnected(self):
+        logger.debug('Waking open on disconnect')
+        self.wake.set()
+
+    def inform_interface_changed(self, *args):
         """Handle the interface-changed inform"""
         logger.debug('Waking up on interface-changed')
         self.wake.set()
 
 
-def terminate(wake, die):
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    die.set_result(None)
-    wake.set()
+def terminate():
+    loop = asyncio.get_event_loop()
+    loop.remove_signal_handler(signal.SIGINT)
+    loop.remove_signal_handler(signal.SIGTERM)
+    main_task.cancel()
 
 
 class Server(object):
@@ -54,20 +60,19 @@ class Server(object):
         self.html_endpoint = None
 
 
-@tornado.gen.coroutine
-def get_servers(client):
+async def get_servers(client):
     servers = defaultdict(Server)
-    if client.is_connected():
+    if client.is_connected:
         sensor_regex = r'^(array_\d+_[A-Za-z0-9]+)\.timeplot\.[^.]*\.html_port$'
-        reply, informs = yield client.future_request(katcp.Message.request(
-            'sensor-value', '/' + sensor_regex + '/'))
+        with async_timeout.timeout(30):
+            reply, informs = await client.request('sensor-value', '/' + sensor_regex + '/')
         for inform in informs:
             if len(inform.arguments) != 5:
                 logger.warning('#sensor-value inform has wrong number of arguments, ignoring')
                 continue
-            name = inform.arguments[2]
-            status = inform.arguments[3]
-            value = inform.arguments[4]
+            name = inform.arguments[2].decode('utf-8')
+            status = inform.arguments[3].decode('utf-8')
+            value = inform.arguments[4].decode('utf-8')
             if status != 'nominal':
                 logger.warning('sensor %s is in state %s, ignoring', name, status)
                 continue
@@ -77,23 +82,19 @@ def get_servers(client):
                 continue
             array = match.group(1)
             servers[array].html_endpoint = value
-    raise tornado.gen.Return(servers)
+    return servers
 
 
-@tornado.gen.coroutine
-def main():
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('sdpmc', type=endpoint_parser(5001),
                         help='host[:port] of the SDP master controller')
     args = parser.parse_args()
 
-    ioloop = tornado.ioloop.IOLoop.current()
-    wake = tornado.locks.Event()
-    # Future set when the process is interrupted.
-    die = tornado.gen.Future()
+    loop = asyncio.get_event_loop()
+    wake = asyncio.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(signum, lambda signum_, frame:
-            ioloop.add_callback_from_signal(terminate, wake, die))
+        loop.add_signal_handler(signum, terminate)
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
     pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
@@ -102,15 +103,15 @@ def main():
     content = None
     try:
         client = Client(wake, args.sdpmc.host, args.sdpmc.port)
-        client.set_ioloop(ioloop)
-        client.start()
         while True:
-            yield wake.wait()
+            await wake.wait()
             wake.clear()
-            if die.done():
-                break
             logger.info('Updating state')
-            servers = yield get_servers(client)
+            try:
+                servers = await get_servers(client)
+            except Exception:
+                logger.exception('Failed to get server list')
+                continue
             old_content = content
             content = textwrap.dedent(r"""
                 global
@@ -145,20 +146,21 @@ def main():
                 cfg.write(content)
                 cfg.flush()
                 if haproxy is None:
-                    haproxy = tornado.process.Subprocess(
-                        ['/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name,
-                         '-f', cfg.name])
+                    haproxy = await asyncio.create_subprocess_exec(
+                        '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
-                    haproxy.proc.send_signal(signal.SIGHUP)
+                    haproxy.send_signal(signal.SIGHUP)
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
     finally:
         if client is not None:
-            client.stop()
+            client.close()
+            await client.wait_closed()
         if haproxy is not None:
-            haproxy.proc.send_signal(signal.SIGTERM)
-            ret = yield haproxy.wait_for_exit(raise_error=False)
+            if haproxy.returncode is None:
+                haproxy.terminate()
+            ret = await haproxy.wait()
             if ret:
                 logger.warning('haproxy exited with non-zero exit status %d', ret)
         cfg.close()
@@ -166,6 +168,12 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    ioloop = tornado.ioloop.IOLoop.current()
-    ioloop.run_sync(main)
+    katsdpservices.setup_logging()
+    loop = asyncio.get_event_loop()
+    main_task = loop.create_task(main())
+    try:
+        loop.run_until_complete(main_task)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        loop.close()
