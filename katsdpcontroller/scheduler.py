@@ -99,6 +99,13 @@ grouped into a single queue, since there is no benefit to launching out of
 order. Batch jobs with very different requirements (e.g. non-overlapping)
 should go into different queues to avoid head-of-line blocking.
 
+Queues can also have priorities. As long as there are tasks waiting in a
+higher-priority queue, no tasks from a lower-priority queue will be launched,
+even if the resources are available for them. This is a crude mechanism to
+ensure that a stream of low-priority jobs with minimal resource requirements do
+not block high-priority tasks that needs to wait for a more significant portion
+of the cluster to be available.
+
 GPU support
 -----------
 GPUs are supported independently of Mesos' built-in GPU support, which is not
@@ -1814,9 +1821,19 @@ class _LaunchGroup:
 
 
 class LaunchQueue:
-    """Queue of launch requests."""
-    def __init__(self, name=''):
+    """Queue of launch requests.
+
+    Parameters
+    ----------
+    name : str, optional
+        Name of the queue for ``__repr__``
+    priority : int
+        Priority of the tasks in the queue. A smaller numeric value indicates a
+        higher-priority queue (ala UNIX nice).
+    """
+    def __init__(self, name='', *, priority=0):
         self.name = name
+        self.priority = priority
         self._groups = deque()
 
     def _clear_cancelled(self):
@@ -2221,7 +2238,11 @@ class Scheduler(pymesos.Scheduler):
             self._offers_suppressed = False
             return
 
+        # Filter out any candidates other than the highest priority
+        priority = min(queue.priority for (queue, group) in candidates)
         for queue, group in candidates:
+            if queue.priority != priority:
+                continue
             nodes = group.nodes
             try:
                 # Due to concurrency, another coroutine may have altered
