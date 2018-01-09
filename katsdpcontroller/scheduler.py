@@ -1924,8 +1924,8 @@ class Scheduler(pymesos.Scheduler):
 
     Attributes
     ----------
-    resources_timeout : float
-        Time limit for resources to become available one a task is ready to
+    resources_timeout : float or None
+        Default time limit for resources to become available once a task is ready to
         launch.
     http_port : int
         Actual HTTP port used by :attr:`http_server` (after :meth:`start`)
@@ -2347,7 +2347,8 @@ class Scheduler(pymesos.Scheduler):
         keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
         return any(data.get(key) for key in keys)
 
-    async def launch(self, graph, resolver, nodes=None, *, queue=None):
+    async def launch(self, graph, resolver, nodes=None, *,
+                     queue=None, resources_timeout=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
         a coroutine that returns only once the nodes are ready.
 
@@ -2386,6 +2387,9 @@ class Scheduler(pymesos.Scheduler):
         queue : :class:`LaunchQueue`
             Queue from which to launch the nodes. If not specified, a default
             queue is used.
+        resources_timeout : float
+            Time to wait for sufficient resources to launch the nodes. If not
+            specified, defaults to the class value.
 
         Raises
         ------
@@ -2415,6 +2419,8 @@ class Scheduler(pymesos.Scheduler):
             queue = self._default_queue
         if queue not in self._queues:
             raise ValueError('queue has not been added to the scheduler')
+        if resources_timeout is None:
+            resources_timeout = self.resources_timeout
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
@@ -2442,7 +2448,7 @@ class Scheduler(pymesos.Scheduler):
         if empty:
             self._retry_launch.set()
         try:
-            await asyncio.wait_for(pending.future, timeout=self.resources_timeout)
+            await asyncio.wait_for(pending.future, timeout=resources_timeout)
         except Exception as error:
             logger.debug('Exception in launching group', exc_info=True)
             # Could be
