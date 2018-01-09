@@ -1043,6 +1043,27 @@ class TestScheduler(asynctest.TestCase):
         return _make_offer(self.framework_id, 'agentid{}'.format(agent_num),
                            'agenthost{}'.format(agent_num), resources, attrs)
 
+    def _make_offers(self, ports=None):
+        if ports is None:
+            ports = [(30000, 31000)]
+        return [
+            # Suitable for node0
+            self._make_offer({
+                'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
+                'katsdpcontroller.gpu.0.compute': 0.25,
+                'katsdpcontroller.gpu.0.mem': 2048.0,
+                'katsdpcontroller.gpu.1.compute': 1.0,
+                'katsdpcontroller.gpu.1.mem': 1024.0,
+                'katsdpcontroller.interface.0.bandwidth_in': 1e9,
+                'katsdpcontroller.interface.0.bandwidth_out': 1e9
+            }, 0, self.agent0_attrs),
+            # Suitable for node1
+            self._make_offer({
+                'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
+                'cores': [(0, 8)]
+            }, 1, [self.numa_attr])
+        ]
+
     def _status_update(self, task_id, state):
         status = _make_status(task_id, state)
         self.sched.statusUpdate(self.driver, status)
@@ -1198,20 +1219,7 @@ class TestScheduler(asynctest.TestCase):
         """Test launch on the success path, with no concurrent calls."""
         # TODO: still need to extend this to test:
         # - custom wait_ports
-        offer0 = self._make_offer({
-            'cpus': 2.0, 'mem': 1024.0, 'ports': [(30000, 31000)],
-            'katsdpcontroller.gpu.0.compute': 0.25,
-            'katsdpcontroller.gpu.0.mem': 2048.0,
-            'katsdpcontroller.gpu.1.compute': 1.0,
-            'katsdpcontroller.gpu.1.mem': 1024.0,
-            'katsdpcontroller.interface.0.bandwidth_in': 1e9,
-            'katsdpcontroller.interface.0.bandwidth_out': 1e9
-        }, 0, self.agent0_attrs)
-        offer1 = self._make_offer({
-            'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
-            'cores': [(0, 8)]
-        }, 1, [self.numa_attr])
-
+        offer0, offer1 = self._make_offers()
         expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
         expected_taskinfo0.task_id.value = self.task_ids[0]
@@ -1372,23 +1380,7 @@ class TestScheduler(asynctest.TestCase):
             :const:`TaskState.DEAD`, then `kill` is ``None``
         """
         assert target_state > TaskState.NOT_READY
-        if ports is None:
-            ports = [(30000, 31000)]
-        offers = [
-            self._make_offer({
-                'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
-                'katsdpcontroller.gpu.0.compute': 0.25,
-                'katsdpcontroller.gpu.0.mem': 2048.0,
-                'katsdpcontroller.gpu.1.compute': 1.0,
-                'katsdpcontroller.gpu.1.mem': 1024.0,
-                'katsdpcontroller.interface.0.bandwidth_in': 1e9,
-                'katsdpcontroller.interface.0.bandwidth_out': 1e9
-            }, 0, self.agent0_attrs),
-            self._make_offer({
-                'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
-                'cores': [(0, 8)]
-            }, 1, [self.numa_attr])
-        ]
+        offers = self._make_offers(ports)
         launch = asyncio.ensure_future(self.sched.launch(self.physical_graph, self.resolver, nodes),
                                        loop=self.loop)
         kill = None
