@@ -1170,6 +1170,22 @@ class TestScheduler(asynctest.TestCase):
         with assert_raises(scheduler.DependencyError):
             await self.sched.launch(physical_graph, self.resolver, target)
 
+    async def test_add_queue_twice(self):
+        queue = scheduler.LaunchQueue()
+        self.sched.add_queue(queue)
+        with assert_raises(ValueError):
+            self.sched.add_queue(queue)
+
+    async def test_remove_nonexistent_queue(self):
+        with assert_raises(ValueError):
+            self.sched.remove_queue(scheduler.LaunchQueue())
+
+    async def test_launch_bad_queue(self):
+        """Launch raises ValueError if queue has been added"""
+        queue = scheduler.LaunchQueue()
+        with assert_raises(ValueError):
+            await self.sched.launch(self.physical_graph, self.resolver, queue=queue)
+
     async def test_launch_closing(self):
         """Launch raises asyncio.InvalidStateError if close has been called"""
         await self.sched.close()
@@ -1265,7 +1281,7 @@ class TestScheduler(asynctest.TestCase):
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
-        assert_equal([mock.call.reviveOffers()], self.driver.mock_calls)
+        assert_equal([], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
@@ -1414,6 +1430,43 @@ class TestScheduler(asynctest.TestCase):
         assert_true(launch.done())  # Ensures the next line won't hang the test
         await launch
         self.driver.reset_mock()
+
+    async def test_multiple_queues(self):
+        # Remove the dependency between nodes so that they can be launched
+        # independently
+        self.physical_graph.remove_edge(self.nodes[1], self.nodes[0])
+        self.nodes[1].logical_node.command = [
+            'test', '--host={host}', '--another={endpoints[node2_foo]}']
+        # Schedule the nodes separately on separate queues
+        queue = scheduler.LaunchQueue()
+        self.sched.add_queue(queue)
+        launch0, kill0 = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        launch1 = asyncio.ensure_future(
+            self.sched.launch(self.physical_graph, self.resolver,
+                              self.nodes[1:], queue=queue),
+            loop=self.loop)
+        # Make an offer so that node1 can start
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, [offers[1]])
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTED, self.nodes[1].state)
+        self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_true(launch1.done())
+
+        # Now unblock node0
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        self.sched.resourceOffers(self.driver, [offers[0]])
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTED, self.nodes[0].state)
+        with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
+            poll_future = asyncio.Future(loop=self.loop)
+            poll_ports.return_value = poll_future
+            poll_future.set_result(None)   # Mark ports as ready
+            self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
+            await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.READY, self.nodes[0].state)
+        assert_true(launch0.done())
 
     async def test_launch_port_recycle(self):
         """Tests that ports are recycled only when necessary"""

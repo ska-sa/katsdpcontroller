@@ -83,6 +83,22 @@ depends_kill
    Task A must be killed before task B. This is the shutdown counterpart to
    `depends_ready`. It is an error for these edges to form a cycle.
 
+Queues
+------
+The scheduler supports multiple queues, but these aren't quite the same as the
+queues in a classic HPC batch system. Each call to :meth:`Scheduler.launch`
+targets a particular queue. Concurrent launch requests within a queue are
+serviced strictly in order, while launch requests to separate queues may be
+serviced out-of-order, depending on availability of resources. Note that jobs
+in a queue *can* run in parallel: queues are not a tool to enforce
+serialisation of dependent jobs.
+
+The scheduler does not currently scale well with large numbers of queues. Thus,
+it is recommended that batch jobs with the same resource requirements are
+grouped into a single queue, since there is no benefit to launching out of
+order. Batch jobs with very different requirements (e.g. non-overlapping)
+should go into different queues to avoid head-of-line blocking.
+
 GPU support
 -----------
 GPUs are supported independently of Mesos' built-in GPU support, which is not
@@ -1785,16 +1801,49 @@ class _LaunchGroup:
         List of :class:`PhysicalNode`s to launch
     resolver : :class:`Resolver`
         Resolver which will be used to launch the nodes
-    started_event : :class:`asyncio.Event`
-        An event that is marked ready when the launch group has been removed
-        from the pending list (either because the tasks were launched or
-        because the launch failed in some way).
+    future : :class:`asyncio.Future`
+        A future that is set with the result of the launch i.e., once the
+        group has been removed from the queue.
     """
     def __init__(self, graph, nodes, resolver, loop):
         self.nodes = nodes
         self.graph = graph
         self.resolver = resolver
-        self.started_event = asyncio.Event(loop=loop)
+        self.future = asyncio.Future(loop=loop)
+        self.last_insufficient = InsufficientResourcesError('No resource offers received')
+
+
+class LaunchQueue:
+    """Queue of launch requests."""
+    def __init__(self, name=''):
+        self.name = name
+        self._groups = deque()
+
+    def _clear_cancelled(self):
+        while self._groups and self._groups[0].future.cancelled():
+            self._groups.popleft()
+
+    def front(self):
+        """First non-cancelled group"""
+        self._clear_cancelled()
+        return self._groups[0]
+
+    def __bool__(self):
+        self._clear_cancelled()
+        return bool(self._groups)
+
+    def remove(self, group):
+        self._groups.remove(group)
+
+    def add(self, group):
+        self._groups.append(group)
+
+    def __iter__(self):
+        return (group for group in self._groups if not group.future.cancelled())
+
+    def __repr__(self):
+        return "<LaunchQueue '{}' with {} items at {:#x}>".format(
+            self.name, len(self._groups), id(self))
 
 
 @decorator
@@ -1861,10 +1910,6 @@ class Scheduler(pymesos.Scheduler):
     decorator.
 
     The following invariants are maintained at each yield point:
-    - if :attr:`_pending` is empty, then so is :attr:`_offers`
-    - if :attr:`_pending` is empty, then offers are suppressed, otherwise they
-      are active (this is not true in the initial state, but becomes true as
-      soon as an offer is received).
     - each dictionary within :attr:`_offers` is non-empty
 
     Parameters
@@ -1895,9 +1940,11 @@ class Scheduler(pymesos.Scheduler):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
-        #: set when it's time to retry a launch
+        #: set when it's time to retry a launch (see _launcher)
         self._retry_launch = asyncio.Event(loop=self._loop)
-        self._pending = deque()     #: node groups for which we do not yet have resources
+        self._default_queue = LaunchQueue()
+        self._queues = [self._default_queue]
+        self._offers_suppressed = False
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
@@ -1908,6 +1955,7 @@ class Scheduler(pymesos.Scheduler):
         self.http_handler = None
         self.http_port = http_port
         self.http_url = http_url
+        self._launcher_task = loop.create_task(self._launcher())
 
     async def start(self):
         """Start the internal HTTP server running. This must be called before any launches."""
@@ -1934,6 +1982,34 @@ class Scheduler(pymesos.Scheduler):
             self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
         logger.info('Internal HTTP server at %s', self.http_url)
 
+    def add_queue(self, queue):
+        """Register a new queue.
+
+        Raises
+        ------
+        ValueError
+            If `queue` has already been added
+        """
+        if queue in self._queues:
+            raise ValueError('Queue has already been added')
+        self._queues.append(queue)
+
+    def remove_queue(self, queue):
+        """Deregister a previously-registered queue.
+
+        The queue must be empty before deregistering it.
+
+        Raises
+        ------
+        ValueError
+            If `queue` has not been registered with :meth:`add_queue`
+        asyncio.InvalidStateError
+            If `queue` is not empty
+        """
+        if queue:
+            raise asyncio.InvalidStateError('queue is not empty')
+        self._queues.remove(queue)
+
     @classmethod
     def _node_sort_key(cls, physical_node):
         """Sort key for nodes when launching.
@@ -1953,7 +2029,9 @@ class Scheduler(pymesos.Scheduler):
         for offers in self._offers.values():
             self._driver.acceptOffers([offer.id for offer in offers.values()], [])
         self._offers = {}
-        self._driver.suppressOffers()
+        if not self._offers_suppressed:
+            self._driver.suppressOffers()
+            self._offers_suppressed = True
 
     def _remove_offer(self, agent_id, offer_id):
         try:
@@ -1977,14 +2055,11 @@ class Scheduler(pymesos.Scheduler):
     def resourceOffers(self, driver, offers):
         for offer in offers:
             self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
-        if not self._pending:
-            self._clear_offers()
-        elif offers:
-            self._retry_launch.set()
+        self._retry_launch.set()
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
-        for agent_id, offers in self._offers.items():
+        for agent_id, offers in list(self._offers.items()):
             if offer_id.value in offers:
                 self._remove_offer(agent_id, offer_id.value)
 
@@ -2135,127 +2210,132 @@ class Scheduler(pymesos.Scheduler):
         # Not a simple error e.g. due to packing problems
         raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
-    async def _launch_group(self, group):
-        try:
-            empty = not self._pending
-            self._pending.append(group)
-            if empty:
-                # TODO: use requestResources to ask the allocator for resources?
-                self._driver.reviveOffers()
-            else:
-                # Wait for the previous entry in the queue to be done
-                await self._pending[-2].started_event.wait()
-            assert self._pending[0] is group
+    async def _launch_once(self):
+        """Run single iteration of :meth:`_launcher`"""
+        candidates = [(queue, queue.front()) for queue in self._queues if queue]
+        if not candidates:
+            self._clear_offers()
+            return
+        elif not self._offers and self._offers_suppressed:
+            self._driver.reviveOffers()
+            self._offers_suppressed = False
+            return
 
-            deadline = self._loop.time() + self.resources_timeout
-            last_insufficient = InsufficientResourcesError('No resource offers received')
+        for queue, group in candidates:
             nodes = group.nodes
-            while True:
-                # Wait until we have offers, but time out if we cross the
-                # deadline.  If one of the tasks is killed, that can also
-                # unblock us since we no longer require resources for that,
-                # so wait for that too.
-                remaining = max(0.0, deadline - self._loop.time())
-                futures = [node.dead_event.wait() for node in nodes]
-                futures.append(self._retry_launch.wait())
-                # Make sure these are real futures, not coroutines
-                futures = [asyncio.ensure_future(future, loop=self._loop)
-                           for future in futures]
-                done_futures, pending_futures = await (asyncio.wait(
-                    futures, loop=self._loop, timeout=remaining,
-                    return_when=asyncio.FIRST_COMPLETED))
-                for future in pending_futures:
-                    future.cancel()
-                if not done_futures:
-                    # We hit the timeout (asyncio.wait does not throw TimeoutError)
-                    raise last_insufficient
-                self._retry_launch.clear()
-                try:
-                    # Due to concurrency, another coroutine may have altered
-                    # the state of the tasks since they were put onto the
-                    # pending list (e.g. by killing them). Filter those out.
-                    nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                    agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
-                              for agent_id, offers in self._offers.items()]
-                    # Back up the original agents so that if allocation fails we can
-                    # diagnose it.
-                    orig_agents = copy.deepcopy(agents)
-                    # Sort agents by GPUs then free memory. This makes it less likely that a
-                    # low-memory process will hog all the other resources on a high-memory
-                    # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
-                    # there is no other choice. Should eventually look into smarter
-                    # algorithms e.g. Dominant Resource Fairness
-                    # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                    agents.sort(key=lambda agent: (agent.priority, agent.mem))
-                    nodes.sort(key=self._node_sort_key, reverse=True)
-                    allocations = []
-                    for node in nodes:
-                        allocation = None
-                        if isinstance(node, PhysicalTask):
-                            for agent in agents:
-                                try:
-                                    allocation = agent.allocate(node.logical_node)
-                                    break
-                                except InsufficientResourcesError as error:
-                                    logger.debug('Cannot add %s to %s: %s',
-                                                 node.name, agent.agent_id, error)
-                            else:
-                                # Raises an InsufficientResourcesError
-                                self._diagnose_insufficient(orig_agents, nodes)
-                            allocations.append((node, allocation))
-                except InsufficientResourcesError as error:
-                    logger.debug('Could not yet launch graph: %s', error)
-                    last_insufficient = error
-                else:
-                    # At this point we have a sufficient set of offers.
-                    # Two-phase resolving
-                    logger.debug('Allocating resources to tasks')
-                    for (node, allocation) in allocations:
-                        node.allocate(allocation)
-                    logger.debug('Performing resolution')
-                    order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
-                    # Lexicographical sorting isn't required for
-                    # functionality, but the unit tests depend on it to get
-                    # predictable task IDs.
-                    for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
-                                                                          key=lambda x: x.name):
-                        logger.debug('Resolving %s', node.name)
-                        await node.resolve(group.resolver, group.graph, self._loop)
-                    # Launch the tasks
-                    new_min_ports = {}
-                    taskinfos = {agent: [] for agent in agents}
-                    for (node, allocation) in allocations:
-                        taskinfos[node.agent].append(node.taskinfo)
-                        for port in allocation.ports:
-                            prev = new_min_ports.get(node.agent_id, 0)
-                            new_min_ports[node.agent_id] = max(prev, port + 1)
-                        self._active[node.taskinfo.task_id.value] = (node, group.graph)
-                    self._min_ports.update(new_min_ports)
-                    for agent in agents:
-                        offer_ids = [offer.id for offer in agent.offers]
-                        # TODO: does this need to use run_in_executor? Is it
-                        # thread-safe to do so?
-                        # TODO: if there are more pending in the queue then we
-                        # should use a filter to be re-offered resources more
-                        # quickly.
-                        self._driver.launchTasks(offer_ids, taskinfos[agent])
-                        for offer_id in offer_ids:
-                            self._remove_offer(agent.agent_id, offer_id.value)
-                        logger.info('Launched %d tasks on %s',
-                                    len(taskinfos[agent]), agent.agent_id)
-                    for node in nodes:
-                        node.set_state(TaskState.STARTED)
-                    break
-        finally:
-            self._pending.remove(group)
-            if not self._pending:
-                # Nothing that can use the offers, so get rid of them
-                self._clear_offers()
-            group.started_event.set()
+            try:
+                # Due to concurrency, another coroutine may have altered
+                # the state of the tasks since they were put onto the
+                # pending list (e.g. by killing them). Filter those out.
+                nodes = [node for node in nodes if node.state == TaskState.STARTING]
+                agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
+                          for agent_id, offers in self._offers.items()]
+                # Back up the original agents so that if allocation fails we can
+                # diagnose it.
+                orig_agents = copy.deepcopy(agents)
+                # Sort agents by GPUs then free memory. This makes it less likely that a
+                # low-memory process will hog all the other resources on a high-memory
+                # box. Similarly, non-GPU tasks will only use GPU-equipped agents if
+                # there is no other choice. Should eventually look into smarter
+                # algorithms e.g. Dominant Resource Fairness
+                # (http://mesos.apache.org/documentation/latest/allocation-module/)
+                agents.sort(key=lambda agent: (agent.priority, agent.mem))
+                nodes.sort(key=self._node_sort_key, reverse=True)
+                allocations = []
+                for node in nodes:
+                    allocation = None
+                    if isinstance(node, PhysicalTask):
+                        for agent in agents:
+                            try:
+                                allocation = agent.allocate(node.logical_node)
+                                break
+                            except InsufficientResourcesError as error:
+                                logger.debug('Cannot add %s to %s: %s',
+                                             node.name, agent.agent_id, error)
+                        else:
+                            # Raises an InsufficientResourcesError
+                            self._diagnose_insufficient(orig_agents, nodes)
+                        allocations.append((node, allocation))
+            except InsufficientResourcesError as error:
+                logger.debug('Could not yet launch graph: %s', error)
+                group.last_insufficient = error
+            else:
+                # At this point we have a sufficient set of offers.
+                # Two-phase resolving
+                logger.debug('Allocating resources to tasks')
+                for (node, allocation) in allocations:
+                    node.allocate(allocation)
+                logger.debug('Performing resolution')
+                order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
+                # Lexicographical sorting isn't required for
+                # functionality, but the unit tests depend on it to get
+                # predictable task IDs.
+                for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
+                                                                      key=lambda x: x.name):
+                    logger.debug('Resolving %s', node.name)
+                    await node.resolve(group.resolver, group.graph, self._loop)
+                # Last chance for the group to be cancelled. After this point, we must
+                # not await anything.
+                if group.future.cancelled():
+                    # No need to set _retry_launch, because the cancellation did so.
+                    continue
+                # Launch the tasks
+                new_min_ports = {}
+                taskinfos = {agent: [] for agent in agents}
+                for (node, allocation) in allocations:
+                    taskinfos[node.agent].append(node.taskinfo)
+                    for port in allocation.ports:
+                        prev = new_min_ports.get(node.agent_id, 0)
+                        new_min_ports[node.agent_id] = max(prev, port + 1)
+                    self._active[node.taskinfo.task_id.value] = (node, group.graph)
+                self._min_ports.update(new_min_ports)
+                for agent in agents:
+                    offer_ids = [offer.id for offer in agent.offers]
+                    # TODO: does this need to use run_in_executor? Is it
+                    # thread-safe to do so?
+                    # TODO: if there are more pending in the queue then we
+                    # should use a filter to be re-offered resources more
+                    # quickly.
+                    self._driver.launchTasks(offer_ids, taskinfos[agent])
+                    for offer_id in offer_ids:
+                        self._remove_offer(agent.agent_id, offer_id.value)
+                    logger.info('Launched %d tasks on %s',
+                                len(taskinfos[agent]), agent.agent_id)
+                for node in nodes:
+                    node.set_state(TaskState.STARTED)
+                group.future.set_result(None)
+                queue.remove(group)
+                self._retry_launch.set()
+                break
 
-        # Note: don't use "nodes" here: we have to wait for everything to start
-        ready_futures = [node.ready_event.wait() for node in group.nodes]
-        await asyncio.gather(*ready_futures, loop=self._loop)
+    async def _launcher(self):
+        """Background task to monitor the queues and offers and launch when possible.
+
+        This function does not handle timing out launch requests. The caller
+        deals with that and cancels the launch where necessary.
+        """
+
+        # There are a number of conditions under which we need to do more work:
+        # - A group is added to an empty queue (non-empty queues aren't an issue,
+        #   because only the front-of-queue is a candidate).
+        # - A group is cancelled from the front of a queue
+        # - A task is killed in a front-of-queue group (this reduces the
+        #   resource requirements to launch the remainder of the group)
+        # - A new offer is received
+        # - After a successful launch (since a new front-of-queue group may
+        #   appear).
+        # All are signalled by setting _retry_launch. In some cases it is set
+        # when it is not actually needed - this is harmless as long as the number
+        # of queues doesn't get out of hand.
+        while True:
+            await self._retry_launch.wait()
+            self._retry_launch.clear()
+            try:
+                await self._launch_once()
+            except asyncio.CancelledError:
+                raise     # Normal operation in close()
+            except Exception:
+                logger.exception('Error in _launch_once')
 
     @classmethod
     def depends_resources(cls, data):
@@ -2267,15 +2347,15 @@ class Scheduler(pymesos.Scheduler):
         keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
         return any(data.get(key) for key in keys)
 
-    async def launch(self, graph, resolver, nodes=None):
+    async def launch(self, graph, resolver, nodes=None, *, queue=None):
         """Launch a physical graph, or a subset of nodes from a graph. This is
         a coroutine that returns only once the nodes are ready.
 
         It is legal to pass nodes that have already been passed to
-        :meth:`launch`. They will not be re-launched, but this call will wait
-        until they are ready.
+        :meth:`launch` with the same queue. They will not be re-launched, but
+        this call will wait until they are ready.
 
-        It is safe to run this coroutine as a asyncio task and cancel it.
+        It is safe to run this coroutine as an asyncio task and cancel it.
         However, some of the nodes may have been started already. If the
         launch is cancelled, it is recommended to kill the nodes to reach a
         known state.
@@ -2303,6 +2383,9 @@ class Scheduler(pymesos.Scheduler):
         nodes : list, optional
             If specified, lists a subset of the nodes to launch. Otherwise,
             all nodes in the graph are launched.
+        queue : :class:`LaunchQueue`
+            Queue from which to launch the nodes. If not specified, a default
+            queue is used.
 
         Raises
         ------
@@ -2321,11 +2404,17 @@ class Scheduler(pymesos.Scheduler):
             and has a `depends_resources` or `depends_ready` dependency on a
             node that is not in `nodes` and is also in state
             :const:`TaskState.NOT_READY`.
+        ValueError
+            If `queue` has not been added with :meth:`add_queue`.
         """
         if self._closing:
             raise asyncio.InvalidStateError('Cannot launch tasks while shutting down')
         if nodes is None:
             nodes = graph.nodes()
+        if queue is None:
+            queue = self._default_queue
+        if queue not in self._queues:
+            raise ValueError('queue has not been added to the scheduler')
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
@@ -2348,17 +2437,29 @@ class Scheduler(pymesos.Scheduler):
         for node in remaining:
             node.state = TaskState.STARTING
         pending = _LaunchGroup(graph, remaining, resolver, self._loop)
+        empty = not queue
+        queue.add(pending)
+        if empty:
+            self._retry_launch.set()
         try:
-            await self._launch_group(pending)
-        except Exception:
+            await asyncio.wait_for(pending.future, timeout=self.resources_timeout)
+        except Exception as error:
             logger.debug('Exception in launching group', exc_info=True)
-            # Could be either an InsufficientResourcesError from
-            # the yield or a CancelledError if this function was
-            # cancelled.
+            # Could be
+            # - a timeout
+            # - we were cancelled
+            # - close() was called, which cancels pending.future
             for node in remaining:
                 if node.state == TaskState.STARTING:
                     node.set_state(TaskState.NOT_READY)
-            raise
+            queue.remove(pending)
+            self._retry_launch.set()
+            if isinstance(error, asyncio.TimeoutError):
+                raise pending.last_insufficient
+            else:
+                raise
+        ready_futures = [node.ready_event.wait() for node in nodes]
+        await asyncio.gather(*ready_futures, loop=self._loop)
 
     async def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
@@ -2386,6 +2487,9 @@ class Scheduler(pymesos.Scheduler):
         """
         async def kill_one(node, graph):
             if node.state <= TaskState.STARTING:
+                if node.state == TaskState.STARTING:
+                    # Fewer resources now needed to start rest of the group
+                    self._retry_launch.set()
                 node.set_state(TaskState.DEAD)
             elif node.state <= TaskState.KILLING:
                 for src in graph.predecessors(node):
@@ -2427,13 +2531,20 @@ class Scheduler(pymesos.Scheduler):
         graphs = set()
         for (_task, graph) in self._active.values():
             graphs.add(graph)
-        for group in self._pending:
-            graphs.add(group.graph)
+        for queue in self._queues:
+            for group in queue:
+                graphs.add(group.graph)
         for graph in graphs:
             await self.kill(graph)
-        if self._pending:
-            await self._pending[-1].started_event.wait()
-        assert not self._pending
+        for queue in self._queues:
+            while queue:
+                queue.front().future.cancel()
+        self._launcher_task.cancel()
+        try:
+            await self._launcher_task
+        except asyncio.CancelledError:
+            pass
+        self._launcher_task = None
         self._driver.stop()
         # If self._driver is a mock, then asyncio incorrectly complains about passing
         # self._driver.join directly, due to
