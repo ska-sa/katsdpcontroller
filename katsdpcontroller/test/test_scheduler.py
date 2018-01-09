@@ -1409,11 +1409,6 @@ class TestScheduler(asynctest.TestCase):
     async def _ready_graph(self):
         """Gets the whole graph to READY state"""
         launch, kill = await self._transition_node0(TaskState.READY)
-        offer = self._make_offer(
-            {'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)], 'cores': [(0, 8)]}, 1,
-            [_make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])])
-        self.sched.resourceOffers(self.driver, [offer])
-        await asynctest.exhaust_callbacks(self.loop)
         self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
         await asynctest.exhaust_callbacks(self.loop)
         assert_true(launch.done())  # Ensures the next line won't hang the test
