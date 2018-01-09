@@ -72,8 +72,8 @@ class GraphResolver:
 
        Parameters
        ----------
-       overrides : list, optional
-            A list of override strings in the form <subarray_product_id>:<override_graph_name>
+       overrides : iterable, optional
+            Override strings in the form <subarray_product_id>:<override_graph_name>
        """
     def __init__(self, overrides=()):
         self._overrides = {}
@@ -770,8 +770,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
         await self.sched.launch(self.physical_graph, self.resolver, boot)
-        # encode metadata into the telescope state for use
-        # in component configuration
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
@@ -879,7 +877,7 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-1.1"
+    VERSION = "sdpcontroller-1.2"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
@@ -1280,8 +1278,6 @@ class SDPControllerServer(DeviceServer):
             return ''
 
         logger.info("Using '{}' as antenna mask".format(antennas))
-        # temp hack to make sure we have a comma delimited set of antennas
-        antennas = antennas.replace(" ", ",")
         antennas = antennas.split(',')
 
         # all good so far, lets check arguments for validity

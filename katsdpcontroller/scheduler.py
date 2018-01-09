@@ -1802,7 +1802,8 @@ def run_in_event_loop(func, *args, **kw):
     args[0]._loop.call_soon_threadsafe(func, *args, **kw)
 
 
-async def wait_start_handler(scheduler, request):
+async def wait_start_handler(request):
+    scheduler = request.app['katsdpcontroller_scheduler']
     task_id = request.match_info['id']
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
@@ -1913,8 +1914,8 @@ class Scheduler(pymesos.Scheduler):
         if self.http_server:
             raise RuntimeError('Already started')
         app = aiohttp.web.Application(loop=self._loop)
-        app.router.add_get('/tasks/{id}/wait_start',
-                           functools.partial(wait_start_handler, self))
+        app['katsdpcontroller_scheduler'] = self
+        app.router.add_get('/tasks/{id}/wait_start', wait_start_handler)
         app.router.add_static('/static',
                               pkg_resources.resource_filename('katsdpcontroller', 'static'))
         self.http_handler = app.make_handler()
@@ -2434,7 +2435,7 @@ class Scheduler(pymesos.Scheduler):
             await self._pending[-1].started_event.wait()
         assert not self._pending
         self._driver.stop()
-        # If self._driver is a mock, then asyncio incorrect complains about passing
+        # If self._driver is a mock, then asyncio incorrectly complains about passing
         # self._driver.join directly, due to
         # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())

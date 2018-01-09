@@ -45,7 +45,7 @@ class PrometheusObserver:
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
                 if value < self._old_value:
-                    logger.warn(
+                    logger.debug(
                         'Counter %s went backwards (%d to %d), not sending delta to Prometheus',
                         self._sensor.name, self._old_value, value)
                     # self._old_value is still updated with value. This is
@@ -159,7 +159,7 @@ class SensorProxyClient(aiokatcp.Client):
         except OSError as error:
             # Connection died before we finished. Log it, but no need for
             # a stack trace.
-            logger.warning('Exception in update task: %s', error)
+            logger.warning('Connection error in update task: %s', error)
         except Exception:
             logger.exception('Exception in update task')
 
@@ -246,6 +246,7 @@ class SensorProxyClient(aiokatcp.Client):
 
     def __disconnected(self):
         self._synced.clear()
+        self._sampling_set.clear()
         if self._update_task is not None:
             self._update_task.cancel()
             self._update_task = None
@@ -268,7 +269,7 @@ class SensorProxyClient(aiokatcp.Client):
                 try:
                     sensor = self.server.sensors[self.qualify_name(name)]
                 except KeyError:
-                    logger.info('Received update for unknown sensor %s', name)
+                    logger.warning('Received update for unknown sensor %s', name)
                     continue
                 value = aiokatcp.decode(sensor.stype, args[3 * i + 2])
                 sensor.set_value(value, status=status, timestamp=timestamp)
