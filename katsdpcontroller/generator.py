@@ -1013,8 +1013,9 @@ def build_postprocess_logical_graph(config):
         task = SDPLogicalTask('process.{}'.format(i))
         task.image = 'katsdpfilewriter'
         task.command = ['sh', '-c', 'sleep 2 && echo Hello world {}'.format(i)]
-        task.cpus = 1
+        task.cpus = 0.1
         task.mem = 256
+        task.max_run_time = 20
         g.add_node(task)
         g.add_edge(task, telstate, port='telstate')
 

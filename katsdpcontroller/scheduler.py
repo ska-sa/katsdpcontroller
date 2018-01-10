@@ -937,6 +937,8 @@ class LogicalTask(LogicalNode):
         Mesos memory reservation (megabytes)
     disk : float
         Mesos disk reservation (megabytes)
+    max_run_time : float or None
+        Maximum time to run with :meth:`batch_run` (seconds)
     cores : list of str
         Reserved CPU cores. If this is empty, then the task will not be pinned.
         If it is non-empty, then the task will be pinned to the assigned cores,
@@ -984,6 +986,7 @@ class LogicalTask(LogicalNode):
             setattr(self, r, 0.0)
         for r in RANGE_RESOURCES:
             setattr(self, r, [])
+        self.max_run_time = None
         self.gpus = []
         self.interfaces = []
         self.volumes = []
@@ -2509,10 +2512,10 @@ class Scheduler(pymesos.Scheduler):
         await asyncio.gather(*ready_futures, loop=self._loop)
 
     async def _batch_run_once(self, graph, resolver, nodes, *,
-                              queue, resources_timeout, run_timeout):
+                              queue, resources_timeout):
         """Single attempt for :meth:`batch_run`."""
         async def wait_one(node):
-            await node.dead_event.wait()
+            await asyncio.wait_for(node.dead_event.wait(), timeout=node.logical_node.max_run_time)
             if node.status is not None and node.status.state != 'TASK_FINISHED':
                 raise TaskError(node)
 
@@ -2522,13 +2525,11 @@ class Scheduler(pymesos.Scheduler):
             if isinstance(node, PhysicalTask):
                 futures.append(self._loop.create_task(wait_one(node)))
         try:
-            done, pending = await asyncio.wait(futures, loop=self._loop, timeout=run_timeout,
+            done, pending = await asyncio.wait(futures, loop=self._loop,
                                                return_when=asyncio.FIRST_EXCEPTION)
             # Raise the TaskError if any
             for future in done:
                 future.result()
-            if pending:
-                raise asyncio.TimeoutError()
         finally:
             # asyncio.wait doesn't cancel futures if it is itself cancelled
             for future in futures:
@@ -2537,7 +2538,7 @@ class Scheduler(pymesos.Scheduler):
             await self.kill(graph, nodes)
 
     async def batch_run(self, graph, resolver, nodes=None, *,
-                        queue=None, resources_timeout=None, run_timeout=None,
+                        queue=None, resources_timeout=None,
                         attempts=1):
         """Launch and run a batch graph (i.e., one that terminates on its own).
 
@@ -2563,9 +2564,6 @@ class Scheduler(pymesos.Scheduler):
         resources_timeout : float
             Time (seconds) to wait for sufficient resources to launch the nodes. If not
             specified, defaults to the class value.
-        run_timeout : float
-            Time (seconds) to wait for the nodes to terminate after launching. If not
-            specified, there is no timeout (not recommended).
         attempts : int
             Number of times to try running the graph
 
@@ -2575,7 +2573,7 @@ class Scheduler(pymesos.Scheduler):
             if the graph failed (any of the tasks exited with a status other
             than TASK_FINISHED) on all attempts
         asyncio.TimeoutError
-            if the `run_timeout` is breached
+            if the :attr:`~LogicalTask.max_run_time` is breached for some task
         """
         if nodes is None:
             nodes = list(graph.nodes())
@@ -2584,8 +2582,7 @@ class Scheduler(pymesos.Scheduler):
             try:
                 await self._batch_run_once(graph, resolver, nodes,
                                            queue=queue,
-                                           resources_timeout=resources_timeout,
-                                           run_timeout=run_timeout)
+                                           resources_timeout=resources_timeout)
             except TaskError as error:
                 if not attempts:
                     raise

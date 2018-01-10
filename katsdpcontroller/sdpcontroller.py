@@ -774,7 +774,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if isinstance(node, scheduler.PhysicalTask):
                 coro = self.sched.batch_run(
                     physical_graph, self.resolver, [node], queue=self.batch_queue,
-                    resources_timeout=7*86400, run_timeout=8*3600, attempts=3)
+                    resources_timeout=7*86400, attempts=3)
                 batch.append(coro)
         await asyncio.gather(*batch, loop=self.loop)
 
