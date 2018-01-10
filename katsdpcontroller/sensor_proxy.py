@@ -251,7 +251,7 @@ class SensorProxyClient(aiokatcp.Client):
             self._update_task.cancel()
             self._update_task = None
         for name in self._observers:
-            sensor = self.server.sensors[name]
+            sensor = self.server.sensors[self.qualify_name(name)]
             sensor.set_value(sensor.value, status=aiokatcp.Sensor.Status.UNREACHABLE)
 
     def inform_interface_changed(self, *args) -> None:
