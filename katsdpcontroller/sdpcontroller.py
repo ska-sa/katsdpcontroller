@@ -224,6 +224,7 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
+        self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
         self.capture_blocks = {}              # live capture blocks, indexed by name
@@ -752,6 +753,24 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 observer = node.capture_block_state_observer
                 if observer is not None:
                     await observer.wait_capture_block_done(capture_block.name)
+
+        physical_graph = self._instantiate_graph(self.postprocess_logical_graph)
+        nodes = {node.logical_node.name: node for node in physical_graph}
+        telstate_node = nodes['telstate']
+        telstate_node.host = self.telstate_node.host
+        telstate_node.ports = dict(self.telstate_node.ports)
+        # Doesn't actually run anything in Mesos, just marks the node as ready
+        # so that it doesn't block anything else.
+        await self.sched.launch(physical_graph, self.resolver, [telstate_node])
+        batch = []
+        for node in physical_graph:
+            if isinstance(node, scheduler.PhysicalTask):
+                # TODO: batch queue
+                coro = self.sched.batch_run(
+                    physical_graph, self.resolver, [node],
+                    resources_timeout=7*86400, run_timeout=8*3600, attempts=3)
+                batch.append(coro)
+        await asyncio.gather(*batch, loop=self.loop)
 
     async def _launch_telstate(self):
         """Make sure the telstate node is launched"""
