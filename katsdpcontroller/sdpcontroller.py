@@ -627,6 +627,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
         self.telstate_node.capture_blocks = self.capture_blocks
+        # Priority is lower (higher number) than the default queue
+        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=1)
+        sched.add_queue(self.batch_queue)
+
+    def __del__(self):
+        self.sched.remove_queue(self.batch_queue)
 
     async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical
@@ -766,9 +772,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         batch = []
         for node in physical_graph:
             if isinstance(node, scheduler.PhysicalTask):
-                # TODO: batch queue
                 coro = self.sched.batch_run(
-                    physical_graph, self.resolver, [node],
+                    physical_graph, self.resolver, [node], queue=self.batch_queue,
                     resources_timeout=7*86400, run_timeout=8*3600, attempts=3)
                 batch.append(coro)
         await asyncio.gather(*batch, loop=self.loop)
