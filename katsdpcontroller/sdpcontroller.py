@@ -605,31 +605,31 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
-    def _instantiate(self, logical_node, sdp_controller):
+    def _instantiate(self, logical_node, capture_block_id):
         if isinstance(logical_node, tasks.SDPLogicalTask):
             return logical_node.physical_factory(
                 logical_node, self.loop,
-                sdp_controller, self.subarray_product_id)
+                self.sdp_controller, self.subarray_product_id, capture_block_id)
         else:
             return logical_node.physical_factory(logical_node, self.loop)
 
-    def _instantiate_graph(self, logical_graph):
-        mapping = {logical: self._instantiate(logical, self.sdp_controller)
+    def _instantiate_graph(self, logical_graph, capture_block_id=None):
+        mapping = {logical: self._instantiate(logical, capture_block_id)
                    for logical in logical_graph}
         return networkx.relabel_nodes(logical_graph, mapping)
 
     def __init__(self, sched, config, resolver, subarray_product_id, loop,
                  sdp_controller, telstate_name='telstate'):
         super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
+        # Priority is lower (higher number) than the default queue
+        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=1)
+        sched.add_queue(self.batch_queue)
         # generate physical nodes
         self.physical_graph = self._instantiate_graph(self.logical_graph)
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
         self.telstate_node.capture_blocks = self.capture_blocks
-        # Priority is lower (higher number) than the default queue
-        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=1)
-        sched.add_queue(self.batch_queue)
 
     def __del__(self):
         self.sched.remove_queue(self.batch_queue)
@@ -761,7 +761,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 if observer is not None:
                     await observer.wait_capture_block_done(capture_block.name)
 
-        physical_graph = self._instantiate_graph(self.postprocess_logical_graph)
+        physical_graph = self._instantiate_graph(self.postprocess_logical_graph, capture_block.name)
         nodes = {node.logical_node.name: node for node in physical_graph}
         telstate_node = nodes['telstate']
         telstate_node.host = self.telstate_node.host

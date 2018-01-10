@@ -101,9 +101,12 @@ class SDPLogicalTask(scheduler.LogicalTask):
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
         super().__init__(logical_task, loop)
-        self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
+        if capture_block_id is None:
+            self.name = '.'.join([subarray_product_id, logical_task.name])
+        else:
+            self.name = '.'.join([subarray_product_id, capture_block_id, logical_task.name])
         self.sdp_controller = sdp_controller
         self.subarray_product_id = subarray_product_id
         # list of exposed KATCP sensors
@@ -316,8 +319,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     For example:
       sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super().__init__(logical_task, loop, sdp_controller, subarray_product_id)
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
+        super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
