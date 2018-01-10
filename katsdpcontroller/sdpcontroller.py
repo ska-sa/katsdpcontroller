@@ -612,13 +612,16 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         else:
             return logical_node.physical_factory(logical_node, self.loop)
 
+    def _instantiate_graph(self, logical_graph):
+        mapping = {logical: self._instantiate(logical, self.sdp_controller)
+                   for logical in logical_graph}
+        return networkx.relabel_nodes(logical_graph, mapping)
+
     def __init__(self, sched, config, resolver, subarray_product_id, loop,
                  sdp_controller, telstate_name='telstate'):
         super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
         # generate physical nodes
-        mapping = {logical: self._instantiate(logical, sdp_controller)
-                   for logical in self.logical_graph}
-        self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
+        self.physical_graph = self._instantiate_graph(self.logical_graph)
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
