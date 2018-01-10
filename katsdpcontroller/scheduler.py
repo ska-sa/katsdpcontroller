@@ -915,7 +915,7 @@ class LogicalExternal(LogicalNode):
 
     The host and port must be set manually on the physical node. It also
     defaults to an empty :attr:`~LogicalNode.wait_ports`, which must be
-    overridden is waiting is desired."""
+    overridden if waiting is desired."""
     def __init__(self, name):
         super().__init__(name)
         self.physical_factory = PhysicalExternal
@@ -2430,8 +2430,8 @@ class Scheduler(pymesos.Scheduler):
             Queue from which to launch the nodes. If not specified, a default
             queue is used.
         resources_timeout : float
-            Time to wait for sufficient resources to launch the nodes. If not
-            specified, defaults to the class value.
+            Time (seconds) to wait for sufficient resources to launch the
+            nodes. If not specified, defaults to the class value.
 
         Raises
         ------
