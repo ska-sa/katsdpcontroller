@@ -410,13 +410,13 @@ class SDPSubarrayProductBase:
         self.state = State.IDLE
         self.current_capture_block = None
         capture_block.state = CaptureBlock.State.POSTPROCESSING
-        capture_block.postprocessing_task = asyncio.ensure_future(
+        capture_block.postprocess_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
-            capture_block.postprocessing_task,
+            capture_block.postprocess_task,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
                                                            capture_block.name))
-        capture_block.postprocessing_task.add_done_callback(
+        capture_block.postprocess_task.add_done_callback(
             lambda task: self._capture_block_dead(capture_block))
         return capture_block
 
