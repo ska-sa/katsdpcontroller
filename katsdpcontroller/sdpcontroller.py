@@ -723,7 +723,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 loop = node.loop
                 tasks[node] = task
         if tasks:
-            with async_timeout.timeout(300):
+            with async_timeout.timeout(300, loop=loop):
                 await asyncio.gather(*tasks.values(), loop=loop)
 
     async def capture_init_impl(self, capture_block):
