@@ -163,7 +163,6 @@ from collections import namedtuple, deque
 from enum import Enum
 import asyncio
 import urllib
-import functools
 import ssl
 import ipaddress
 
