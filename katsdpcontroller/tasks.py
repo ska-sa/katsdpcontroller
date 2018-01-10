@@ -205,6 +205,10 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
 
+    def clone(self):
+        return self.logical_node.physical_factory(
+            self.logical_node, self.loop, self.sdp_controller, self.subarray_product_id)
+
 
 class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""

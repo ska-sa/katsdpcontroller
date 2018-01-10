@@ -882,6 +882,13 @@ class ImageError(RuntimeError):
     pass
 
 
+class TaskError(RuntimeError):
+    """A batch job failed."""
+    def __init__(self, node):
+        super().__init__("Node {} failed with status {}".format(node.name, node.status.state))
+        self.node = node
+
+
 class LogicalNode:
     """A node in a logical graph. This is a base class. For nodes that
     execute code and use Mesos resources, see :class:`LogicalTask`.
@@ -1497,6 +1504,14 @@ class PhysicalNode:
         """
         pass
 
+    def clone(self):
+        """Create a duplicate of the task, ready to be run.
+
+        The duplicate is in state :const:`TaskState.NOT_READY` and is
+        unresolved.
+        """
+        return self.logical_node.physical_factory(self.logical_node, self.loop)
+
 
 class PhysicalExternal(PhysicalNode):
     """External service with a hostname and ports. The service moves
@@ -1510,6 +1525,12 @@ class PhysicalExternal(PhysicalNode):
         elif state == TaskState.KILLING:
             state = TaskState.DEAD
         super().set_state(state)
+
+    def clone(self):
+        dup = super().clone()
+        dup.host = self.host
+        dup.ports = copy.copy(self.ports)
+        return dup
 
 
 class PhysicalTask(PhysicalNode):
@@ -2487,6 +2508,96 @@ class Scheduler(pymesos.Scheduler):
                 raise
         ready_futures = [node.ready_event.wait() for node in nodes]
         await asyncio.gather(*ready_futures, loop=self._loop)
+
+    async def _batch_run_once(self, graph, resolver, nodes, *,
+                              queue, resources_timeout, run_timeout):
+        """Single attempt for :meth:`batch_run`."""
+        async def wait_one(node):
+            await node.dead_event.wait()
+            if node.status is not None and node.status.state != 'TASK_FINISHED':
+                raise TaskError(node)
+
+        await self.launch(graph, resolver, nodes, queue=queue, resources_timeout=resources_timeout)
+        futures = []
+        for node in nodes:
+            if isinstance(node, PhysicalTask):
+                futures.append(self._loop.create_task(wait_one(node)))
+        try:
+            done, pending = await asyncio.wait(futures, loop=self._loop, timeout=run_timeout,
+                                               return_when=asyncio.FIRST_EXCEPTION)
+            # Raise the TaskError if any
+            for future in done:
+                future.result()
+            if pending:
+                raise asyncio.TimeoutError()
+        finally:
+            # asyncio.wait doesn't cancel futures if it is itself cancelled
+            for future in futures:
+                future.cancel()
+            # In success case this will be immediate since it's all dead already
+            await self.kill(graph, nodes)
+
+    async def batch_run(self, graph, resolver, nodes=None, *,
+                        queue=None, resources_timeout=None, run_timeout=None,
+                        attempts=1):
+        """Launch and run a batch graph (i.e., one that terminates on its own).
+
+        Apart from the exceptions explicitly listed below, any exceptions
+        raised by :meth:`launch` are also applicable.
+
+        .. note::
+            If retries are needed, then `graph` is modified in place with
+            replacement physical nodes (see :meth:`PhysicalNode.clone`).
+
+        Parameters
+        ----------
+        graph : :class:`networkx.MultiDiGraph`
+            Physical graph to launch
+        resolver : :class:`Resolver`
+            Resolver to allocate resources like task IDs
+        nodes : list, optional
+            If specified, lists a subset of the nodes to launch. Otherwise,
+            all nodes in the graph are launched.
+        queue : :class:`LaunchQueue`
+            Queue from which to launch the nodes. If not specified, a default
+            queue is used.
+        resources_timeout : float
+            Time (seconds) to wait for sufficient resources to launch the nodes. If not
+            specified, defaults to the class value.
+        run_timeout : float
+            Time (seconds) to wait for the nodes to terminate after launching. If not
+            specified, there is no timeout (not recommended).
+        attempts : int
+            Number of times to try running the graph
+
+        Raises
+        ------
+        TaskError
+            if the graph failed (any of the tasks exited with a status other
+            than TASK_FINISHED) on all attempts
+        asyncio.TimeoutError
+            if the `run_timeout` is breached
+        """
+        if nodes is None:
+            nodes = list(graph.nodes())
+        while attempts > 0:
+            attempts -= 1
+            try:
+                await self._batch_run_once(graph, resolver, nodes,
+                                           queue=queue,
+                                           resources_timeout=resources_timeout,
+                                           run_timeout=run_timeout)
+            except TaskError as error:
+                if not attempts:
+                    raise
+                else:
+                    logger.warning('Batch graph failed (%s), retrying', error)
+                    new_nodes = [node.clone() for node in nodes]
+                    mapping = dict(zip(nodes, new_nodes))
+                    networkx.relabel_nodes(graph, mapping, copy=False)
+                    nodes = new_nodes
+            else:
+                break
 
     async def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes
