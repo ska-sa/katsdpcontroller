@@ -766,14 +766,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         telstate_node = nodes['telstate']
         telstate_node.host = self.telstate_node.host
         telstate_node.ports = dict(self.telstate_node.ports)
-        # Doesn't actually run anything in Mesos, just marks the node as ready
-        # so that it doesn't block anything else.
-        await self.sched.launch(physical_graph, self.resolver, [telstate_node])
         batch = []
         for node in physical_graph:
             if isinstance(node, scheduler.PhysicalTask):
                 coro = self.sched.batch_run(
-                    physical_graph, self.resolver, [node], queue=self.batch_queue,
+                    physical_graph, self.resolver, [telstate_node, node], queue=self.batch_queue,
                     resources_timeout=7*86400, attempts=3)
                 batch.append(coro)
         await asyncio.gather(*batch, loop=self.loop)
