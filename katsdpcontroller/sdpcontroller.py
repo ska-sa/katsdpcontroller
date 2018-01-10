@@ -626,6 +626,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
+        self.telstate_node.capture_blocks = self.capture_blocks
 
     async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical

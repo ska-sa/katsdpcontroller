@@ -140,8 +140,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def kill(self, driver, **kwargs):
-        self._disconnect()
-        super().kill(driver)
+        force = kwargs.pop('force', False)
+        if not force:
+            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
+        else:
+            self._disconnect()
+            super().kill(driver, **kwargs)
 
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
@@ -208,6 +212,10 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     def clone(self):
         return self.logical_node.physical_factory(
             self.logical_node, self.loop, self.sdp_controller, self.subarray_product_id)
+
+    async def graceful_kill(self, driver, **kwargs):
+        self._disconnect()
+        super().kill(driver, **kwargs)
 
 
 class SDPConfigMixin:
@@ -396,14 +404,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 await self.capture_block_state_observer.wait_empty()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        super().kill(driver, **kwargs)
-
-    def kill(self, driver, **kwargs):
-        force = kwargs.pop('force', False)
-        if not force:
-            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
-        else:
-            super().kill(driver, **kwargs)
+        await super().graceful_kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):

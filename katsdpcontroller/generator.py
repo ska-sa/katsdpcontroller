@@ -67,6 +67,10 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 
 class TelstateTask(SDPPhysicalTaskBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.capture_blocks = None   #: Set by sdpcontroller to mirror the subarray product
+
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
         # Add a port mapping
@@ -76,6 +80,14 @@ class TelstateTask(SDPPhysicalTaskBase):
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
         self.taskinfo.container.docker.port_mappings = [portmap]
+
+    async def graceful_kill(self, driver, **kwargs):
+        try:
+            for capture_block in list(self.capture_blocks.values()):
+                await capture_block.dead_event.wait()
+        except Exception:
+            logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
+        await super().graceful_kill(driver, **kwargs)
 
 
 class IngestTask(SDPPhysicalTask):
