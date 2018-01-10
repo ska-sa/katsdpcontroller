@@ -161,6 +161,7 @@ import contextlib
 import copy
 from collections import namedtuple, deque
 from enum import Enum
+import math
 import asyncio
 import urllib
 import ssl
@@ -1834,12 +1835,17 @@ class _LaunchGroup:
     future : :class:`asyncio.Future`
         A future that is set with the result of the launch i.e., once the
         group has been removed from the queue.
+    deadline : float
+        Loop timestamp by which the resources must be acquired. This is
+        currently approximate (i.e. the actual timeout may occur at a slightly
+        different time) and is used only for sorting.
     """
-    def __init__(self, graph, nodes, resolver, loop):
+    def __init__(self, graph, nodes, resolver, deadline, loop):
         self.nodes = nodes
         self.graph = graph
         self.resolver = resolver
         self.future = asyncio.Future(loop=loop)
+        self.deadline = deadline
         self.last_insufficient = InsufficientResourcesError('No resource offers received')
 
 
@@ -2263,9 +2269,10 @@ class Scheduler(pymesos.Scheduler):
 
         # Filter out any candidates other than the highest priority
         priority = min(queue.priority for (queue, group) in candidates)
+        candidates = [candidate for candidate in candidates if candidate[0].priority == priority]
+        # Order by deadline, to give some degree of fairness
+        candidates.sort(key=lambda x: x[1].deadline)
         for queue, group in candidates:
-            if queue.priority != priority:
-                continue
             nodes = group.nodes
             try:
                 # Due to concurrency, another coroutine may have altered
@@ -2486,7 +2493,11 @@ class Scheduler(pymesos.Scheduler):
 
         for node in remaining:
             node.state = TaskState.STARTING
-        pending = _LaunchGroup(graph, remaining, resolver, self._loop)
+        if resources_timeout is not None:
+            deadline = self._loop.time() + resources_timeout
+        else:
+            deadline = math.inf
+        pending = _LaunchGroup(graph, remaining, resolver, deadline, self._loop)
         empty = not queue
         queue.add(pending)
         if empty:
