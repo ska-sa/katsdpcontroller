@@ -5,6 +5,8 @@ from unittest import mock
 import json
 import itertools
 import asyncio
+# Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
+from socket import getaddrinfo
 
 import asynctest
 from nose.tools import assert_raises, assert_equal
@@ -413,12 +415,20 @@ class TestSDPController(BaseTestSDPController):
             sensor_proxy_client.wait_synced,
             None, cancelled, loop=self.loop)
 
+    def _getaddrinfo(self, host, *args, **kwargs):
+        """Mock getaddrinfo that replaces all hosts with a dummy IP address"""
+        if host.startswith('host'):
+            host = '127.0.0.2'
+        return getaddrinfo(host, *args, **kwargs)
+
     async def setUp(self):
         # Future that is already resolved with no return value
         done_future = asyncio.Future()
         done_future.set_result(None)
         # Mock TelescopeState, but preserve SEPARATOR in the mock
         separator = katsdptelstate.TelescopeState.SEPARATOR
+        mock_getaddrinfo = self._create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
+        mock_getaddrinfo._is_coroutine = False
         self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
         self.telstate_class.SEPARATOR = separator
         self.sensor_proxy_client_class = self._create_patch(
