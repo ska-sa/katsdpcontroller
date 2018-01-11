@@ -1037,7 +1037,7 @@ class TestSubgraph:
         assert_equal({'a', 'b', 'c'}, set(out.nodes()))
 
 
-class TestScheduler(asynctest.TestCase):
+class TestScheduler(asynctest.ClockedTestCase):
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
     def _make_offer(self, resources, agent_num=0, attrs=()):
         return _make_offer(self.framework_id, 'agentid{}'.format(agent_num),
@@ -1497,8 +1497,8 @@ class TestScheduler(asynctest.TestCase):
 
     async def test_launch_resources_timeout(self):
         """Test a launch failing due to insufficient resources within the timeout"""
-        self.sched.resources_timeout = 0.01
         launch, kill = await self._transition_node0(TaskState.STARTING)
+        await self.advance(30)
         with assert_raises(scheduler.InsufficientResourcesError):
             await launch
         assert_equal(TaskState.NOT_READY, self.nodes[0].state)
