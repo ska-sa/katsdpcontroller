@@ -29,7 +29,7 @@ setup (
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'aiokatcp',
+        'aiokatcp>=0.2',
         'katsdptelstate',
         'katsdpservices',
         'kazoo',

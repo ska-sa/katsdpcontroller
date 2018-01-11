@@ -1,5 +1,6 @@
 addict==2.1.1
 aiohttp==2.3.6
+aiokatcp==0.2
 async-timeout==2.0.0
 certifi                    # via requests
 chardet==3.0.4             # via aiohttp, requests
@@ -33,4 +34,3 @@ websocket-client==0.45.0   # via docker
 yarl==0.16.0               # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
-git+ssh://git@github.com/ska-sa/aiokatcp@client#egg=aiokatcp
