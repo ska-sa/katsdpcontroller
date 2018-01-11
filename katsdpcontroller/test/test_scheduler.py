@@ -1071,12 +1071,14 @@ class TestScheduler(asynctest.ClockedTestCase):
 
     def _make_physical(self):
         self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
+        self.physical_batch_graph = scheduler.instantiate(self.logical_batch_graph, self.loop)
         self.nodes = []
         for i in range(3):
             self.nodes.append(next(node for node in self.physical_graph
                                    if node.name == 'node{}'.format(i)))
         self.nodes[2].host = 'remotehost'
         self.nodes[2].ports['foo'] = 10000
+        self.batch_node = list(self.physical_batch_graph.nodes())[0]
 
     async def _wait_request(self, task_id):
         async with aiohttp.ClientSession(loop=self.loop) as session:
@@ -1114,6 +1116,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         node1.cores = ['core0', 'core1']
         node2 = scheduler.LogicalExternal('node2')
         node2.wait_ports = []
+        batch_node = scheduler.LogicalTask('batch0')
+        batch_node.image = 'batch_image'
+        batch_node.cpus = 0.5
+        batch_node.mem = 256
+        batch_node.max_run_time = 10
+        batch_node.command = ['/bin/echo', 'Hello']
         # The order is determined by the lexicographical_topological_sort done in _launch_group
         self.task_ids = ['test-00000000', 'test-00000001', None]
         self.logical_graph = networkx.MultiDiGraph()
@@ -1121,6 +1129,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.logical_graph.add_edge(node1, node0, port='port',
                                     depends_ready=True, depends_kill=True)
         self.logical_graph.add_edge(node1, node2, port='foo', depends_ready=True, depends_kill=True)
+        self.logical_batch_graph = networkx.MultiDiGraph()
+        self.logical_batch_graph.add_node(batch_node)
         self.numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.agent0_attrs = [
             _make_json_attr('katsdpcontroller.gpus', [
@@ -1620,6 +1630,77 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.DEAD, self.nodes[2].state)
         assert_true(kill.done())
         await kill
+
+    async def _transition_batch_run(self, state):
+        """Interact with scheduler to get batch task to state `state`.
+
+        It is assumed that it has already been launched.
+
+        Returns
+        -------
+        future
+            The batch_run asynchronous task
+        """
+        if state >= TaskState.STARTED:
+            self.sched.resourceOffers(self.driver, self._make_offers())
+            await asynctest.exhaust_callbacks(self.loop)
+            assert_equal(TaskState.STARTED, self.batch_node.state)
+            if state >= TaskState.READY:
+                task_id = self.batch_node.taskinfo.task_id.value
+                self._status_update(task_id, 'TASK_RUNNING')
+                await asynctest.exhaust_callbacks(self.loop)
+                assert_equal(TaskState.READY, self.batch_node.state)
+                if state >= TaskState.DEAD:
+                    self._status_update(task_id, 'TASK_FINISHED')
+                    await asynctest.exhaust_callbacks(self.loop)
+                    assert_equal(TaskState.DEAD, self.batch_node.state)
+
+    async def test_batch_run_success(self):
+        """batch_run for the case of a successful run"""
+        task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
+        await self._transition_batch_run(TaskState.DEAD)
+        await task
+
+    async def test_batch_run_failure(self):
+        """batch_run with a failing task"""
+        task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
+        await self._transition_batch_run(TaskState.READY)
+        task_id = self.batch_node.taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_FAILED')
+        with assert_raises(scheduler.TaskError):
+            await task
+
+    async def test_batch_run_timeout(self):
+        """batch_run with a task that doesn't finish in time"""
+        task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
+        await self._transition_batch_run(TaskState.READY)
+        await self.advance(30)
+        self.driver.killTask.assert_called_with(self.batch_node.taskinfo.task_id)
+        task_id = self.batch_node.taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_KILLED')
+        with assert_raises(asyncio.TimeoutError):
+            await task
+
+    async def test_batch_run_resources_timeout(self):
+        """batch_run with a task that doesn't get resources in time"""
+        task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
+        await self.advance(30)
+        with assert_raises(scheduler.TaskInsufficientResourcesError):
+            await task
+
+    async def test_batch_run_retry(self):
+        """batch_run where first attempt fails, later attempt succeeds"""
+        task = asyncio.ensure_future(self.sched.batch_run(
+            self.physical_batch_graph, self.resolver, attempts=2))
+        await self._transition_batch_run(TaskState.READY)
+        task_id = self.batch_node.taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_FAILED')
+        await asynctest.exhaust_callbacks(self.loop)
+        # The graph should now have been modified in place, so we need to
+        # get the new physical node
+        self.batch_node = list(self.physical_batch_graph.nodes())[0]
+        await self._transition_batch_run(TaskState.DEAD)
+        await task
 
     async def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
