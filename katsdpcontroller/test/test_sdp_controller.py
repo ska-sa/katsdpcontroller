@@ -428,6 +428,7 @@ class TestSDPController(BaseTestSDPController):
         # Mock TelescopeState, but preserve SEPARATOR in the mock
         separator = katsdptelstate.TelescopeState.SEPARATOR
         mock_getaddrinfo = self._create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
+        # Workaround for Python bug that makes it think mocks are coroutines
         mock_getaddrinfo._is_coroutine = False
         self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
         self.telstate_class.SEPARATOR = separator
