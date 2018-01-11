@@ -5,39 +5,29 @@
 import time
 import logging
 import subprocess
-import shlex
 import json
 import signal
 import re
-import sys
 import os.path
 from collections import deque
+import asyncio
+import functools
+import enum
+import ipaddress
+import faulthandler
 
-from tornado import gen
-import tornado.platform.asyncio
-import tornado.ioloop
-import tornado.concurrent
-import trollius
-from trollius import From, Return
 import networkx
 import networkx.drawing.nx_pydot
-import six
-import enum
-from decorator import decorator
 
+import async_timeout
 import jsonschema
-import ipaddress
 import netifaces
-import faulthandler
 
 from prometheus_client import Histogram
 
-from katcp import AsyncDeviceServer, Sensor, AsyncReply, FailReply, Message
-from katcp.kattypes import request, return_reply, Str, Int, Float, Bool
+from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
-from katsdpservices.asyncio import to_tornado_future
 import katsdptelstate
-from katsdptelstate.endpoint import endpoint_list_parser
 from . import scheduler, tasks, product_config, generator
 from .tasks import State, DEPENDS_INIT
 
@@ -56,7 +46,7 @@ def log_task_exceptions(task, msg):
 
     Parameters
     ----------
-    task : :class:`trollius.Future`
+    task : :class:`asyncio.Future`
         Task (or any future) on which the callback will be added
     msg : str
         Message that will be logged
@@ -70,39 +60,7 @@ def log_task_exceptions(task, msg):
     task.add_done_callback(done_callback)
 
 
-class CallbackSensor(Sensor):
-    """KATCP Sensor that uses a callback to obtain the next sensor value."""
-    def __init__(self, *args, **kwargs):
-        self._read_callback = None
-        self._read_callback_kwargs = {}
-        self._busy_updating = False
-        super(CallbackSensor, self).__init__(*args, **kwargs)
-
-    def set_read_callback(self, callback, **kwargs):
-        self._read_callback = callback
-        self._read_callback_kwargs = kwargs
-
-    def read(self):
-        """Provide a callback function that is executed when read is called.
-        Callback should provide a (timestamp, status, value) tuple
-
-        Returns
-        -------
-        reading : :class:`katcp.core.Reading` object
-            Sensor reading as a (timestamp, status, value) tuple
-
-        """
-        if self._read_callback and not self._busy_updating:
-            self._busy_updating = True
-            (_val, _status, _timestamp) = self._read_callback(**self._read_callback_kwargs)
-            self.set_value(self.parse_value(_val), _status, _timestamp)
-        # Having this outside the above if-statement ensures that we cannot get
-        # stuck with busy_updating=True if read callback crashes in one thread
-        self._busy_updating = False
-        return (self._timestamp, self._status, self._value)
-
-
-class GraphResolver(object):
+class GraphResolver:
     """Provides graph name resolution services for use when presented with
        a subarray product id.
 
@@ -114,10 +72,10 @@ class GraphResolver(object):
 
        Parameters
        ----------
-       overrides : list, optional
-            A list of override strings in the form <subarray_product_id>:<override_graph_name>
+       overrides : iterable, optional
+            Override strings in the form <subarray_product_id>:<override_graph_name>
        """
-    def __init__(self, overrides=[]):
+    def __init__(self, overrides=()):
         self._overrides = {}
 
         for override in overrides:
@@ -134,16 +92,17 @@ class GraphResolver(object):
         """
         try:
             base_graph_name = self._overrides[subarray_product_id]
+            # if an override is set use this instead, but warn the user about this.
             logger.warning("Graph name specified by subarray_product_id (%s) has been overridden "
                            "to %s", subarray_product_id, base_graph_name)
-             # if an override is set use this instead, but warn the user about this
         except KeyError:
+            # default graph name is to split out the trailing name from the
+            # subarray product id specifier
             base_graph_name = subarray_product_id.split("_")[-1]
-             # default graph name is to split out the trailing name from the subarray product id specifier
         return base_graph_name
 
 
-class MulticastIPResources(object):
+class MulticastIPResources:
     def __init__(self, network):
         self._hosts = network.hosts()
 
@@ -151,7 +110,7 @@ class MulticastIPResources(object):
         try:
             ip = str(next(self._hosts))
             if n_addresses > 1:
-                for i in range(1, n_addresses):
+                for _ in range(1, n_addresses):
                     next(self._hosts)
                 ip = '{}+{}'.format(ip, n_addresses - 1)
             return ip
@@ -159,15 +118,15 @@ class MulticastIPResources(object):
             raise RuntimeError('Multicast IP addresses exhausted')
 
 
-class SDPCommonResources(object):
+class SDPCommonResources:
     """Assigns multicast groups and ports across all subarrays."""
     def __init__(self, safe_multicast_cidr):
         logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
         self.multicast_subnets = deque(
-            ipaddress.ip_network(unicode(safe_multicast_cidr)).subnets(new_prefix=24))
+            ipaddress.ip_network(safe_multicast_cidr).subnets(new_prefix=24))
 
 
-class SDPResources(object):
+class SDPResources:
     """Helper class to allocate resources for a single subarray-product."""
     def __init__(self, common, subarray_product_id):
         self.subarray_product_id = subarray_product_id
@@ -194,7 +153,7 @@ class SDPResources(object):
             self._multicast_resources = None
 
 
-class CaptureBlock(object):
+class CaptureBlock:
     """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
@@ -208,7 +167,7 @@ class CaptureBlock(object):
         self.name = name
         self._state = CaptureBlock.State.INITIALISING
         self.postprocess_task = None
-        self.dead_event = trollius.Event(loop=loop)
+        self.dead_event = asyncio.Event(loop=loop)
         self.state_change_callback = None
 
     @property
@@ -225,7 +184,7 @@ class CaptureBlock(object):
                 self.state_change_callback()
 
 
-class SDPSubarrayProductBase(object):
+class SDPSubarrayProductBase:
     """SDP Subarray Product Base
 
     Represents an instance of an SDP subarray product. This includes ingest, an
@@ -270,21 +229,20 @@ class SDPSubarrayProductBase(object):
         self.capture_blocks = {}              # live capture blocks, indexed by name
         self.capture_block_names = set()      # all capture block names used
         self.current_capture_block = None     # set between capture_init and capture_done
-        self.dead_event = trollius.Event(loop)   # Set when reached state DEAD
+        self.dead_event = asyncio.Event(loop=loop)   # Set when reached state DEAD
         # Callbacks that are called when we reach state DEAD. These are
         # provided in addition to dead_event, because sometimes it's
         # necessary to react immediately rather than waiting for next time
         # around the event loop. Each callback takes self as the argument.
         self.dead_callbacks = [lambda product: product.dead_event.set()]
         self._state = None
-        self.capture_block_sensor = Sensor.string(
-            subarray_product_id + ".capture-block-state",
+        self.capture_block_sensor = Sensor(
+            str, subarray_product_id + ".capture-block-state",
             "JSON dictionary of capture block states for active capture blocks",
-            default="{}", initial_status=Sensor.NOMINAL)
-        self.state_sensor = Sensor.discrete(
-            subarray_product_id + ".state",
-            "State of the subarray product state machine",
-            params=[member.lower() for member in State.__members__])
+            default="{}", initial_status=Sensor.Status.NOMINAL)
+        self.state_sensor = Sensor(
+            State, subarray_product_id + ".state",
+            "State of the subarray product state machine")
         self.state = State.CONFIGURING   # This sets the sensor
         logger.info("Created: {!r}".format(self))
 
@@ -295,7 +253,7 @@ class SDPSubarrayProductBase(object):
     @state.setter
     def state(self, value):
         self._state = value
-        self.state_sensor.set_value(value.name.lower())
+        self.state_sensor.value = value
 
     @property
     def async_busy(self):
@@ -306,15 +264,14 @@ class SDPSubarrayProductBase(object):
         """Raise a FailReply if there is an asynchronous operation in progress."""
         if self.async_busy:
             raise FailReply('Subarray product {} is busy with an operation. '
-                            'Please wait for it to complete first.'.format(self.subarray_product_id))
+                            'Please wait for it to complete first.'.format(
+                                self.subarray_product_id))
 
-    @trollius.coroutine
-    def configure_impl(self, req):
+    async def configure_impl(self, ctx):
         """Extension point to configure the subarray."""
         pass
 
-    @trollius.coroutine
-    def deconfigure_impl(self, force, ready):
+    async def deconfigure_impl(self, force, ready):
         """Extension point to deconfigure the subarray.
 
         Parameters
@@ -322,19 +279,17 @@ class SDPSubarrayProductBase(object):
         force : bool
             Whether to do an abrupt deconfiguration without waiting for
             postprocessing.
-        ready : :class:`trollius.Event`
+        ready : :class:`asyncio.Event`
             If the ?product-deconfigure command should return before
             deconfiguration is complete, this event can be set at that point.
         """
         pass
 
-    @trollius.coroutine
-    def capture_init_impl(self, capture_block):
+    async def capture_init_impl(self, capture_block):
         """Extension point to start a capture block."""
         pass
 
-    @trollius.coroutine
-    def capture_done_impl(self, capture_block):
+    async def capture_done_impl(self, capture_block):
         """Extension point to stop a capture block.
 
         This should only do the work needed for the ``capture-done`` master
@@ -346,8 +301,7 @@ class SDPSubarrayProductBase(object):
         """
         pass
 
-    @trollius.coroutine
-    def postprocess_impl(self, capture_block):
+    async def postprocess_impl(self, capture_block):
         """Complete the post-processing for a capture block.
 
         Subclasses should override this if a capture block is not finished when
@@ -355,14 +309,12 @@ class SDPSubarrayProductBase(object):
         """
         pass
 
-    @trollius.coroutine
-    def _configure(self, req):
+    async def _configure(self, ctx):
         """Asynchronous task that does he configuration."""
-        yield From(self.configure_impl(req))
+        await self.configure_impl(ctx)
         self.state = State.IDLE
 
-    @trollius.coroutine
-    def _deconfigure(self, force, ready):
+    async def _deconfigure(self, force, ready):
         """Asynchronous task that does the deconfiguration.
 
         This handles the entire burndown cycle. The end of the synchronous
@@ -375,8 +327,8 @@ class SDPSubarrayProductBase(object):
                 capture_block = self.current_capture_block
                 # To prevent trying again if we get a second forced-deconfigure.
                 self.current_capture_block = None
-                yield From(self.capture_done_impl(capture_block))
-            except trollius.CancelledError:
+                await self.capture_done_impl(capture_block)
+            except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.error("Failed to issue capture-done during shutdown request. "
@@ -391,15 +343,15 @@ class SDPSubarrayProductBase(object):
                 else:
                     self._capture_block_dead(capture_block)
 
-        yield From(self.deconfigure_impl(force, ready))
+        await self.deconfigure_impl(force, ready)
 
         # Allow all the postprocessing tasks to finish up
         # Note: this needs to be done carefully, because self.capture_blocks
         # can change during the yield.
         while self.capture_blocks:
-            name, capture_block = next(self.capture_blocks.iteritems())
+            name, capture_block = next(iter(self.capture_blocks.items()))
             logging.info('Waiting for capture block %s to terminate', name)
-            yield From(capture_block.dead_event.wait())
+            await capture_block.dead_event.wait()
             self.capture_blocks.pop(name, None)
 
         self.state = State.DEAD
@@ -420,18 +372,17 @@ class SDPSubarrayProductBase(object):
 
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
-                 for name, capture_block in six.iteritems(self.capture_blocks)}
+                 for name, capture_block in self.capture_blocks.items()}
         self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
-    @trollius.coroutine
-    def _capture_init(self, capture_block):
+    async def _capture_init(self, capture_block):
         self.capture_block_names.add(capture_block.name)
         self.capture_blocks[capture_block.name] = capture_block
         capture_block.state_change_callback = self._update_capture_block_sensor
         # Update the sensor with the INITIALISING state
         self._update_capture_block_sensor()
         try:
-            yield From(self.capture_init_impl(capture_block))
+            await self.capture_init_impl(capture_block)
         except Exception:
             self._capture_block_dead(capture_block)
             raise
@@ -440,8 +391,7 @@ class SDPSubarrayProductBase(object):
         self.current_capture_block = capture_block
         capture_block.state = CaptureBlock.State.CAPTURING
 
-    @trollius.coroutine
-    def _capture_done(self):
+    async def _capture_done(self):
         """The asynchronous task that handles ?capture-done. See
         :meth:`capture_done_impl` for additional details.
 
@@ -454,13 +404,13 @@ class SDPSubarrayProductBase(object):
         """
         capture_block = self.current_capture_block
         assert capture_block is not None
-        yield From(self.capture_done_impl(capture_block))
+        await self.capture_done_impl(capture_block)
         assert self.state == State.CAPTURING
         assert self.current_capture_block is capture_block
         self.state = State.IDLE
         self.current_capture_block = None
         capture_block.state = CaptureBlock.State.POSTPROCESSING
-        capture_block.postprocessing_task = trollius.ensure_future(
+        capture_block.postprocessing_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
             capture_block.postprocessing_task,
@@ -468,14 +418,14 @@ class SDPSubarrayProductBase(object):
                                                            capture_block.name))
         capture_block.postprocessing_task.add_done_callback(
             lambda task: self._capture_block_dead(capture_block))
-        raise Return(capture_block)
+        return capture_block
 
     def _clear_async_task(self, future):
         """Clear the current async task.
 
         Parameters
         ----------
-        future : :class:`trollius.Future`
+        future : :class:`asyncio.Future`
             The expected value of :attr:`_async_task`. If it does not match,
             it is not cleared (this can happen if another task replaced it
             already).
@@ -483,8 +433,7 @@ class SDPSubarrayProductBase(object):
         if self._async_task is future:
             self._async_task = None
 
-    @trollius.coroutine
-    def _replace_async_task(self, new_task):
+    async def _replace_async_task(self, new_task):
         """Set the current asynchronous task.
 
         If there is an existing task, it is atomically replaced then cancelled.
@@ -499,26 +448,24 @@ class SDPSubarrayProductBase(object):
         self._async_task = new_task
         if old_task is not None:
             old_task.cancel()
-            # Using trollius.wait instead of directly yielding from the task
+            # Using asyncio.wait instead of directly yielding from the task
             # avoids re-raising any exception raised from the task.
-            yield From(trollius.wait([old_task], loop=self.loop))
-        raise Return(self._async_task is new_task)
+            await asyncio.wait([old_task], loop=self.loop)
+        return self._async_task is new_task
 
-    @trollius.coroutine
-    def configure(self, req):
+    async def configure(self, ctx):
         assert not self.async_busy, "configure should be the first thing to happen"
         assert self.state == State.CONFIGURING, "configure should be the first thing to happen"
-        task = trollius.ensure_future(self._configure(req), loop=self.loop)
+        task = asyncio.ensure_future(self._configure(ctx), loop=self.loop)
         log_task_exceptions(task, "Configuring subarray product {} failed".format(
             self.subarray_product_id))
         self._async_task = task
         try:
-            yield From(task)
+            await task
         finally:
             self._clear_async_task(task)
 
-    @trollius.coroutine
-    def deconfigure(self, force=False):
+    async def deconfigure(self, force=False):
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
         if self.state == State.DEAD:
             return
@@ -526,32 +473,32 @@ class SDPSubarrayProductBase(object):
             if not force:
                 self._fail_if_busy()
             else:
-                logger.warning('Subarray product %s is busy with an operation, but deconfiguring anyway',
-                               self.subarray_product_id)
+                logger.warning('Subarray product %s is busy with an operation, '
+                               'but deconfiguring anyway', self.subarray_product_id)
 
         if self.state != State.IDLE:
             if not force:
-                raise FailReply('Subarray product is not idle and thus cannot be deconfigured. Please issue capture_done first.')
+                raise FailReply('Subarray product is not idle and thus cannot be deconfigured. '
+                                'Please issue capture_done first.')
             else:
                 logger.warning('Subarray product %s is in state %s, but deconfiguring anyway',
                                self.subarray_product_id, self.state.name)
         logger.info("Deconfiguring subarray product %s", self.subarray_product_id)
 
-        ready = trollius.Event(self.loop)
-        task = trollius.ensure_future(self._deconfigure(force, ready), loop=self.loop)
+        ready = asyncio.Event(loop=self.loop)
+        task = asyncio.ensure_future(self._deconfigure(force, ready), loop=self.loop)
         log_task_exceptions(task, "Deconfiguring {} failed".format(self.subarray_product_id))
         # Make sure that ready gets unblocked even if task throws.
         task.add_done_callback(lambda future: ready.set())
         task.add_done_callback(self._clear_async_task)
-        if (yield From(self._replace_async_task(task))):
-            yield From(ready.wait())
+        if (await self._replace_async_task(task)):
+            await ready.wait()
         # We don't wait for task to complete, but if it's already done we
         # pass back any exceptions.
         if task.done():
-            yield From(task)
+            await task
 
-    @trollius.coroutine
-    def capture_init(self, program_block_id):
+    async def capture_init(self, program_block_id):
         def format_cbid(seq):
             return '{}-{:05}'.format(program_block_id, seq)
 
@@ -570,23 +517,22 @@ class SDPSubarrayProductBase(object):
         logger.info('Using capture block ID %s', capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, self.loop)
-        task = trollius.ensure_future(self._capture_init(capture_block), loop=self.loop)
+        task = asyncio.ensure_future(self._capture_init(capture_block), loop=self.loop)
         self._async_task = task
         try:
-            yield From(task)
+            await task
         finally:
             self._clear_async_task(task)
 
-    @trollius.coroutine
-    def capture_done(self):
+    async def capture_done(self):
         self._fail_if_busy()
         if self.state != State.CAPTURING:
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
-        task = trollius.ensure_future(self._capture_done(), loop=self.loop)
+        task = asyncio.ensure_future(self._capture_done(), loop=self.loop)
         self._async_task = task
         try:
-            yield From(task)
+            await task
         finally:
             self._clear_async_task(task)
 
@@ -615,7 +561,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     actually run anything.
     """
     def __init__(self, *args, **kwargs):
-        super(SDPSubarrayProductInterface, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
         sensors = self._interface_mode_sensors.sensors
         self._capture_block_states = [
@@ -630,34 +576,29 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         """
         for name, sensor in self._interface_mode_sensors.sensors.items():
             if name.endswith('.capture-block-state'):
-                states = json.loads(sensor.value())
+                states = json.loads(sensor.value)
                 if state is None:
                     states.pop(capture_block_id, None)
                 else:
                     states[capture_block_id] = state
                 sensor.set_value(json.dumps(states))
 
-    @trollius.coroutine
-    def capture_init_impl(self, capture_block):
+    async def capture_init_impl(self, capture_block):
         self._update_capture_block_state(capture_block.name, 'CAPTURING')
 
-    @trollius.coroutine
-    def capture_done_impl(self, capture_block):
+    async def capture_done_impl(self, capture_block):
         self._update_capture_block_state(capture_block.name, 'PROCESSING')
 
-    @trollius.coroutine
-    def postprocess_impl(self, capture_block):
-        yield From(trollius.sleep(0.1, loop=self.loop))
+    async def postprocess_impl(self, capture_block):
+        await asyncio.sleep(0.1, loop=self.loop)
         self._update_capture_block_state(capture_block.name, None)
 
-    @trollius.coroutine
-    def configure_impl(self, req):
+    async def configure_impl(self, ctx):
         logger.warning("No components will be started - running in interface mode")
         # Add dummy sensors for this product
         self._interface_mode_sensors.add_sensors(self.sdp_controller)
 
-    @trollius.coroutine
-    def deconfigure_impl(self, force, ready):
+    async def deconfigure_impl(self, force, ready):
         self._interface_mode_sensors.remove_sensors(self.sdp_controller)
 
 
@@ -673,8 +614,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def __init__(self, sched, config, resolver, subarray_product_id, loop,
                  sdp_controller, telstate_name='telstate'):
-        super(SDPSubarrayProduct, self).__init__(
-            sched, config, resolver, subarray_product_id, loop, sdp_controller)
+        super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
         # generate physical nodes
         mapping = {logical: self._instantiate(logical, sdp_controller)
                    for logical in self.logical_graph}
@@ -683,8 +623,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
 
-    @trollius.coroutine
-    def _issue_req(self, req, args=[], node_type='ingest', **kwargs):
+    async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical
         usage is to issue a command such as 'capture-init' to all ingest nodes.
         A single failure is treated as terminal.
@@ -696,10 +635,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         Raises
         ------
-        katcp.FailReply
+        aiokatcp.FailReply
             If any of the underlying requests fail
         Exception
-            Any exceptions raised by katcp itself will propagate
+            Any exceptions raised by aiokatcp itself will propagate
         """
         logger.debug("Issuing request {} to node_type {}".format(req, node_type))
         ret_args = ""
@@ -713,29 +652,28 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if (not node.logical_node.name.startswith(node_type + '.')
                     and node.logical_node.name != node_type):
                 continue
-            reply, informs = yield From(node.issue_req(req, args, **kwargs))
-            if not reply.reply_ok():
-                retmsg = "Failed to issue req {} to node {}. {}".format(req, node.name, reply.arguments[-1])
-                raise FailReply(retmsg)
-            ret_args += "," + reply.arguments[-1]
+            reply, informs = await node.issue_req(req, args)
+            ret_args += "," + (reply[-1] if reply else 'ok')
         if ret_args == "":
-            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(req, node_type)
-        raise Return(ret_args)
+            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(
+                req, node_type)
+        return ret_args
 
-    @trollius.coroutine
-    def _exec_node_transition(self, node, req, deps):
+    async def _exec_node_transition(self, node, req, deps):
         if deps:
-            yield From(trollius.gather(*deps, loop=node.loop))
+            await asyncio.gather(*deps, loop=node.loop)
         if req is not None:
             if node.katcp_connection is None:
                 logger.warning('Cannot issue %s to %s because there is no katcp connection',
                                req, node.name)
             else:
                 # TODO: should handle katcp exceptions or failed replies
-                yield From(node.issue_req(req[0], req[1:], timeout=300))
+                try:
+                    await node.issue_req(req[0], req[1:])
+                except FailReply:
+                    pass   # Callee logs a warning
 
-    @trollius.coroutine
-    def exec_transitions(self, old_state, new_state, reverse, capture_block):
+    async def exec_transitions(self, old_state, new_state, reverse, capture_block):
         """Issue requests to nodes on state transitions.
 
         The requests are made in parallel, but respects `depends_init`
@@ -780,42 +718,39 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 req = [field.format(**subst) for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
-                task = trollius.ensure_future(self._exec_node_transition(node, req, deps),
-                                              loop=node.loop)
+                task = asyncio.ensure_future(self._exec_node_transition(node, req, deps),
+                                             loop=node.loop)
                 loop = node.loop
                 tasks[node] = task
         if tasks:
-            yield From(trollius.gather(*tasks.values(), loop=loop))
+            with async_timeout.timeout(300, loop=loop):
+                await asyncio.gather(*tasks.values(), loop=loop)
 
-    @trollius.coroutine
-    def capture_init_impl(self, capture_block):
+    async def capture_init_impl(self, capture_block):
         if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
             logger.info('SIMULATE: Configuring antennas in simulator(s)')
             try:
                 # Replace temporary fake antennas with ones configured by kattelmod
-                yield From(self._issue_req('configure-subarray-from-telstate', node_type='sim'))
-            except trollius.CancelledError:
+                await self._issue_req('configure-subarray-from-telstate', node_type='sim')
+            except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
-        yield From(self.exec_transitions(State.IDLE, State.CAPTURING, True, capture_block))
+        await self.exec_transitions(State.IDLE, State.CAPTURING, True, capture_block)
 
-    @trollius.coroutine
-    def capture_done_impl(self, capture_block):
-        yield From(self.exec_transitions(State.CAPTURING, State.IDLE, False, capture_block))
+    async def capture_done_impl(self, capture_block):
+        await self.exec_transitions(State.CAPTURING, State.IDLE, False, capture_block)
 
-    @trollius.coroutine
-    def postprocess_impl(self, capture_block):
+    async def postprocess_impl(self, capture_block):
         for node in self.physical_graph:
             if isinstance(node, tasks.SDPPhysicalTask):
                 observer = node.capture_block_state_observer
                 if observer is not None:
-                    yield From(observer.wait_capture_block_done(capture_block.name))
+                    await observer.wait_capture_block_done(capture_block.name)
 
-    @trollius.coroutine
-    def _launch_telstate(self):
+    async def _launch_telstate(self):
         """Make sure the telstate node is launched"""
         boot = [self.telstate_node]
 
@@ -826,7 +761,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
-        for name, stream in six.iteritems(self.config['inputs']):
+        for name, stream in self.config['inputs'].items():
             if stream['type'].startswith('cbf.'):
                 prefix = name + katsdptelstate.TelescopeState.SEPARATOR
                 for suffix in ['src_streams', 'instrument_dev_name']:
@@ -834,18 +769,16 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                         base_params[prefix + suffix] = stream[suffix]
 
         logger.debug("Launching telstate. Base parameters {}".format(base_params))
-        yield From(self.sched.launch(self.physical_graph, self.resolver, boot))
-         # encode metadata into the telescope state for use
-         # in component configuration
-         # connect to telstate store
+        await self.sched.launch(self.physical_graph, self.resolver, boot)
+        # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
         self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         self.resolver.telstate = self.telstate
 
         logger.debug("base params: %s", base_params)
-         # set the configuration
-        for k, v in base_params.iteritems():
+        # set the configuration
+        for k, v in base_params.items():
             self.telstate.add(k, v, immutable=True)
 
     def check_nodes(self):
@@ -861,32 +794,31 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 return False
         return True
 
-    @trollius.coroutine
-    def _shutdown(self, force):
+    async def _shutdown(self, force):
         try:
             # TODO: issue progress reports as tasks stop
-            yield From(self.sched.kill(self.physical_graph, force=force))
+            await self.sched.kill(self.physical_graph, force=force)
         finally:
             if hasattr(self.resolver, 'resources'):
                 self.resolver.resources.close()
 
-    @trollius.coroutine
-    def configure_impl(self, req):
+    async def configure_impl(self, ctx):
         try:
             try:
                 resolver = self.resolver
                 resolver.resources = SDPResources(self.sdp_controller.resources,
                                                   self.subarray_product_id)
                 # launch the telescope state for this graph
-                yield From(self._launch_telstate())
-                req.inform("Telstate launched. [{}]".format(self.telstate_endpoint))
-                 # launch containers for those nodes that require them
-                yield From(self.sched.launch(self.physical_graph, self.resolver))
-                req.inform("All nodes launched")
+                await self._launch_telstate()
+                ctx.inform("Telstate launched. [{}]".format(self.telstate_endpoint))
+                # launch containers for those nodes that require them
+                await self.sched.launch(self.physical_graph, self.resolver)
+                ctx.inform("All nodes launched")
                 alive = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
-                    ret_msg = "Some nodes in the graph failed to start. Check the error log for specific details."
+                    ret_msg = ("Some nodes in the graph failed to start. "
+                               "Check the error log for specific details.")
                     logger.error(ret_msg)
                     raise FailReply(ret_msg)
                 # Record the TaskInfo for each task in telstate, as well as details
@@ -901,22 +833,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 self.telstate.add('sdp_task_details', details, immutable=True)
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
                 self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                   immutable=True)
-            except Exception:
+                                  immutable=True)
+            except Exception as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
-                exc_info = sys.exc_info()
-                yield From(self._shutdown(force=True))
-                six.reraise(*exc_info)
+                await self._shutdown(force=True)
+                raise exc
         except scheduler.InsufficientResourcesError as error:
             raise FailReply('Insufficient resources to launch {}: {}'.format(
-                self.subarray_product_id, error))
+                self.subarray_product_id, error)) from error
         except scheduler.ImageError as error:
-            raise FailReply(str(error))
+            raise FailReply(str(error)) from error
 
-    @trollius.coroutine
-    def deconfigure_impl(self, force, ready):
+    async def deconfigure_impl(self, force, ready):
         if force:
-            yield From(self._shutdown(force=force))
+            await self._shutdown(force=force)
             ready.set()
         else:
             def must_wait(node):
@@ -925,100 +855,66 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             # Start the shutdown in a separate task, so that we can monitor
             # for task shutdown.
             wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
-            shutdown_task = trollius.ensure_future(self._shutdown(force=force), loop=self.loop)
-            yield From(trollius.gather(*wait_tasks, loop=self.loop))
+            shutdown_task = asyncio.ensure_future(self._shutdown(force=force), loop=self.loop)
+            await asyncio.gather(*wait_tasks, loop=self.loop)
             ready.set()
-            yield From(shutdown_task)
-
-
-def async_request(func):
-    """Decorator for requests that run asynchronously on the tornado ioloop
-    of :class:`SDPControllerServer`. This converts a handler that returns a
-    future to one that uses AsyncReply. The difference is that this allows
-    further commands to be immediately processed *on the same connection*.
-
-    The function itself must return a future that resolves to a reply. Thus,
-    a typical order of decorators is async_request, request, return_reply,
-    gen.coroutine.
-    """
-    @six.wraps(func)
-    def wrapper(self, req, msg):
-        # Note that this will run the coroutine until it first yields. The initial
-        # code until the first yield thus happens synchronously.
-        future = func(self, req, msg)
-        @gen.coroutine
-        def callback():
-            with REQUEST_TIME.labels(msg.name).time():
-                try:
-                    reply = yield future
-                    req.reply_with_message(reply)
-                except FailReply as error:
-                    reason = str(error)
-                    self._logger.error('Request %s FAIL: %s', msg.name, reason)
-                    req.reply('fail', reason)
-                except trollius.CancelledError:
-                    self._logger.error('Request %s CANCELLED', msg.name)
-                    req.reply('fail', 'request was cancelled')
-                except Exception:
-                    reply = self.create_exception_reply_and_log(msg, sys.exc_info())
-                    req.reply_with_message(reply)
-        self.ioloop.add_callback(callback)
-        raise AsyncReply
-    return wrapper
+            await shutdown_task
 
 
 def time_request(func):
-    """Decorator to record request servicing time as a Prometheus histogram.
-
-    Use this on the outside of ``@request``.
-
-    .. note::
-        Only suitable for use on synchronous request handlers. Asynchronous
-        handlers get the functionality as part of :func:`async_request`.
-    """
-    @six.wraps(func)
-    def wrapper(self, req, msg):
-        with REQUEST_TIME.labels(msg.name).time():
-            return func(self, req, msg)
+    """Decorator to record request servicing time as a Prometheus histogram."""
+    @functools.wraps(func)
+    async def wrapper(self, ctx, *args, **kwargs):
+        with REQUEST_TIME.labels(ctx.req.name).time():
+            return await func(self, ctx, *args, **kwargs)
     return wrapper
 
 
-class SDPControllerServer(AsyncDeviceServer):
+class DeviceStatus(enum.Enum):
+    OK = 1
+    DEGRADED = 2
+    FAIL = 3
 
-    VERSION_INFO = ("sdpcontroller", 1, 1)
-    BUILD_INFO = ("sdpcontroller",) + tuple(katsdpcontroller.__version__.split('.', 1)) + ('',)
+
+class SDPControllerServer(DeviceServer):
+    VERSION = "sdpcontroller-1.2"
+    BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  simulate=False, develop=False, interface_mode=False, wrapper=None,
                  graph_resolver=None, image_resolver_factory=None,
                  gui_urls=None, graph_dir=None):
-         # setup sensors
-        self._build_state_sensor = Sensor(Sensor.STRING, "build-state", "SDP Controller build state.", "")
-        self._api_version_sensor = Sensor(Sensor.STRING, "api-version", "SDP Controller API version.", "")
-        self._device_status_sensor = Sensor(Sensor.DISCRETE, "device-status", "Devices status of the SDP Master Controller", "", ["ok", "degraded", "fail"])
-        self._gui_urls_sensor = Sensor(Sensor.STRING, "gui-urls", "Links to associated GUIs", "")
+        # setup sensors
+        self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
+        self._api_version_sensor = Sensor(str, "api-version", "SDP Controller API version.")
+        self._device_status_sensor = Sensor(DeviceStatus, "device-status",
+                                            "Devices status of the SDP Master Controller")
+        self._gui_urls_sensor = Sensor(str, "gui-urls", "Links to associated GUIs")
+        # example FMECA sensor. In this case something to keep track of issues
+        # arising from launching to many processes.
+        # TODO: Add more sensors exposing resource usage and currently executing graphs
         self._fmeca_sensors = {}
-        self._fmeca_sensors['FD0001'] = Sensor(Sensor.BOOLEAN, "fmeca.FD0001", "Sub-process limits", "")
-         # example FMECA sensor. In this case something to keep track of issues arising from launching to many processes.
-         # TODO: Add more sensors exposing resource usage and currently executing graphs
-        self._ntp_sensor = CallbackSensor(Sensor.BOOLEAN, "time-synchronised","SDP Controller container (and host) is synchronised to NTP", "")
+        self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
+        self._ntp_sensor = Sensor(bool, "time-synchronised",
+                                  "SDP Controller container (and host) is synchronised to NTP")
 
         self.simulate = simulate
-        if self.simulate: logger.warning("Note: Running in simulation mode. This will simulate certain external components such as the CBF.")
+        if self.simulate:
+            logger.warning("Note: Running in simulation mode. "
+                           "This will simulate certain external components such as the CBF.")
         self.develop = develop
         if self.develop:
             logger.warning("Note: Running in developer mode. This will relax some constraints.")
         self.interface_mode = interface_mode
         if self.interface_mode:
-            logger.warning("Note: Running master controller in interface mode. This allows testing of the interface only, no actual command logic will be enacted.")
+            logger.warning("Note: Running master controller in interface mode. "
+                           "This allows testing of the interface only, "
+                           "no actual command logic will be enacted.")
         self.wrapper = wrapper
         if self.wrapper is not None:
             logger.warning('Note: Using wrapper %s in all containers. This may alter behaviour.',
                            self.wrapper)
-        self.loop = loop
         self.sched = sched
-        self.components = {}
-         # dict of currently managed SDP components
         self.gui_urls = gui_urls if gui_urls is not None else []
         self.graph_dir = graph_dir
 
@@ -1029,70 +925,46 @@ class SDPControllerServer(AsyncDeviceServer):
             image_resolver_factory = scheduler.ImageResolver
         self.image_resolver_factory = image_resolver_factory
 
+        # create a new resource pool.
         logger.debug("Building initial resource pool")
         self.resources = SDPCommonResources(safe_multicast_cidr)
-         # create a new resource pool.
 
+        # dict of currently configured SDP subarray_products
         self.subarray_products = {}
-         # dict of currently configured SDP subarray_products
+        # per subarray product dictionaries used to override internal config
         self.override_dicts = {}
-         # per subarray product dictionaries used to override internal config
-        self.tasks = {}
-         # dict of currently managed SDP tasks
 
-        super(SDPControllerServer, self).__init__(host, port)
+        super().__init__(host, port)
 
-    def setup_sensors(self):
-        """Add sensors for processes."""
-        self._build_state_sensor.set_value(self.build_state())
-        self.add_sensor(self._build_state_sensor)
-        self._api_version_sensor.set_value(self.version())
-        self.add_sensor(self._api_version_sensor)
+        self._build_state_sensor.set_value(self.BUILD_STATE)
+        self.sensors.add(self._build_state_sensor)
+        self._api_version_sensor.set_value(self.VERSION)
+        self.sensors.add(self._api_version_sensor)
         self._device_status_sensor.set_value('ok')
-        self.add_sensor(self._device_status_sensor)
+        self.sensors.add(self._device_status_sensor)
         self._gui_urls_sensor.set_value(json.dumps(self.gui_urls))
-        self.add_sensor(self._gui_urls_sensor)
+        self.sensors.add(self._gui_urls_sensor)
 
         self._ntp_sensor.set_value('0')
-        self._ntp_sensor.set_read_callback(self._check_ntp_status)
-        self.add_sensor(self._ntp_sensor)
+        # TODO disabled since aiokatcp doesn't support callback sensors. It was
+        # broken anyway.
+        # self._ntp_sensor.set_read_callback(self._check_ntp_status)
+        self.sensors.add(self._ntp_sensor)
 
-          # until we know any better, failure modes are all inactive
-        for s in self._fmeca_sensors.itervalues():
+        # until we know any better, failure modes are all inactive
+        for s in self._fmeca_sensors.values():
             s.set_value(0)
-            self.add_sensor(s)
+            self.sensors.add(s)
 
     def _check_ntp_status(self):
+        # Note: currently unused, because it can't talk to the host's NTP anyway
         try:
-            return (subprocess.check_output(["/usr/bin/ntpq","-p"]).find('*') > 0 and '1' or '0', Sensor.NOMINAL, time.time())
+            return (subprocess.check_output(["/usr/bin/ntpq", "-p"]).find('*') > 0 and '1' or '0',
+                    Sensor.Status.NOMINAL, time.time())
         except OSError:
-            return ('0', Sensor.NOMINAL, time.time())
+            return ('0', Sensor.Status.NOMINAL, time.time())
 
-    @time_request
-    def request_halt(self, req, msg):
-        """Halt the device server.
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
-            Whether scheduling the halt succeeded.
-
-        Examples
-        --------
-        ::
-
-            ?halt
-            !halt ok
-        """
-        self.stop()
-        logger.warning("Halt requested. Attempting cleanup...")
-        # this message makes it through because stop
-        # only registers in .run(...) after the reply
-        # has been sent.
-        return req.make_reply("ok")
-
-    @trollius.coroutine
-    def deregister_product(self, product, force=False):
+    async def deregister_product(self, product, force=False):
         """Deregister a subarray product and remove it form the list of products.
 
         Raises
@@ -1101,10 +973,9 @@ class SDPControllerServer(AsyncDeviceServer):
             if an asynchronous operation is in progress on the subarray product and
             `force` is false.
         """
-        yield From(product.deconfigure(force=force))
+        await product.deconfigure(force=force)
 
-    @trollius.coroutine
-    def deconfigure_product(self, subarray_product_id, force=False):
+    async def deconfigure_product(self, subarray_product_id, force=False):
         """Deconfigure a subarray product in response to a request.
 
         The difference between this method and :meth:`deregister_product` is
@@ -1123,10 +994,9 @@ class SDPControllerServer(AsyncDeviceServer):
         except KeyError:
             raise FailReply("Deconfiguration of subarray product {} requested, "
                             "but no configuration found.".format(subarray_product_id))
-        yield From(self.deregister_product(product, force))
+        await self.deregister_product(product, force)
 
-    @trollius.coroutine
-    def configure_product(self, req, subarray_product_id, config):
+    async def configure_product(self, ctx, subarray_product_id, config):
         """Configure a subarray product in response to a request.
 
         Raises
@@ -1135,7 +1005,8 @@ class SDPControllerServer(AsyncDeviceServer):
             if a configure/deconfigure is in progress
         FailReply
             If any of the following occur
-            - The specified subarray product id already exists, but the config differs from that specified
+            - The specified subarray product id already exists, but the config
+              differs from that specified
             - If docker python libraries are not installed and we are not using interface mode
             - There are insufficient resources to launch
             - A docker image could not be found
@@ -1152,14 +1023,15 @@ class SDPControllerServer(AsyncDeviceServer):
             # Protect against potential race conditions
             if self.subarray_products.get(product.subarray_product_id) is product:
                 del self.subarray_products[product.subarray_product_id]
-                self.remove_sensor(product.state_sensor)
-                self.remove_sensor(product.capture_block_sensor)
+                self.sensors.discard(product.state_sensor)
+                self.sensors.discard(product.capture_block_sensor)
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:
+            # this is a use-once set of overrides
             odict = self.override_dicts.pop(subarray_product_id)
-             # this is a use-once set of overrides
-            logger.warning("Setting overrides on {} for the following: {}".format(subarray_product_id, odict))
+            logger.warning("Setting overrides on {} for the following: {}".format(
+                subarray_product_id, odict))
             config = product_config.override(config, odict)
             # Re-validate, since the override may have broken it
             try:
@@ -1183,7 +1055,7 @@ class SDPControllerServer(AsyncDeviceServer):
             dp = self.subarray_products[subarray_product_id]
             if dp.config == config:
                 logger.info("Subarray product with this configuration already exists. Pass.")
-                raise Return(subarray_product_id)
+                return subarray_product_id
             else:
                 raise FailReply("A subarray product with this id ({0}) already exists, but has a "
                                 "different configuration. Please deconfigure this product or "
@@ -1191,14 +1063,14 @@ class SDPControllerServer(AsyncDeviceServer):
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))
-        req.inform("Starting configuration of new product {}. This may take a few minutes..."
-            .format(subarray_product_id))
+        ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
+                   .format(subarray_product_id))
 
         image_tag = config['config'].get('image_tag')
         if image_tag is not None:
-            resolver_factory_args=dict(tag=image_tag)
+            resolver_factory_args = dict(tag=image_tag)
         else:
-            resolver_factory_args={}
+            resolver_factory_args = {}
         resolver = scheduler.Resolver(self.image_resolver_factory(**resolver_factory_args),
                                       scheduler.TaskIDAllocator(subarray_product_id + '-'),
                                       self.sched.http_url if self.sched else '')
@@ -1218,108 +1090,108 @@ class SDPControllerServer(AsyncDeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
-        self.add_sensor(product.state_sensor)
-        self.add_sensor(product.capture_block_sensor)
+        self.sensors.add(product.state_sensor)
+        self.sensors.add(product.capture_block_sensor)
         product.dead_callbacks.append(remove_product)
         try:
-            yield From(product.configure(req))
+            await product.configure(ctx)
         except Exception:
             remove_product(product)
             raise
-        raise Return(subarray_product_id)
+        return subarray_product_id
 
-    @trollius.coroutine
-    def deconfigure_on_exit(self):
+    async def deconfigure_on_exit(self):
         """Try to shutdown as gracefully as possible when interrupted."""
         logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
-        for subarray_product_id, product in self.subarray_products.items():
+        for subarray_product_id, product in list(self.subarray_products.items()):
             try:
-                yield From(self.deregister_product(product, force=True))
+                await self.deregister_product(product, force=True)
             except Exception:
                 logger.warning("Failed to deconfigure product %s during master controller exit. "
                                "Forging ahead...", subarray_product_id, exc_info=True)
 
-    @trollius.coroutine
-    def async_stop(self):
-        super(SDPControllerServer, self).stop()
+    async def stop(self, cancel: bool = True):
         # TODO: set a flag to prevent new async requests being entertained
-        yield From(self.deconfigure_on_exit())
+        await self.deconfigure_on_exit()
         if self.sched is not None:
-            yield From(self.sched.close())
+            await self.sched.close()
+        await super().stop(cancel)
 
     @time_request
-    @request(Str(), Str())
-    @return_reply(Str())
-    def request_set_config_override(self, req, subarray_product_id, override_dict_json):
+    async def request_set_config_override(
+            self, ctx, subarray_product_id: str, override_dict_json: str) -> str:
         """Override internal configuration parameters for the next configure of the
         specified subarray product.
 
         An existing override for this subarry product will be completely overwritten.
 
-        The override will only persist until a successful configure has been called on the subarray product.
+        The override will only persist until a successful configure has been
+        called on the subarray product.
 
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID of the subarray product to set overrides for in the form <subarray_name>_<data_product_name>.
+            The ID of the subarray product to set overrides for in the form
+            <subarray_name>_<data_product_name>.
         override_dict_json : string
             A json string containing a dict of config key:value overrides to use.
         """
-        logger.info("?set-config-override called on {} with {}".format(subarray_product_id, override_dict_json))
+        logger.info("?set-config-override called on {} with {}"
+                    .format(subarray_product_id, override_dict_json))
         try:
             odict = json.loads(override_dict_json)
-            if type(odict) is not dict: raise ValueError
-            logger.info("Set override for subarray product {} for the following: {}".format(subarray_product_id, odict))
+            if type(odict) is not dict:
+                raise ValueError
+            logger.info("Set override for subarray product {} for the following: {}"
+                        .format(subarray_product_id, odict))
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
-            msg = "The supplied override string {} does not appear to be a valid json string containing a dict. {}".format(override_dict_json, e)
+            msg = ("The supplied override string {} does not appear to be a valid json string "
+                   "containing a dict. {}".format(override_dict_json, e))
             logger.error(msg)
-            return ('fail', msg)
-        return ('ok', "Set {} override keys for subarray product {}".format(len(self.override_dicts[subarray_product_id]), subarray_product_id))
+            raise FailReply(msg)
+        return "Set {} override keys for subarray product {}".format(
+            len(self.override_dicts[subarray_product_id]), subarray_product_id)
 
-    @gen.coroutine
-    def _product_reconfigure(self, req, req_msg, subarray_product_id):
+    async def _product_reconfigure(self, ctx, subarray_product_id):
         logger.info("?product-reconfigure called on {}".format(subarray_product_id))
         try:
             product = self.subarray_products[subarray_product_id]
         except KeyError:
-            raise FailReply("The specified subarray product id {} has no existing configuration and thus cannot be reconfigured.".format(subarray_product_id))
+            raise FailReply("The specified subarray product id {} has no existing configuration "
+                            "and thus cannot be reconfigured.".format(subarray_product_id))
         config = product.config
 
         logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
         try:
-            yield to_tornado_future(self.deregister_product(product), loop=self.loop)
+            await self.deregister_product(product)
         except Exception as error:
             msg = "Unable to deconfigure as part of reconfigure"
             logger.error(msg, exc_info=True)
             raise FailReply("{}. {}".format(msg, error))
 
         logger.info("Waiting for {} to disappear".format(subarray_product_id))
-        yield to_tornado_future(product.dead_event.wait(), loop=self.loop)
+        await product.dead_event.wait()
 
-        logger.info("Issuing new configure for {} as part of reconfigure request.".format(subarray_product_id))
+        logger.info("Issuing new configure for {} as part of reconfigure request."
+                    .format(subarray_product_id))
         try:
-            yield to_tornado_future(self.configure_product(req, subarray_product_id, config),
-                                    loop=self.loop)
+            await self.configure_product(ctx, subarray_product_id, config)
         except Exception as error:
             msg = "Unable to configure as part of reconfigure, original array deconfigured"
             logger.error(msg, exc_info=True)
             raise FailReply("{}. {}".format(msg, error))
 
-        raise gen.Return(('ok', ''))
-
-    @async_request
-    @request(Str(), include_msg=True)
-    @return_reply(Str())
-    @gen.coroutine
-    def request_product_reconfigure(self, req, req_msg, subarray_product_id):
+    @time_request
+    async def request_product_reconfigure(self, ctx, subarray_product_id: str) -> None:
         """Reconfigure the specified SDP subarray product instance.
 
            The primary use of this command is to restart the SDP components for a particular
            subarray without having to reconfigure the rest of the system.
 
-           Essentially this runs a deconfigure() followed by a configure() with the same parameters as originally
-           specified via the product-configure katcp request.
+           Essentially this runs a deconfigure() followed by a configure() with
+           the same parameters as originally specified via the
+           product-configure katcp request.
 
            Request Arguments
            -----------------
@@ -1327,25 +1199,24 @@ class SDPControllerServer(AsyncDeviceServer):
              The ID of the subarray product to reconfigure.
 
         """
-        ret = yield self._product_reconfigure(req, req_msg, subarray_product_id)
-        raise gen.Return(ret)
+        await self._product_reconfigure(ctx, subarray_product_id)
 
     # Backwards-compatibility alias
-    @async_request
-    @request(Str(), include_msg=True)
-    @return_reply(Str())
-    @gen.coroutine
-    def request_data_product_reconfigure(self, req, req_msg, subarray_product_id):
-        ret = yield self._product_reconfigure(req, req_msg, subarray_product_id)
-        raise gen.Return(ret)
+    @time_request
+    async def request_data_product_reconfigure(self, ctx, subarray_product_id: str) -> None:
+        await self._product_reconfigure(ctx, subarray_product_id)
 
     request_data_product_reconfigure.__doc__ = request_product_reconfigure.__doc__
 
-    @async_request
-    @request(Str(optional=True),Str(optional=True),Int(min=1,max=65535,optional=True),Float(optional=True),Int(min=0,max=16384,optional=True),Str(optional=True),include_msg=True)
-    @return_reply(Str())
-    @gen.coroutine
-    def request_data_product_configure(self, req, req_msg, subarray_product_id, antennas, n_channels, dump_rate, n_beams, stream_sources):
+    @time_request
+    async def request_data_product_configure(
+            self, ctx,
+            subarray_product_id: str = None,
+            antennas: str = None,
+            n_channels: int = None,
+            dump_rate: float = None,
+            n_beams: int = None,
+            stream_sources: str = None) -> str:
         """Configure a SDP subarray product instance (legacy interface).
 
         A subarray product instance is comprised of a telescope state, a
@@ -1387,32 +1258,32 @@ class SDPControllerServer(AsyncDeviceServer):
         -------
         success : {'ok', 'fail'}
         """
-        logger.info("?data-product-configure called with: {}".format(req_msg))
-         # INFO for now, but should be DEBUG post integration
+        # INFO for now, but should be DEBUG post integration
+        logger.info("?data-product-configure called with: {}".format(ctx.req))
         if antennas is None:
             if subarray_product_id is None:
-                for (subarray_product_id, subarray_product) in self.subarray_products.iteritems():
-                    req.inform(subarray_product_id,subarray_product)
-                raise gen.Return(('ok', "%i" % len(self.subarray_products)))
+                for (subarray_product_id, subarray_product) in self.subarray_products.items():
+                    ctx.inform(subarray_product_id, str(subarray_product))
+                return "%i" % len(self.subarray_products)
             elif subarray_product_id in self.subarray_products:
-                raise gen.Return(('ok', "%s is currently configured: %s" %
-                        (subarray_product_id, repr(self.subarray_products[subarray_product_id]))))
+                return "%s is currently configured: %s" % (
+                    subarray_product_id, repr(self.subarray_products[subarray_product_id]))
             else:
                 raise FailReply("This subarray product id has no current configuration.")
 
         if antennas == "0" or antennas == "":
-            req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
-            yield to_tornado_future(self.deconfigure_product(subarray_product_id), loop=self.loop)
-            raise gen.Return(('ok', ''))
+            ctx.inform("Starting deconfiguration of {}. This may take a few minutes..."
+                       .format(subarray_product_id))
+            await self.deconfigure_product(subarray_product_id)
+            return ''
 
         logger.info("Using '{}' as antenna mask".format(antennas))
-        antennas = antennas.replace(" ",",")
-         # temp hack to make sure we have a comma delimited set of antennas
         antennas = antennas.split(',')
 
         # all good so far, lets check arguments for validity
         if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams and appropriate spead stream sources to configure a subarray product")
+            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams "
+                            "and appropriate spead stream sources to configure a subarray product")
 
         graph_name = self.graph_resolver(subarray_product_id)
         try:
@@ -1420,20 +1291,16 @@ class SDPControllerServer(AsyncDeviceServer):
             config = product_config.convert(graph_name, streams_dict, antennas, dump_rate,
                                             self.simulate, self.develop, self.wrapper)
         except (ValueError, jsonschema.ValidationError) as error:
-             # something is definitely wrong with these
+            # something is definitely wrong with these
             retmsg = "Failed to process source stream specifiers: {}".format(error)
             logger.error(retmsg)
             raise FailReply(retmsg)
 
-        yield to_tornado_future(self.configure_product(req, subarray_product_id, config),
-                                loop=self.loop)
-        raise gen.Return(('ok', ''))
+        await self.configure_product(ctx, subarray_product_id, config)
+        return ''
 
-    @async_request
-    @request(Str(), Str(), include_msg=True)
-    @return_reply(Str())
-    @gen.coroutine
-    def request_product_configure(self, req, req_msg, subarray_product_id, config):
+    @time_request
+    async def request_product_configure(self, ctx, subarray_product_id: str, config: str) -> str:
         """Configure a SDP subarray product instance.
 
         A subarray product instance is comprised of a telescope state, a
@@ -1464,7 +1331,7 @@ class SDPControllerServer(AsyncDeviceServer):
         name : str
             Actual subarray-product-id
         """
-        logger.info("?product-configure called with: {}".format(req_msg))
+        logger.info("?product-configure called with: {}".format(ctx.req))
 
         if not re.match('^[A-Za-z0-9_]+\*?$', subarray_product_id):
             raise FailReply('Subarray_product_id contains illegal characters')
@@ -1476,15 +1343,12 @@ class SDPControllerServer(AsyncDeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg)
 
-        subarray_product_id = yield to_tornado_future(
-            self.configure_product(req, subarray_product_id, config_dict), loop=self.loop)
-        raise gen.Return(('ok', subarray_product_id))
+        subarray_product_id = await self.configure_product(ctx, subarray_product_id, config_dict)
+        return subarray_product_id
 
-    @async_request
-    @request(Str(), Bool(optional=True, default=False))
-    @return_reply()
-    @gen.coroutine
-    def request_product_deconfigure(self, req, subarray_product_id, force=False):
+    @time_request
+    async def request_product_deconfigure(
+            self, ctx, subarray_product_id: str, force: bool = False) -> None:
         """Deconfigure an existing subarray product.
 
         Parameters
@@ -1499,14 +1363,12 @@ class SDPControllerServer(AsyncDeviceServer):
         -------
         success : {'ok', 'fail'}
         """
-        req.inform("Starting deconfiguration of {}. This may take a few minutes...".format(subarray_product_id))
-        yield to_tornado_future(self.deconfigure_product(subarray_product_id, force),
-                                loop=self.loop)
-        raise gen.Return(('ok',))
+        ctx.inform("Starting deconfiguration of {}. This may take a few minutes..."
+                   .format(subarray_product_id))
+        await self.deconfigure_product(subarray_product_id, force)
 
-    @request(Str(optional=True))
-    @return_reply(Int())
-    def request_product_list(self, req, subarray_product_id):
+    @time_request
+    async def request_product_list(self, ctx, subarray_product_id: str = None) -> None:
         """List existing subarray products
 
         Parameters
@@ -1522,20 +1384,17 @@ class SDPControllerServer(AsyncDeviceServer):
             Number of subarray products listed
         """
         if subarray_product_id is None:
-            for (subarray_product_id, subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id, subarray_product)
-            return ('ok', len(self.subarray_products))
+            ctx.informs((product_id, str(product))
+                        for (product_id, product) in self.subarray_products.items())
         elif subarray_product_id in self.subarray_products:
-            req.inform(subarray_product_id, self.subarray_products[subarray_product_id])
-            return ('ok', 1)
+            ctx.informs([(subarray_product_id,
+                          str(self.subarray_products[subarray_product_id]))])
         else:
             raise FailReply("This product id has no current configuration.")
 
-    @async_request
-    @request(Str(), Str(optional=True))
-    @return_reply(Str())
-    @gen.coroutine
-    def request_capture_init(self, req, subarray_product_id, program_block_id=None):
+    @time_request
+    async def request_capture_init(
+            self, ctx, subarray_product_id: str, program_block_id: str = None) -> str:
         """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data
@@ -1560,13 +1419,11 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        yield to_tornado_future(sa.capture_init(program_block_id), loop=self.loop)
-        raise gen.Return(('ok','SDP ready'))
+        await sa.capture_init(program_block_id)
+        return 'SDP ready'
 
     @time_request
-    @request(Str(optional=True))
-    @return_reply(Str())
-    def request_telstate_endpoint(self, req, subarray_product_id):
+    async def request_telstate_endpoint(self, ctx, subarray_product_id: str = None):
         """Returns the endpoint for the telescope state repository of the
         specified subarray product.
 
@@ -1581,18 +1438,15 @@ class SDPControllerServer(AsyncDeviceServer):
         state : str
         """
         if not subarray_product_id:
-            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id, subarray_product.telstate_endpoint)
-            return ('ok',"%i" % len(self.subarray_products))
-
+            ctx.informs((product_id, product.telstate_endpoint)
+                        for (product_id, product) in self.subarray_products.items())
+            return   # ctx.informs sends the reply
         if subarray_product_id not in self.subarray_products:
-            return ('fail','No existing subarray product configuration with this id found')
-        return ('ok',self.subarray_products[subarray_product_id].telstate_endpoint)
+            raise FailReply('No existing subarray product configuration with this id found')
+        return self.subarray_products[subarray_product_id].telstate_endpoint
 
     @time_request
-    @request(Str(optional=True))
-    @return_reply(Str())
-    def request_capture_status(self, req, subarray_product_id):
+    async def request_capture_status(self, ctx, subarray_product_id: str = None):
         """Returns the status of the specified subarray product.
 
         Request Arguments
@@ -1606,19 +1460,16 @@ class SDPControllerServer(AsyncDeviceServer):
         state : str
         """
         if not subarray_product_id:
-            for (subarray_product_id,subarray_product) in self.subarray_products.iteritems():
-                req.inform(subarray_product_id,subarray_product.state.name)
-            return ('ok',"%i" % len(self.subarray_products))
+            ctx.informs((product_id, product.state)
+                        for (product_id, product) in self.subarray_products.items())
+            return   # ctx.informs sends the reply
 
         if subarray_product_id not in self.subarray_products:
-            return ('fail','No existing subarray product configuration with this id found')
-        return ('ok',self.subarray_products[subarray_product_id].state.name)
+            raise FailReply('No existing subarray product configuration with this id found')
+        return self.subarray_products[subarray_product_id].state
 
-    @async_request
-    @request(Str())
-    @return_reply(Str())
-    @gen.coroutine
-    def request_capture_done(self, req, subarray_product_id):
+    @time_request
+    async def request_capture_done(self, ctx, subarray_product_id: str) -> str:
         """Halts the currently specified subarray product
 
         Request Arguments
@@ -1634,14 +1485,11 @@ class SDPControllerServer(AsyncDeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        yield to_tornado_future(sa.capture_done(), loop=self.loop)
-        raise gen.Return(('ok', 'capture complete'))
+        await sa.capture_done()
+        return 'capture complete'
 
-    @async_request
-    @request()
-    @return_reply(Str())
-    @gen.coroutine
-    def request_sdp_shutdown(self, req):
+    @time_request
+    async def request_sdp_shutdown(self, ctx) -> str:
         """Shut down the SDP master controller and all controlled nodes.
 
         Returns
@@ -1653,12 +1501,11 @@ class SDPControllerServer(AsyncDeviceServer):
         """
         logger.info("SDP Shutdown called.")
 
-        yield to_tornado_future(self.deconfigure_on_exit(), loop=self.loop)
-         # attempt to deconfigure any existing subarrays
-         # will always succeed even if some deconfigure fails
+        # attempt to deconfigure any existing subarrays
+        # will always succeed even if some deconfigure fails
+        await self.deconfigure_on_exit()
         try:
-            master, slaves = yield to_tornado_future(
-                self.sched.get_master_and_slaves(timeout=5), loop=self.loop)
+            master, slaves = await self.sched.get_master_and_slaves(timeout=5)
         except Exception as error:
             logger.error('Failed to get list of slaves, so not powering them off.', exc_info=True)
             raise FailReply('could not get a list of slaves to power off')
@@ -1678,21 +1525,22 @@ class SDPControllerServer(AsyncDeviceServer):
         master_addresses = set()
         for interface in netifaces.interfaces():
             ifaddresses = netifaces.ifaddresses(interface)
-            addresses = ifaddresses.get(netifaces.AF_INET, []) + \
-                        ifaddresses.get(netifaces.AF_INET6, [])
+            addresses = (ifaddresses.get(netifaces.AF_INET, [])
+                         + ifaddresses.get(netifaces.AF_INET6, []))
             for entry in addresses:
                 address = entry.get('addr', '')
                 if address:
                     master_addresses.add(address)
-        for (family, (address, port)) in (yield tornado.netutil.Resolver().resolve(master, 0)):
-            master_addresses.add(address)
+        addresses = await self.loop.getaddrinfo(master, 0)
+        for (_family, _type, _proto, _canonname, sockaddr) in addresses:
+            master_addresses.add(sockaddr[0])
         logger.debug('Master IP addresses: %s', ','.join(master_addresses))
         non_master = []
         for node in physical_graph:
             is_master = False
-            addresses = yield tornado.netutil.Resolver().resolve(node.logical_node.host, 0)
-            for (family, (address, port)) in addresses:
-                if address in master_addresses:
+            addresses = await self.loop.getaddrinfo(node.logical_node.host, 0)
+            for (_family, _type, _proto, _canonname, sockaddr) in addresses:
+                if sockaddr[0] in master_addresses:
                     is_master = True
                     break
             if not is_master:
@@ -1702,11 +1550,9 @@ class SDPControllerServer(AsyncDeviceServer):
                                       scheduler.TaskIDAllocator('poweroff-'),
                                       self.sched.http_url)
         # Shut down everything except the master/self
-        yield to_tornado_future(
-            self.sched.launch(physical_graph, resolver, non_master), loop=self.loop)
+        await self.sched.launch(physical_graph, resolver, non_master)
         # Shut down the rest
-        yield to_tornado_future(
-            self.sched.launch(physical_graph, resolver), loop=self.loop)
+        await self.sched.launch(physical_graph, resolver)
         # Check for failures. This won't detect everything (it's possible that
         # the task will start running then fail), but handles cases like the
         # agent having disappeared under us or failing to pull the image.
@@ -1719,13 +1565,11 @@ class SDPControllerServer(AsyncDeviceServer):
             elif node.state == scheduler.TaskState.DEAD and node.status.state == 'TASK_FINISHED':
                 status = ''
             response.append(node.logical_node.host + status)
-        raise gen.Return(('ok', ','.join(response)))
+        return ','.join(response)
 
     @time_request
-    @request(include_msg=True)
-    @return_reply(Int(min=0))
-    def request_sdp_status(self, req, reqmsg):
-        """Request status of SDP components.
+    async def request_sdp_status(self, ctx) -> int:
+        """Request status of SDP components (deprecated).
 
         Request Arguments
         -----------------
@@ -1739,12 +1583,10 @@ class SDPControllerServer(AsyncDeviceServer):
         informs : int
             Number of #sdp_status informs sent
         """
-        for (component_name,component) in self.components:
-            req.inform("%s:%s",component_name,component.status)
-        return ("ok", len(self.components))
+        return 0
 
 
-class InterfaceModeSensors(object):
+class InterfaceModeSensors:
     def __init__(self, subarray_product_id):
         """Manage dummy subarray product sensors on a SDPControllerServer instance
 
@@ -1762,38 +1604,38 @@ class InterfaceModeSensors(object):
 
         interface_sensor_params = {
             'bf_ingest.beamformer.1.port': dict(
-                default=("ing1.sdp.mkat.fake.kat.ac.za", 31048),
-                sensor_type=Sensor.ADDRESS,
+                default=Address("ing1.sdp.mkat.fake.kat.ac.za", 31048),
+                sensor_type=Address,
                 description='IP endpoint for port',
-                initial_status=Sensor.NOMINAL),
+                initial_status=Sensor.Status.NOMINAL),
             'filewriter.sdp_l0.1.filename': dict(
                 default='/var/kat/data/148966XXXX.h5',
-                sensor_type=Sensor.STRING,
+                sensor_type=str,
                 description='Final name for file being captured',
-                initial_status=Sensor.NOMINAL),
+                initial_status=Sensor.Status.NOMINAL),
             'ingest.sdp_l0.1.capture-active': dict(
                 default=False,
-                sensor_type=Sensor.BOOLEAN,
+                sensor_type=bool,
                 description='Is there a currently active capture session.',
-                initial_status=Sensor.NOMINAL),
+                initial_status=Sensor.Status.NOMINAL),
             'timeplot.sdp_l0.1.gui-urls': dict(
                 default='[{"category": "Plot", '
                 '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
                 '"description": "Signal displays for array_1_bc856M4k", '
                 '"title": "Signal Display"}]',
-                sensor_type=Sensor.STRING,
+                sensor_type=str,
                 description='URLs for GUIs',
-                initial_status=Sensor.NOMINAL),
+                initial_status=Sensor.Status.NOMINAL),
             'timeplot.sdp_l0.1.html_port': dict(
-                default=("ing1.sdp.mkat.fake.kat.ac.za", 31054),
-                sensor_type=Sensor.ADDRESS,
+                default=Address("ing1.sdp.mkat.fake.kat.ac.za", 31054),
+                sensor_type=Address,
                 description='IP endpoint for html_port',
-                initial_status=Sensor.NOMINAL),
+                initial_status=Sensor.Status.NOMINAL),
             'cal.sdp_l0.1.capture-block-state': dict(
                 default='{}',
-                sensor_type=Sensor.STRING,
+                sensor_type=str,
                 description='JSON dict with the state of each capture block',
-                initial_status=Sensor.NOMINAL)
+                initial_status=Sensor.Status.NOMINAL)
         }
 
         sensors_added = False
@@ -1807,20 +1649,20 @@ class InterfaceModeSensors(object):
                 sensor_params['name'] = sensor_name
                 sensor = Sensor(**sensor_params)
                 self.sensors[sensor_name] = sensor
-                server.add_sensor(sensor)
+                server.sensors.add(sensor)
                 sensors_added = True
         finally:
             if sensors_added:
-                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+                server.mass_inform('interface-changed', 'sensor-list')
 
     def remove_sensors(self, server):
         """Remove dummy subarray product sensors and issue #interface-changed"""
         sensors_removed = False
         try:
-            for sensor_name, sensor in self.sensors.items():
-                server.remove_sensor(sensor)
+            for sensor_name, sensor in list(self.sensors.items()):
+                server.sensors.discard(sensor)
                 del self.sensors[sensor_name]
                 sensors_removed = True
         finally:
             if sensors_removed:
-                server.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+                server.mass_inform('interface-changed', 'sensor-list')

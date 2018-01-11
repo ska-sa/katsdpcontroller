@@ -1,17 +1,14 @@
-from __future__ import print_function, division, absolute_import
 import math
 import logging
 import re
 import time
 import copy
 import fractions
+import urllib
 
 import networkx
-import trollius
-from trollius import From
+
 import addict
-import six
-from six.moves import urllib
 
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
@@ -50,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 class LogicalMulticast(scheduler.LogicalExternal):
     def __init__(self, name, n_addresses=None, endpoint=None):
-        super(LogicalMulticast, self).__init__(name)
+        super().__init__(name)
         self.physical_factory = PhysicalMulticast
         self.n_addresses = n_addresses
         self.endpoint = endpoint
@@ -59,9 +56,8 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
-    @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(PhysicalMulticast, self).resolve(resolver, graph, loop))
+    async def resolve(self, resolver, graph, loop):
+        await super().resolve(resolver, graph, loop)
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
@@ -71,9 +67,8 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 
 class TelstateTask(SDPPhysicalTaskBase):
-    @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(TelstateTask, self).resolve(resolver, graph, loop))
+    async def resolve(self, resolver, graph, loop):
+        await super().resolve(resolver, graph, loop)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
         portmap = addict.Dict()
@@ -84,9 +79,8 @@ class TelstateTask(SDPPhysicalTaskBase):
 
 
 class IngestTask(SDPPhysicalTask):
-    @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(IngestTask, self).resolve(resolver, graph, loop))
+    async def resolve(self, resolver, graph, loop):
+        await super().resolve(resolver, graph, loop)
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image. If it is the standard GPU, don't try to override
         # anything, but otherwise synthesize an image name by mangling the
@@ -98,7 +92,7 @@ class IngestTask(SDPPhysicalTask):
             # allow uppercase in image names).
             mangled = re.sub('[- ]', '_', gpu.name.lower())
             mangled = re.sub('[^a-z0-9_]', '', mangled)
-            image_path = yield From(resolver.image_resolver('katsdpingest_' + mangled, loop))
+            image_path = await resolver.image_resolver('katsdpingest_' + mangled, loop)
             self.taskinfo.container.docker.image = image_path
             logger.info('Develop mode: using %s for ingest', image_path)
 
@@ -137,7 +131,7 @@ def _bandwidth(size, time, ratio=1.05, overhead=2048):
     return (size * ratio + overhead) * 8 / time
 
 
-class CBFStreamInfo(object):
+class CBFStreamInfo:
     """Wraps a CBF stream from the config to provide convenient access to
     calculated quantities.
 
@@ -183,7 +177,7 @@ class CBFStreamInfo(object):
         return self.antenna_channelised_voltage['n_samples_between_spectra']
 
 
-class VisInfo(object):
+class VisInfo:
     """Mixin for info classes to compute visibility info from baselines and channels."""
     @property
     def n_vis(self):
@@ -367,7 +361,7 @@ def _make_cbf_simulator(g, config, name):
     g.add_node(sim_group, config=make_config)
     multicast = find_node(g, 'multicast.' + name)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
-        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
 
     for i in range(n_sim):
@@ -884,7 +878,7 @@ def build_logical_graph(config):
     # the graph.
     inputs = {}
     input_multicast = []
-    for name, input_ in six.iteritems(config['inputs']):
+    for name, input_ in config['inputs'].items():
         inputs.setdefault(input_['type'], []).append(name)
         url = input_['url']
         parts = urllib.parse.urlsplit(url)
@@ -906,7 +900,7 @@ def build_logical_graph(config):
     # direct dependencies are gathered because those are the only ones that
     # can have the simulate flag anyway.
     inputs_used = set()
-    for output in six.itervalues(config['outputs']):
+    for output in config['outputs'].values():
         inputs_used.update(output['src_streams'])
 
     # Simulators for input streams where requested
@@ -918,7 +912,7 @@ def build_logical_graph(config):
 
     # Group outputs by type
     outputs = {}
-    for name, output in six.iteritems(config['outputs']):
+    for name, output in config['outputs'].items():
         outputs.setdefault(output['type'], []).append(name)
 
     # Pair up spectral and continuum L0 outputs
@@ -936,7 +930,7 @@ def build_logical_graph(config):
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
-                        ingest = _make_ingest(g, config, name, name2)
+                        _make_ingest(g, config, name, name2)
                         _make_cal(g, config, name)
                         _make_filewriter(g, config, name)
                         l0_done.add(name)
@@ -952,7 +946,7 @@ def build_logical_graph(config):
         _adjust_ingest_output_channels(config, [name])
         if is_spectral:
             _make_timeplot(g, config, name)
-            ingest = _make_ingest(g, config, name, None)
+            _make_ingest(g, config, name, None)
             _make_cal(g, config, name)
             _make_filewriter(g, config, name)
         else:
@@ -969,7 +963,7 @@ def build_logical_graph(config):
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
     telstate_extra = 0
-    for node, data in g.nodes(True):
+    for _node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
     for node in g:
         if node is not telstate and isinstance(node, SDPLogicalTask):

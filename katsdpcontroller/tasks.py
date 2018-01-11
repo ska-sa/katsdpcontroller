@@ -1,20 +1,15 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 import json
-import contextlib
+import asyncio
+import socket
+import ipaddress
 
-import six
 from addict import Dict
 
-import trollius
-from trollius import From, Return
-import tornado.concurrent
-from tornado import gen
+import aiokatcp
+from aiokatcp import FailReply, InvalidReply, Sensor
 from prometheus_client import Gauge, Counter
 
-from katcp import Sensor, Message
-import katcp.core
 from katsdptelstate.endpoint import Endpoint
 
 from . import scheduler, sensor_proxy, product_config
@@ -23,7 +18,8 @@ from . import scheduler, sensor_proxy, product_config
 def _add_prometheus_sensor(name, description, class_):
     PROMETHEUS_SENSORS[name] = (
         class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
-        Gauge('katsdpcontroller_' + name + '_status', 'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
+        Gauge('katsdpcontroller_' + name + '_status',
+              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
     )
 
 
@@ -53,7 +49,7 @@ _add_prometheus_sensor('accumulator_batches',
                        'Number of batches completed by the accumulator', Counter)
 _add_prometheus_sensor('slots', 'Total number of buffer slots', Gauge)
 _add_prometheus_sensor('accumulator_slots',
-                        'Number of buffer slots the current accumulation has written to', Gauge)
+                       'Number of buffer slots the current accumulation has written to', Gauge)
 _add_prometheus_sensor('free_slots', 'Number of unused buffer slots', Gauge)
 _add_prometheus_sensor('pipeline_slots', 'Number of buffer slots in use by the pipeline', Gauge)
 _add_prometheus_sensor('accumulator_capture_active', 'Whether an observation is in progress', Gauge)
@@ -91,18 +87,9 @@ class State(scheduler.OrderedEnum):
     DEAD = 4
 
 
-def to_trollius_future(tornado_future, loop=None):
-    """Variant of :func:`tornado.platform.asyncio.to_asyncio_future` that
-    allows a custom event loop to be specified."""
-    tornado_future = gen.convert_yielded(tornado_future)
-    af = trollius.Future(loop=loop)
-    tornado.concurrent.chain_future(tornado_future, af)
-    return af
-
-
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
-        super(SDPLogicalTask, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.physical_factory = SDPPhysicalTask
         self.transitions = {}
         # List of dictionaries for a .gui-urls sensor. The fields are expanded
@@ -115,12 +102,12 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super(SDPPhysicalTaskBase, self).__init__(logical_task, loop)
+        super().__init__(logical_task, loop)
         self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
         self.sdp_controller = sdp_controller
         self.subarray_product_id = subarray_product_id
+        # list of exposed KATCP sensors
         self.sensors = {}
-         # list of exposed KATCP sensors
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -128,7 +115,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """
         self.sensors[sensor.name] = sensor
         if self.sdp_controller:
-            self.sdp_controller.add_sensor(sensor)
+            self.sdp_controller.sensors.add(sensor)
         else:
             logger.warning("Attempted to add sensor {} to node {}, but the node has "
                            "no SDP controller available.".format(sensor.name, self.name))
@@ -137,9 +124,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """Removes all attached sensors. It does *not* send an
         ``interface-changed`` inform; that is left to the caller.
         """
-        for sensor_name in self.sensors.iterkeys():
+        for sensor_name in self.sensors.keys():
             logger.debug("Removing sensor {}".format(sensor_name))
-            self.sdp_controller.remove_sensor(sensor_name)
+            del self.sdp_controller.sensors[sensor_name]
         self.sensors = {}
 
     def _disconnect(self):
@@ -150,42 +137,51 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         """
         if self.sensors:
             self._remove_sensors()
-            self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def kill(self, driver, **kwargs):
         self._disconnect()
-        super(SDPPhysicalTaskBase, self).kill(driver)
+        super().kill(driver)
 
-    @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(SDPPhysicalTaskBase, self).resolve(resolver, graph, loop))
+    async def resolve(self, resolver, graph, loop):
+        await super().resolve(resolver, graph, loop)
 
         gui_urls = []
         for entry in self.logical_node.gui_urls:
             gui_urls.append({})
-            for key, value in six.iteritems(entry):
-                if isinstance(value, six.string_types):
+            for key, value in entry.items():
+                if isinstance(value, str):
                     gui_urls[-1][key] = value.format(self)
                 else:
                     gui_urls[-1][key] = value
         if gui_urls:
-            gui_urls_sensor = Sensor.string(self.name + '.gui-urls', 'URLs for GUIs')
+            gui_urls_sensor = Sensor(str, self.name + '.gui-urls', 'URLs for GUIs')
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
 
-        for key, value in six.iteritems(self.ports):
-            endpoint_sensor = Sensor.address(
+        for key, value in self.ports.items():
+            endpoint_sensor = Sensor(
+                aiokatcp.Address,
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
-            endpoint_sensor.set_value((self.host, value))
+            try:
+                addrinfo = await loop.getaddrinfo(self.host, value)
+                host, port = addrinfo[0][4][:2]
+                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
+            except socket.gaierror as error:
+                logger.warn('Could not resolve %s: %s', self.host, error)
+                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
+                                          status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
         # Provide info about which container this is for logspout to collect
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
             {'key': 'label',
              'value': 'za.ac.kat.sdp.katsdpcontroller.task={}'.format(self.logical_node.name)},
             {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'.format(self.taskinfo.task_id.value)},
+             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'
+                      .format(self.taskinfo.task_id.value)},
             {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'.format(self.subarray_product_id)}
+             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'
+                      .format(self.subarray_product_id)}
         ])
         # Request SDP services to escape newlines, for the benefit of
         # logstash.
@@ -199,26 +195,25 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
-        version_sensor = Sensor.string(self.name + '.version', "Image of executing container.", "")
+        version_sensor = Sensor(str, self.name + '.version', "Image of executing container.", "")
         version_sensor.set_value(self.taskinfo.container.docker.image)
         self._add_sensor(version_sensor)
 
     def set_state(self, state):
         # TODO: extend this to set a sensor indicating the task state
-        super(SDPPhysicalTaskBase, self).set_state(state)
+        super().set_state(state)
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
 
 
-class SDPConfigMixin(object):
+class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
-    @trollius.coroutine
-    def resolve(self, resolver, graph, loop):
-        yield From(super(SDPConfigMixin, self).resolve(resolver, graph, loop))
+    async def resolve(self, resolver, graph, loop):
+        await super().resolve(resolver, graph, loop)
         config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
-        for name, value in six.iteritems(self.ports):
+        for name, value in self.ports.items():
             config[name] = value
-        for src, trg, attr in graph.out_edges(self, data=True):
+        for _src, trg, attr in graph.out_edges(self, data=True):
             endpoint = None
             if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr['port']
@@ -233,7 +228,7 @@ class SDPConfigMixin(object):
         resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 
-class CaptureBlockStateObserver(object):
+class CaptureBlockStateObserver:
     """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """
@@ -242,13 +237,13 @@ class CaptureBlockStateObserver(object):
         self.loop = loop
         self._last = {}
         self._waiters = []    # Each a tuple of a predicate and a future
-        self.update(sensor, sensor.read())
+        self(sensor, sensor.reading)
         sensor.attach(self)
 
-    def update(self, sensor, reading):
-        if reading.status in [Sensor.NOMINAL, Sensor.WARN, Sensor.ERROR]:
+    def __call__(self, sensor, reading):
+        if reading.status in [Sensor.Status.NOMINAL, Sensor.Status.WARN, Sensor.Status.ERROR]:
             try:
-                value = json.loads(reading.value)
+                value = json.loads(reading.value.decode('utf-8'))
             except ValueError:
                 logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
             else:
@@ -269,34 +264,31 @@ class CaptureBlockStateObserver(object):
                     new_waiters.append(waiter)  # Not ready yet, keep for later
         self._waiters = new_waiters
 
-    @trollius.coroutine
-    def wait(self, condition):
+    async def wait(self, condition):
         if condition(self._last):
             return      # Already satisfied, no need to wait
-        future = trollius.Future(loop=self.loop)
+        future = asyncio.Future(loop=self.loop)
         self._waiters.append((condition, future))
-        yield From(future)
+        await future
 
-    @trollius.coroutine
-    def wait_empty(self):
-        yield From(self.wait(lambda value: not value))
+    async def wait_empty(self):
+        await self.wait(lambda value: not value)
 
-    @trollius.coroutine
-    def wait_capture_block_done(self, capture_block_id):
-        yield From(self.wait(lambda value: capture_block_id not in value))
+    async def wait_capture_block_done(self, capture_block_id):
+        await self.wait(lambda value: capture_block_id not in value)
 
     def close(self):
         """Close down the observer. This should be called when the connection
         to the server is closed. It sets the capture block states list to
         empty (which will wake up any waiters whose condition is satisfied by
         this). Any remaining waiters receive a
-        :exc:`.trollius.ConnectionResetError`.
+        :exc:`.asyncio.ConnectionResetError`.
         """
         self.sensor.detach(self)
         self._last = {}
         self._trigger()   # Give waiters a chance to react to an empty map
         for waiter in self._waiters:
-            waiter[1].set_exception(trollius.ConnectionResetError())
+            waiter[1].set_exception(ConnectionResetError())
         self._waiters = []
 
 
@@ -312,7 +304,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
       sdp.array_1.ingest.1.input_rate
     """
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super(SDPPhysicalTask, self).__init__(logical_task, loop, sdp_controller, subarray_product_id)
+        super().__init__(logical_task, loop, sdp_controller, subarray_product_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
@@ -330,8 +322,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             need_inform = True
         if self.katcp_connection is not None:
             try:
-                self.katcp_connection.stop()
-                need_inform = False  # katcp_connection.stop() sends an inform itself
+                self.katcp_connection.close()
+                need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
                 logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
@@ -339,11 +331,10 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             self.capture_block_state_observer.close()
             self.capture_block_state_observer = None
         if need_inform:
-            self.sdp_controller.mass_inform(Message.inform('interface-changed', 'sensor-list'))
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
-    @trollius.coroutine
-    def wait_ready(self):
-        yield From(super(SDPPhysicalTask, self).wait_ready())
+    async def wait_ready(self):
+        await super().wait_ready()
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
@@ -354,73 +345,60 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
                     PROMETHEUS_SENSORS, labels,
-                    host=self.host, port=self.ports['port'])
+                    host=self.host, port=self.ports['port'], loop=self.loop)
                 try:
-                    yield From(to_trollius_future(self.katcp_connection.start(), loop=self.loop))
-                    # The design of wait_ready is that it shouldn't time out,
-                    # instead relying on higher-level timeouts to decide
-                    # whether to cancel it. We use a timeout here, together
-                    # with the while True loop, rather than letting
-                    # until_synced run forever, because Tornado futures have no
-                    # concept of cancellation. If wait_ready is cancelled, then
-                    # it will stop the connection immediately, but the Tornado
-                    # future will hang around until it times out.
-                    #
-                    # Timing out also allows recovery if the TCP connection
-                    # somehow gets wedged badly enough that katcp can't recover
-                    # itself.
-                    yield From(to_trollius_future(self.katcp_connection.until_synced(timeout=20), loop=self.loop))
+                    await self.katcp_connection.wait_synced()
                     logger.info("Connected to {}:{} for node {}".format(
                         self.host, self.ports['port'], self.name))
-                    sensor = yield From(to_trollius_future(self.katcp_connection.future_get_sensor(
-                        'capture-block-state'), loop=self.loop))
+                    sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, loop=self.loop)
                     return
                 except RuntimeError:
-                    self.katcp_connection.stop()
+                    self.katcp_connection.close()
+                    await self.katcp_connection.wait_closed()
+                    # no need for these to lurk around
                     self.katcp_connection = None
-                     # no need for these to lurk around
-                    logger.error("Failed to connect to %s via katcp on %s:%d. Check to see if networking issues could be to blame.",
+                    logger.error("Failed to connect to %s via katcp on %s:%d. "
+                                 "Check to see if networking issues could be to blame.",
                                  self.name, self.host, self.ports['port'], exc_info=True)
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
-                    yield From(trollius.sleep(1.0, loop=self.loop))
+                    await asyncio.sleep(1.0, loop=self.loop)
 
-    @trollius.coroutine
-    def issue_req(self, req, args=[], **kwargs):
+    async def issue_req(self, req, args=()):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
-        message is printed.
+        message is printed and FailReply is raised.
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
         logger.info("Issued request {} {} to node {}".format(req, args, self.name))
-        reply, informs = yield From(to_trollius_future(
-            self.katcp_connection.katcp_client.future_request(Message.request(req, *args), **kwargs),
-            loop=self.loop))
-        if not reply.reply_ok():
-            msg = "Failed to issue req {} to node {}. {}".format(req, self.name, reply.arguments[-1])
-            logger.warning(msg)
-        raise Return((reply, informs))
+        try:
+            await self.katcp_connection.wait_connected()
+            reply, informs = await self.katcp_connection.request(req, *args)
+            return (reply, informs)
+        except (FailReply, InvalidReply, OSError) as error:
+            msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
+            logger.warning('%s', msg)
+            raise FailReply(msg) from error
 
-    @trollius.coroutine
-    def graceful_kill(self, driver, **kwargs):
+    async def graceful_kill(self, driver, **kwargs):
         try:
             if self.capture_block_state_observer is not None:
-                yield From(self.capture_block_state_observer.wait_empty())
+                await self.capture_block_state_observer.wait_empty()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        super(SDPPhysicalTask, self).kill(driver, **kwargs)
+        super().kill(driver, **kwargs)
 
     def kill(self, driver, **kwargs):
         force = kwargs.pop('force', False)
         if not force:
-            trollius.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
+            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
         else:
-            super(SDPPhysicalTask, self).kill(driver, **kwargs)
+            super().kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):
@@ -431,7 +409,7 @@ class LogicalGroup(scheduler.LogicalExternal):
     to be stored once rather than repeated.
     """
     def __init__(self, name):
-        super(LogicalGroup, self).__init__(name)
+        super().__init__(name)
         self.physical_factory = PhysicalGroup
 
 
@@ -442,7 +420,7 @@ class PhysicalGroup(SDPConfigMixin, scheduler.PhysicalExternal):
 class PoweroffLogicalTask(scheduler.LogicalTask):
     """Logical task for powering off a machine."""
     def __init__(self, host):
-        super(PoweroffLogicalTask, self).__init__('kibisis')
+        super().__init__('kibisis')
         self.host = host
         # Use minimal resources, to reduce chance it that it won't fit
         self.cpus = 0.001
@@ -462,6 +440,6 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
         self.container.docker.parameters.append({'key': 'user', 'value': 'root'})
 
     def valid_agent(self, agent):
-        if not super(PoweroffLogicalTask, self).valid_agent(agent):
+        if not super().valid_agent(agent):
             return False
         return agent.host == self.host

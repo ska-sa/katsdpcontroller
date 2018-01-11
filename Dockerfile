@@ -7,6 +7,9 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
+# Switch to Python 3 environment
+ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+
 # Install haproxy for haproxy_disp and graphviz for --write-graphs support
 USER root
 RUN apt-get -y update && apt-get -y --no-install-recommends install haproxy graphviz
@@ -23,6 +26,3 @@ RUN python ./setup.py clean && pip install --no-deps . && pip check
 
 # Network setup
 EXPOSE 5001
-
-# Create directory into which config.json can be volume-mounted
-RUN mkdir /home/kat/.docker

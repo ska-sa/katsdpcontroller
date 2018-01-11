@@ -4,7 +4,7 @@
 scheduler. See :mod:`katsdpcontroller.scheduler` for details.
 """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 import argparse
 import subprocess
 import contextlib
@@ -18,9 +18,11 @@ from collections import OrderedDict
 import xml.etree.ElementTree
 import netifaces
 import psutil
-import six
 try:
-    import pynvml
+    if sys.version_info >= (3,):
+        import py3nvml.py3nvml as pynvml
+    else:
+        import pynvml
     import pycuda.driver
     pycuda.driver.init()
 except ImportError:
@@ -65,11 +67,14 @@ class GPU(object):
         self.driver_version = pynvml.nvmlSystemGetDriverVersion()
         # NVML doesn't report compute capability, so we need CUDA
         pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
+        # In Python 3 pci_bus_id is bytes but pycuda wants str
+        if not isinstance(pci_bus_id, str):
+            pci_bus_id = pci_bus_id.decode('ascii')
         cuda_device = pycuda.driver.Device(pci_bus_id)
         self.compute_capability = cuda_device.compute_capability()
         self.device_attributes = {}
-        for key, value in six.iteritems(cuda_device.get_attributes()):
-            if isinstance(value, (six.integer_types, six.string_types, float)):
+        for key, value in cuda_device.get_attributes().items():
+            if isinstance(value, (int, float, str)):
                 # Some of the attributes use Boost.Python's enum, which is
                 # derived from int but which leads to invalid JSON when passed
                 # to json.dumps.
@@ -283,7 +288,7 @@ def encode(d):
         s = json.dumps(d)
         while len(s) % 3:
             s += ' '
-        return base64.urlsafe_b64encode(s)
+        return base64.urlsafe_b64encode(s.encode('utf-8')).decode('ascii')
 
 
 def write_dict(name, path, args, d, do_encode=False):
@@ -315,7 +320,7 @@ def write_dict(name, path, args, d, do_encode=False):
             converted = json.loads(json.dumps(d))
         else:
             converted = d
-        for key, value in six.iteritems(converted):
+        for key, value in converted.items():
             print('    {}:{}'.format(key, value))
     else:
         try:
@@ -327,7 +332,7 @@ def write_dict(name, path, args, d, do_encode=False):
         else:
             # The path didn't exist
             changed = True
-        for key, value in d.iteritems():
+        for key, value in d.items():
             filename = os.path.join(path, key)
             content = encode(value) if do_encode else value
             content = '{}\n'.format(content)

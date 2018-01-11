@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Script for launching the Science Data Processor Master Controller.
 
@@ -10,15 +10,10 @@ import os
 import os.path
 import json
 import signal
-import tornado
-import tornado.gen
 import argparse
 import logging
 import addict
-import trollius
-from trollius import From
-from tornado.platform.asyncio import AsyncIOMainLoop
-import tornado.netutil
+import asyncio
 from prometheus_client import start_http_server
 import pymesos
 import katsdpservices
@@ -30,14 +25,11 @@ except ImportError:
     manhole = None
 
 
-@trollius.coroutine
 def on_shutdown(loop, server):
     loop.remove_signal_handler(signal.SIGINT)
     loop.remove_signal_handler(signal.SIGTERM)
      # in case the exit code below borks, we allow shutdown via traditional means
-    yield From(server.async_stop())
-    ioloop.stop()
-    loop.stop()
+    server.halt()
 
 
 class InvalidGuiUrlsError(RuntimeError):
@@ -67,6 +59,14 @@ def load_gui_urls_dir(dirname):
     except (IOError, OSError) as error:
         raise InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
     return gui_urls
+
+
+async def run(loop, sched, server):
+    await sched.start()
+    await server.start()
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
+    await server.join()
 
 
 if __name__ == "__main__":
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     def die(msg=None):
         if msg:
-            print msg
+            print(msg)
         else:
             parser.print_help()
         sys.exit(1)
@@ -140,10 +140,6 @@ if __name__ == "__main__":
         logging.root.setLevel(opts.loglevel.upper())
     logger = logging.getLogger('sdpcontroller')
     logger.info("Starting SDP Controller...")
-
-    # Use an asynchronous resolver, so that DNS lookups for katcp connections
-    # does not block the IOLoop.
-    tornado.netutil.Resolver.configure('tornado.netutil.ThreadedResolver')
 
     image_resolver_factory = scheduler.ImageResolverFactory(
         private_registry=opts.private_registry or None,
@@ -179,13 +175,11 @@ if __name__ == "__main__":
     framework_info.principal = opts.principal
     framework_info.role = opts.role
 
-    loop = trollius.get_event_loop()
-    ioloop = AsyncIOMainLoop()
-    ioloop.install()
+    loop = asyncio.get_event_loop()
     if opts.interface_mode:
         sched = None
     else:
-        sched = scheduler.Scheduler(loop, ioloop, opts.http_port, opts.http_url)
+        sched = scheduler.Scheduler(loop, opts.http_port, opts.http_url)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, opts.master, use_addict=True,
             implicit_acknowledgements=False)
@@ -213,7 +207,5 @@ if __name__ == "__main__":
         start_http_server(8081)
          # expose any prometheus metrics that we create
 
-    for sig in [signal.SIGINT, signal.SIGTERM]:
-        loop.add_signal_handler(sig, lambda: trollius.ensure_future(on_shutdown(loop, server)))
-    ioloop.add_callback(server.start)
-    ioloop.start()
+    loop.run_until_complete(run(loop, sched, server))
+    loop.close()

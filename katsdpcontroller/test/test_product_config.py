@@ -1,7 +1,5 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
-from __future__ import print_function, division, absolute_import, unicode_literals
-
 import jsonschema
 from nose.tools import assert_equal, assert_in, assert_raises
 
@@ -15,7 +13,7 @@ def merge_dicts(*dicts):
     return out
 
 
-class TestOverride(object):
+class TestOverride:
     """Tests for :func:`~katsdpcontroller.product_config.override`"""
 
     def test_add(self):
@@ -39,7 +37,7 @@ class TestOverride(object):
         assert_equal({"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}, out)
 
 
-class TestValidate(object):
+class TestValidate:
     """Tests for :func:`~katsdpcontroller.product_config.validate`"""
 
     def setup(self):
@@ -162,7 +160,8 @@ class TestValidate(object):
 
     def test_input_bad_n_endpoints(self):
         """Number of endpoints doesn't divide into number of channels"""
-        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = "spead://239.9.3.1+14:7148"
+        self.config["inputs"]["i0_baseline_correlation_products"]["url"] = \
+            "spead://239.9.3.1+14:7148"
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("not a multiple of endpoints", str(cm.exception))
@@ -221,7 +220,7 @@ class TestValidate(object):
         assert_in("not a multiple of", str(cm.exception))
 
 
-class TestConvert(object):
+class TestConvert:
     """Tests for :func:`~katsdpcontroller.product_config.convert`.
 
     These tests are fragile because there is more than one valid way to skin
@@ -345,7 +344,7 @@ class TestConvert(object):
         """No beamformer"""
         config = product_config.convert("c856M4k", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": self.expected_l0,
@@ -357,7 +356,7 @@ class TestConvert(object):
         """PTUSE beamformer capture"""
         config = product_config.convert("bc856M4k", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ptuse),
@@ -369,7 +368,7 @@ class TestConvert(object):
         """HDF5 beamformer capture"""
         config = product_config.convert("bec856M4kssd", self.stream_sources, self.antennas,
                                         0.5, False, False, None)
-        expected =  {
+        expected = {
             "config": {},
             "inputs": self.expected_inputs,
             "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ssd),

@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['mock', 'unittest2', 'nose', 'futures', 'requests_mock']
+tests_require = ['nose', 'aioresponses', 'asynctest']
 
 setup (
     name = "katsdpcontroller",
@@ -20,7 +20,8 @@ setup (
     install_requires = [
         'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
         'addict!=2.0.*',
-        'trollius',
+        'aiohttp',
+        'async_timeout',
         'decorator',
         'docker',
         'jsonschema',
@@ -28,22 +29,15 @@ setup (
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'enum34',
-        'ipaddress',
-        'requests',
-        'six',
-        'katcp',
-        'tornado',
+        'aiokatcp>=0.2',
         'katsdptelstate',
         'katsdpservices',
-        'faulthandler',
         'kazoo',
-        'tornado>=4.3',
         'prometheus_client'
     ],
     tests_require = tests_require,
     extras_require = {
-        'agent': ['psutil', 'nvidia-ml-py', 'pycuda'],
+        'agent': ['psutil', 'py3nvml', 'pycuda'],
         'test': tests_require
     },
     use_katversion = True,
