@@ -427,6 +427,7 @@ class TestSDPController(BaseTestSDPController):
         done_future.set_result(None)
         # Mock TelescopeState, but preserve SEPARATOR in the mock
         separator = katsdptelstate.TelescopeState.SEPARATOR
+        self._create_patch('time.time', return_value=123456789.5)
         mock_getaddrinfo = self._create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
         # Workaround for Python bug that makes it think mocks are coroutines
         mock_getaddrinfo._is_coroutine = False
@@ -789,7 +790,7 @@ class TestSDPController(BaseTestSDPController):
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
             mock.call('configure-subarray-from-telstate'),
-            mock.call('capture-init', 'my_pb-00000'),
+            mock.call('capture-init', 'my_pb-123456789'),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
