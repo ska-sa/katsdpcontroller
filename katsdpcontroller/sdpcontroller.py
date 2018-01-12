@@ -377,7 +377,6 @@ class SDPSubarrayProductBase:
         self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     async def _capture_init(self, capture_block):
-        _capture_block_names.add(capture_block.name)
         self.capture_blocks[capture_block.name] = capture_block
         capture_block.state_change_callback = self._update_capture_block_sensor
         # Update the sensor with the INITIALISING state
@@ -518,6 +517,7 @@ class SDPSubarrayProductBase:
         while format_cbid(seq) in _capture_block_names:
             seq += 1
         capture_block_id = format_cbid(seq)
+        _capture_block_names.add(capture_block_id)
         logger.info('Using capture block ID %s', capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, self.loop)
