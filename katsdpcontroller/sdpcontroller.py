@@ -515,7 +515,7 @@ class SDPSubarrayProductBase:
         # warping).
         seq = int(time.time())
         while format_cbid(seq) in _capture_block_names:
-            seq += 1
+            seq -= 1
         capture_block_id = format_cbid(seq)
         _capture_block_names.add(capture_block_id)
         logger.info('Using capture block ID %s', capture_block_id)
