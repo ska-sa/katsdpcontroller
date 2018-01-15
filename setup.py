@@ -10,7 +10,7 @@ setup (
     description = "Service providing control and monitoring services for the MeerKAT Science Data Processor",
     author = "Simon Ratcliffe",
     packages = find_packages(),
-    package_data={'katsdpcontroller': ['static/*', 'schemas/*']},
+    package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*']},
     include_package_data = True,
     scripts = [
         "scripts/sdp_master_controller.py",
@@ -38,6 +38,7 @@ setup (
     tests_require = tests_require,
     extras_require = {
         'agent': ['psutil', 'py3nvml', 'pycuda'],
+        'haproxy_disp': ['jinja2'],
         'test': tests_require
     },
     use_katversion = True,

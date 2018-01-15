@@ -22,7 +22,7 @@ RUN install-requirements.py --default-versions ~/docker-base/base-requirements.t
 # Install the current package
 COPY . /tmp/install/katsdpcontroller
 WORKDIR /tmp/install/katsdpcontroller
-RUN python ./setup.py clean && pip install --no-deps . && pip check
+RUN python ./setup.py clean && pip install --no-deps ".[haproxy_disp]" && pip check
 
 # Network setup
 EXPOSE 5001
