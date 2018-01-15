@@ -17,8 +17,12 @@ import tempfile
 import textwrap
 from collections import defaultdict
 import asyncio
+import io
+import html
 
 import async_timeout
+import aiohttp
+import aiohttp.web
 import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
@@ -85,6 +89,31 @@ async def get_servers(client):
     return servers
 
 
+def request_handler(request):
+    servers = request.app['servers']
+    response = io.StringIO()
+    print(textwrap.dedent(r"""
+        <!doctype html>
+        <html>
+            <head>
+                <title>Available signal displays</title>
+            </head>
+            <body>
+                <h1>Available signal displays</h1>"""), file=response)
+    if (servers):
+        print("<ul>", file=response)
+        for name in sorted(servers.keys()):
+            escaped = html.escape(name)
+            print('<li><a href="/{name}/">{name}</a></li>'.format(name=escaped), file=response)
+        print("</ul>", file=response)
+    else:
+        print("<p>No signal displays active</p>", file=response)
+    print(textwrap.dedent(r"""
+            </body>
+        </html>"""), file=response)
+    return aiohttp.web.Response(text=response.getvalue(), content_type='text/html')
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('sdpmc', type=endpoint_parser(5001),
@@ -95,6 +124,13 @@ async def main():
     wake = asyncio.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, terminate)
+
+    app = aiohttp.web.Application()
+    app['servers'] = {}
+    app.router.add_get('/', request_handler)
+    handler = app.make_handler()
+    srv = await loop.create_server(handler, '127.0.0.1', 0)
+    port = srv.sockets[0].getsockname()[1]
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
     pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
@@ -130,10 +166,16 @@ async def main():
                     http-request redirect code 301 prefix / drop-query append-slash if missing_slash
                     http-request set-var(req.array) path,field(2,/) if has_array
                     use_backend %[var(req.array)] if has_array
-                """)
+                    default_backend fallback
+
+                backend fallback
+                    acl root path_reg '^/$'
+                    http-request redirect code 301 location / drop-query if !root
+                    server fallback_html_server 127.0.0.1:{port}
+                """.format(port=port))
             for array, server in sorted(servers.items()):
                 if not server.html_endpoint:
-                    logger.warn('Array %s has no signal display html port', array)
+                    logger.warning('Array %s has no signal display html port', array)
                     continue
                 content += textwrap.dedent(r"""
                     backend {array}
@@ -153,6 +195,7 @@ async def main():
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
+            app['servers'] = servers
     finally:
         if client is not None:
             client.close()
@@ -165,6 +208,13 @@ async def main():
                 logger.warning('haproxy exited with non-zero exit status %d', ret)
         cfg.close()
         pidfile.close()
+        # Shut down aiohttp server
+        # (https://docs.aiohttp.org/en/stable/web.html#aiohttp-web-graceful-shutdown)
+        srv.close()
+        await srv.wait_closed()
+        await app.shutdown()
+        await handler.shutdown(5.0)
+        await app.cleanup()
 
 
 if __name__ == '__main__':
