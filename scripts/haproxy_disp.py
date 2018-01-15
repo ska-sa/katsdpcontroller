@@ -6,7 +6,8 @@ Run haproxy to reverse-proxy signal displays. To use it, run as
 docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller haproxy_disp.py <sdpmchost>:5001
 
 Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get the signal
-displays from that subarray-product. If they aren't running, haproxy will return a 503 error.
+displays from that subarray-product. Any URL that doesn't correspond to a known subarray product
+redirects to the root, which will have a list of links.
 """
 
 import re
@@ -19,6 +20,10 @@ from collections import defaultdict
 import asyncio
 
 import async_timeout
+import aiohttp
+import aiohttp.web
+import aiohttp_jinja2
+import jinja2
 import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
@@ -85,6 +90,12 @@ async def get_servers(client):
     return servers
 
 
+@aiohttp_jinja2.template('index.html.j2')
+def request_handler(request):
+    servers = request.app['servers']
+    return dict(servers=servers)
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('sdpmc', type=endpoint_parser(5001),
@@ -95,6 +106,14 @@ async def main():
     wake = asyncio.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, terminate)
+
+    app = aiohttp.web.Application()
+    app['servers'] = {}
+    app.router.add_get('/', request_handler)
+    aiohttp_jinja2.setup(app, loader=jinja2.PackageLoader('katsdpcontroller'))
+    handler = app.make_handler()
+    srv = await loop.create_server(handler, '127.0.0.1', 0)
+    port = srv.sockets[0].getsockname()[1]
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
     pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
@@ -130,10 +149,16 @@ async def main():
                     http-request redirect code 301 prefix / drop-query append-slash if missing_slash
                     http-request set-var(req.array) path,field(2,/) if has_array
                     use_backend %[var(req.array)] if has_array
-                """)
+                    default_backend fallback
+
+                backend fallback
+                    acl root path_reg '^/$'
+                    http-request redirect code 301 location / drop-query if !root
+                    server fallback_html_server 127.0.0.1:{port}
+                """.format(port=port))
             for array, server in sorted(servers.items()):
                 if not server.html_endpoint:
-                    logger.warn('Array %s has no signal display html port', array)
+                    logger.warning('Array %s has no signal display html port', array)
                     continue
                 content += textwrap.dedent(r"""
                     backend {array}
@@ -153,6 +178,7 @@ async def main():
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
+            app['servers'] = servers
     finally:
         if client is not None:
             client.close()
@@ -165,6 +191,13 @@ async def main():
                 logger.warning('haproxy exited with non-zero exit status %d', ret)
         cfg.close()
         pidfile.close()
+        # Shut down aiohttp server
+        # (https://docs.aiohttp.org/en/stable/web.html#aiohttp-web-graceful-shutdown)
+        srv.close()
+        await srv.wait_closed()
+        await app.shutdown()
+        await handler.shutdown(5.0)
+        await app.cleanup()
 
 
 if __name__ == '__main__':

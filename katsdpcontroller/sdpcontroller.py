@@ -39,6 +39,7 @@ REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
+_capture_block_names = set()      #: all capture block names used
 
 
 def log_task_exceptions(task, msg):
@@ -206,7 +207,8 @@ class SDPSubarrayProductBase:
       CAPTURING, or ``None`` if there isn't one.
     - :attr:`current_capture_block` is set if and only if the subarray state
       is CAPTURING.
-    - Keys in :attr:`capture_blocks` also appear in `capture_block_names`.
+    - Keys in :attr:`capture_blocks` also appear in
+      :py:data:`_capture_block_names`.
     - Elements of :attr:`capture_blocks` are not in state DEAD.
 
     This is a base class that is intended to be subclassed. The methods whose
@@ -228,7 +230,6 @@ class SDPSubarrayProductBase:
         self.telstate_endpoint = ""
         self.telstate = None
         self.capture_blocks = {}              # live capture blocks, indexed by name
-        self.capture_block_names = set()      # all capture block names used
         self.current_capture_block = None     # set between capture_init and capture_done
         self.dead_event = asyncio.Event(loop=loop)   # Set when reached state DEAD
         # Callbacks that are called when we reach state DEAD. These are
@@ -377,7 +378,6 @@ class SDPSubarrayProductBase:
         self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     async def _capture_init(self, capture_block):
-        self.capture_block_names.add(capture_block.name)
         self.capture_blocks[capture_block.name] = capture_block
         capture_block.state_change_callback = self._update_capture_block_sensor
         # Update the sensor with the INITIALISING state
@@ -501,7 +501,7 @@ class SDPSubarrayProductBase:
 
     async def capture_init(self, program_block_id):
         def format_cbid(seq):
-            return '{}-{:05}'.format(program_block_id, seq)
+            return '{}-{}'.format(program_block_id, seq)
 
         self._fail_if_busy()
         if self.state != State.IDLE:
@@ -510,11 +510,15 @@ class SDPSubarrayProductBase:
         if program_block_id is None:
             # Match the layout of program block IDs
             program_block_id = '00000000-00000'
-        # Find first unique capture block ID for that PB ID
-        seq = 0
-        while format_cbid(seq) in self.capture_block_names:
-            seq += 1
+        # Find first unique capture block ID for that PB ID, starting from the
+        # current timestamp (this protects against the unlikely case of two
+        # capture blocks started in the same second, or oddities from clock
+        # warping).
+        seq = int(time.time())
+        while format_cbid(seq) in _capture_block_names:
+            seq -= 1
         capture_block_id = format_cbid(seq)
+        _capture_block_names.add(capture_block_id)
         logger.info('Using capture block ID %s', capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, self.loop)
