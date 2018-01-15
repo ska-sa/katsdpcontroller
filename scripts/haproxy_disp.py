@@ -6,7 +6,8 @@ Run haproxy to reverse-proxy signal displays. To use it, run as
 docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller haproxy_disp.py <sdpmchost>:5001
 
 Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get the signal
-displays from that subarray-product. If they aren't running, haproxy will return a 503 error.
+displays from that subarray-product. Any URL that doesn't correspond to a known subarray product
+redirects to the root, which will have a list of links.
 """
 
 import re
