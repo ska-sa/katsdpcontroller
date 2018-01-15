@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Available signal displays</title>
+    </head>
+    <body>
+        <h1>Available signal displays</h1>
+{% if servers %}
+        <ul>
+{% for name in servers.keys() %}
+            <li><a href="/{{name|e}}">{{name|e}}</a></li>
+{% endfor %}
+        </ul>
+{% else %}
+        <p>No signal displays active</p>
+{% endif %}
+    </body>
+</html>

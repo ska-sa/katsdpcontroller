@@ -18,12 +18,12 @@ import tempfile
 import textwrap
 from collections import defaultdict
 import asyncio
-import io
-import html
 
 import async_timeout
 import aiohttp
 import aiohttp.web
+import aiohttp_jinja2
+import jinja2
 import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
@@ -90,29 +90,10 @@ async def get_servers(client):
     return servers
 
 
+@aiohttp_jinja2.template('index.html.j2')
 def request_handler(request):
     servers = request.app['servers']
-    response = io.StringIO()
-    print(textwrap.dedent(r"""
-        <!doctype html>
-        <html>
-            <head>
-                <title>Available signal displays</title>
-            </head>
-            <body>
-                <h1>Available signal displays</h1>"""), file=response)
-    if (servers):
-        print("<ul>", file=response)
-        for name in sorted(servers.keys()):
-            escaped = html.escape(name)
-            print('<li><a href="/{name}/">{name}</a></li>'.format(name=escaped), file=response)
-        print("</ul>", file=response)
-    else:
-        print("<p>No signal displays active</p>", file=response)
-    print(textwrap.dedent(r"""
-            </body>
-        </html>"""), file=response)
-    return aiohttp.web.Response(text=response.getvalue(), content_type='text/html')
+    return dict(servers=servers)
 
 
 async def main():
@@ -129,6 +110,7 @@ async def main():
     app = aiohttp.web.Application()
     app['servers'] = {}
     app.router.add_get('/', request_handler)
+    aiohttp_jinja2.setup(app, loader=jinja2.PackageLoader('katsdpcontroller'))
     handler = app.make_handler()
     srv = await loop.create_server(handler, '127.0.0.1', 0)
     port = srv.sockets[0].getsockname()[1]
