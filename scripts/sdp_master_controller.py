@@ -62,7 +62,8 @@ def load_gui_urls_dir(dirname):
 
 
 async def run(loop, sched, server):
-    await sched.start()
+    if sched is not None:
+        await sched.start()
     await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
