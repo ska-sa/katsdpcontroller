@@ -1029,6 +1029,7 @@ class SDPControllerServer(DeviceServer):
                 del self.subarray_products[product.subarray_product_id]
                 self.sensors.discard(product.state_sensor)
                 self.sensors.discard(product.capture_block_sensor)
+                self.mass_inform('interface-changed', 'sensor-list')
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:

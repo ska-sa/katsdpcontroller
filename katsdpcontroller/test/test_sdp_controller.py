@@ -246,7 +246,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
         # Deconfigure and check that the array sensors are gone
         with mock.patch.object(aiokatcp.Client, 'unhandled_inform', spec=True) as unhandled_inform:
             await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1)
-            unhandled_inform.assert_called_once_with(self.client, interface_changed_msg)
+            unhandled_inform.assert_called_with(self.client, interface_changed_msg)
         await self.assert_sensors(EXPECTED_SENSOR_LIST)
 
     async def test_capture_done(self):
