@@ -40,7 +40,8 @@ class PrometheusObserver:
         # Gauge aren't actually classes (they're functions). So we have to
         # use introspection.
         if type(self._value_metric).__name__ == 'Gauge':
-            self._value_metric.set(value)
+            if valid:
+                self._value_metric.set(value)
         elif type(self._value_metric).__name__ == 'Counter':
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
