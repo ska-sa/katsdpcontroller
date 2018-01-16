@@ -12,7 +12,7 @@ import asynctest
 from nose.tools import assert_raises, assert_equal
 from addict import Dict
 import aiokatcp
-from aiokatcp import Message, FailReply
+from aiokatcp import Message, FailReply, Sensor
 from aiokatcp.test.test_utils import timelimit
 import redis
 import pymesos
@@ -21,7 +21,7 @@ import netifaces
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, State)
+    SDPControllerServer, SDPCommonResources, SDPResources, State, _capture_block_names)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
 
@@ -273,9 +273,9 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.client.request("product-configure", SUBARRAY_PRODUCT3, CONFIG)
         await self.client.request("capture-init", SUBARRAY_PRODUCT3)
         # should not be able to deconfigure when not in idle state
-        await self.assert_request_fails("product-configure", SUBARRAY_PRODUCT3)
+        await self.assert_request_fails("product-deconfigure", SUBARRAY_PRODUCT3)
         await self.client.request("capture-done", SUBARRAY_PRODUCT3)
-        await self.client.request("product-list", SUBARRAY_PRODUCT3)
+        await self.client.request("product-deconfigure", SUBARRAY_PRODUCT3)
 
     async def test_configure_subarray_product_legacy(self):
         await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT4)
@@ -453,6 +453,14 @@ class TestSDPController(BaseTestSDPController):
         await self.setup_server(
             '127.0.0.1', 0, self.sched, simulate=True,
             safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+        for product in [SUBARRAY_PRODUCT1, SUBARRAY_PRODUCT2,
+                        SUBARRAY_PRODUCT3, SUBARRAY_PRODUCT4]:
+            # Creating the sensor here isn't quite accurate (it is a dynamic sensor
+            # created on subarray activation), but it shouldn't matter.
+            self.server.sensors.add(Sensor(
+                bytes, product + '.cal.sdp_l0.capture-block-state',
+                'Dummy implementation of sensor', default=b'{}',
+                initial_status=Sensor.Status.NOMINAL))
         master_and_slaves_future = asyncio.Future(loop=self.loop)
         master_and_slaves_future.set_result(
             ('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
@@ -461,6 +469,8 @@ class TestSDPController(BaseTestSDPController):
         self.fail_launches = {}
         # Set of katcp requests to return failures for
         self.fail_requests = set()
+        # Isolate tests from each other by resetting this
+        _capture_block_names.clear()
 
     async def _launch(self, graph, resolver, nodes=None):
         """Mock implementation of Scheduler.launch."""
@@ -515,7 +525,10 @@ class TestSDPController(BaseTestSDPController):
             kill_graph = graph
         for node in kill_graph:
             if scheduler.TaskState.STARTED <= node.state <= scheduler.TaskState.KILLING:
-                node.kill(self.driver, **kwargs)
+                if hasattr(node, 'graceful_kill') and not kwargs.get('force'):
+                    await node.graceful_kill(self.driver, **kwargs)
+                else:
+                    node.kill(self.driver, **kwargs)
             node.set_state(scheduler.TaskState.DEAD)
 
     async def _request(self, msg, *args, **kwargs):
@@ -841,7 +854,9 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+        await self.client.request("capture-init", SUBARRAY_PRODUCT4, 'my_pb')
+        self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.sdp_l0.capture-block-state'].value = \
+            b'{"my_pb-123456789": "capturing"}'
         await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
