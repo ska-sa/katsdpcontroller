@@ -21,6 +21,11 @@
             "type": "integer",
             "minimum": 1
         },
+        "positive_number": {
+            "type": "number",
+            "minimum": 0.0,
+            "exclusiveMinimum": true
+        },
         "singleton": {
             "type": "array",
             "minItems": 1,
@@ -34,6 +39,23 @@
         "channel_range": {
             "$ref": "#/definitions/pair",
             "items": {"$ref": "#/definitions/nonneg_integer"}
+        },
+        "simulate": {
+            "oneOf": [
+                {"type": "boolean"},
+                {
+                    "type": "object",
+                    "properties": {
+                        "sources": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
+                        "center_freq": {"type": "number"}
+                    },
+                    "additionalProperties": false
+                }
+            ],
+            "default": false
         }
     },
     "type": "object",
@@ -100,7 +122,7 @@
                                             "$ref": "#/definitions/nonneg_integer"
                                         },
                                         "instrument_dev_name": {"type": "string"},
-                                        "simulate": {"type": "boolean", "default": false}
+                                        "simulate": {"$ref": "#/definitions/simulate"}
                                     },
                                     "required": [
                                         "src_streams", "int_time", "n_bls",
@@ -131,7 +153,7 @@
                                             "$ref": "#/definitions/nonneg_integer"
                                         },
                                         "instrument_dev_name": {"type": "string"},
-                                        "simulate": {"type": "boolean", "default": false}
+                                        "simulate": {"$ref": "#/definitions/simulate"}
                                     },
                                     "required": [
                                         "src_streams", "beng_out_bits_per_sample",
@@ -175,7 +197,7 @@
                     "required": ["type"],
                     "properties": {
                         "type": {
-                            "enum": ["sdp.l0", "sdp.beamformer", "sdp.beamformer_engineering"]
+                            "enum": ["sdp.l0", "sdp.beamformer", "sdp.beamformer_engineering", "sdp.cal"]
                         },
                         "src_streams": {"$ref": "#/definitions/src_streams"}
                     },
@@ -249,6 +271,58 @@
                                     }
                                 }
                             ]
+                        },
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.cal"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {
+                                                "k_solint": {"$ref": "#/definitions/positive_number"},
+                                                "k_chan_sample": {"$ref": "#/definitions/positive_integer"},
+                                                "k_bchan": {"$ref": "#/definitions/nonneg_integer"},
+                                                "k_echan": {"$ref": "#/definitions/nonneg_integer"},
+                                                "kcross_chanave": {"$ref": "#/definitions/positive_integer"},
+                                                "bp_solint": {"$ref": "#/definitions/positive_number"},
+                                                "g_solint": {"$ref": "#/definitions/positive_number"},
+                                                "g_bchan": {"$ref": "#/definitions/nonneg_integer"},
+                                                "g_echan": {"$ref": "#/definitions/nonneg_integer"},
+                                                "rfi_calib_nsigma": {"$ref": "#/definitions/positive_number"},
+                                                "rfi_targ_nsigma": {"$ref": "#/definitions/positive_number"},
+                                                "rfi_windows_freq": {
+                                                    "type": "array",
+                                                    "items": {"$ref": "#/definitions/positive_integer"},
+                                                    "minItems": 1,
+                                                    "uniqueItems": true
+                                                },
+                                                "rfi_average_freq": {"$ref": "#/definitions/positive_integer"},
+                                                "rfi_targ_spike_width_freq": {"$ref": "#/definitions/positive_number"},
+                                                "rfi_calib_spike_width_freq": {"$ref": "#/definitions/positive_number"},
+                                                "rfi_spike_width_time": {"$ref": "#/definitions/positive_number"},
+                                                "rfi_extend_freq": {"$ref": "#/definitions/nonneg_integer"}
+                                            },
+                                            "additionalProperties": false
+                                        },
+                                        "models": {
+                                            "type": "object",
+                                            "additionalProperties": {"type": "string"}
+                                        },
+                                        "buffer_time": {"$ref": "#/definitions/positive_number"}
+                                    },
+                                    "required": ["src_streams"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.cal"]}
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     ]
                 }
@@ -276,7 +350,7 @@
         },
         "version": {
             "type": "string",
-            "enum": ["1.0"]
+            "enum": ["1.0", "1.1"]
         }
     }
 }

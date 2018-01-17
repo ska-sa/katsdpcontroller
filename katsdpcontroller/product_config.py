@@ -98,17 +98,22 @@ def validate(config):
         'cam.http': [],
         'sdp.l0': ['cbf.baseline_correlation_products'],
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
-        'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage']
+        'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
+        'sdp.cal': ['sdp.l0']
     }
     for name, stream in itertools.chain(config['inputs'].items(),
                                         config['outputs'].items()):
         src_streams = stream.get('src_streams', [])
         for src in src_streams:
-            if src not in config['inputs']:
+            if src in config['inputs']:
+                src_config = config['inputs'][src]
+            elif src in config['outputs']:
+                src_config = config['outputs'][src]
+            else:
                 raise ValueError('Unknown source {} in {}'.format(src, name))
             if stream['type'] in src_valid_types:
                 valid_types = src_valid_types[stream['type']]
-                if config['inputs'][src]['type'] not in valid_types:
+                if src_config['type'] not in valid_types:
                     raise ValueError('Source {} has wrong type for {}'.format(src, name))
 
     # Can only have one cam.http stream
@@ -136,6 +141,9 @@ def validate(config):
                     raise ValueError(
                         'channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
                         .format(n_chans_per_endpoint, n_chans_per_substream))
+                if config['version'] == '1.0':
+                    if not isinstance(stream.get('simulate', False), bool):
+                        raise ValueError('simulate dict only supported from schema version 1.1')
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
 
@@ -169,6 +177,11 @@ def validate(config):
                     raise ValueError(
                         'continuum channels ({}) not a multiple of number of ingests ({})'.format(
                             n_chans, n_ingest))
+
+            if output['type'] == 'sdp.cal':
+                if config['version'] == '1.0':
+                    raise ValueError('sdp.cal is only supported from schema version 1.1')
+
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
 
