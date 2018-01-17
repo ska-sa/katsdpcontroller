@@ -229,6 +229,10 @@ class TestValidate:
             product_config.validate(self.config)
 
     def test_v1_0_simulate_dict(self):
+        self.config["version"] = "1.0"
+        del self.config["outputs"]["cal"]
+        # Confirm that this is now valid 1.0
+        product_config.validate(self.config)
         self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
         with assert_raises(ValueError):
             product_config.validate(self.config)
