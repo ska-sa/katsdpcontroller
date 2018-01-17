@@ -657,9 +657,6 @@ def _make_ingest(g, config, spectral_name, continuum_name):
 
 
 def _make_cal(g, config, name):
-    if 'cal_params' in config['outputs'][name]:
-        raise NotImplementedError('cal_params is not implemented yet')
-
     info = L0Info(config, name)
     if info.n_antennas < 4:
         # Only possible to calibrate with at least 4 antennas

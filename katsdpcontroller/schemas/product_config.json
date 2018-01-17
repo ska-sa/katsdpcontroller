@@ -192,8 +192,7 @@
                                         "continuum_factor": {
                                             "$ref": "#/definitions/positive_integer"
                                         },
-                                        "excise": {"type": "boolean", "default": true},
-                                        "cal_params": {"type": "object"}
+                                        "excise": {"type": "boolean", "default": true}
                                     },
                                     "required": [
                                         "src_streams", "output_int_time", "continuum_factor"
