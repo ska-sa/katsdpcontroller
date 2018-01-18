@@ -42,7 +42,7 @@ class TestValidate:
 
     def setup(self):
         self.config = {
-            "version": "1.0",
+            "version": "1.1",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -110,6 +110,10 @@ class TestValidate:
                     ],
                     "output_channels": [0, 4096],
                     "store": "ssd"
+                },
+                "cal": {
+                    "type": "sdp.cal",
+                    "src_streams": ["l0"]
                 }
             },
             "config": {}
@@ -119,7 +123,7 @@ class TestValidate:
         product_config.validate(self.config)
 
     def test_bad_version(self):
-        self.config["version"] = "1.1"
+        self.config["version"] = "1.10"
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config)
 
@@ -218,6 +222,20 @@ class TestValidate:
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("not a multiple of", str(cm.exception))
+
+    def test_v1_0_sdp_cal(self):
+        self.config["version"] = "1.0"
+        with assert_raises(ValueError):
+            product_config.validate(self.config)
+
+    def test_v1_0_simulate_dict(self):
+        self.config["version"] = "1.0"
+        del self.config["outputs"]["cal"]
+        # Confirm that this is now valid 1.0
+        product_config.validate(self.config)
+        self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        with assert_raises(ValueError):
+            product_config.validate(self.config)
 
 
 class TestConvert:

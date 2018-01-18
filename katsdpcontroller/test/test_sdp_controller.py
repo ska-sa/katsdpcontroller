@@ -48,7 +48,7 @@ STREAMS = '''{
 }'''
 
 CONFIG = '''{
-    "version": "1.0",
+    "version": "1.1",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -74,7 +74,10 @@ CONFIG = '''{
             "xeng_out_bits_per_sample": 32,
             "n_chans_per_substream": 256,
             "instrument_dev_name": "i0",
-            "simulate": true
+            "simulate": {
+                "center_freq": 1284000000.0,
+                "sources": ["PKS 1934-638, radec, 19:39:25.03, -63:42:45.63"]
+            }
         },
         "i0_tied_array_channelised_voltage_0x": {
             "type": "cbf.tied_array_channelised_voltage",
@@ -145,6 +148,11 @@ CONFIG = '''{
             ],
             "output_channels": [0, 4096],
             "store": "ram"
+        },
+        "sdp_cal": {
+            "type": "sdp.cal",
+            "src_streams": ["sdp_l0"],
+            "buffer_time": 1800.0
         }
     },
     "config": {}

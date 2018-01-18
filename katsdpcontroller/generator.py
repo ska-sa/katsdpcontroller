@@ -322,6 +322,9 @@ def _make_cam2telstate(g, config, name):
 
 def _make_cbf_simulator(g, config, name):
     type_ = config['inputs'][name]['type']
+    settings = config['inputs'][name].get('simulate', {})
+    if settings is True:
+        settings = {}
     assert type_ in ('cbf.baseline_correlation_products', 'cbf.tied_array_channelised_voltage')
     # Determine number of simulators to run.
     n_sim = 1
@@ -343,8 +346,11 @@ def _make_cbf_simulator(g, config, name):
             'cbf_ibv': ibv,
             'cbf_sync_time': time.time(),
             'antenna_mask': ','.join(info.antennas),
-            'servers': n_sim,
+            'servers': n_sim
         }
+        sources = settings.get('sources', [])
+        if sources:
+            conf['cbf_sim_sources'] = [{'description': description} for description in sources]
         if type_ == 'cbf.baseline_correlation_products':
             conf.update({
                 'cbf_int_time': info.int_time,
@@ -355,6 +361,8 @@ def _make_cbf_simulator(g, config, name):
                 'beamformer-timesteps': info.raw['spectra_per_heap'],
                 'beamformer-bits': info.raw['beng_out_bits_per_sample']
             })
+        if 'center_freq' in settings:
+            conf['cbf_center_freq'] = float(settings['center_freq'])
         return conf
 
     sim_group = LogicalGroup('sim.' + name)
@@ -656,16 +664,28 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     return ingest_group
 
 
-def _make_cal(g, config, name):
-    if 'cal_params' in config['outputs'][name]:
-        raise NotImplementedError('cal_params is not implemented yet')
-
-    info = L0Info(config, name)
+def _make_cal(g, config, name, l0_name):
+    info = L0Info(config, l0_name)
     if info.n_antennas < 4:
         # Only possible to calibrate with at least 4 antennas
         return None
 
-    cal = SDPLogicalTask('cal.' + name)
+    if name is None:
+        name = 'cal.' + l0_name
+        settings = {}
+    else:
+        settings = config['outputs'][name]
+    # We want ~30 min of data in the buffer, to allow for a single batch of
+    # 15 minutes.
+    buffer_time = settings.get('buffer_time', 30.0 * 60.0)
+    parameters = settings.get('parameters', {})
+    models = settings.get('models', {})
+    if parameters:
+        raise NotImplementedError('cal parameters are not yet supported')
+    if models:
+        raise NotImplementedError('cal models are not yet supported')
+
+    cal = SDPLogicalTask(name)
     cal.image = 'katsdpcal'
     cal.command = ['run_cal.py']
     # Give cal 8 CPUs for 32K, 32 antennas, and scale from there.
@@ -680,9 +700,7 @@ def _make_cal(g, config, name):
     # - flags (uint8)
     # - weights (float32)
     # There are also timestamps, but they're insignificant compared to the rest.
-    # We want ~30 min of data in the buffer, to allow for a single batch of
-    # 15 minutes.
-    slots = 30 * 60 / info.int_time
+    slots = int(math.ceil(buffer_time / info.int_time))
     slot_size = info.n_vis * 13
     buffer_size = slots * slot_size
     # Processing operations come in a few flavours:
@@ -713,9 +731,12 @@ def _make_cal(g, config, name):
         'buffer_maxsize': buffer_size,
         'workers': workers,
         'l0_spectral_interface': task.interfaces['sdp_10g'].name,
-        'l0_spectral_name': name
+        'l0_spectral_name': l0_name,
+        # cal should change to remove "spectral"; both are provided for now
+        'l0_interface': task.interfaces['sdp_10g'].name,
+        'l0_name': l0_name
     })
-    src_multicast = find_node(g, 'multicast.' + name)
+    src_multicast = find_node(g, 'multicast.' + l0_name)
     g.add_edge(cal, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
@@ -907,7 +928,7 @@ def build_logical_graph(config):
     cbf_streams = inputs.get('cbf.baseline_correlation_products', [])
     cbf_streams.extend(inputs.get('cbf.tied_array_channelised_voltage', []))
     for name in cbf_streams:
-        if name in inputs_used and config['inputs'][name].get('simulate'):
+        if name in inputs_used and config['inputs'][name].get('simulate', False) is not False:
             _make_cbf_simulator(g, config, name)
 
     # Group outputs by type
@@ -916,6 +937,7 @@ def build_logical_graph(config):
         outputs.setdefault(output['type'], []).append(name)
 
     # Pair up spectral and continuum L0 outputs
+    implicit_cal = (config['version'] == '1.0')
     l0_done = set()
     for name in outputs.get('sdp.l0', []):
         if config['outputs'][name]['continuum_factor'] == 1:
@@ -931,7 +953,8 @@ def build_logical_graph(config):
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
                         _make_ingest(g, config, name, name2)
-                        _make_cal(g, config, name)
+                        if implicit_cal:
+                            _make_cal(g, config, None, name)
                         _make_filewriter(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
@@ -947,7 +970,8 @@ def build_logical_graph(config):
         if is_spectral:
             _make_timeplot(g, config, name)
             _make_ingest(g, config, name, None)
-            _make_cal(g, config, name)
+            if implicit_cal:
+                _make_cal(g, config, None, name)
             _make_filewriter(g, config, name)
         else:
             _make_ingest(g, config, None, name)
@@ -955,6 +979,8 @@ def build_logical_graph(config):
         logger.warning('Both continuum-only and spectral-only L0 streams found - '
                        'perhaps they were intended to be matched?')
 
+    for name in outputs.get('sdp.cal', []):
+        _make_cal(g, config, name, config['outputs'][name]['src_streams'][0])
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
