@@ -11,6 +11,7 @@ import contextlib
 import os
 import os.path
 import sys
+import glob
 import base64
 import json
 import numbers
@@ -222,6 +223,7 @@ def attributes_resources(args):
         resources['katsdpcontroller.interface.{}.bandwidth_in'.format(i)] = speed
         resources['katsdpcontroller.interface.{}.bandwidth_out'.format(i)] = speed
     attributes['katsdpcontroller.interfaces'] = interfaces
+    attributes['katsdpcontroller.infiniband_devices'] = glob.glob('/dev/infiniband/*')
 
     volumes = []
     for volume_spec in args.volumes:
