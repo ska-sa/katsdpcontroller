@@ -181,8 +181,6 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
     ))
 
 EXPECTED_REQUEST_LIST = [
-    'data-product-configure',
-    'data-product-reconfigure',
     'product-configure',
     'product-deconfigure',
     'product-reconfigure',
@@ -229,7 +227,7 @@ class BaseTestSDPController(asynctest.TestCase):
 class TestSDPControllerInterface(BaseTestSDPController):
     """Testing of the SDP controller in interface mode."""
     async def setUp(self):
-        await self.setup_server('127.0.0.1', 0, None, simulate=True, interface_mode=True,
+        await self.setup_server('127.0.0.1', 0, None, interface_mode=True,
                                 safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
 
     async def test_capture_init(self):
@@ -266,16 +264,6 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.client.request("capture-done", SUBARRAY_PRODUCT2)
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
-    async def test_deconfigure_subarray_product_legacy(self):
-        await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT3, "")
-        await self.client.request(
-            "data-product-configure", SUBARRAY_PRODUCT3, ANTENNAS, "4096", "2.1", "0", STREAMS)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT3)
-        # should not be able to deconfigure when not in idle state
-        await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT3, "")
-        await self.client.request("capture-done", SUBARRAY_PRODUCT3)
-        await self.client.request("data-product-configure", SUBARRAY_PRODUCT3, "")
-
     async def test_deconfigure_subarray_product(self):
         await self.assert_request_fails("product-configure", SUBARRAY_PRODUCT3)
         await self.client.request("product-configure", SUBARRAY_PRODUCT3, CONFIG)
@@ -284,23 +272,6 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.assert_request_fails("product-deconfigure", SUBARRAY_PRODUCT3)
         await self.client.request("capture-done", SUBARRAY_PRODUCT3)
         await self.client.request("product-deconfigure", SUBARRAY_PRODUCT3)
-
-    async def test_configure_subarray_product_legacy(self):
-        await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT4)
-        await self.client.request("data-product-configure")
-        await self.client.request(
-            "data-product-configure", SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.1", "0", STREAMS)
-        await self.client.request(
-            "data-product-configure", SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.1", "0", STREAMS)
-        await self.assert_request_fails(
-            "data-product-configure", SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.2", "0", STREAMS)
-        await self.client.request("data-product-configure", SUBARRAY_PRODUCT4)
-
-        reply, informs = await self.client.request("data-product-configure")
-        self.assertEqual(reply, [b'1'])
-
-        await self.client.request("data-product-configure", SUBARRAY_PRODUCT4, "")
-        await self.assert_request_fails("data-product-configure", SUBARRAY_PRODUCT4)
 
     async def test_configure_subarray_product(self):
         await self.assert_request_fails("product-deconfigure", SUBARRAY_PRODUCT4)
@@ -322,14 +293,6 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
         await self.client.request("product-deconfigure", SUBARRAY_PRODUCT4)
         await self.assert_request_fails("product-list", SUBARRAY_PRODUCT4)
-
-    async def test_reconfigure_subarray_product_legacy(self):
-        await self.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
-        await self.client.request("data-product-configure",
-                                  SUBARRAY_PRODUCT4, ANTENNAS, "4096", "2.1", "0", STREAMS)
-        await self.client.request("data-product-reconfigure", SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
-        await self.assert_request_fails("data-product-reconfigure", SUBARRAY_PRODUCT4)
 
     async def test_reconfigure_subarray_product(self):
         await self.assert_request_fails("product-reconfigure", SUBARRAY_PRODUCT4)
@@ -413,7 +376,7 @@ class TestSDPController(BaseTestSDPController):
             ([], []),
             cancelled, loop=self.loop)
 
-    def _data_product_configure_slow(self, subarray_product, cancelled=False):
+    def _product_configure_slow(self, subarray_product, cancelled=False):
         """Asynchronous context manager that runs its block with a
         product-configure in progress.
         """
@@ -459,7 +422,7 @@ class TestSDPController(BaseTestSDPController):
         self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         await self.setup_server(
-            '127.0.0.1', 0, self.sched, simulate=True,
+            '127.0.0.1', 0, self.sched,
             safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
         for product in [SUBARRAY_PRODUCT1, SUBARRAY_PRODUCT2,
                         SUBARRAY_PRODUCT3, SUBARRAY_PRODUCT4]:
@@ -665,7 +628,7 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_product_configure_parallel(self):
         """Can configure two subarray products at the same time"""
-        async with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
+        async with self._product_configure_slow(SUBARRAY_PRODUCT1):
             # We use a different subarray product
             await self.client.request(*self._configure_args(SUBARRAY_PRODUCT2))
         # Check that both products are in the right state
@@ -717,7 +680,7 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_product_deconfigure_while_configuring_force(self):
         """forced product-deconfigure must succeed while in product-configure"""
-        async with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
+        async with self._product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1, '1')
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY, force=True)
@@ -782,7 +745,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_reconfigure_configure_busy(self):
         """Can run product-reconfigure concurrently with another product-configure"""
         await self._configure_subarray(SUBARRAY_PRODUCT1)
-        async with self._data_product_configure_slow(SUBARRAY_PRODUCT2):
+        async with self._product_configure_slow(SUBARRAY_PRODUCT2):
             await self.client.request('product-reconfigure', SUBARRAY_PRODUCT1)
 
     async def test_product_reconfigure_configure_fails(self):
@@ -832,7 +795,7 @@ class TestSDPController(BaseTestSDPController):
         """Test that a command fails if issued while ?capture-init or
         ?product-configure is in progress
         """
-        async with self._data_product_configure_slow(SUBARRAY_PRODUCT1):
+        async with self._product_configure_slow(SUBARRAY_PRODUCT1):
             await self.assert_request_fails(command, *args)
         async with self._capture_init_slow(SUBARRAY_PRODUCT1):
             await self.assert_request_fails(command, *args)
@@ -902,7 +865,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_deconfigure_on_exit_cancel(self):
         """Calling deconfigure_on_exit while a configure is in process cancels
         that configure and kills off the graph."""
-        async with self._data_product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
+        async with self._product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.server.deconfigure_on_exit()
         # We must have killed off the partially-launched graph
         self.sched.kill.assert_called_with(mock.ANY, force=True)
