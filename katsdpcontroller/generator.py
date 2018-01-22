@@ -796,7 +796,13 @@ def _make_beamformer_ptuse(g, config, name):
     bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
     bf_ingest.interfaces[0].bandwidth_in = sum(x.net_bandwidth for x in info)
     bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
-    bf_ingest.container.docker.parameters = [{'key': 'ipc', 'value': 'host'}]
+    # If the kernel is < 3.16, the default values are very low. Set
+    # the values to the default from more recent Linux versions
+    # (https://github.com/torvalds/linux/commit/060028bac94bf60a65415d1d55a359c3a17d5c31)
+    bf_ingest.container.docker.parameters = [
+        {'key': 'sysctl', 'value': 'kernel.shmmax=18446744073692774399'},
+        {'key': 'sysctl', 'value': 'kernel.shmall=18446744073692774399'}
+    ]
     bf_ingest.transitions = CAPTURE_TRANSITIONS
     g.add_node(bf_ingest, config=lambda task, resolver: {
         'cbf_channels': info[0].n_channels,
