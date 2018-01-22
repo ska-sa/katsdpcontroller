@@ -1987,7 +1987,7 @@ class Scheduler(pymesos.Scheduler):
         self._driver = None
         self._offers = {}           #: offers keyed by slave ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
-        self._retry_launch = asyncio.Event(loop=self._loop)
+        self._wakeup_launcher = asyncio.Event(loop=self._loop)
         self._default_queue = LaunchQueue()
         self._queues = [self._default_queue]
         self._offers_suppressed = False
@@ -2101,7 +2101,7 @@ class Scheduler(pymesos.Scheduler):
     def resourceOffers(self, driver, offers):
         for offer in offers:
             self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
-        self._retry_launch.set()
+        self._wakeup_launcher.set()
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
@@ -2328,7 +2328,7 @@ class Scheduler(pymesos.Scheduler):
                 # Last chance for the group to be cancelled. After this point, we must
                 # not await anything.
                 if group.future.cancelled():
-                    # No need to set _retry_launch, because the cancellation did so.
+                    # No need to set _wakeup_launcher, because the cancellation did so.
                     continue
                 # Launch the tasks
                 new_min_ports = {}
@@ -2356,7 +2356,7 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.STARTED)
                 group.future.set_result(None)
                 queue.remove(group)
-                self._retry_launch.set()
+                self._wakeup_launcher.set()
                 break
 
     async def _launcher(self):
@@ -2375,12 +2375,12 @@ class Scheduler(pymesos.Scheduler):
         # - A new offer is received
         # - After a successful launch (since a new front-of-queue group may
         #   appear).
-        # All are signalled by setting _retry_launch. In some cases it is set
+        # All are signalled by setting _wakeup_launcher. In some cases it is set
         # when it is not actually needed - this is harmless as long as the number
         # of queues doesn't get out of hand.
         while True:
-            await self._retry_launch.wait()
-            self._retry_launch.clear()
+            await self._wakeup_launcher.wait()
+            self._wakeup_launcher.clear()
             try:
                 await self._launch_once()
             except asyncio.CancelledError:
@@ -2501,7 +2501,7 @@ class Scheduler(pymesos.Scheduler):
         empty = not queue
         queue.add(pending)
         if empty:
-            self._retry_launch.set()
+            self._wakeup_launcher.set()
         try:
             await asyncio.wait_for(pending.future, timeout=resources_timeout)
         except Exception as error:
@@ -2514,7 +2514,7 @@ class Scheduler(pymesos.Scheduler):
                 if node.state == TaskState.STARTING:
                     node.set_state(TaskState.NOT_READY)
             queue.remove(pending)
-            self._retry_launch.set()
+            self._wakeup_launcher.set()
             if isinstance(error, asyncio.TimeoutError):
                 raise pending.last_insufficient
             else:
@@ -2634,7 +2634,7 @@ class Scheduler(pymesos.Scheduler):
             if node.state <= TaskState.STARTING:
                 if node.state == TaskState.STARTING:
                     # Fewer resources now needed to start rest of the group
-                    self._retry_launch.set()
+                    self._wakeup_launcher.set()
                 node.set_state(TaskState.DEAD)
             elif node.state <= TaskState.KILLING:
                 for src in graph.predecessors(node):
