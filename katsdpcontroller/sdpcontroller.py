@@ -35,6 +35,7 @@ from .tasks import State, DEPENDS_INIT
 faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 
+BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
@@ -626,7 +627,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                  sdp_controller, telstate_name='telstate'):
         super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
         # Priority is lower (higher number) than the default queue
-        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=1)
+        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=BATCH_PRIORITY)
         sched.add_queue(self.batch_queue)
         # generate physical nodes
         self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
