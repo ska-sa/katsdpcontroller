@@ -695,8 +695,6 @@ def _make_cal(g, config, name, l0_name):
     buffer_time = settings.get('buffer_time', 30.0 * 60.0)
     parameters = settings.get('parameters', {})
     models = settings.get('models', {})
-    if parameters:
-        raise NotImplementedError('cal parameters are not yet supported')
     if models:
         raise NotImplementedError('cal models are not yet supported')
 
@@ -753,7 +751,7 @@ def _make_cal(g, config, name, l0_name):
     cal.ports = ['port']
     cal.transitions = CAPTURE_TRANSITIONS
     cal.deconfigure_wait = False
-    g.add_node(cal, telstate_extra=telstate_extra, config=lambda task, resolver: {
+    g.add_node(cal, telstate_extra=telstate_extra, config=lambda task, resolver: dict(**{
         'buffer_maxsize': buffer_size,
         'workers': workers,
         'l0_spectral_interface': task.interfaces['sdp_10g'].name,
@@ -761,7 +759,7 @@ def _make_cal(g, config, name, l0_name):
         # cal should change to remove "spectral"; both are provided for now
         'l0_interface': task.interfaces['sdp_10g'].name,
         'l0_name': l0_name
-    })
+    }, **parameters))
     src_multicast = find_node(g, 'multicast.' + l0_name)
     g.add_edge(cal, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,

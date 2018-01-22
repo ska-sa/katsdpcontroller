@@ -285,6 +285,12 @@
                                         "parameters": {
                                             "type": "object",
                                             "properties": {
+                                                "preferred_refants": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"},
+                                                    "minItems": 1,
+                                                    "uniqueItems": true
+                                                },
                                                 "k_solint": {"$ref": "#/definitions/positive_number"},
                                                 "k_chan_sample": {"$ref": "#/definitions/positive_integer"},
                                                 "k_bchan": {"$ref": "#/definitions/nonneg_integer"},
