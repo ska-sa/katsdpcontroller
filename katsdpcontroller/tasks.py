@@ -101,9 +101,12 @@ class SDPLogicalTask(scheduler.LogicalTask):
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
         super().__init__(logical_task, loop)
-        self.name = '{}.{}'.format(subarray_product_id, logical_task.name)
+        if capture_block_id is None:
+            self.name = '.'.join([subarray_product_id, logical_task.name])
+        else:
+            self.name = '.'.join([subarray_product_id, capture_block_id, logical_task.name])
         self.sdp_controller = sdp_controller
         self.subarray_product_id = subarray_product_id
         # list of exposed KATCP sensors
@@ -140,8 +143,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def kill(self, driver, **kwargs):
-        self._disconnect()
-        super().kill(driver)
+        force = kwargs.pop('force', False)
+        if not force:
+            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
+        else:
+            self._disconnect()
+            super().kill(driver, **kwargs)
 
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
@@ -205,6 +212,14 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
 
+    def clone(self):
+        return self.logical_node.physical_factory(
+            self.logical_node, self.loop, self.sdp_controller, self.subarray_product_id)
+
+    async def graceful_kill(self, driver, **kwargs):
+        self._disconnect()
+        super().kill(driver, **kwargs)
+
 
 class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
@@ -225,7 +240,8 @@ class SDPConfigMixin:
             logger.warning('Overriding config for %s', self.name)
             config = product_config.override(config, overrides)
         logger.debug('Config for %s: %s', self.name, config)
-        resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
+        if config:
+            resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 
 
 class CaptureBlockStateObserver:
@@ -303,8 +319,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     For example:
       sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id):
-        super().__init__(logical_task, loop, sdp_controller, subarray_product_id)
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
+        super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
@@ -391,14 +407,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 await self.capture_block_state_observer.wait_empty()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        super().kill(driver, **kwargs)
-
-    def kill(self, driver, **kwargs):
-        force = kwargs.pop('force', False)
-        if not force:
-            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
-        else:
-            super().kill(driver, **kwargs)
+        await super().graceful_kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):

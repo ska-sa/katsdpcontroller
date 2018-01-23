@@ -1,7 +1,9 @@
 addict==2.1.1
+aioconsole==0.1.7          # via aiomonitor
 aiohttp==2.3.6
 aiohttp-jinja2==0.14.0
 aiokatcp==0.2
+aiomonitor==0.3.0
 async-timeout==2.0.0
 certifi                    # via requests
 chardet==3.0.4             # via aiohttp, requests
@@ -18,7 +20,6 @@ jsonschema==2.6.0
 katversion
 kazoo==2.4.0
 multidict==3.3.2           # via aiohttp, yarl
-manhole
 markupsafe                 # via jinja2
 netifaces
 networkx==2.0
@@ -32,6 +33,7 @@ redis                      # via katsdptelstate
 requests==2.18.4           # via docker
 rfc3987==1.3.7
 six                        # via docker and others
+terminaltables==3.1.0      # via aiomonitor
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 yarl==0.16.0               # via aiohttp

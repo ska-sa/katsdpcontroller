@@ -35,6 +35,7 @@ from .tasks import State, DEPENDS_INIT
 faulthandler.register(signal.SIGUSR2, all_threads=True)
 
 
+BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
@@ -226,6 +227,7 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
+        self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
         self.capture_blocks = {}              # live capture blocks, indexed by name
@@ -410,13 +412,13 @@ class SDPSubarrayProductBase:
         self.state = State.IDLE
         self.current_capture_block = None
         capture_block.state = CaptureBlock.State.POSTPROCESSING
-        capture_block.postprocessing_task = asyncio.ensure_future(
+        capture_block.postprocess_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
-            capture_block.postprocessing_task,
+            capture_block.postprocess_task,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
                                                            capture_block.name))
-        capture_block.postprocessing_task.add_done_callback(
+        capture_block.postprocess_task.add_done_callback(
             lambda task: self._capture_block_dead(capture_block))
         return capture_block
 
@@ -608,24 +610,34 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
-    def _instantiate(self, logical_node, sdp_controller):
+    def _instantiate(self, logical_node, capture_block_id):
         if isinstance(logical_node, tasks.SDPLogicalTask):
             return logical_node.physical_factory(
                 logical_node, self.loop,
-                sdp_controller, self.subarray_product_id)
+                self.sdp_controller, self.subarray_product_id, capture_block_id)
         else:
             return logical_node.physical_factory(logical_node, self.loop)
+
+    def _instantiate_physical_graph(self, logical_graph, capture_block_id=None):
+        mapping = {logical: self._instantiate(logical, capture_block_id)
+                   for logical in logical_graph}
+        return networkx.relabel_nodes(logical_graph, mapping)
 
     def __init__(self, sched, config, resolver, subarray_product_id, loop,
                  sdp_controller, telstate_name='telstate'):
         super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
+        # Priority is lower (higher number) than the default queue
+        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=BATCH_PRIORITY)
+        sched.add_queue(self.batch_queue)
         # generate physical nodes
-        mapping = {logical: self._instantiate(logical, sdp_controller)
-                   for logical in self.logical_graph}
-        self.physical_graph = networkx.relabel_nodes(self.logical_graph, mapping)
+        self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
+        self.telstate_node.capture_blocks = self.capture_blocks
+
+    def __del__(self):
+        self.sched.remove_queue(self.batch_queue)
 
     async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical
@@ -753,6 +765,21 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 observer = node.capture_block_state_observer
                 if observer is not None:
                     await observer.wait_capture_block_done(capture_block.name)
+
+        physical_graph = self._instantiate_physical_graph(self.postprocess_logical_graph,
+                                                          capture_block.name)
+        nodes = {node.logical_node.name: node for node in physical_graph}
+        telstate_node = nodes['telstate']
+        telstate_node.host = self.telstate_node.host
+        telstate_node.ports = dict(self.telstate_node.ports)
+        batch = []
+        for node in physical_graph:
+            if isinstance(node, scheduler.PhysicalTask):
+                coro = self.sched.batch_run(
+                    physical_graph, self.resolver, [telstate_node, node], queue=self.batch_queue,
+                    resources_timeout=7*86400, attempts=3)
+                batch.append(coro)
+        await asyncio.gather(*batch, loop=self.loop)
 
     async def _launch_telstate(self):
         """Make sure the telstate node is launched"""
