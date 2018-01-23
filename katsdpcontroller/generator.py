@@ -1006,18 +1006,11 @@ def build_logical_graph(config):
 
 
 def build_postprocess_logical_graph(config):
+    # This is just a stub implementation, until we have some postprocessing
+    # tasks to run.
     g = networkx.MultiDiGraph()
     telstate = scheduler.LogicalExternal('telstate')
     g.add_node(telstate)
-    for i in range(16):
-        task = SDPLogicalTask('process.{}'.format(i))
-        task.image = 'katsdpfilewriter'
-        task.command = ['sh', '-c', 'sleep 2 && echo Hello world {}'.format(i)]
-        task.cpus = 0.1
-        task.mem = 256
-        task.max_run_time = 20
-        g.add_node(task)
-        g.add_edge(task, telstate, port='telstate')
 
     for node in g:
         if isinstance(node, SDPLogicalTask):
