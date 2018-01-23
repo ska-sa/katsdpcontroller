@@ -42,7 +42,7 @@ class TestValidate:
 
     def setup(self):
         self.config = {
-            "version": "1.0",
+            "version": "1.1",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -110,6 +110,10 @@ class TestValidate:
                     ],
                     "output_channels": [0, 4096],
                     "store": "ssd"
+                },
+                "cal": {
+                    "type": "sdp.cal",
+                    "src_streams": ["l0"]
                 }
             },
             "config": {}
@@ -119,7 +123,7 @@ class TestValidate:
         product_config.validate(self.config)
 
     def test_bad_version(self):
-        self.config["version"] = "1.1"
+        self.config["version"] = "1.10"
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config)
 
@@ -219,219 +223,16 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("not a multiple of", str(cm.exception))
 
-
-class TestConvert:
-    """Tests for :func:`~katsdpcontroller.product_config.convert`.
-
-    These tests are fragile because there is more than one valid way to skin
-    the cat. They're written by checking what comes out for sanity then
-    setting that as the expected value.
-    """
-
-    def setup(self):
-        self.antennas = ["m000", "m001", "m002", "m003", "m004"]
-        self.stream_sources = {
-            "cam.http": {"camdata": "http://10.8.67.235/api/client/1"},
-            "cbf.antenna_channelised_voltage": {
-                "i0.antenna-channelised-voltage": "spead://239.2.1.150+15:7148"
-            },
-            "cbf.baseline_correlation_products": {
-                "i0.baseline-correlation-products": "spead://239.9.3.1+15:7148"
-            }, "cbf.tied_array_channelised_voltage": {
-                "i0.tied-array-channelised-voltage.0x": "spead://239.9.3.30+15:7148",
-                "i0.tied-array-channelised-voltage.0y": "spead://239.9.3.46+15:7148"
-            }
-        }
-        self.expected_inputs = {
-            "camdata": {
-                "type": "cam.http",
-                "url": "http://10.8.67.235/api/client/1"
-            },
-            "i0_antenna_channelised_voltage": {
-                "adc_sample_rate": 1712000000.0,
-                "antennas": [
-                    "m000",
-                    "m001",
-                    "m002",
-                    "m003",
-                    "m004"
-                ],
-                "bandwidth": 856000000.0,
-                "instrument_dev_name": "i0",
-                "n_chans": 4096,
-                "n_pols": 2,
-                "n_samples_between_spectra": 8192,
-                "type": "cbf.antenna_channelised_voltage",
-                "url": "spead://239.2.1.150+15:7148"
-            },
-            "i0_baseline_correlation_products": {
-                "instrument_dev_name": "i0",
-                "int_time": 0.49978856074766354,
-                "n_bls": 144,
-                "n_chans_per_substream": 256,
-                "simulate": False,
-                "src_streams": [
-                    "i0_antenna_channelised_voltage"
-                ],
-                "type": "cbf.baseline_correlation_products",
-                "url": "spead://239.9.3.1+15:7148",
-                "xeng_out_bits_per_sample": 32
-            },
-            "i0_tied_array_channelised_voltage_0x": {
-                "beng_out_bits_per_sample": 8,
-                "instrument_dev_name": "i0",
-                "n_chans_per_substream": 256,
-                "simulate": False,
-                "spectra_per_heap": 256,
-                "src_streams": [
-                    "i0_antenna_channelised_voltage"
-                ],
-                "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.30+15:7148"
-            },
-            "i0_tied_array_channelised_voltage_0y": {
-                "beng_out_bits_per_sample": 8,
-                "instrument_dev_name": "i0",
-                "n_chans_per_substream": 256,
-                "simulate": False,
-                "spectra_per_heap": 256,
-                "src_streams": [
-                    "i0_antenna_channelised_voltage"
-                ],
-                "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.46+15:7148"
-            }
-        }
-        self.expected_l0 = {
-            "sdp_l0": {
-                "continuum_factor": 1,
-                "output_int_time": 2.0,
-                "src_streams": [
-                    "i0_baseline_correlation_products"
-                ],
-                "type": "sdp.l0"
-            },
-            "sdp_l0_continuum": {
-                "continuum_factor": 16,
-                "output_int_time": 2.0,
-                "src_streams": [
-                    "i0_baseline_correlation_products"
-                ],
-                "type": "sdp.l0"
-            }
-        }
-        self.expected_beamformer_ptuse = {
-            "beamformer": {
-                "src_streams": [
-                    "i0_tied_array_channelised_voltage_0x",
-                    "i0_tied_array_channelised_voltage_0y"
-                ],
-                "type": "sdp.beamformer"
-            }
-        }
-        self.expected_beamformer_ssd = {
-            "beamformer": {
-                "src_streams": [
-                    "i0_tied_array_channelised_voltage_0x",
-                    "i0_tied_array_channelised_voltage_0y"
-                ],
-                "store": "ssd",
-                "type": "sdp.beamformer_engineering"
-            }
-        }
-
-    def test_c856M4k(self):
-        """No beamformer"""
-        config = product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                        0.5, False, False, None)
-        expected = {
-            "config": {},
-            "inputs": self.expected_inputs,
-            "outputs": self.expected_l0,
-            "version": "1.0"
-        }
-        assert_equal(expected, config)
-
-    def test_bc856M4k(self):
-        """PTUSE beamformer capture"""
-        config = product_config.convert("bc856M4k", self.stream_sources, self.antennas,
-                                        0.5, False, False, None)
-        expected = {
-            "config": {},
-            "inputs": self.expected_inputs,
-            "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ptuse),
-            "version": "1.0"
-        }
-        assert_equal(expected, config)
-
-    def test_bec856M4kssd(self):
-        """HDF5 beamformer capture"""
-        config = product_config.convert("bec856M4kssd", self.stream_sources, self.antennas,
-                                        0.5, False, False, None)
-        expected = {
-            "config": {},
-            "inputs": self.expected_inputs,
-            "outputs": merge_dicts(self.expected_l0, self.expected_beamformer_ssd),
-            "version": "1.0"
-        }
-        assert_equal(expected, config)
-
-    def test_single_pol(self):
-        config = product_config.convert("c856M4k1p", self.stream_sources, self.antennas,
-                                        0.5, False, False, None)
-        self.expected_inputs["i0_antenna_channelised_voltage"]["n_pols"] = 1
-        self.expected_inputs["i0_baseline_correlation_products"]["n_bls"] = 40
-        expected = {
-            "config": {},
-            "inputs": self.expected_inputs,
-            "outputs": self.expected_l0,
-            "version": "1.0"
-        }
-        assert_equal(expected, config)
-
-    def test_extras(self):
-        """Test develop, simulate and wrapper arguments"""
-        del self.stream_sources["cam.http"]
-        config = product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                        0.5, True, True, "http://invalid.com/wrapper")
-        del self.expected_inputs["camdata"]
-        self.expected_inputs["i0_baseline_correlation_products"]["simulate"] = True
-        self.expected_inputs["i0_tied_array_channelised_voltage_0x"]["simulate"] = True
-        self.expected_inputs["i0_tied_array_channelised_voltage_0y"]["simulate"] = True
-        expected = {
-            "config": {
-                "develop": True,
-                "wrapper": "http://invalid.com/wrapper"
-            },
-            "inputs": self.expected_inputs,
-            "outputs": self.expected_l0,
-            "version": "1.0"
-        }
-        assert_equal(expected, config)
-
-    def test_bad_graph(self):
+    def test_v1_0_sdp_cal(self):
+        self.config["version"] = "1.0"
         with assert_raises(ValueError):
-            product_config.convert("notavalidgraph", self.stream_sources, self.antennas,
-                                   0.5, False, False, None)
+            product_config.validate(self.config)
 
-    def test_two_antenna_channelised_voltage(self):
-        acv = self.stream_sources["cbf.antenna_channelised_voltage"]
-        acv["i0.bad"] = acv["i0.antenna-channelised-voltage"]
+    def test_v1_0_simulate_dict(self):
+        self.config["version"] = "1.0"
+        del self.config["outputs"]["cal"]
+        # Confirm that this is now valid 1.0
+        product_config.validate(self.config)
+        self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
         with assert_raises(ValueError):
-            product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                   0.5, False, False, None)
-
-    def test_no_antenna_channelised_voltage(self):
-        self.stream_sources["cbf.antenna_channelised_voltage"] = {}
-        with assert_raises(ValueError):
-            product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                   0.5, False, False, None)
-        del self.stream_sources["cbf.antenna_channelised_voltage"]
-        with assert_raises(ValueError):
-            product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                   0.5, False, False, None)
-
-    def test_bad_output(self):
-        with assert_raises(jsonschema.ValidationError):
-            product_config.convert("c856M4k", self.stream_sources, self.antennas,
-                                   0.5, False, False, "not a valid URL")
+            product_config.validate(self.config)

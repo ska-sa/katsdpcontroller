@@ -15,7 +15,7 @@ from unittest import mock
 import aiokatcp
 from aiokatcp import Sensor, Address
 from aiokatcp.test.test_utils import timelimit
-import prometheus_client
+from prometheus_client import Gauge, Counter, CollectorRegistry
 
 import asynctest
 
@@ -66,14 +66,27 @@ class FutureObserver:
 
 @timelimit
 class TestSensorProxyClient(asynctest.TestCase):
+    def _make_prom_sensor(self, name, description, class_):
+        return (
+            class_('test_' + name, description, ['label1'], registry=self.registry),
+            Gauge('test_' + name + '_status',
+                  'Status of katcp sensor ' + name, ['label1'], registry=self.registry))
+
     async def setUp(self):
+        # Create a custom registry, to avoid polluting the global one
+        self.registry = CollectorRegistry()
+        prom_sensors = {
+            'int_sensor': self._make_prom_sensor('int_sensor', 'A counter', Counter),
+            'float_sensor': self._make_prom_sensor('float_sensor', 'A gauge', Gauge)
+        }
         self.mirror = mock.create_autospec(aiokatcp.DeviceServer, instance=True)
         self.mirror.sensors = aiokatcp.SensorSet([])
         self.server = DummyServer('127.0.0.1', 0)
         await self.server.start()
         self.addCleanup(self.server.stop)
         port = self.server.server.sockets[0].getsockname()[1]
-        self.client = SensorProxyClient(self.mirror, 'prefix-', {}, [], '127.0.0.1', port)
+        self.client = SensorProxyClient(self.mirror, 'prefix-',
+                                        prom_sensors, ['labelvalue1'], '127.0.0.1', port)
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
         await self.client.wait_synced()
@@ -102,11 +115,16 @@ class TestSensorProxyClient(asynctest.TestCase):
     async def test_init(self):
         self._check_sensors()
 
-    async def test_set_value(self):
+    async def _set(self, name, value, **kwargs):
+        """Set a sensor on the server and wait for the mirror to observe it"""
         observer = FutureObserver(self.loop)
-        self.mirror.sensors['prefix-int-sensor'].attach(observer)
-        self.server.sensors['int-sensor'].set_value(2, timestamp=123456790.0)
+        self.mirror.sensors['prefix-' + name].attach(observer)
+        self.server.sensors[name].set_value(value, **kwargs)
         await observer.future
+        self.mirror.sensors['prefix-' + name].detach(observer)
+
+    async def test_set_value(self):
+        await self._set('int-sensor', 2, timestamp=123456790.0)
         self._check_sensors()
 
     async def test_add_sensor(self):
@@ -136,3 +154,36 @@ class TestSensorProxyClient(asynctest.TestCase):
         await self.client.wait_disconnected()
         await self.client.wait_synced()
         self._check_sensors()
+
+    def _check_prom(self, name, value, status=Sensor.Status.NOMINAL):
+        labels = {'label1': 'labelvalue1'}
+        actual_value = self.registry.get_sample_value(name, labels)
+        actual_status = self.registry.get_sample_value(name + '_status', labels)
+        self.assertEqual(value, actual_value)
+        self.assertEqual(status.value, actual_status)
+
+    async def test_gauge(self):
+        labels = {'label1': 'labelvalue1'}
+        await self._set('float-sensor', 2.5)
+        self._check_prom('test_float_sensor', 2.5)
+        # Change to an status where the value is not valid. The prometheus
+        # Gauge must not change.
+        await self._set('float-sensor', 1.0, status=Sensor.Status.FAILURE)
+        self._check_prom('test_float_sensor', 2.5, Sensor.Status.FAILURE)
+
+    async def test_counter(self):
+        await self._set('int-sensor', 4)
+        self._check_prom('test_int_sensor', 4)
+        # Increase the value
+        await self._set('int-sensor', 10)
+        self._check_prom('test_int_sensor', 10)
+        # Reset then increase the value. The counter must record the cumulative total
+        await self._set('int-sensor', 0)
+        await self._set('int-sensor', 6, status=Sensor.Status.ERROR)
+        self._check_prom('test_int_sensor', 16, Sensor.Status.ERROR)
+        # Set to an invalid status. The counter value must not be affected.
+        await self._set('int-sensor', 9, status=Sensor.Status.FAILURE)
+        self._check_prom('test_int_sensor', 16, Sensor.Status.FAILURE)
+        # Set back to a valid status
+        await self._set('int-sensor', 8)
+        self._check_prom('test_int_sensor', 18)

@@ -60,7 +60,8 @@ def load_gui_urls_dir(dirname):
 
 
 async def run(loop, sched, server):
-    await sched.start()
+    if sched is not None:
+        await sched.start()
     await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
@@ -80,18 +81,10 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--loglevel', dest='loglevel',
                         default="info", metavar='LOGLEVEL',
                         help='set the Python logging level (default=%(default)s)')
-    parser.add_argument('-s', '--simulate', dest='simulate', default=False,
-                        action='store_true',
-                        help='run controller in simulation mode suitable for lab testing (default: %(default)s)')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
                         help='port that slaves communicate with (default=%(default)s)')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port (default=auto)')
-    parser.add_argument('--develop', default=False,
-                        action='store_true',
-                        help='relax constraints to allow testing on different hardware (default: %(default)s)')
-    parser.add_argument('--wrapper', metavar='URI',
-                        help='URI to wrapper script used to launch all tasks (default: none)')
     parser.add_argument('--no-prometheus', dest='prometheus', default=True,
                         action='store_false',
                         help='disable Prometheus client HTTP service')
@@ -188,10 +181,7 @@ if __name__ == "__main__":
         driver.start()
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port, sched, loop,
-        simulate=opts.simulate,
-        develop=opts.develop,
         interface_mode=opts.interface_mode,
-        wrapper=opts.wrapper,
         image_resolver_factory=image_resolver_factory,
         graph_resolver=graph_resolver,
         safe_multicast_cidr=opts.safe_multicast_cidr,

@@ -908,11 +908,11 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-1.2"
+    VERSION = "sdpcontroller-2.0"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
-                 simulate=False, develop=False, interface_mode=False, wrapper=None,
+                 interface_mode=False,
                  graph_resolver=None, image_resolver_factory=None,
                  gui_urls=None, graph_dir=None):
         # setup sensors
@@ -929,22 +929,11 @@ class SDPControllerServer(DeviceServer):
         self._ntp_sensor = Sensor(bool, "time-synchronised",
                                   "SDP Controller container (and host) is synchronised to NTP")
 
-        self.simulate = simulate
-        if self.simulate:
-            logger.warning("Note: Running in simulation mode. "
-                           "This will simulate certain external components such as the CBF.")
-        self.develop = develop
-        if self.develop:
-            logger.warning("Note: Running in developer mode. This will relax some constraints.")
         self.interface_mode = interface_mode
         if self.interface_mode:
             logger.warning("Note: Running master controller in interface mode. "
                            "This allows testing of the interface only, "
                            "no actual command logic will be enacted.")
-        self.wrapper = wrapper
-        if self.wrapper is not None:
-            logger.warning('Note: Using wrapper %s in all containers. This may alter behaviour.',
-                           self.wrapper)
         self.sched = sched
         self.gui_urls = gui_urls if gui_urls is not None else []
         self.graph_dir = graph_dir
@@ -1056,6 +1045,7 @@ class SDPControllerServer(DeviceServer):
                 del self.subarray_products[product.subarray_product_id]
                 self.sensors.discard(product.state_sensor)
                 self.sensors.discard(product.capture_block_sensor)
+                self.mass_inform('interface-changed', 'sensor-list')
                 logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
 
         if subarray_product_id in self.override_dicts:
@@ -1184,7 +1174,23 @@ class SDPControllerServer(DeviceServer):
         return "Set {} override keys for subarray product {}".format(
             len(self.override_dicts[subarray_product_id]), subarray_product_id)
 
-    async def _product_reconfigure(self, ctx, subarray_product_id):
+    @time_request
+    async def request_product_reconfigure(self, ctx, subarray_product_id: str) -> None:
+        """Reconfigure the specified SDP subarray product instance.
+
+           The primary use of this command is to restart the SDP components for a particular
+           subarray without having to reconfigure the rest of the system.
+
+           Essentially this runs a deconfigure() followed by a configure() with
+           the same parameters as originally specified via the
+           product-configure katcp request.
+
+           Request Arguments
+           -----------------
+           subarray_product_id : string
+             The ID of the subarray product to reconfigure.
+
+        """
         logger.info("?product-reconfigure called on {}".format(subarray_product_id))
         try:
             product = self.subarray_products[subarray_product_id]
@@ -1212,123 +1218,6 @@ class SDPControllerServer(DeviceServer):
             msg = "Unable to configure as part of reconfigure, original array deconfigured"
             logger.error(msg, exc_info=True)
             raise FailReply("{}. {}".format(msg, error))
-
-    @time_request
-    async def request_product_reconfigure(self, ctx, subarray_product_id: str) -> None:
-        """Reconfigure the specified SDP subarray product instance.
-
-           The primary use of this command is to restart the SDP components for a particular
-           subarray without having to reconfigure the rest of the system.
-
-           Essentially this runs a deconfigure() followed by a configure() with
-           the same parameters as originally specified via the
-           product-configure katcp request.
-
-           Request Arguments
-           -----------------
-           subarray_product_id : string
-             The ID of the subarray product to reconfigure.
-
-        """
-        await self._product_reconfigure(ctx, subarray_product_id)
-
-    # Backwards-compatibility alias
-    @time_request
-    async def request_data_product_reconfigure(self, ctx, subarray_product_id: str) -> None:
-        await self._product_reconfigure(ctx, subarray_product_id)
-
-    request_data_product_reconfigure.__doc__ = request_product_reconfigure.__doc__
-
-    @time_request
-    async def request_data_product_configure(
-            self, ctx,
-            subarray_product_id: str = None,
-            antennas: str = None,
-            n_channels: int = None,
-            dump_rate: float = None,
-            n_beams: int = None,
-            stream_sources: str = None) -> str:
-        """Configure a SDP subarray product instance (legacy interface).
-
-        A subarray product instance is comprised of a telescope state, a
-        collection of containers running required SDP services, and a
-        networking configuration appropriate for the required data movement.
-
-        On configuring a new product, several steps occur:
-         * Build initial static configuration. Includes elements such as IP
-           addresses of deployment machines, multicast subscription details etc
-         * Launch a new Telescope State Repository (redis instance) for this
-           product and copy in static config.
-         * Launch service containers as described in the static configuration.
-         * Verify all services are running and reachable.
-
-
-        Request Arguments
-        -----------------
-        subarray_product_id : string
-            The ID to use for this subarray product, in the form
-            <subarray_name>_<data_product_name>.
-        antennas : string
-            A comma-separated list of antenna names to use in this subarray
-            product. These will be matched to the CBF output and used to pull
-            only the specific data. If antennas is "0" or "", then this subarray
-            product is de-configured. Trailing arguments can be omitted.
-        n_channels : int
-            Number of channels used in this subarray product (based on CBF config)
-        dump_rate : float
-            Dump rate of subarray product in Hz
-        n_beams : int
-            Number of beams in the subarray product
-            (0 = Correlator output, 1+ = Beamformer)
-        stream_sources: string
-            A JSON dict of the form {<type>: {<name>: <url>, ...}, ...}
-            These stream specifiers are used directly by the graph to configure
-            the SDP system and thus rely on the stream_name as a key
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
-        """
-        # INFO for now, but should be DEBUG post integration
-        logger.info("?data-product-configure called with: {}".format(ctx.req))
-        if antennas is None:
-            if subarray_product_id is None:
-                for (subarray_product_id, subarray_product) in self.subarray_products.items():
-                    ctx.inform(subarray_product_id, str(subarray_product))
-                return "%i" % len(self.subarray_products)
-            elif subarray_product_id in self.subarray_products:
-                return "%s is currently configured: %s" % (
-                    subarray_product_id, repr(self.subarray_products[subarray_product_id]))
-            else:
-                raise FailReply("This subarray product id has no current configuration.")
-
-        if antennas == "0" or antennas == "":
-            ctx.inform("Starting deconfiguration of {}. This may take a few minutes..."
-                       .format(subarray_product_id))
-            await self.deconfigure_product(subarray_product_id)
-            return ''
-
-        logger.info("Using '{}' as antenna mask".format(antennas))
-        antennas = antennas.split(',')
-
-        # all good so far, lets check arguments for validity
-        if not(antennas and n_channels >= 0 and dump_rate >= 0 and n_beams >= 0 and stream_sources):
-            raise FailReply("You must specify antennas, n_channels, dump_rate, n_beams "
-                            "and appropriate spead stream sources to configure a subarray product")
-
-        graph_name = self.graph_resolver(subarray_product_id)
-        try:
-            streams_dict = json.loads(stream_sources)
-            config = product_config.convert(graph_name, streams_dict, antennas, dump_rate,
-                                            self.simulate, self.develop, self.wrapper)
-        except (ValueError, jsonschema.ValidationError) as error:
-            # something is definitely wrong with these
-            retmsg = "Failed to process source stream specifiers: {}".format(error)
-            logger.error(retmsg)
-            raise FailReply(retmsg)
-
-        await self.configure_product(ctx, subarray_product_id, config)
-        return ''
 
     @time_request
     async def request_product_configure(self, ctx, subarray_product_id: str, config: str) -> str:
