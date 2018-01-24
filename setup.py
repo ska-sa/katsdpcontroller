@@ -21,6 +21,7 @@ setup (
         'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
         'addict!=2.0.*',
         'aiohttp',
+        'aiomonitor',
         'async_timeout',
         'decorator',
         'docker',
