@@ -2332,52 +2332,56 @@ class Scheduler(pymesos.Scheduler):
                 logger.debug('Could not yet launch graph: %s', error)
                 group.last_insufficient = error
             else:
-                # At this point we have a sufficient set of offers.
-                # Two-phase resolving
-                logger.debug('Allocating resources to tasks')
-                for (node, allocation) in allocations:
-                    node.allocate(allocation)
-                logger.debug('Performing resolution')
-                order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
-                # Lexicographical sorting isn't required for
-                # functionality, but the unit tests depend on it to get
-                # predictable task IDs.
-                for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
-                                                                      key=lambda x: x.name):
-                    logger.debug('Resolving %s', node.name)
-                    await node.resolve(group.resolver, group.graph, self._loop)
-                # Last chance for the group to be cancelled. After this point, we must
-                # not await anything.
-                if group.future.cancelled():
-                    # No need to set _wakeup_launcher, because the cancellation did so.
-                    continue
-                # Launch the tasks
-                new_min_ports = {}
-                taskinfos = {agent: [] for agent in agents}
-                for (node, allocation) in allocations:
-                    taskinfos[node.agent].append(node.taskinfo)
-                    for port in allocation.ports:
-                        prev = new_min_ports.get(node.agent_id, 0)
-                        new_min_ports[node.agent_id] = max(prev, port + 1)
-                    self._active[node.taskinfo.task_id.value] = (node, group.graph)
-                self._min_ports.update(new_min_ports)
-                for agent in agents:
-                    offer_ids = [offer.id for offer in agent.offers]
-                    # TODO: does this need to use run_in_executor? Is it
-                    # thread-safe to do so?
-                    # TODO: if there are more pending in the queue then we
-                    # should use a filter to be re-offered resources more
-                    # quickly.
-                    self._driver.launchTasks(offer_ids, taskinfos[agent])
-                    for offer_id in offer_ids:
-                        self._remove_offer(agent.agent_id, offer_id.value)
-                    logger.info('Launched %d tasks on %s',
-                                len(taskinfos[agent]), agent.agent_id)
-                for node in nodes:
-                    node.set_state(TaskState.STARTED)
-                group.future.set_result(None)
-                queue.remove(group)
-                self._wakeup_launcher.set()
+                try:
+                    # At this point we have a sufficient set of offers.
+                    # Two-phase resolving
+                    logger.debug('Allocating resources to tasks')
+                    for (node, allocation) in allocations:
+                        node.allocate(allocation)
+                    logger.debug('Performing resolution')
+                    order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
+                    # Lexicographical sorting isn't required for
+                    # functionality, but the unit tests depend on it to get
+                    # predictable task IDs.
+                    for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
+                                                                          key=lambda x: x.name):
+                        logger.debug('Resolving %s', node.name)
+                        await node.resolve(group.resolver, group.graph, self._loop)
+                    # Last chance for the group to be cancelled. After this point, we must
+                    # not await anything.
+                    if group.future.cancelled():
+                        # No need to set _wakeup_launcher, because the cancellation did so.
+                        continue
+                    # Launch the tasks
+                    new_min_ports = {}
+                    taskinfos = {agent: [] for agent in agents}
+                    for (node, allocation) in allocations:
+                        taskinfos[node.agent].append(node.taskinfo)
+                        for port in allocation.ports:
+                            prev = new_min_ports.get(node.agent_id, 0)
+                            new_min_ports[node.agent_id] = max(prev, port + 1)
+                        self._active[node.taskinfo.task_id.value] = (node, group.graph)
+                    self._min_ports.update(new_min_ports)
+                    for agent in agents:
+                        offer_ids = [offer.id for offer in agent.offers]
+                        # TODO: does this need to use run_in_executor? Is it
+                        # thread-safe to do so?
+                        # TODO: if there are more pending in the queue then we
+                        # should use a filter to be re-offered resources more
+                        # quickly.
+                        self._driver.launchTasks(offer_ids, taskinfos[agent])
+                        for offer_id in offer_ids:
+                            self._remove_offer(agent.agent_id, offer_id.value)
+                        logger.info('Launched %d tasks on %s',
+                                    len(taskinfos[agent]), agent.agent_id)
+                    for node in nodes:
+                        node.set_state(TaskState.STARTED)
+                    group.future.set_result(None)
+                    queue.remove(group)
+                    self._wakeup_launcher.set()
+                except Exception as error:
+                    group.future.set_exception(error)
+                    # Don't remove from the queue: launch() handles that
                 break
 
     async def _launcher(self):
@@ -2530,6 +2534,7 @@ class Scheduler(pymesos.Scheduler):
             # Could be
             # - a timeout
             # - we were cancelled
+            # - some internal error, such as the image was not found
             # - close() was called, which cancels pending.future
             for node in remaining:
                 if node.state == TaskState.STARTING:
