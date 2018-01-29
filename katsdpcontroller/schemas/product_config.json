@@ -50,6 +50,10 @@
                             "type": "array",
                             "items": {"type": "string"}
                         },
+                        "antennas": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
                         "center_freq": {"type": "number"}
                     },
                     "additionalProperties": false
