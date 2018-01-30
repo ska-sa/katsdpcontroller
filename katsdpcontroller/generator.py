@@ -754,7 +754,10 @@ def _make_cal(g, config, name, l0_name):
     src_multicast = find_node(g, 'multicast.' + l0_name)
     g.add_edge(cal, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+               config=lambda task, resolver, endpoint: {
+                   'l0_spectral_spead': str(endpoint),
+                   'l0_spead': str(endpoint)
+               })
 
     return cal
 
