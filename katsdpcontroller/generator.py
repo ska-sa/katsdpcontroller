@@ -357,7 +357,6 @@ def _make_cbf_simulator(g, config, name):
             'cbf_substreams': substreams,
             'cbf_ibv': ibv,
             'cbf_sync_time': time.time(),
-            'antenna_mask': ','.join(info.antennas),
             'servers': n_sim
         }
         sources = settings.get('sources', [])
@@ -375,6 +374,10 @@ def _make_cbf_simulator(g, config, name):
             })
         if 'center_freq' in settings:
             conf['cbf_center_freq'] = float(settings['center_freq'])
+        if 'antennas' in settings:
+            conf['cbf_antennas'] = [{'description': value} for value in settings['antennas']]
+        else:
+            conf['antenna_mask'] = ','.join(info.antennas)
         return conf
 
     sim_group = LogicalGroup('sim.' + name)
@@ -751,7 +754,10 @@ def _make_cal(g, config, name, l0_name):
     src_multicast = find_node(g, 'multicast.' + l0_name)
     g.add_edge(cal, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+               config=lambda task, resolver, endpoint: {
+                   'l0_spectral_spead': str(endpoint),
+                   'l0_spead': str(endpoint)
+               })
 
     return cal
 
