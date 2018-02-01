@@ -1098,6 +1098,7 @@ class Agent(ResourceCollector):
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
+        self.infiniband_devices = []
         self.volumes = []
         self.gpus = []
         self.numa = []
@@ -1127,6 +1128,11 @@ class Agent(ResourceCollector):
                     value = _decode_json_base64(attribute.text.value)
                     schemas.NUMA.validate(value)
                     self.numa = value
+                elif (attribute.name == 'katsdpcontroller.infiniband_devices'
+                        and attribute.type == 'TEXT'):
+                    value = _decode_json_base64(attribute.text.value)
+                    schemas.INFINIBAND_DEVICES.validate(value)
+                    self.infiniband_devices = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
@@ -1743,8 +1749,13 @@ class PhysicalTask(PhysicalNode):
             docker_parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
             # rdma_get_devices requires *all* the devices to be present to
             # succeed, even if they're not all used.
-            for interface in self.agent.interfaces:
-                docker_devices.update(interface.infiniband_devices)
+            if self.agent.infiniband_devices:
+                docker.devices.update(self.agent.infiniband_devices)
+            else:
+                # Fallback for machines that haven't been updated with the
+                # latest agent_mkconfig.py.
+                for interface in self.agent.interfaces:
+                    docker_devices.update(interface.infiniband_devices)
 
         gpu_driver_version = None
         for gpu_alloc in self.allocation.gpus:
