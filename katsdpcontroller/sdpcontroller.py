@@ -754,6 +754,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
+        self.telstate.add('capture_block_id', capture_block.name)
         await self.exec_transitions(State.IDLE, State.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block):
