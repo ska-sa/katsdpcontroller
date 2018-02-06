@@ -703,10 +703,11 @@ def _make_cal(g, config, name, l0_name):
     cal = SDPLogicalTask(name)
     cal.image = 'katsdpcal'
     cal.command = ['run_cal.py']
-    # Give cal 8 CPUs for 32K, 32 antennas, and scale from there.
-    # However, don't go below 2 (except in development mode) because we
+    # Give cal 8 CPUs for 32K, 32 antennas, 2s, and scale from there (we use
+    # 1.99 instead of 2.0 since actual integration times are just under 2s).
+    # However, don't go below 2 CPUs (except in development mode) because we
     # can't have less than 1 pipeline worker.
-    cal.cpus = 8 * info.n_vis / _N32_32
+    cal.cpus = 8 * info.n_vis / _N32_32 * 1.99 / info.int_time
     if not is_develop(config):
         cal.cpus = max(cal.cpus, 2)
     workers = max(1, int(math.ceil(cal.cpus - 1)))
