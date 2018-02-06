@@ -222,6 +222,12 @@ class BaseTestSDPController(asynctest.TestCase):
             actual[inform.arguments[0]] = tuple(inform.arguments[2:])
         self.assertEqual(expected, actual)
 
+    def create_patch(self, *args, **kwargs):
+        patcher = mock.patch(*args, **kwargs)
+        mock_obj = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock_obj
+
 
 @timelimit
 class TestSDPControllerInterface(BaseTestSDPController):
@@ -229,11 +235,15 @@ class TestSDPControllerInterface(BaseTestSDPController):
     async def setUp(self):
         await self.setup_server('127.0.0.1', 0, None, interface_mode=True,
                                 safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+        self.create_patch('time.time', return_value=123456789.5)
+        # Isolate tests from each other by resetting this
+        _capture_block_names.clear()
 
     async def test_capture_init(self):
         await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
         await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT1)
+        reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
+        self.assertEqual(reply, [b"00000000-00000-123456789"])
 
         reply, informs = await self.client.request("capture-status", SUBARRAY_PRODUCT1)
         self.assertEqual(reply, [b"capturing"])
@@ -261,7 +271,8 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
         await self.client.request("capture-init", SUBARRAY_PRODUCT2)
-        await self.client.request("capture-done", SUBARRAY_PRODUCT2)
+        reply, informs = await self.client.request("capture-done", SUBARRAY_PRODUCT2)
+        self.assertEqual(reply, [b"00000000-00000-123456789"])
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
     async def test_deconfigure_subarray_product(self):
@@ -359,12 +370,6 @@ class TestSDPController(BaseTestSDPController):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
     mocking of the scheduler.
     """
-    def _create_patch(self, *args, **kwargs):
-        patcher = mock.patch(*args, **kwargs)
-        mock_obj = patcher.start()
-        self.addCleanup(patcher.stop)
-        return mock_obj
-
     def _capture_init_slow(self, subarray_product, cancelled=False):
         """Asynchronous context manager that runs its block with a capture-init
         in progress. The subarray product must already be configured.
@@ -398,23 +403,23 @@ class TestSDPController(BaseTestSDPController):
         done_future.set_result(None)
         # Mock TelescopeState, but preserve SEPARATOR in the mock
         separator = katsdptelstate.TelescopeState.SEPARATOR
-        self._create_patch('time.time', return_value=123456789.5)
-        mock_getaddrinfo = self._create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
+        self.create_patch('time.time', return_value=123456789.5)
+        mock_getaddrinfo = self.create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
         # Workaround for Python bug that makes it think mocks are coroutines
         mock_getaddrinfo._is_coroutine = False
-        self.telstate_class = self._create_patch('katsdptelstate.TelescopeState', autospec=True)
+        self.telstate_class = self.create_patch('katsdptelstate.TelescopeState', autospec=True)
         self.telstate_class.SEPARATOR = separator
-        self.sensor_proxy_client_class = self._create_patch(
+        self.sensor_proxy_client_class = self.create_patch(
             'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.wait_connected.return_value = done_future
         sensor_proxy_client.wait_synced.return_value = done_future
         sensor_proxy_client.wait_closed.return_value = done_future
         sensor_proxy_client.request.side_effect = self._request
-        self._create_patch(
+        self.create_patch(
             'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future)
-        self._create_patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
-        self._create_patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
+        self.create_patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
+        self.create_patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill

@@ -529,18 +529,21 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        return capture_block_id
 
     async def capture_done(self):
         self._fail_if_busy()
         if self.state != State.CAPTURING:
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
+        cbid = self.current_capture_block.name
         task = asyncio.ensure_future(self._capture_done(), loop=self.loop)
         self._async_task = task
         try:
             await task
         finally:
             self._clear_async_task(task)
+        return cbid
 
     def write_graphs(self, output_dir):
         """Write visualisations to `output_dir`."""
@@ -1335,12 +1338,14 @@ class SDPControllerServer(DeviceServer):
         -------
         success : {'ok', 'fail'}
             Whether the system is ready to capture or not.
+        cbid : str
+            ID of the new capture block
         """
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        await sa.capture_init(program_block_id)
-        return 'SDP ready'
+        cbid = await sa.capture_init(program_block_id)
+        return cbid
 
     @time_request
     async def request_telstate_endpoint(self, ctx, subarray_product_id: str = None):
@@ -1400,13 +1405,15 @@ class SDPControllerServer(DeviceServer):
         Returns
         -------
         success : {'ok', 'fail'}
-        state : str
+            Whether the command succeeded
+        cbid : str
+            Capture-block ID that was stopped
         """
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        await sa.capture_done()
-        return 'capture complete'
+        cbid = await sa.capture_done()
+        return cbid
 
     @time_request
     async def request_sdp_shutdown(self, ctx) -> str:
