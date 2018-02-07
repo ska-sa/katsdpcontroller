@@ -740,7 +740,14 @@ def _make_cal(g, config, name, l0_name):
     cal.volumes = [DATA_VOL]
     cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     cal.interfaces[0].bandwidth_in = info.net_bandwidth
-    cal.ports = ['port']
+    cal.ports = ['port', 'dask_diagnostics']
+    cal.wait_ports = ['port']
+    cal.gui_urls = [{
+        'title': 'Cal diagnostics',
+        'description': 'Dask diagnostics for cal process on {0.subarray_product_id}',
+        'href': 'http://{0.host}:{0.ports[dask_diagnostics]}/status',
+        'category': 'Plot'
+    }]
     cal.transitions = CAPTURE_TRANSITIONS
     cal.deconfigure_wait = False
     g.add_node(cal, telstate_extra=telstate_extra, config=lambda task, resolver: {
@@ -750,7 +757,8 @@ def _make_cal(g, config, name, l0_name):
         'l0_spectral_name': l0_name,
         # cal should change to remove "spectral"; both are provided for now
         'l0_interface': task.interfaces['sdp_10g'].name,
-        'l0_name': l0_name
+        'l0_name': l0_name,
+        'dask_diagnostics': ('', task.ports['dask_diagnostics'])
     })
     src_multicast = find_node(g, 'multicast.' + l0_name)
     g.add_edge(cal, src_multicast, port='spead',
