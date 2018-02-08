@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Signal Display Rotation</title>
+    </head>
+    <body>
+     <iframe id='rotate_frame' style='border: 0; width: {{ args.width }}px; height: {{ args.height}}px;'></iframe>
+    </body>
+    <script>
+     var url_id = 0;
+     var arrays = [];
+     var urls = {};
+     var rotater = null;
+     var ws = null;
+     var ws_url = null;
+
+     var rotate_frame = document.getElementById('rotate_frame');
+     var no_content = 'No arrays containing signal displays currently active.';
+   
+     function set_no_content() {
+      rotate_frame.src = 'data:text/html,' + encodeURIComponent(no_content);
+     } 
+
+     function rotate()
+     {
+      if (url_id == arrays.length) { url_id = 0;}
+      document.getElementById('rotate_frame').src = 'http://' + urls[arrays[url_id]];
+      url_id = url_id + 1;
+     }
+
+     window.onload = function() {
+      set_no_content();
+      ws_url = 'ws://' + document.location.host + '/ws';
+       // have had issues checking host before the onload event
+      console.log("Attempting WS connection to " + ws_url);
+      ws = new WebSocket(ws_url);
+      
+      ws.onopen = function(msg) { 
+       console.log("Websocket connected. Requesting active servers..."); 
+       ws.send('servers');
+      }
+ 
+      ws.onmessage = function(msg) {
+       url_id = 0;
+       console.log("Got WS message: " + msg.data);
+       clearInterval(rotater);
+       try {
+        urls = JSON.parse(msg.data);
+        arrays = Object.keys(urls);    
+        var rotater = setInterval(rotate, {{args.rotate_interval}});
+        rotate();
+         // don't wait for interval for first showing...
+       } catch (err) {
+        console.log("Failed to parse WS message: " + msg.data);
+       }
+       if (arrays.length == 0) { set_no_content(); }
+      }
+     } // end of onload
+    </script>
+</html>
