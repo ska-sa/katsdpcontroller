@@ -18,6 +18,7 @@ import tempfile
 import textwrap
 from collections import defaultdict
 import asyncio
+import json
 
 import async_timeout
 import aiohttp
@@ -63,7 +64,8 @@ def terminate():
 class Server:
     def __init__(self):
         self.html_endpoint = None
-
+    def __repr__(self):
+        return str(self.html_endpoint) if self.html_endpoint else ''
 
 async def get_servers(client):
     servers = defaultdict(Server)
@@ -87,14 +89,42 @@ async def get_servers(client):
                 continue
             array = match.group(1)
             servers[array].html_endpoint = value
+    servers['mesos'].html_endpoint = '10.98.2.1:5050'
+    servers['prometheus'].html_endpoint = '10.98.2.1:9200'
     return servers
 
+@aiohttp_jinja2.template('rotate_sd.html.j2')
+def rotate_handler(request):
+    defaults = {'rotate_interval': 5000, 'width': 500, 'height': 500}
+    defaults.update(request.query)    
+    return dict(args=defaults)
 
 @aiohttp_jinja2.template('index.html.j2')
 def request_handler(request):
     servers = request.app['servers']
     return dict(servers=servers)
 
+async def websocket_handler(request):
+
+    ws = aiohttp.web.WebSocketResponse()
+    await ws.prepare(request)
+
+    async for msg in ws:
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            if msg.data == 'close':
+                await ws.close()
+            elif msg.data == 'servers':
+                server_dict = {array: str(server) for array,server in request.app['servers'].items()}
+                await ws.send_str(json.dumps(server_dict))
+            else:
+                await ws.send_str(msg.data + '/answer/')
+        elif msg.type == aiohttp.WSMsgType.ERROR:
+            print('ws connection closed with exception %s' %
+                  ws.exception())
+
+    print('websocket connection closed')
+    request.app['ws'] = ws
+    return ws
 
 async def main():
     parser = argparse.ArgumentParser()
@@ -110,10 +140,13 @@ async def main():
     app = aiohttp.web.Application()
     app['servers'] = {}
     app.router.add_get('/', request_handler)
+    app.router.add_get('/rotate', rotate_handler)
+    app.router.add_get('/ws', websocket_handler)
     aiohttp_jinja2.setup(app, loader=jinja2.PackageLoader('katsdpcontroller'))
     handler = app.make_handler()
     srv = await loop.create_server(handler, '127.0.0.1', 0)
     port = srv.sockets[0].getsockname()[1]
+    logger.info("Local webserver on {}".format(port))
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
     pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
@@ -154,13 +187,16 @@ async def main():
                 backend fallback
                     acl root path_reg '^/$'
                     acl favicon path_reg '^/favicon.ico$'
-                    http-request redirect code 303 location / drop-query if !root !favicon
+                    acl rotate path_reg '^/rotate'
+                    acl ws path_reg '^/ws'
+                    http-request redirect code 303 location / drop-query if !root !favicon !rotate !ws
                     server fallback_html_server 127.0.0.1:{port}
                 """.format(port=port))
             for array, server in sorted(servers.items()):
                 if not server.html_endpoint:
                     logger.warning('Array %s has no signal display html port', array)
                     continue
+                logger.info("Adding server {}".format(server.html_endpoint))
                 content += textwrap.dedent(r"""
                     backend {array}
                         http-request set-path %[path,regsub(^/.*?/,/)]
@@ -176,6 +212,8 @@ async def main():
                         '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
+                if 'ws' in app:
+                    await app['ws'].send_str(msg.data + '/pushed/' + servers)
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
