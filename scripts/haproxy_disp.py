@@ -153,7 +153,8 @@ async def main():
 
                 backend fallback
                     acl root path_reg '^/$'
-                    http-request redirect code 301 location / drop-query if !root
+                    acl favicon path_reg '^/favicon.ico$'
+                    http-request redirect code 303 location / drop-query if !root !favicon
                     server fallback_html_server 127.0.0.1:{port}
                 """.format(port=port))
             for array, server in sorted(servers.items()):
