@@ -89,8 +89,7 @@ async def get_servers(client):
                 continue
             array = match.group(1)
             servers[array].html_endpoint = value
-    servers['mesos'].html_endpoint = '10.98.2.1:5050'
-    servers['prometheus'].html_endpoint = '10.98.2.1:9200'
+    logger.info("Get servers complete: {} found".format(len(servers)))
     return servers
 
 @aiohttp_jinja2.template('rotate_sd.html.j2')
@@ -144,8 +143,9 @@ async def main():
     app.router.add_get('/ws', websocket_handler)
     aiohttp_jinja2.setup(app, loader=jinja2.PackageLoader('katsdpcontroller'))
     handler = app.make_handler()
-    srv = await loop.create_server(handler, '127.0.0.1', 0)
+    srv = await loop.create_server(handler, '', 5005)
     port = srv.sockets[0].getsockname()[1]
+    app['port'] = port
     logger.info("Local webserver on {}".format(port))
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
@@ -213,7 +213,8 @@ async def main():
                 else:
                     haproxy.send_signal(signal.SIGHUP)
                 if 'ws' in app:
-                    await app['ws'].send_str(msg.data + '/pushed/' + servers)
+                    server_dict = {array: str(server) for array,server in servers.items()}
+                    await app['ws'].send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
