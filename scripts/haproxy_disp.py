@@ -112,20 +112,22 @@ async def websocket_handler(request):
     ws = aiohttp.web.WebSocketResponse()
     await ws.prepare(request)
 
-    request.app['websockets'].append(ws)
-
-    async for msg in ws:
-        if msg.type == aiohttp.WSMsgType.TEXT:
-            if msg.data == 'close':
-                await ws.close()
-            elif msg.data == 'servers':
-                server_dict = {array: "http://{}".format(server) for array, server in request.app['servers'].items()}
-                await ws.send_str(json.dumps(server_dict))
-            else:
-                await ws.send_str(msg.data + '/ping/')
-        elif msg.type == aiohttp.WSMsgType.ERROR:
-            logger.error('ws connection closed with exception %s', ws.exception())
-    request.app['websockets'].remove(ws)
+    request.app['websockets'].add(ws)
+    try:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                if msg.data == 'close':
+                    request.app['websockets'].remove(ws)
+                    await ws.close()
+                elif msg.data == 'servers':
+                    server_dict = {array: "http://{}".format(server) for array, server in request.app['servers'].items()}
+                    await ws.send_json(server_dict)
+                else:
+                    await ws.send_str(msg.data + '/ping/')
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                logger.error('ws connection closed with exception %s', ws.exception())
+    finally:
+        request.app['websockets'].remove(ws)
     return ws
 
 
@@ -144,7 +146,7 @@ async def main():
 
     app = aiohttp.web.Application()
     app['servers'] = {}
-    app['websockets'] = []
+    app['websockets'] = set()
     app.router.add_get('/', request_handler)
     app.router.add_get('/rotate', rotate_handler)
     app.router.add_get('/ws', websocket_handler)
