@@ -64,8 +64,10 @@ def terminate():
 class Server:
     def __init__(self):
         self.html_endpoint = None
+
     def __repr__(self):
         return str(self.html_endpoint) if self.html_endpoint else ''
+
 
 async def get_servers(client):
     servers = defaultdict(Server)
@@ -92,19 +94,21 @@ async def get_servers(client):
     logger.info("Get servers complete: %d found", len(servers))
     return servers
 
+
 @aiohttp_jinja2.template('rotate_sd.html.j2')
 def rotate_handler(request):
     defaults = {'rotate_interval': 5000, 'width': 500, 'height': 500}
-    defaults.update(request.query)    
+    defaults.update(request.query)
     return dict(args=defaults)
+
 
 @aiohttp_jinja2.template('index.html.j2')
 def request_handler(request):
     servers = request.app['servers']
     return dict(servers=servers)
 
-async def websocket_handler(request):
 
+async def websocket_handler(request):
     ws = aiohttp.web.WebSocketResponse()
     await ws.prepare(request)
 
@@ -113,7 +117,7 @@ async def websocket_handler(request):
             if msg.data == 'close':
                 await ws.close()
             elif msg.data == 'servers':
-                server_dict = {array: str(server) for array,server in request.app['servers'].items()}
+                server_dict = {array: str(server) for array, server in request.app['servers'].items()}
                 await ws.send_str(json.dumps(server_dict))
             else:
                 await ws.send_str(msg.data + '/ping/')
@@ -123,6 +127,7 @@ async def websocket_handler(request):
     print('websocket connection closed')
     request.app['ws'] = ws
     return ws
+
 
 async def main():
     parser = argparse.ArgumentParser()
@@ -212,7 +217,7 @@ async def main():
                 else:
                     haproxy.send_signal(signal.SIGHUP)
                 if 'ws' in app:
-                    server_dict = {array: str(server) for array,server in servers.items()}
+                    server_dict = {array: str(server) for array, server in servers.items()}
                     await app['ws'].send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
