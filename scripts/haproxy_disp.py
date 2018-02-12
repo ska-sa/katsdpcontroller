@@ -119,7 +119,7 @@ async def websocket_handler(request):
             if msg.data == 'close':
                 await ws.close()
             elif msg.data == 'servers':
-                server_dict = {array: str(server) for array, server in request.app['servers'].items()}
+                server_dict = {array: "http://{}".format(server) for array, server in request.app['servers'].items()}
                 await ws.send_str(json.dumps(server_dict))
             else:
                 await ws.send_str(msg.data + '/ping/')
@@ -218,7 +218,7 @@ async def main():
                         '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
-                server_dict = {array: str(server) for array, server in servers.items()}
+                server_dict = {array: "http://{}".format(server) for array, server in servers.items()}
                 for _ws in app['websockets']:
                     await _ws.send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
