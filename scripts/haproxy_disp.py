@@ -89,7 +89,7 @@ async def get_servers(client):
                 continue
             array = match.group(1)
             servers[array].html_endpoint = value
-    logger.info("Get servers complete: {} found".format(len(servers)))
+    logger.info("Get servers complete: %d found", len(servers))
     return servers
 
 @aiohttp_jinja2.template('rotate_sd.html.j2')
@@ -116,10 +116,9 @@ async def websocket_handler(request):
                 server_dict = {array: str(server) for array,server in request.app['servers'].items()}
                 await ws.send_str(json.dumps(server_dict))
             else:
-                await ws.send_str(msg.data + '/answer/')
+                await ws.send_str(msg.data + '/ping/')
         elif msg.type == aiohttp.WSMsgType.ERROR:
-            print('ws connection closed with exception %s' %
-                  ws.exception())
+            logger.error('ws connection closed with exception %s', ws.exception())
 
     print('websocket connection closed')
     request.app['ws'] = ws
@@ -196,7 +195,7 @@ async def main():
                 if not server.html_endpoint:
                     logger.warning('Array %s has no signal display html port', array)
                     continue
-                logger.info("Adding server {}".format(server.html_endpoint))
+                logger.info("Adding server %s", server.html_endpoint)
                 content += textwrap.dedent(r"""
                     backend {array}
                         http-request set-path %[path,regsub(^/.*?/,/)]
