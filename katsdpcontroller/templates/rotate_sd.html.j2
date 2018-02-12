@@ -85,7 +85,7 @@
        retry_count = 0;
        console.log("Got WS message: " + msg.data);
        clearInterval(rotater);
-       var rotater = null;
+       rotater = null;
        try {
         urls = JSON.parse(msg.data);
         arrays = Object.keys(urls);    
