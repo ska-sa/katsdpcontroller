@@ -65,7 +65,7 @@ class Server:
     def __init__(self):
         self.html_endpoint = None
 
-    def __repr__(self):
+    def __str__(self):
         return str(self.html_endpoint) if self.html_endpoint else ''
 
 
@@ -112,6 +112,8 @@ async def websocket_handler(request):
     ws = aiohttp.web.WebSocketResponse()
     await ws.prepare(request)
 
+    request.app['websockets'].append(ws)
+
     async for msg in ws:
         if msg.type == aiohttp.WSMsgType.TEXT:
             if msg.data == 'close':
@@ -123,9 +125,7 @@ async def websocket_handler(request):
                 await ws.send_str(msg.data + '/ping/')
         elif msg.type == aiohttp.WSMsgType.ERROR:
             logger.error('ws connection closed with exception %s', ws.exception())
-
-    print('websocket connection closed')
-    request.app['ws'] = ws
+    request.app['websockets'].remove(ws)
     return ws
 
 
@@ -133,6 +133,8 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('sdpmc', type=endpoint_parser(5001),
                         help='host[:port] of the SDP master controller')
+    parser.add_argument('-p', '--aioport', dest='aioport', metavar='PORT', default=5005, 
+                        help='Port to assign to the internal aiohttp webserver. [default=%default]')
     args = parser.parse_args()
 
     loop = asyncio.get_event_loop()
@@ -142,15 +144,15 @@ async def main():
 
     app = aiohttp.web.Application()
     app['servers'] = {}
+    app['websockets'] = []
     app.router.add_get('/', request_handler)
     app.router.add_get('/rotate', rotate_handler)
     app.router.add_get('/ws', websocket_handler)
     aiohttp_jinja2.setup(app, loader=jinja2.PackageLoader('katsdpcontroller'))
     handler = app.make_handler()
-    srv = await loop.create_server(handler, '', 5005)
+    srv = await loop.create_server(handler, '', args.aioport)
     port = srv.sockets[0].getsockname()[1]
-    app['port'] = port
-    logger.info("Local webserver on {}".format(port))
+    logger.info("Local webserver on {}".format(args.aioport))
 
     cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
     pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
@@ -216,9 +218,9 @@ async def main():
                         '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
-                if 'ws' in app:
-                    server_dict = {array: str(server) for array, server in servers.items()}
-                    await app['ws'].send_str(json.dumps(server_dict))
+                server_dict = {array: str(server) for array, server in servers.items()}
+                for _ws in app['websockets']:
+                    await _ws.send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
             else:
                 logger.info('No change, not restarted haproxy')
