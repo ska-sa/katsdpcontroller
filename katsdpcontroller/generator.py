@@ -703,13 +703,17 @@ def _make_cal(g, config, name, l0_name):
     cal = SDPLogicalTask(name)
     cal.image = 'katsdpcal'
     cal.command = ['run_cal.py']
-    # Give cal 8 CPUs for 32K, 32 antennas, 2s, and scale from there (we use
-    # 1.99 instead of 2.0 since actual integration times are just under 2s).
+    # Some of the scaling in cal is non-linear, so we need to give smaller
+    # arrays more CPU than might be suggested by linear scaling. As a
+    # heuristic, we start with linear scaling for 4 CPUs for 32K, 32 antennas,
+    # 2s, but clamp to just below 8 CPUs (we use 1.99s instead of 2s since
+    # actual integration times are just under 2s).
     # However, don't go below 2 CPUs (except in development mode) because we
     # can't have less than 1 pipeline worker.
-    cal.cpus = 8 * info.n_vis / _N32_32 * 1.99 / info.int_time
+    cal.cpus = 4 * info.n_vis / _N16_32 * 1.99 / info.int_time
     if not is_develop(config):
         cal.cpus = max(cal.cpus, 2)
+    cal.cpus = min(cal.cpus, 7.9)
     workers = max(1, int(math.ceil(cal.cpus - 1)))
     # Main memory consumer is buffers for
     # - visibilities (complex64)
@@ -724,7 +728,13 @@ def _make_cal(g, config, name, l0_name):
     # - average over frequency: needs far less memory than the above
     # - compute flags per baseline: works on 16 baselines at a time.
     # In each case we arbitrarily allow for 4 times the result, per worker.
+    # There is also a time- and channel-averaged version (down to 1024 channels)
+    # of the HH and VV products for each scan. The number of scans is unknown,
+    # but should always be less than 1000, and we allow a factor of 2 for
+    # operations that work on it (which cancels the factor of 1/2 for only
+    # having 2 of the 4 pol products).
     extra = max(workers / slots, min(16 * workers, info.n_baselines) / info.n_baselines) * 4
+    extra += 1000 * 1024 / (slots * info.n_channels)
 
     # Extra memory allocation for tasks that deal with bandpass calibration
     # solutions in telescope state. The exact size of these depends on how
