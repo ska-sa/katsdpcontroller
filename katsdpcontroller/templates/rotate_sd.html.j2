@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+    <head>
+         <title>Signal Display Rotation</title>
+    </head>
+    <body>
+         <iframe id='rotate_frame' style='border: 0; width: {{ args.width }}px; height: {{ args.height}}px;'></iframe>
+    </body>
+    <script>
+     var url_id = 0;
+     var arrays = [];
+     var urls = {};
+     var rotater = null;
+     var ws = null;
+     var ws_url = null;
+     var ws_error = null;
+     var restarting = false;
+      // protect restarts so that we dont end up with another
+      // error triggering a restart during the wait period
+     var retry_count = 0;
+      // how many times have we tried to reconnect to the
+      // websocket in this session
+
+     var rotate_frame = document.getElementById('rotate_frame');
+     var no_content = "No arrays containing signal displays currently active.";
+   
+     function set_content(content) {
+      rotate_frame.src = 'data:text/html,' + encodeURIComponent("<div style='color: #aaaaaa;'>" + content + "</div>");
+     } 
+
+     function rotate(force=false)
+     {
+      if (arrays.length == 0) { set_content(no_content); return; }
+      if (arrays.length == 1 && !force) { return; }
+       // don't rotate if we have only one to display (unless forced)
+       // or none to dispay
+      document.getElementById('rotate_frame').src = urls[arrays[url_id]];
+      url_id = url_id + 1;
+      if (url_id == arrays.length) { url_id = 0;}
+     }
+
+     function restart_ws() {
+      if (retry_count > 4) {
+       console.log("Hit ws retry limit of 5. Reloading page...");
+       window.location.reload(true);
+      }
+      if (restarting) {
+       console.log("Not restarting since another restart is underway");
+      } else {
+       setTimeout(function() { ws_connect(); }, 5000);
+        // give it 5 seconds to settle and then try again
+       restarting = true;
+       retry_count += 1;
+      }
+     }
+
+     function ws_connect() {
+      restarting = false;
+      set_content(no_content);
+      ws_url = 'ws://' + document.location.host + '/ws';
+       // have had issues checking host before the onload event
+      console.log("Attempting WS connection to " + ws_url);
+      ws = new WebSocket(ws_url);
+      
+      ws.onopen = function(msg) { 
+       console.log("Websocket connected. Requesting active servers..."); 
+       ws.send('servers');
+       retry_count = 0;
+      }
+
+      ws.onclose = function(msg) {
+       console.log("Websocket disconnected. Trying a restart...");
+       restart_ws();
+      }
+
+      ws.onerror = function(error) {
+       ws_error = error;
+       console.log("WS error: " + error);
+       set_content("Failed to establish WebSocket connection to " + ws_url + ". Retrying in 5s...");
+       restart_ws();
+      }
+ 
+      ws.onmessage = function(msg) {
+       url_id = 0;
+       retry_count = 0;
+       console.log("Got WS message: " + msg.data);
+       clearInterval(rotater);
+       rotater = null;
+       try {
+        urls = JSON.parse(msg.data);
+        arrays = Object.keys(urls);    
+        rotater = setInterval(rotate, {{args.rotate_interval}});
+        rotate(true);
+         // don't wait for interval for first showing...
+       } catch (err) {
+        console.log("Failed to parse WS message: " + msg.data);
+       }
+       if (arrays.length == 0) { set_content(no_content); }
+      }
+     } // end of ws_connect
+
+     window.onload = function() { ws_connect(); }
+    </script>
+</html>
