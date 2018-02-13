@@ -705,7 +705,7 @@ def _make_cal(g, config, name, l0_name):
     cal.command = ['run_cal.py']
     # Some of the scaling in cal is non-linear, so we need to give smaller
     # arrays more CPU than might be suggested by linear scaling. As a
-    # heuristic, we start with linear scaling for 4 CPUs for 32K, 32 antennas,
+    # heuristic, we start with linear scaling for 4 CPUs for 32K, 16 antennas,
     # 2s, but clamp to just below 8 CPUs (we use 1.99s instead of 2s since
     # actual integration times are just under 2s).
     # However, don't go below 2 CPUs (except in development mode) because we
