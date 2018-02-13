@@ -640,7 +640,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self.telstate_node.capture_blocks = self.capture_blocks
 
     def __del__(self):
-        self.sched.remove_queue(self.batch_queue)
+        if hasattr(self, 'batch_queue'):
+            self.sched.remove_queue(self.batch_queue)
 
     async def _issue_req(self, req, args=(), node_type='ingest'):
         """Issue a request against all nodes of a particular type. Typical
