@@ -919,13 +919,7 @@ def build_logical_graph(config):
     # Copy the config, because we make some changes to it as we go
     config = copy.deepcopy(config)
 
-    g = networkx.MultiDiGraph(config=lambda resolver: {
-        'cal_refant': '',
-        'cal_g_solint': 10,
-        'cal_bp_solint': 10,
-        'cal_k_solint': 10,
-        'cal_k_chan_sample': 10
-    })
+    g = networkx.MultiDiGraph(config=lambda resolver: {})
 
     # telstate node
     telstate = _make_telstate(g, config)

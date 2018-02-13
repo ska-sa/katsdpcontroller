@@ -567,7 +567,6 @@ class TestSDPController(BaseTestSDPController):
         # This is not a complete list of calls. It check that each category of stuff
         # is covered: base_params, per node, per edge
         ts.add.assert_any_call('subarray_product_id', SUBARRAY_PRODUCT4, immutable=True)
-        ts.add.assert_any_call('cal_bp_solint', 10, immutable=True)
         ts.add.assert_any_call('config.filewriter.sdp_l0', {
             'file_base': '/var/kat/data',
             'port': 20000,
