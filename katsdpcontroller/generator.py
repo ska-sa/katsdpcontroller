@@ -39,6 +39,8 @@ _N32_32 = 32 * 33 * 2 * 32768
 _N16_32 = 16 * 17 * 2 * 32768
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
+#: Like DATA_VOL, but for high speed data to be transferred to an object store
+OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 
@@ -803,6 +805,47 @@ def _make_filewriter(g, config, name):
     return filewriter
 
 
+def _make_vis_writer(g, config, name):
+    info = L0Info(config, name)
+
+    vis_writer = SDPLogicalTask('vis_writer.' + name)
+    vis_writer.image = 'katsdpfilewriter'
+    vis_writer.command = ['vis_writer.py']
+    # Don't yet have a good idea of real CPU usage. For now assume that 32
+    # antennas, 32K channels requires two CPUs (one for capture, one for
+    # writing) and scale from there.
+    vis_writer.cpus = 2 * info.n_vis / _N32_32
+
+    # Estimate the size of the memory pool. The actual code is pretty complex,
+    # so this is just to get the right scaling.
+    target_obj_size = 10e6
+    src_multicast = find_node(g, 'multicast.' + name)
+    n_substreams = src_multicast.n_addresses
+    # Number of chunks per dump (at minimum one for vis, flags, weights, weights_channel)
+    n_chunks = max(4 * n_substreams, info.size / target_obj_size)
+    n_dumps_per_write = int(math.ceil(200 / n_chunks))
+    n_dumps_to_buffer = 2 * (n_dumps_per_write + 1) + 4
+    memory_pool = n_dumps_to_buffer * info.size
+
+    # It's only a rough estimate, so double it to be on the safe side
+    vis_writer.mem = _mb(2 * memory_pool) + 256
+    vis_writer.ports = ['port']
+    vis_writer.volumes = [OBJ_DATA_VOL]
+    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
+    vis_writer.transitions = CAPTURE_TRANSITIONS
+    g.add_node(vis_writer, config=lambda task, resolver: {
+        'l0_name': name,
+        'l0_interface': task.interfaces['sdp_10g'].name,
+        'obj_size_mb': _mb(target_obj_size),
+        'npy_path': '/var/kat/data'
+    })
+    g.add_edge(vis_writer, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
+    return vis_writer
+
+
 def _make_beamformer_ptuse(g, config, name):
     output = config['outputs'][name]
     srcs = output['src_streams']
@@ -985,6 +1028,7 @@ def build_logical_graph(config):
                         if implicit_cal:
                             _make_cal(g, config, None, name)
                         _make_filewriter(g, config, name)
+                        _make_vis_writer(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
     l0_spectral_only = False
