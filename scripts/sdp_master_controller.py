@@ -102,11 +102,10 @@ if __name__ == "__main__":
                         help='Override an image name lookup (default: none)')
     parser.add_argument('--image-tag-file', dest='image_tag_file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
+    parser.add_argument('--s3-config-file', dest='s3_config_file',
+                        metavar='FILE', help='Configuration for connecting services to S3 (loaded on each configure)')
     parser.add_argument('--safe-multicast-cidr', dest='safe_multicast_cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %(default)s)')
-    parser.add_argument('--graph-override', dest='graph_override', action='append',
-                        default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
-                        help='Override the graph to be used for the specified subarray product id (default: none)')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
                         help='File containing JSON describing related GUIs, or directory with .json files (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
@@ -145,11 +144,6 @@ if __name__ == "__main__":
             die("--image-override option must have a colon")
         image_resolver_factory.override(fields[0], fields[1])
 
-    for override in opts.graph_override:
-        if len(override.split(':', 1)) < 2:
-            die("--graph-override option must be in the form <subarray_product_id>:<graph_name>")
-    graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override)
-
     gui_urls = None
     if opts.gui_urls is not None:
         try:
@@ -183,7 +177,7 @@ if __name__ == "__main__":
         opts.host, opts.port, sched, loop,
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
-        graph_resolver=graph_resolver,
+        s3_config_file=opts.s3_config_file,
         safe_multicast_cidr=opts.safe_multicast_cidr,
         gui_urls=gui_urls,
         graph_dir=opts.write_graphs)

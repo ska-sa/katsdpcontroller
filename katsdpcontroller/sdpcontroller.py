@@ -28,7 +28,7 @@ from prometheus_client import Histogram
 from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
-from . import scheduler, tasks, product_config, generator
+from . import scheduler, tasks, product_config, generator, schemas
 from .tasks import State, DEPENDS_INIT
 
 
@@ -62,46 +62,13 @@ def log_task_exceptions(task, msg):
     task.add_done_callback(done_callback)
 
 
-class GraphResolver:
-    """Provides graph name resolution services for use when presented with
-       a subarray product id.
-
-       A subarray product id has the form <subarray_name>_<data_product_name>
-       and in general the graph name will be the same as the data_product_name.
-
-       This resolver class allows specified subarray product ids to be mapped
-       to a user specified graph.
-
-       Parameters
-       ----------
-       overrides : iterable, optional
-            Override strings in the form <subarray_product_id>:<override_graph_name>
-       """
-    def __init__(self, overrides=()):
-        self._overrides = {}
-
-        for override in overrides:
-            fields = override.split(':', 1)
-            if len(fields) < 2:
-                logger.warning("Ignoring graph resolver override {} as it does not conform to \
-                                the required <subarray_product_id>:<graph_name>".format(override))
-            self._overrides[fields[0]] = fields[1]
-            logger.info("Registering graph override {} => {}".format(fields[0], fields[1]))
-
-    def __call__(self, subarray_product_id):
-        """Returns a full qualified graph name from the specified subarray product id.
-           e.g. array_1_c856M4k => c856M4k
-        """
-        try:
-            base_graph_name = self._overrides[subarray_product_id]
-            # if an override is set use this instead, but warn the user about this.
-            logger.warning("Graph name specified by subarray_product_id (%s) has been overridden "
-                           "to %s", subarray_product_id, base_graph_name)
-        except KeyError:
-            # default graph name is to split out the trailing name from the
-            # subarray product id specifier
-            base_graph_name = subarray_product_id.split("_")[-1]
-        return base_graph_name
+def _load_s3_config(filename):
+    if filename is None:
+        return {}
+    with open(filename, 'r') as f:
+        config = json.load(f)
+    schemas.S3_CONFIG.validate(config)
+    return config
 
 
 class MulticastIPResources:
@@ -917,7 +884,8 @@ class SDPControllerServer(DeviceServer):
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  interface_mode=False,
-                 graph_resolver=None, image_resolver_factory=None,
+                 image_resolver_factory=None,
+                 s3_config_file=None,
                  gui_urls=None, graph_dir=None):
         # setup sensors
         self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
@@ -942,12 +910,10 @@ class SDPControllerServer(DeviceServer):
         self.gui_urls = gui_urls if gui_urls is not None else []
         self.graph_dir = graph_dir
 
-        if graph_resolver is None:
-            graph_resolver = GraphResolver()
-        self.graph_resolver = graph_resolver
         if image_resolver_factory is None:
             image_resolver_factory = scheduler.ImageResolver
         self.image_resolver_factory = image_resolver_factory
+        self.s3_config_file = s3_config_file
 
         # create a new resource pool.
         logger.debug("Building initial resource pool")
@@ -1086,6 +1052,11 @@ class SDPControllerServer(DeviceServer):
                                 "different configuration. Please deconfigure this product or "
                                 "choose a new product id to continue.".format(subarray_product_id))
 
+        try:
+            s3_config = _load_s3_config(self.s3_config_file)
+        except (OSError, KeyError, ValueError) as error:
+            raise FailReply("Could not load S3 config: {}".format(str(error)))
+
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))
         ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
@@ -1101,6 +1072,7 @@ class SDPControllerServer(DeviceServer):
                                       self.sched.http_url if self.sched else '')
         resolver.service_overrides = config['config'].get('service_overrides', {})
         resolver.telstate = None
+        resolver.s3_config = s3_config
 
         # create graph object and build physical graph from specified resources
         if self.interface_mode:

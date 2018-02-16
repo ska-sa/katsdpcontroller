@@ -18,6 +18,7 @@ import redis
 import pymesos
 import networkx
 import netifaces
+import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
@@ -426,8 +427,15 @@ class TestSDPController(BaseTestSDPController):
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
+        self.open_mock = self.create_patch('builtins.open', new_callable=open_file_mock.MockOpen)
+        self.open_mock.set_read_data_for('s3_config.json', '''
+            {
+                "access_key": "not-really-an-access-key",
+                "secret_key": "tellno1",
+                "url": "http://s3.invalid/"
+            }''')
         await self.setup_server(
-            '127.0.0.1', 0, self.sched,
+            '127.0.0.1', 0, self.sched, s3_config_file='s3_config.json',
             safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
         for product in [SUBARRAY_PRODUCT1, SUBARRAY_PRODUCT2,
                         SUBARRAY_PRODUCT3, SUBARRAY_PRODUCT4]:
@@ -609,6 +617,22 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request('product-deconfigure', 'prefix_0')
         name = await self._configure_subarray('prefix_*')
         self.assertEqual(b'prefix_0', name)
+
+    async def test_product_configure_s3_config_missing(self):
+        self.open_mock.unregister_path('s3_config.json')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
+        # Must not have created the subarray product internally
+        self.assertEqual({}, self.server.subarray_products)
+
+    async def test_product_configure_s3_config_bad_json(self):
+        self.open_mock.unregister_path('s3_config.json')
+        self.open_mock.set_read_data_for('s3_config.json', '{not json')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
+
+    async def test_product_configure_s3_config_schema_fail(self):
+        self.open_mock.unregister_path('s3_config.json')
+        self.open_mock.set_read_data_for('s3_config.json', '{}')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
 
     async def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""

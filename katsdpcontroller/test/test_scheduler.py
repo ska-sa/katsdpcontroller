@@ -17,6 +17,7 @@ import pymesos
 from addict import Dict
 import asynctest
 import aioresponses
+import open_file_mock
 import aiohttp
 
 from katsdpcontroller import scheduler
@@ -221,6 +222,11 @@ class TestTaskState:
 
 class TestImageResolver(asynctest.TestCase):
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
+    def setUp(self):
+        patcher = mock.patch('builtins.open', new_callable=open_file_mock.MockOpen)
+        self._open_mock = patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_simple(self):
         """Test the base case"""
         resolver = scheduler.ImageResolver()
@@ -269,30 +275,25 @@ class TestImageResolver(asynctest.TestCase):
 
     async def test_tag_file(self):
         """Test with a tag file"""
-        with mock.patch('builtins.open', autospec=open) as open_mock:
-            open_mock.return_value.__enter__.return_value.read.return_value = 'tag1\n'
-            resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                               tag_file='tag_file', use_digests=False)
-            resolver.override('foo', 'my-registry:5000/bar:custom')
-            open_mock.assert_called_once_with('tag_file', 'r')
-            assert_equal('my-registry:5000/test1:tag1', await resolver('test1', self.loop))
-            assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged', self.loop))
-            assert_equal('my-registry:5000/bar:custom', await resolver('foo', self.loop))
+        self._open_mock.set_read_data_for('tag_file', 'tag1\n')
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                           tag_file='tag_file', use_digests=False)
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        assert_equal('my-registry:5000/test1:tag1', await resolver('test1', self.loop))
+        assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged', self.loop))
+        assert_equal('my-registry:5000/bar:custom', await resolver('foo', self.loop))
 
     async def test_bad_tag_file(self):
         """A ValueError is raised if the tag file contains illegal content"""
-        with mock.patch('builtins.open', autospec=open) as open_mock:
-            open_mock.return_value.__enter__.return_value.read.return_value = 'not a good :tag\n'
-            with assert_raises(ValueError):
-                scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+        self._open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
+        with assert_raises(ValueError):
+            scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
 
     async def test_tag(self):
         """Test with an explicit tag"""
-        with mock.patch('builtins.open', autospec=open) as open_mock:
-            resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                               tag_file='tag_file', tag='mytag', use_digests=False)
-            assert_equal('my-registry:5000/test1:mytag', await resolver('test1', self.loop))
-            open_mock.assert_not_called()
+        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
+                                           tag_file='tag_file', tag='mytag', use_digests=False)
+        assert_equal('my-registry:5000/test1:mytag', await resolver('test1', self.loop))
 
 
 class TestTaskIDAllocator:
