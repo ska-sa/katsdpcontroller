@@ -1310,8 +1310,7 @@ class SDPControllerServer(DeviceServer):
             raise FailReply("This product id has no current configuration.")
 
     @time_request
-    async def request_capture_init(
-            self, ctx, subarray_product_id: str) -> str:
+    async def request_capture_init(self, ctx, subarray_product_id: str) -> str:
         """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data as
