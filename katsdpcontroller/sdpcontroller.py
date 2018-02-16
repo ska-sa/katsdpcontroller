@@ -905,7 +905,7 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-2.0"
+    VERSION = "sdpcontroller-3.0"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
@@ -1319,6 +1319,12 @@ class SDPControllerServer(DeviceServer):
         command before issuing a start command to the CBF. Essentially the SDP
         will, once this command has returned 'OK', be in a wait state until
         reception of the stream control start packet.
+
+        Upon capture-init the subarray product starts a new capture block which
+        lasts until the next capture-done command. This corresponds to the
+        notion of a "file". The capture-init command returns an ID string that
+        uniquely identifies the capture block and can be used to link various
+        output products and data sets produced during the capture block.
 
         Request Arguments
         -----------------
