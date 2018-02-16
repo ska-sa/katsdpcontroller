@@ -243,7 +243,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
         await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
         reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
-        self.assertEqual(reply, [b"00000000-00000-123456789"])
+        self.assertEqual(reply, [b"123456789"])
 
         reply, informs = await self.client.request("capture-status", SUBARRAY_PRODUCT1)
         self.assertEqual(reply, [b"capturing"])
@@ -272,7 +272,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
         await self.client.request("capture-init", SUBARRAY_PRODUCT2)
         reply, informs = await self.client.request("capture-done", SUBARRAY_PRODUCT2)
-        self.assertEqual(reply, [b"00000000-00000-123456789"])
+        self.assertEqual(reply, [b"123456789"])
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
     async def test_deconfigure_subarray_product(self):
@@ -765,7 +765,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4, "my_pb")
+        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
@@ -778,7 +778,7 @@ class TestSDPController(BaseTestSDPController):
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
             mock.call('configure-subarray-from-telstate'),
-            mock.call('capture-init', 'my_pb-123456789'),
+            mock.call('capture-init', '123456789'),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
@@ -829,9 +829,9 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4, 'my_pb')
+        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.sdp_l0.capture-block-state'].value = \
-            b'{"my_pb-123456789": "capturing"}'
+            b'{"123456789": "capturing"}'
         await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
