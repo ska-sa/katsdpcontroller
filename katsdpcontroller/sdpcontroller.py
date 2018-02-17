@@ -63,8 +63,6 @@ def log_task_exceptions(task, msg):
 
 
 def _load_s3_config(filename):
-    if filename is None:
-        return {}
     with open(filename, 'r') as f:
         config = json.load(f)
     schemas.S3_CONFIG.validate(config)
@@ -1052,10 +1050,13 @@ class SDPControllerServer(DeviceServer):
                                 "different configuration. Please deconfigure this product or "
                                 "choose a new product id to continue.".format(subarray_product_id))
 
-        try:
-            s3_config = _load_s3_config(self.s3_config_file)
-        except (OSError, KeyError, ValueError) as error:
-            raise FailReply("Could not load S3 config: {}".format(str(error)))
+        if self.interface_mode:
+            s3_config = {}
+        else:
+            try:
+                s3_config = _load_s3_config(self.s3_config_file)
+            except (OSError, KeyError, ValueError) as error:
+                raise FailReply("Could not load S3 config: {}".format(str(error)))
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))

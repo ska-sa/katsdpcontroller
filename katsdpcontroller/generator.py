@@ -839,7 +839,7 @@ def _make_vis_writer(g, config, name):
         'l0_interface': task.interfaces['sdp_10g'].name,
         'obj_size_mb': _mb(target_obj_size),
         'npy_path': '/var/kat/data',
-        's3_endpoint_url': resolver.s3_config.get('url')
+        's3_endpoint_url': resolver.s3_config['url']
     })
     g.add_edge(vis_writer, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
