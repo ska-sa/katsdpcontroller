@@ -823,7 +823,8 @@ def _make_vis_writer(g, config, name):
     n_substreams = src_multicast.n_addresses
     # Number of chunks per dump (at minimum one for vis, flags, weights, weights_channel)
     n_chunks = max(4 * n_substreams, info.size / target_obj_size)
-    n_dumps_per_write = int(math.ceil(200 / n_chunks))
+    GRAPH_SIZE_TO_WRITE = 200   # From vis_writer.py
+    n_dumps_per_write = int(math.ceil(GRAPH_SIZE_TO_WRITE / n_chunks))
     n_dumps_to_buffer = 2 * (n_dumps_per_write + 1) + 4
     memory_pool = n_dumps_to_buffer * info.size
 
