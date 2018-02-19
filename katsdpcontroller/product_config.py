@@ -141,9 +141,6 @@ def validate(config):
                     raise ValueError(
                         'channels per endpoints ({}) not a multiple of n_chans_per_substream ({})'
                         .format(n_chans_per_endpoint, n_chans_per_substream))
-                if config['version'] == '1.0':
-                    if not isinstance(stream.get('simulate', False), bool):
-                        raise ValueError('simulate dict only supported from schema version 1.1')
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
 
@@ -177,10 +174,6 @@ def validate(config):
                     raise ValueError(
                         'continuum channels ({}) not a multiple of number of ingests ({})'.format(
                             n_chans, n_ingest))
-
-            if output['type'] == 'sdp.cal':
-                if config['version'] == '1.0':
-                    raise ValueError('sdp.cal is only supported from schema version 1.1')
 
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
