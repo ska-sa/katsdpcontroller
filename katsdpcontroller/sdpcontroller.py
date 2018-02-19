@@ -500,25 +500,18 @@ class SDPSubarrayProductBase:
         if task.done():
             await task
 
-    async def capture_init(self, program_block_id):
-        def format_cbid(seq):
-            return '{}-{}'.format(program_block_id, seq)
-
+    async def capture_init(self):
         self._fail_if_busy()
         if self.state != State.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
-        if program_block_id is None:
-            # Match the layout of program block IDs
-            program_block_id = '00000000-00000'
-        # Find first unique capture block ID for that PB ID, starting from the
-        # current timestamp (this protects against the unlikely case of two
-        # capture blocks started in the same second, or oddities from clock
-        # warping).
+        # Find first unique capture block ID, starting from the current
+        # timestamp (this protects against the unlikely case of two capture
+        # blocks started in the same second, or oddities from clock warping).
         seq = int(time.time())
-        while format_cbid(seq) in _capture_block_names:
+        while str(seq) in _capture_block_names:
             seq -= 1
-        capture_block_id = format_cbid(seq)
+        capture_block_id = str(seq)
         _capture_block_names.add(capture_block_id)
         logger.info('Using capture block ID %s', capture_block_id)
 
@@ -912,7 +905,7 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-2.0"
+    VERSION = "sdpcontroller-3.0"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
@@ -1317,23 +1310,26 @@ class SDPControllerServer(DeviceServer):
             raise FailReply("This product id has no current configuration.")
 
     @time_request
-    async def request_capture_init(
-            self, ctx, subarray_product_id: str, program_block_id: str = None) -> str:
+    async def request_capture_init(self, ctx, subarray_product_id: str) -> str:
         """Request capture of the specified subarray product to start.
 
-        Note: This command is used to prepare the SDP for reception of data
-        as specified by the subarray product provided. It is necessary to call this
+        Note: This command is used to prepare the SDP for reception of data as
+        specified by the subarray product provided. It is necessary to call this
         command before issuing a start command to the CBF. Essentially the SDP
         will, once this command has returned 'OK', be in a wait state until
         reception of the stream control start packet.
 
+        Upon capture-init the subarray product starts a new capture block which
+        lasts until the next capture-done command. This corresponds to the
+        notion of a "file". The capture-init command returns an ID string that
+        uniquely identifies the capture block and can be used to link various
+        output products and data sets produced during the capture block.
+
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID of the subarray product to initialise. This must have already been
-            configured via the product-configure command.
-        program_block_id : string
-            The ID of the program block being started.
+            The ID of the subarray product to initialise. This must have
+            already been configured via the product-configure command.
 
         Returns
         -------
@@ -1345,7 +1341,7 @@ class SDPControllerServer(DeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        cbid = await sa.capture_init(program_block_id)
+        cbid = await sa.capture_init()
         return cbid
 
     @time_request
