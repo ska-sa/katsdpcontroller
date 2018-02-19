@@ -74,11 +74,11 @@ if __name__ == "__main__":
 
     usage = "%(prog)s [options] master"
     parser = argparse.ArgumentParser(usage=usage)
-    parser.add_argument('-a', '--host', dest='host', default="", metavar='HOST',
+    parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='attach to server HOST (default=localhost)')
-    parser.add_argument('-p', '--port', dest='port', type=int, default=5001, metavar='N',
+    parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
                         help='katcp listen port (default=%(default)s)')
-    parser.add_argument('-l', '--loglevel', dest='loglevel',
+    parser.add_argument('-l', '--loglevel',
                         default="info", metavar='LOGLEVEL',
                         help='set the Python logging level (default=%(default)s)')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
@@ -91,22 +91,21 @@ if __name__ == "__main__":
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
-    parser.add_argument('-i', '--interface_mode', dest='interface_mode', default=False,
+    parser.add_argument('-i', '--interface-mode', default=False,
                         action='store_true',
                         help='run the controller in interface only mode for testing integration and ICD compliance. (default: %(default)s)')
     parser.add_argument('--registry', dest='private_registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                         help='registry from which to pull images (use empty string to disable) (default: %(default)s)')
-    parser.add_argument('--image-override', dest='image_override', action='append',
+    parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup (default: none)')
-    parser.add_argument('--image-tag-file', dest='image_tag_file',
+    parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
-    parser.add_argument('--safe-multicast-cidr', dest='safe_multicast_cidr', default='225.100.0.0/16',
+    parser.add_argument('--s3-config-file',
+                        metavar='FILE', help='Configuration for connecting services to S3 (loaded on each configure)')
+    parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %(default)s)')
-    parser.add_argument('--graph-override', dest='graph_override', action='append',
-                        default=[], metavar='SUBARRAY_PRODUCT_ID:NEW_GRAPH',
-                        help='Override the graph to be used for the specified subarray product id (default: none)')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
                         help='File containing JSON describing related GUIs, or directory with .json files (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
@@ -123,13 +122,6 @@ if __name__ == "__main__":
     parser.add_argument('master', help='Zookeeper URL for discovering Mesos master e.g. zk://server.domain:2181/mesos')
     opts = parser.parse_args()
 
-    def die(msg=None):
-        if msg:
-            print(msg)
-        else:
-            parser.print_help()
-        sys.exit(1)
-
     if opts.loglevel is not None:
         logging.root.setLevel(opts.loglevel.upper())
     logger = logging.getLogger('sdpcontroller')
@@ -142,13 +134,8 @@ if __name__ == "__main__":
     for override in opts.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:
-            die("--image-override option must have a colon")
+            parser.error("--image-override option must have a colon")
         image_resolver_factory.override(fields[0], fields[1])
-
-    for override in opts.graph_override:
-        if len(override.split(':', 1)) < 2:
-            die("--graph-override option must be in the form <subarray_product_id>:<graph_name>")
-    graph_resolver = sdpcontroller.GraphResolver(overrides=opts.graph_override)
 
     gui_urls = None
     if opts.gui_urls is not None:
@@ -158,9 +145,12 @@ if __name__ == "__main__":
             else:
                 gui_urls = load_gui_urls_file(opts.gui_urls)
         except InvalidGuiUrlsError as error:
-            die(str(error))
+            parser.error(str(error))
         except Exception as error:
-            die('Could not read {}: {}'.format(opts.gui_urls, error))
+            parser.error('Could not read {}: {}'.format(opts.gui_urls, error))
+
+    if opts.s3_config_file is None and not opts.interface_mode:
+        parser.error('--s3-config-file is required (unless --interface-mode is given)')
 
     framework_info = addict.Dict()
     framework_info.user = 'root'
@@ -183,7 +173,7 @@ if __name__ == "__main__":
         opts.host, opts.port, sched, loop,
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
-        graph_resolver=graph_resolver,
+        s3_config_file=opts.s3_config_file,
         safe_multicast_cidr=opts.safe_multicast_cidr,
         gui_urls=gui_urls,
         graph_dir=opts.write_graphs)
