@@ -37,6 +37,8 @@ IMAGES = frozenset([
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
+#: Maximum number of custom signals requested by timeplot
+TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
@@ -475,6 +477,7 @@ def _make_timeplot(g, config, spectral_name):
     g.add_node(timeplot, config=lambda task, resolver: {
         'config_base': '/var/kat/config/.katsdpdisp',
         'l0_name': spectral_name,
+        'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
     return timeplot
@@ -483,12 +486,11 @@ def _make_timeplot(g, config, spectral_name):
 def _timeplot_frame_size(spectral_info, n_cont_channels):
     """Approximate size of the data sent from all ingest processes to timeplot per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
-    max_custom_signals = 128      # From katsdpdisp/scripts/time_plot.py
     n_perc_signals = 5 * 8
     n_spec_channels = spectral_info.n_channels
     n_bls = spectral_info.n_baselines
-    ans = n_spec_channels * max_custom_signals * 9  # sd_data + sd_flags
-    ans += max_custom_signals * 4                   # sd_data_index
+    ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * 9  # sd_data + sd_flags
+    ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
     ans += n_cont_channels * n_bls * 9              # sd_blmx_data + sd_blmx_flags
     ans += n_bls * 12                               # sd_timeseries + sd_timeseriesabs
     ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
