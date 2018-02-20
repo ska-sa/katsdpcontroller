@@ -1,12 +1,23 @@
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "definitions": {
+        "key": {"type": "string"},
+        "key_pair": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "access_key": {"$ref": "#/definitions/key"},
+                "secret_key": {"$ref": "#/definitions/key"}
+            }
+        }
+    },
     "type": "object",
     "additionalProperties": false,
     "properties": {
-        "access_key": { "type": "string" },
-        "secret_key": { "type": "string" },
+        "read": {"$ref": "#/definitions/key_pair"},
+        "write": {"$ref": "#/definitions/key_pair"},
         "url": { "type": "string", "format": "uri" }
     },
-    "required": ["access_key", "secret_key", "url"]
+    "required": ["read", "write", "url"]
 }
 
