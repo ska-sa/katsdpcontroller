@@ -22,7 +22,8 @@ import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, State, _capture_block_names)
+    SDPControllerServer, SDPCommonResources, SDPResources, State,
+    _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
 
@@ -197,6 +198,39 @@ EXPECTED_REQUEST_LIST = [
     'client-list', 'halt', 'help', 'log-level', 'sensor-list',
     'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'
 ]
+
+
+class TestRedactKeys(unittest.TestCase):
+    def setUp(self):
+        self.s3_config = {
+            'read': {
+                'access_key': 'ACCESS_KEY',
+                'secret_key': 'tellno1'
+            },
+            'write': {
+                'access_key': 's3cr3t',
+                'secret_key': 'mores3cr3t'
+            }
+        }
+
+    def test_no_command(self):
+        taskinfo = Dict()
+        result = _redact_keys(taskinfo, self.s3_config)
+        self.assertEqual(result, taskinfo)
+
+    def run_it(self, arguments):
+        taskinfo = Dict()
+        taskinfo.command.arguments = arguments
+        result = _redact_keys(taskinfo, self.s3_config)
+        return result.command.arguments
+
+    def test_with_equals(self):
+        result = self.run_it(['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'])
+        self.assertEqual(result, ['--secret=REDACTED', '--key=REDACTED', '--other=safe'])
+
+    def test_without_equals(self):
+        result = self.run_it(['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'])
+        self.assertEqual(result, ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe'])
 
 
 class BaseTestSDPController(asynctest.TestCase):
