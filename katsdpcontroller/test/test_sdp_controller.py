@@ -430,8 +430,14 @@ class TestSDPController(BaseTestSDPController):
         self.open_mock = self.create_patch('builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.set_read_data_for('s3_config.json', '''
             {
-                "access_key": "not-really-an-access-key",
-                "secret_key": "tellno1",
+                "read": {
+                    "access_key": "not-really-an-access-key",
+                    "secret_key": "tellno1"
+                },
+                "write": {
+                    "access_key": "another-fake-key",
+                    "secret_key": "s3cr3t"
+                },
                 "url": "http://s3.invalid/"
             }''')
         await self.setup_server(
