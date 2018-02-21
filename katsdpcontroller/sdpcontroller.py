@@ -69,6 +69,47 @@ def _load_s3_config(filename):
     return config
 
 
+def _redact_arg(arg, s3_config):
+    """Process one argument for _redact_keys"""
+    for mode in ['read', 'write']:
+        for name in ['access_key', 'secret_key']:
+            key = s3_config[mode][name]
+            if arg == key or arg.endswith('=' + key):
+                return arg[:-len(key)] + 'REDACTED'
+    return arg
+
+
+def _redact_keys(taskinfo, s3_config):
+    """Return a copy of a Mesos TaskInfo with command-line secret keys redacted.
+
+    This is intended for putting the taskinfo into telstate without revealing
+    secrets. Any occurrences of the secrets in s3_config in a command-line
+    argument are replaced by REDACTED.
+
+    It will handle both '--secret=foo' and '--secret foo'.
+
+    .. note::
+
+        While the original `taskinfo` is not modified, the copy is not a full deep copy.
+
+    Parameters
+    ----------
+    taskinfo : :class:`addict.Dict`
+        Taskinfo structure
+
+    Returned
+    --------
+    redacted : :class:`addict.Dict`
+        Copy of `taskinfo` with secrets redacted
+    """
+    taskinfo = taskinfo.copy()
+    if taskinfo.command.arguments:
+        taskinfo.command = taskinfo.command.copy()
+        taskinfo.command.arguments = [_redact_arg(arg, s3_config)
+                                      for arg in taskinfo.command.arguments]
+    return taskinfo
+
+
 class MulticastIPResources:
     def __init__(self, network):
         self._hosts = network.hosts()
@@ -828,7 +869,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     if isinstance(task, scheduler.PhysicalTask):
                         details[task.logical_node.name] = {
                             'host': task.host,
-                            'taskinfo': task.taskinfo.to_dict()
+                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
                         }
                 self.telstate.add('sdp_task_details', details, immutable=True)
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
