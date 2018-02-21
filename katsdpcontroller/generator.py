@@ -31,6 +31,7 @@ IMAGES = frozenset([
     'katsdpingest',
     'katsdpingest_titanx',
     'katsdpfilewriter',
+    'katsdpmetawriter',
     'redis'
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
@@ -332,6 +333,39 @@ def _make_cam2telstate(g, config, name):
         'url': url
     })
     return cam2telstate
+
+
+def _make_meta_writer(g, config):
+    def make_config(task, resolver):
+        s3_url = urllib.parse.urlsplit(resolver.s3_config['url'])
+        return {
+            's3_host': s3_url.hostname,
+            's3_port': s3_url.port,
+            'rdb_path': '/var/kat/data'
+        }
+
+    meta_writer = SDPLogicalTask('meta_writer')
+    meta_writer.image = 'katsdpmetawriter'
+    # The keys are passed on the command-line rather than through config so that
+    # they are redacted from telstate
+    meta_writer.command = [
+        'meta_writer.py',
+        '--access-key', '{resolver.s3_config[write][access_key]}',
+        '--secret-key', '{resolver.s3_config[write][secret_key]}'
+    ]
+    meta_writer.cpus = 0.2
+    meta_writer.mem = 256
+    meta_writer.ports = ['port']
+    meta_writer.volumes = [OBJ_DATA_VOL]
+    # Actual required bandwidth is minimal, but bursty.
+    meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    meta_writer.interfaces[0].bandwidth_out = 100e6    # 100 Mb/s
+    meta_writer.transitions = {
+        (State.CAPTURING, State.IDLE): ['write-lite-meta', '{capture_block_id}']
+    }
+
+    g.add_node(meta_writer, config=make_config)
+    return meta_writer
 
 
 def _make_cbf_simulator(g, config, name):
@@ -994,6 +1028,9 @@ def build_logical_graph(config):
     else:
         cam2telstate = None
 
+    # meta_writer node
+    meta_writer = _make_meta_writer(g, config)
+
     # Find all input streams that are actually used. At the moment only the
     # direct dependencies are gathered because those are the only ones that
     # can have the simulate flag anyway.
@@ -1073,17 +1110,21 @@ def build_logical_graph(config):
     for _node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
     for node in g:
-        if node is not telstate and isinstance(node, SDPLogicalTask):
-            node.command.extend([
-                '--telstate', '{endpoints[telstate_telstate]}',
-                '--name', node.name])
-            node.wrapper = config['config'].get('wrapper')
-            g.add_edge(node, telstate, port='telstate',
-                       depends_ready=True, depends_kill=True)
         if isinstance(node, SDPLogicalTask):
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
+            # Connect every task to telstate
+            if node is not telstate:
+                node.command.extend([
+                    '--telstate', '{endpoints[telstate_telstate]}',
+                    '--name', node.name])
+                node.wrapper = config['config'].get('wrapper')
+                g.add_edge(node, telstate, port='telstate',
+                           depends_ready=True, depends_kill=True)
+            # Make sure meta_writer is the last task to be handled in capture-done
+            if node is not meta_writer:
+                g.add_edge(meta_writer, node, depends_init=True)
             # Increase memory allocation where it depends on telstate content
-            if node is telstate or node.name.startswith('filewriter.'):
+            if node is telstate or node is meta_writer or node.name.startswith('filewriter.'):
                 node.mem += _mb(telstate_extra)
             # MESOS-7197 causes the master to crash if we ask for too little of
             # a resource. Enforce some minima.
