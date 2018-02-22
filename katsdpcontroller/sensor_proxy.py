@@ -86,7 +86,7 @@ class SensorProxyClient(aiokatcp.Client):
         collisions.
     prometheus_sensors : dict
         Dict mapping sensor names (after underscore normalisation) to pairs of
-        Prometheus metrics. These should be integer or float sensors (TODO:
+        Prometheus metrics. These should be integer, float or boolean sensors (TODO:
         enforce this). The first metric must be a Gauge or Counter and receives
         the sensor value. The second must be a Gauge and receives the katcp
         status value.

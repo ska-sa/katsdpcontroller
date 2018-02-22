@@ -45,6 +45,21 @@ _add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Cou
 # ingest
 _add_prometheus_sensor('last_dump_timestamp',
                        'Timestamp of most recently received dump in Unix seconds', Gauge)
+_add_prometheus_sensor(
+    'input_no_descriptor_heaps_total',
+    'Number of heaps rejected because descriptors not yet received', Counter)
+_add_prometheus_sensor(
+    'input_bad_timestamp_heaps_total',
+    'Number of heaps rejected because timestamp not aligned to integration boundary', Counter)
+_add_prometheus_sensor(
+    'input_too_old_heaps_total',
+    'Number of heaps rejected because timestamp is prior to the start time', Counter)
+_add_prometheus_sensor(
+    'input_bad_channel_heaps_total',
+    'Number of heaps rejected because channel offset is not aligned to the substreams', Counter)
+_add_prometheus_sensor(
+    'descriptors_received',
+    'Whether the SPEAD descriptors have been received', Gauge)
 
 # file writer
 _add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
