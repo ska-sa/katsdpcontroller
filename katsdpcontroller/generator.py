@@ -964,7 +964,10 @@ def build_logical_graph(config):
     # Copy the config, because we make some changes to it as we go
     config = copy.deepcopy(config)
 
-    g = networkx.MultiDiGraph(config=lambda resolver: {})
+    archived_streams = []   # Streams with connected vis_writers
+    g = networkx.MultiDiGraph(config=lambda resolver: {
+        'sdp_archived_streams': archived_streams
+    })
 
     # telstate node
     telstate = _make_telstate(g, config)
@@ -1031,6 +1034,7 @@ def build_logical_graph(config):
                             _make_cal(g, config, None, name)
                         _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
+                        archived_streams.append(name)
                         l0_done.add(name)
                         l0_done.add(name2)
     l0_spectral_only = False
@@ -1048,6 +1052,8 @@ def build_logical_graph(config):
             if implicit_cal:
                 _make_cal(g, config, None, name)
             _make_filewriter(g, config, name)
+            _make_vis_writer(g, config, name)
+            archived_streams.append(name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
