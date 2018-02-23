@@ -25,6 +25,7 @@ setup (
         'async_timeout',
         'decorator',
         'docker',
+        'jinja2',
         'jsonschema',
         'rfc3987',           # Used by jsonschema to validate URLs
         'networkx>=2.0',
@@ -39,7 +40,6 @@ setup (
     tests_require = tests_require,
     extras_require = {
         'agent': ['psutil', 'py3nvml', 'pycuda'],
-        'haproxy_disp': ['jinja2'],
         'test': tests_require
     },
     use_katversion = True,
