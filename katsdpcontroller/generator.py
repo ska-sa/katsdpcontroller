@@ -5,6 +5,7 @@ import time
 import copy
 import fractions
 import urllib
+import os.path
 
 import networkx
 
@@ -341,7 +342,7 @@ def _make_meta_writer(g, config):
         return {
             's3_host': s3_url.hostname,
             's3_port': s3_url.port,
-            'rdb_path': '/var/kat/data'
+            'rdb_path': OBJ_DATA_VOL.container_path
         }
 
     meta_writer = SDPLogicalTask('meta_writer')
@@ -512,7 +513,7 @@ def _make_timeplot(g, config, spectral_name):
         'category': 'Plot'
     }]
     g.add_node(timeplot, config=lambda task, resolver: {
-        'config_base': '/var/kat/config/.katsdpdisp',
+        'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'l0_name': spectral_name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
@@ -831,7 +832,7 @@ def _make_filewriter(g, config, name):
     filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
     filewriter.transitions = CAPTURE_TRANSITIONS
     g.add_node(filewriter, config=lambda task, resolver: {
-        'file_base': '/var/kat/data',
+        'file_base': DATA_VOL.container_path,
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name
     })
@@ -876,7 +877,7 @@ def _make_vis_writer(g, config, name):
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name,
         'obj_size_mb': _mb(target_obj_size),
-        'npy_path': '/var/kat/data',
+        'npy_path': OBJ_DATA_VOL.container_path,
         's3_endpoint_url': resolver.s3_config['url']
     })
     g.add_edge(vis_writer, src_multicast, port='spead',
