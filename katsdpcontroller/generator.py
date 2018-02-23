@@ -354,12 +354,15 @@ def _make_meta_writer(g, config):
         '--secret-key', '{resolver.s3_config[write][secret_key]}'
     ]
     meta_writer.cpus = 0.2
+    # Only a base allocation: it also gets telstate_extra added
     meta_writer.mem = 256
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
-    # Actual required bandwidth is minimal, but bursty.
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    meta_writer.interfaces[0].bandwidth_out = 100e6    # 100 Mb/s
+    # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
+    # except in development mode where it might not be available.
+    bandwidth = 1e9 if not is_develop(config) else 10e6
+    meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
         (State.CAPTURING, State.IDLE): ['write-lite-meta', '{capture_block_id}']
     }
