@@ -1,0 +1,11 @@
+{
+    "read": {
+        "access_key": "dummy",
+        "secret_key": "dummy"
+    },
+    "write": {
+        "access_key": "dummy",
+        "secret_key": "dummy"
+    },
+    "url": "http://s3.invalid/"
+}
