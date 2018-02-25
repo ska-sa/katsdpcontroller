@@ -532,7 +532,7 @@ class SDPSubarrayProductBase:
         if self.state != State.CAPTURING:
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
-        cbid = self.current_capture_block.name
+        capture_block_id = self.current_capture_block.name
         task = asyncio.ensure_future(self._capture_done(), loop=self.loop)
         self._async_task = task
         try:
@@ -540,8 +540,8 @@ class SDPSubarrayProductBase:
         finally:
             self._clear_async_task(task)
         logger.info('Finished capture block %s on subarray product %s',
-                    cbid, self.subarray_product_id)
-        return cbid
+                    capture_block_id, self.subarray_product_id)
+        return capture_block_id
 
     def write_graphs(self, output_dir):
         """Write visualisations to `output_dir`."""
