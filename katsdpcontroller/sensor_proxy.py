@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class PrometheusObserver:
-    """Watches a sensor and mirrors updates into a Prometheus Gauge or Counter"""
+    """Watches a sensor and mirrors updates into a Prometheus Gauge, Counter or Histogram"""
     def __init__(self, sensor, value_metric, status_metric, label_values):
         self._sensor = sensor
         self._old_value = 0.0
+        self._old_timestamp = None
         self._value_metric_root = value_metric
         self._status_metric_root = status_metric
         self._value_metric = value_metric.labels(*label_values)
@@ -38,14 +39,16 @@ class PrometheusObserver:
     def __call__(self, sensor, reading):
         valid = reading.status in VALID_STATUS
         value = float(reading.value) if valid else 0.0
+        timestamp = reading.timestamp
         self._status_metric.set(reading.status.value)
         # Detecting the type of the metric is tricky, because Counter and
         # Gauge aren't actually classes (they're functions). So we have to
         # use introspection.
-        if type(self._value_metric).__name__ == 'Gauge':
+        metric_type = type(self._value_metric).__name__
+        if metric_type == 'Gauge':
             if valid:
                 self._value_metric.set(value)
-        elif type(self._value_metric).__name__ == 'Counter':
+        elif metric_type == 'Counter':
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
                 if value < self._old_value:
@@ -58,10 +61,14 @@ class PrometheusObserver:
                     # sees a cumulative count.
                 else:
                     self._value_metric.inc(value - self._old_value)
+        elif metric_type == 'Histogram':
+            if valid and timestamp != self._old_timestamp:
+                self._value_metric.observe(value)
         else:
-            raise TypeError('Expected a Counter or Gauge')
+            raise TypeError('Expected a Counter, Gauge or Histogram, not {}'.format(metric_type))
         if valid:
             self._old_value = value
+        self._old_timestamp = timestamp
 
     def close(self):
         """Shut down observing"""

@@ -12,7 +12,7 @@ import async_timeout
 
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
-from prometheus_client import Gauge, Counter
+from prometheus_client import Gauge, Counter, Histogram
 
 from katsdptelstate.endpoint import Endpoint
 
