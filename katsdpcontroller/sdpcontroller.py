@@ -466,6 +466,7 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        logger.info('Subarray product %s successfully configured', self.subarray_product_id)
 
     async def deconfigure(self, force=False):
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
@@ -522,6 +523,8 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        logger.info('Started capture block %s on subarray product %s',
+                    capture_block_id, self.subarray_product_id)
         return capture_block_id
 
     async def capture_done(self):
@@ -536,6 +539,8 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        logger.info('Finished capture block %s on subarray product %s',
+                    cbid, self.subarray_product_id)
         return cbid
 
     def write_graphs(self, output_dir):
