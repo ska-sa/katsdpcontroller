@@ -905,7 +905,7 @@ class TestSDPController(BaseTestSDPController):
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('capture-done')
         # write-lite-meta must be last, hence assert_called_with not assert_any_call
-        katcp_client.request.assert_called_with('write-lite-meta', '123456789')
+        katcp_client.request.assert_called_with('write-meta', '123456789', True)
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
@@ -920,7 +920,7 @@ class TestSDPController(BaseTestSDPController):
 
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_called_with('write-lite-meta', mock.ANY)
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         self.assertEqual({}, self.server.subarray_products)
 
@@ -1003,7 +1003,7 @@ class TestSDPController(BaseTestSDPController):
         # Check that the subarray was stopped then shut down
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_called_with('write-lite-meta', mock.ANY)
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.

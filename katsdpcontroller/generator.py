@@ -367,7 +367,7 @@ def _make_meta_writer(g, config):
     bandwidth = 1e9 if not is_develop(config) else 10e6
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
-        (State.CAPTURING, State.IDLE): ['write-lite-meta', '{capture_block_id}']
+        (State.CAPTURING, State.IDLE): ['write-meta', '{capture_block_id}', True]
     }
 
     g.add_node(meta_writer, config=make_config)

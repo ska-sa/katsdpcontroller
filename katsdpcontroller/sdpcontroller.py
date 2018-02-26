@@ -733,7 +733,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 # Apply {} substitutions to request data
                 subst = dict(capture_block_id=capture_block.name,
                              time=now)
-                req = [field.format(**subst) for field in req]
+                req = [field.format(**subst) if isinstance(field, str) else field for field in req]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
             if deps or req is not None:
                 task = asyncio.ensure_future(self._exec_node_transition(node, req, deps),
