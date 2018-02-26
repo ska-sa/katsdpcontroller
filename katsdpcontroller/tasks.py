@@ -60,6 +60,11 @@ _add_prometheus_sensor(
 _add_prometheus_sensor(
     'descriptors_received',
     'Whether the SPEAD descriptors have been received', Gauge)
+_add_prometheus_sensor('output_n_ants', 'Number of antennas in output stream', Gauge)
+_add_prometheus_sensor('output_n_inputs', 'Number of single-pol signals in output stream', Gauge)
+_add_prometheus_sensor('output_n_bls', 'Number of baseline products in output stream', Gauge)
+_add_prometheus_sensor('output_n_chans', 'Number of channels in output stream', Gauge)
+_add_prometheus_sensor('output_int_time', 'Integration time of output stream', Gauge)
 
 # file writer
 _add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
@@ -84,9 +89,13 @@ _add_prometheus_sensor('pipeline_last_time',
                        'Time taken to process the most recent buffer', Gauge)
 _add_prometheus_sensor('pipeline_exceptions',
                        'Number of times the pipeline threw an exception', Counter),
+_add_prometheus_sensor('pipeline_active',
+                       'Whether pipeline is currently computing', Gauge)
 _add_prometheus_sensor('report_last_time',
                        'Elapsed time to generate most recent report', Gauge)
 _add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
+_add_prometheus_sensor('report_active',
+                       'Whether the report writer is active', Gauge)
 
 # meta writer
 _add_prometheus_sensor('key_failures',
