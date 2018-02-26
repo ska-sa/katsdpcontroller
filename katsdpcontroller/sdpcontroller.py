@@ -677,17 +677,18 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 req, node_type)
         return ret_args
 
-    async def _exec_node_transition(self, node, req, deps):
+    async def _exec_node_transition(self, node, reqs, deps):
         if deps:
             await asyncio.gather(*deps, loop=node.loop)
-        if req is not None:
+        if reqs:
             if node.katcp_connection is None:
                 logger.warning('Cannot issue %s to %s because there is no katcp connection',
-                               req, node.name)
+                               reqs[0], node.name)
             else:
                 # TODO: should handle katcp exceptions or failed replies
                 try:
-                    await node.issue_req(req[0], req[1:])
+                    for req in reqs:
+                        await node.issue_req(req[0], req[1:])
                 except FailReply:
                     pass   # Callee logs a warning
 
@@ -723,20 +724,23 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # behaviour predictable.
         now = time.time()   # Outside loop to be consistent across all nodes
         for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
-            req = None
+            reqs = []
             try:
-                req = node.get_transition(old_state, new_state)
+                reqs = node.get_transition(old_state, new_state)
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
-            if req is not None:
+            if reqs:
                 # Apply {} substitutions to request data
                 subst = dict(capture_block_id=capture_block.name,
                              time=now)
-                req = [field.format(**subst) for field in req]
+                reqs = [
+                    [field.format(**subst) if isinstance(field, str) else field for field in req]
+                    for req in reqs
+                ]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
-            if deps or req is not None:
-                task = asyncio.ensure_future(self._exec_node_transition(node, req, deps),
+            if deps or reqs:
+                task = asyncio.ensure_future(self._exec_node_transition(node, reqs, deps),
                                              loop=node.loop)
                 loop = node.loop
                 tasks[node] = task

@@ -20,8 +20,8 @@ from katsdpcontroller.tasks import (
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
-    (State.IDLE, State.CAPTURING): ['capture-init', '{capture_block_id}'],
-    (State.CAPTURING, State.IDLE): ['capture-done']
+    (State.IDLE, State.CAPTURING): [['capture-init', '{capture_block_id}']],
+    (State.CAPTURING, State.IDLE): [['capture-done']]
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
@@ -367,7 +367,10 @@ def _make_meta_writer(g, config):
     bandwidth = 1e9 if not is_develop(config) else 10e6
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
-        (State.CAPTURING, State.IDLE): ['write-lite-meta', '{capture_block_id}']
+        (State.CAPTURING, State.IDLE): [
+            ['write-meta', '{capture_block_id}', True],   # Light dump
+            ['write-meta', '{capture_block_id}', False]   # Full dump
+        ]
     }
 
     g.add_node(meta_writer, config=make_config)
@@ -471,8 +474,8 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
-            (State.IDLE, State.CAPTURING): ['capture-start', name, '{time}'],
-            (State.CAPTURING, State.IDLE): ['capture-stop', name]
+            (State.IDLE, State.CAPTURING): [['capture-start', name, '{time}']],
+            (State.CAPTURING, State.IDLE): [['capture-stop', name]]
         }
 
         g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {
