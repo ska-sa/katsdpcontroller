@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 # Package dependencies are handled externally via requirements.txt to please Docker and Travis
 
-tests_require = ['nose', 'aioresponses', 'asynctest']
+tests_require = ['nose', 'aioresponses', 'asynctest', 'open-mock-file']
 
 setup (
     name = "katsdpcontroller",

@@ -362,8 +362,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         self.capture_block_state_observer = None
 
     def get_transition(self, old_state, new_state):
-        """If this node has a specified state transition action, return it"""
-        return self.logical_node.transitions.get((old_state, new_state), None)
+        """Get state transition actions"""
+        return self.logical_node.transitions.get((old_state, new_state), [])
 
     def _disconnect(self):
         """Close the katcp connection (if open) and remove the sensors."""
