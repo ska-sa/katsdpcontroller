@@ -5,6 +5,7 @@ import time
 import copy
 import fractions
 import urllib
+import os.path
 
 import networkx
 
@@ -19,8 +20,8 @@ from katsdpcontroller.tasks import (
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
-    (State.IDLE, State.CAPTURING): ['capture-init', '{capture_block_id}'],
-    (State.CAPTURING, State.IDLE): ['capture-done']
+    (State.IDLE, State.CAPTURING): [['capture-init', '{capture_block_id}']],
+    (State.CAPTURING, State.IDLE): [['capture-done']]
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
@@ -31,14 +32,19 @@ IMAGES = frozenset([
     'katsdpingest',
     'katsdpingest_titanx',
     'katsdpfilewriter',
+    'katsdpmetawriter',
     'redis'
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
+#: Maximum number of custom signals requested by timeplot
+TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
+#: Like DATA_VOL, but for high speed data to be transferred to an object store
+OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 
@@ -332,6 +338,45 @@ def _make_cam2telstate(g, config, name):
     return cam2telstate
 
 
+def _make_meta_writer(g, config):
+    def make_config(task, resolver):
+        s3_url = urllib.parse.urlsplit(resolver.s3_config['url'])
+        return {
+            's3_host': s3_url.hostname,
+            's3_port': s3_url.port,
+            'rdb_path': OBJ_DATA_VOL.container_path
+        }
+
+    meta_writer = SDPLogicalTask('meta_writer')
+    meta_writer.image = 'katsdpmetawriter'
+    # The keys are passed on the command-line rather than through config so that
+    # they are redacted from telstate
+    meta_writer.command = [
+        'meta_writer.py',
+        '--access-key', '{resolver.s3_config[write][access_key]}',
+        '--secret-key', '{resolver.s3_config[write][secret_key]}'
+    ]
+    meta_writer.cpus = 0.2
+    # Only a base allocation: it also gets telstate_extra added
+    meta_writer.mem = 256
+    meta_writer.ports = ['port']
+    meta_writer.volumes = [OBJ_DATA_VOL]
+    meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
+    # except in development mode where it might not be available.
+    bandwidth = 1e9 if not is_develop(config) else 10e6
+    meta_writer.interfaces[0].bandwidth_out = bandwidth
+    meta_writer.transitions = {
+        (State.CAPTURING, State.IDLE): [
+            ['write-meta', '{capture_block_id}', True],   # Light dump
+            ['write-meta', '{capture_block_id}', False]   # Full dump
+        ]
+    }
+
+    g.add_node(meta_writer, config=make_config)
+    return meta_writer
+
+
 def _make_cbf_simulator(g, config, name):
     type_ = config['inputs'][name]['type']
     settings = config['inputs'][name].get('simulate', {})
@@ -429,8 +474,8 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
-            (State.IDLE, State.CAPTURING): ['capture-start', name, '{time}'],
-            (State.CAPTURING, State.IDLE): ['capture-stop', name]
+            (State.IDLE, State.CAPTURING): [['capture-start', name, '{time}']],
+            (State.CAPTURING, State.IDLE): [['capture-stop', name]]
         }
 
         g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {
@@ -473,8 +518,9 @@ def _make_timeplot(g, config, spectral_name):
         'category': 'Plot'
     }]
     g.add_node(timeplot, config=lambda task, resolver: {
-        'config_base': '/var/kat/config/.katsdpdisp',
+        'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'l0_name': spectral_name,
+        'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
     return timeplot
@@ -483,12 +529,11 @@ def _make_timeplot(g, config, spectral_name):
 def _timeplot_frame_size(spectral_info, n_cont_channels):
     """Approximate size of the data sent from all ingest processes to timeplot per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
-    max_custom_signals = 128      # From katsdpdisp/scripts/time_plot.py
     n_perc_signals = 5 * 8
     n_spec_channels = spectral_info.n_channels
     n_bls = spectral_info.n_baselines
-    ans = n_spec_channels * max_custom_signals * 9  # sd_data + sd_flags
-    ans += max_custom_signals * 4                   # sd_data_index
+    ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * 9  # sd_data + sd_flags
+    ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
     ans += n_cont_channels * n_bls * 9              # sd_blmx_data + sd_blmx_flags
     ans += n_bls * 12                               # sd_timeseries + sd_timeseriesabs
     ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
@@ -822,7 +867,7 @@ def _make_filewriter(g, config, name):
     filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
     filewriter.transitions = CAPTURE_TRANSITIONS
     g.add_node(filewriter, config=lambda task, resolver: {
-        'file_base': '/var/kat/data',
+        'file_base': DATA_VOL.container_path,
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name
     })
@@ -831,6 +876,49 @@ def _make_filewriter(g, config, name):
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
     return filewriter
+
+
+def _make_vis_writer(g, config, name):
+    info = L0Info(config, name)
+
+    vis_writer = SDPLogicalTask('vis_writer.' + name)
+    vis_writer.image = 'katsdpfilewriter'
+    vis_writer.command = ['vis_writer.py']
+    # Don't yet have a good idea of real CPU usage. For now assume that 32
+    # antennas, 32K channels requires two CPUs (one for capture, one for
+    # writing) and scale from there.
+    vis_writer.cpus = 2 * info.n_vis / _N32_32
+
+    # Estimate the size of the memory pool. The actual code is pretty complex,
+    # so this is just to get the right scaling.
+    target_obj_size = 10e6
+    src_multicast = find_node(g, 'multicast.' + name)
+    n_substreams = src_multicast.n_addresses
+    # Number of chunks per dump (at minimum one for vis, flags, weights, weights_channel)
+    n_chunks = max(4 * n_substreams, info.size / target_obj_size)
+    GRAPH_SIZE_TO_WRITE = 200   # From vis_writer.py
+    n_dumps_per_write = int(math.ceil(GRAPH_SIZE_TO_WRITE / n_chunks))
+    n_dumps_to_buffer = 2 * (n_dumps_per_write + 1) + 4
+    memory_pool = n_dumps_to_buffer * info.size
+
+    # It's only a rough estimate, so double it to be on the safe side
+    vis_writer.mem = _mb(2 * memory_pool) + 256
+    vis_writer.ports = ['port']
+    vis_writer.volumes = [OBJ_DATA_VOL]
+    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
+    vis_writer.transitions = CAPTURE_TRANSITIONS
+    g.add_node(vis_writer, config=lambda task, resolver: {
+        'l0_name': name,
+        'l0_interface': task.interfaces['sdp_10g'].name,
+        'obj_size_mb': _mb(target_obj_size),
+        'npy_path': OBJ_DATA_VOL.container_path,
+        's3_endpoint_url': resolver.s3_config['url']
+    })
+    g.add_edge(vis_writer, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
+    return vis_writer
 
 
 def _make_beamformer_ptuse(g, config, name):
@@ -949,7 +1037,10 @@ def build_logical_graph(config):
     # Copy the config, because we make some changes to it as we go
     config = copy.deepcopy(config)
 
-    g = networkx.MultiDiGraph(config=lambda resolver: {})
+    archived_streams = []   # Streams with connected vis_writers
+    g = networkx.MultiDiGraph(config=lambda resolver: {
+        'sdp_archived_streams': archived_streams
+    })
 
     # telstate node
     telstate = _make_telstate(g, config)
@@ -975,6 +1066,9 @@ def build_logical_graph(config):
             g.add_edge(node, cam2telstate, depends_ready=True)
     else:
         cam2telstate = None
+
+    # meta_writer node
+    meta_writer = _make_meta_writer(g, config)
 
     # Find all input streams that are actually used. At the moment only the
     # direct dependencies are gathered because those are the only ones that
@@ -1015,6 +1109,8 @@ def build_logical_graph(config):
                         if implicit_cal:
                             _make_cal(g, config, None, name)
                         _make_filewriter(g, config, name)
+                        _make_vis_writer(g, config, name)
+                        archived_streams.append(name)
                         l0_done.add(name)
                         l0_done.add(name2)
     l0_spectral_only = False
@@ -1032,6 +1128,8 @@ def build_logical_graph(config):
             if implicit_cal:
                 _make_cal(g, config, None, name)
             _make_filewriter(g, config, name)
+            _make_vis_writer(g, config, name)
+            archived_streams.append(name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
@@ -1051,17 +1149,21 @@ def build_logical_graph(config):
     for _node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
     for node in g:
-        if node is not telstate and isinstance(node, SDPLogicalTask):
-            node.command.extend([
-                '--telstate', '{endpoints[telstate_telstate]}',
-                '--name', node.name])
-            node.wrapper = config['config'].get('wrapper')
-            g.add_edge(node, telstate, port='telstate',
-                       depends_ready=True, depends_kill=True)
         if isinstance(node, SDPLogicalTask):
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
+            # Connect every task to telstate
+            if node is not telstate:
+                node.command.extend([
+                    '--telstate', '{endpoints[telstate_telstate]}',
+                    '--name', node.name])
+                node.wrapper = config['config'].get('wrapper')
+                g.add_edge(node, telstate, port='telstate',
+                           depends_ready=True, depends_kill=True)
+            # Make sure meta_writer is the last task to be handled in capture-done
+            if node is not meta_writer:
+                g.add_edge(meta_writer, node, depends_init=True)
             # Increase memory allocation where it depends on telstate content
-            if node is telstate or node.name.startswith('filewriter.'):
+            if node is telstate or node is meta_writer or node.name.startswith('filewriter.'):
                 node.mem += _mb(telstate_extra)
             # MESOS-7197 causes the master to crash if we ask for too little of
             # a resource. Enforce some minima.

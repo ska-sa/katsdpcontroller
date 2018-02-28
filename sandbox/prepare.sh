@@ -9,5 +9,6 @@ dir="$(realpath $(dirname $0))"
     --network "lo:sdp_10g" \
     --volume "data:$dir/data" \
     --volume "data_local:$dir/data" \
+    --volume "obj_data:$dir/data" \
     --volume "config:$dir/config"
 chmod a+w "$dir/data" "$dir/config"

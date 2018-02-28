@@ -1,3 +1,17 @@
+{% macro validate_version() %}
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "required": ["version"],
+    "properties": {
+        "version": {
+            "type": "string",
+            "enum": ["1.0", "1.1"]
+        }
+    }
+}
+{% endmacro %}
+
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
     "definitions": {
@@ -41,6 +55,7 @@
             "items": {"$ref": "#/definitions/nonneg_integer"}
         },
         "simulate": {
+{% if version != "1.0" %}
             "oneOf": [
                 {"type": "boolean"},
                 {
@@ -59,6 +74,13 @@
                     "additionalProperties": false
                 }
             ],
+{% else %}
+            "type": "boolean",
+{% endif %}
+            "default": false
+        },
+        "simulate_bool": {
+            "type": "boolean",
             "default": false
         }
     },
@@ -201,7 +223,14 @@
                     "required": ["type"],
                     "properties": {
                         "type": {
-                            "enum": ["sdp.l0", "sdp.beamformer", "sdp.beamformer_engineering", "sdp.cal"]
+                            "enum": [
+                                "sdp.l0",
+{% if version != "1.0" %}
+                                "sdp.cal",
+{% endif %}
+                                "sdp.beamformer",
+                                "sdp.beamformer_engineering"
+                            ]
                         },
                         "src_streams": {"$ref": "#/definitions/src_streams"}
                     },
@@ -275,7 +304,9 @@
                                     }
                                 }
                             ]
-                        },
+                        }
+{% if version != "1.0" %}
+                        ,
                         {
                             "oneOf": [
                                 {
@@ -334,6 +365,7 @@
                                 }
                             ]
                         }
+{% endif %}
                     ]
                 }
             }
@@ -360,7 +392,7 @@
         },
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1"]
+            "enum": ["{{version}}"]
         }
     }
 }

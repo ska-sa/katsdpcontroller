@@ -28,13 +28,14 @@
       rotate_frame.src = 'data:text/html,' + encodeURIComponent("<div style='color: #aaaaaa;'>" + content + "</div>");
      } 
 
-     function rotate(force=false)
+     function rotate()
      {
       if (arrays.length == 0) { set_content(no_content); return; }
-      if (arrays.length == 1 && !force) { return; }
-       // don't rotate if we have only one to display (unless forced)
+      if (arrays.length == 1 && rotate_frame.src.startsWith(urls[arrays[0]])) { return; }
+       // don't rotate if we have only one to display and are currently showing it
        // or none to dispay
-      document.getElementById('rotate_frame').src = urls[arrays[url_id]];
+      console.log("Rotating to frame " + url_id + " : " + urls[arrays[url_id]]);
+      rotate_frame.src = urls[arrays[url_id]];
       url_id = url_id + 1;
       if (url_id == arrays.length) { url_id = 0;}
      }
@@ -90,8 +91,7 @@
         urls = JSON.parse(msg.data);
         arrays = Object.keys(urls);    
         rotater = setInterval(rotate, {{args.rotate_interval}});
-        rotate(true);
-         // don't wait for interval for first showing...
+         // waiting the interval gives time for the time_plot endpoint to startup
        } catch (err) {
         console.log("Failed to parse WS message: " + msg.data);
        }

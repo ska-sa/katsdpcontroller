@@ -18,10 +18,12 @@ import redis
 import pymesos
 import networkx
 import netifaces
+import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, State, _capture_block_names)
+    SDPControllerServer, SDPCommonResources, SDPResources, State,
+    _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
 
@@ -198,6 +200,39 @@ EXPECTED_REQUEST_LIST = [
 ]
 
 
+class TestRedactKeys(unittest.TestCase):
+    def setUp(self):
+        self.s3_config = {
+            'read': {
+                'access_key': 'ACCESS_KEY',
+                'secret_key': 'tellno1'
+            },
+            'write': {
+                'access_key': 's3cr3t',
+                'secret_key': 'mores3cr3t'
+            }
+        }
+
+    def test_no_command(self):
+        taskinfo = Dict()
+        result = _redact_keys(taskinfo, self.s3_config)
+        self.assertEqual(result, taskinfo)
+
+    def run_it(self, arguments):
+        taskinfo = Dict()
+        taskinfo.command.arguments = arguments
+        result = _redact_keys(taskinfo, self.s3_config)
+        return result.command.arguments
+
+    def test_with_equals(self):
+        result = self.run_it(['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'])
+        self.assertEqual(result, ['--secret=REDACTED', '--key=REDACTED', '--other=safe'])
+
+    def test_without_equals(self):
+        result = self.run_it(['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'])
+        self.assertEqual(result, ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe'])
+
+
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
     async def setup_server(self, *server_args, **server_kwargs):
@@ -243,7 +278,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT1)
         await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
         reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
-        self.assertEqual(reply, [b"00000000-00000-123456789"])
+        self.assertEqual(reply, [b"123456789"])
 
         reply, informs = await self.client.request("capture-status", SUBARRAY_PRODUCT1)
         self.assertEqual(reply, [b"capturing"])
@@ -272,7 +307,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
         await self.client.request("capture-init", SUBARRAY_PRODUCT2)
         reply, informs = await self.client.request("capture-done", SUBARRAY_PRODUCT2)
-        self.assertEqual(reply, [b"00000000-00000-123456789"])
+        self.assertEqual(reply, [b"123456789"])
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)
 
     async def test_deconfigure_subarray_product(self):
@@ -426,8 +461,21 @@ class TestSDPController(BaseTestSDPController):
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
+        self.open_mock = self.create_patch('builtins.open', new_callable=open_file_mock.MockOpen)
+        self.open_mock.set_read_data_for('s3_config.json', '''
+            {
+                "read": {
+                    "access_key": "not-really-an-access-key",
+                    "secret_key": "tellno1"
+                },
+                "write": {
+                    "access_key": "another-fake-key",
+                    "secret_key": "s3cr3t"
+                },
+                "url": "http://s3.invalid/"
+            }''')
         await self.setup_server(
-            '127.0.0.1', 0, self.sched,
+            '127.0.0.1', 0, self.sched, s3_config_file='s3_config.json',
             safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
         for product in [SUBARRAY_PRODUCT1, SUBARRAY_PRODUCT2,
                         SUBARRAY_PRODUCT3, SUBARRAY_PRODUCT4]:
@@ -610,6 +658,22 @@ class TestSDPController(BaseTestSDPController):
         name = await self._configure_subarray('prefix_*')
         self.assertEqual(b'prefix_0', name)
 
+    async def test_product_configure_s3_config_missing(self):
+        self.open_mock.unregister_path('s3_config.json')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
+        # Must not have created the subarray product internally
+        self.assertEqual({}, self.server.subarray_products)
+
+    async def test_product_configure_s3_config_bad_json(self):
+        self.open_mock.unregister_path('s3_config.json')
+        self.open_mock.set_read_data_for('s3_config.json', '{not json')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
+
+    async def test_product_configure_s3_config_schema_fail(self):
+        self.open_mock.unregister_path('s3_config.json')
+        self.open_mock.set_read_data_for('s3_config.json', '{}')
+        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT1))
+
     async def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
@@ -765,7 +829,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_init(self):
         """Checks that capture-init succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4, "my_pb")
+        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
@@ -778,7 +842,7 @@ class TestSDPController(BaseTestSDPController):
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
             mock.call('configure-subarray-from-telstate'),
-            mock.call('capture-init', 'my_pb-123456789'),
+            mock.call('capture-init', '123456789'),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
@@ -829,9 +893,9 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4, 'my_pb')
+        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.sdp_l0.capture-block-state'].value = \
-            b'{"my_pb-123456789": "capturing"}'
+            b'{"123456789": "capturing"}'
         await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
@@ -839,7 +903,10 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(State.IDLE, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value
-        katcp_client.request.assert_called_with('capture-done')
+        katcp_client.request.assert_any_call('capture-done')
+        katcp_client.request.assert_any_call('write-meta', '123456789', True)
+        # write-meta full dump must be last, hence assert_called_with not assert_any_call
+        katcp_client.request.assert_called_with('write-meta', '123456789', False)
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
@@ -853,7 +920,9 @@ class TestSDPController(BaseTestSDPController):
         await self.server.deconfigure_on_exit()
 
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        sensor_proxy_client.request.assert_called_with('capture-done')
+        sensor_proxy_client.request.assert_any_call('capture-done')
+        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         self.assertEqual({}, self.server.subarray_products)
 
@@ -935,7 +1004,9 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request('sdp-shutdown')
         # Check that the subarray was stopped then shut down
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        sensor_proxy_client.request.assert_called_with('capture-done')
+        sensor_proxy_client.request.assert_any_call('capture-done')
+        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.

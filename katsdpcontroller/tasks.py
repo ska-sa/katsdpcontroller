@@ -31,20 +31,45 @@ PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Some of these will match multiple nodes, which is fine since they get labels
 # in Prometheus.
 PROMETHEUS_SENSORS = {}
-_add_prometheus_sensor('input_rate', 'Current input data rate in Bps', Gauge)
-_add_prometheus_sensor('output_rate', 'Current output data rate in Bps', Gauge)
-_add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
-_add_prometheus_sensor('packets_captured', 'Total number of data dumps received', Counter)
-_add_prometheus_sensor('dumps', 'Total number of data dumps received', Counter)
+
+# common
 _add_prometheus_sensor('input_bytes_total', 'Number of payload bytes received', Counter)
 _add_prometheus_sensor('input_heaps_total', 'Number of payload heaps received', Counter)
+_add_prometheus_sensor('input_incomplete_heaps_total',
+                       'Number of incomplete heaps that were dropped', Counter)
 _add_prometheus_sensor('input_dumps_total', 'Number of payload dumps received', Counter)
 _add_prometheus_sensor('output_bytes_total', 'Number of payload bytes sent', Counter)
 _add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Counter)
 _add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
+
+# ingest
 _add_prometheus_sensor('last_dump_timestamp',
                        'Timestamp of most recently received dump in Unix seconds', Gauge)
+_add_prometheus_sensor(
+    'input_no_descriptor_heaps_total',
+    'Number of heaps rejected because descriptors not yet received', Counter)
+_add_prometheus_sensor(
+    'input_bad_timestamp_heaps_total',
+    'Number of heaps rejected because timestamp not aligned to integration boundary', Counter)
+_add_prometheus_sensor(
+    'input_too_old_heaps_total',
+    'Number of heaps rejected because timestamp is prior to the start time', Counter)
+_add_prometheus_sensor(
+    'input_bad_channel_heaps_total',
+    'Number of heaps rejected because channel offset is not aligned to the substreams', Counter)
+_add_prometheus_sensor(
+    'descriptors_received',
+    'Whether the SPEAD descriptors have been received', Gauge)
+_add_prometheus_sensor('output_n_ants', 'Number of antennas in output stream', Gauge)
+_add_prometheus_sensor('output_n_inputs', 'Number of single-pol signals in output stream', Gauge)
+_add_prometheus_sensor('output_n_bls', 'Number of baseline products in output stream', Gauge)
+_add_prometheus_sensor('output_n_chans', 'Number of channels in output stream', Gauge)
+_add_prometheus_sensor('output_int_time', 'Integration time of output stream', Gauge)
 
+# file writer
+_add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
+
+# cal
 _add_prometheus_sensor('accumulator_batches',
                        'Number of batches completed by the accumulator', Counter)
 _add_prometheus_sensor('slots', 'Total number of buffer slots', Gauge)
@@ -64,9 +89,21 @@ _add_prometheus_sensor('pipeline_last_time',
                        'Time taken to process the most recent buffer', Gauge)
 _add_prometheus_sensor('pipeline_exceptions',
                        'Number of times the pipeline threw an exception', Counter),
+_add_prometheus_sensor('pipeline_active',
+                       'Whether pipeline is currently computing', Gauge)
 _add_prometheus_sensor('report_last_time',
                        'Elapsed time to generate most recent report', Gauge)
 _add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
+_add_prometheus_sensor('report_active',
+                       'Whether the report writer is active', Gauge)
+
+# meta writer
+_add_prometheus_sensor('key_failures',
+                       'Count of the number of failures to write a desired key to the RDB dump.',
+                       Counter)
+_add_prometheus_sensor('last_transfer_rate',
+                       'Rate of last data transfer to S3 endpoint in bytes per second.',
+                       Gauge)
 
 
 class State(scheduler.OrderedEnum):
@@ -326,8 +363,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         self.capture_block_state_observer = None
 
     def get_transition(self, old_state, new_state):
-        """If this node has a specified state transition action, return it"""
-        return self.logical_node.transitions.get((old_state, new_state), None)
+        """Get state transition actions"""
+        return self.logical_node.transitions.get((old_state, new_state), [])
 
     def _disconnect(self):
         """Close the katcp connection (if open) and remove the sensors."""

@@ -28,7 +28,7 @@ from prometheus_client import Histogram
 from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
-from . import scheduler, tasks, product_config, generator
+from . import scheduler, tasks, product_config, generator, schemas
 from .tasks import State, DEPENDS_INIT
 
 
@@ -62,46 +62,52 @@ def log_task_exceptions(task, msg):
     task.add_done_callback(done_callback)
 
 
-class GraphResolver:
-    """Provides graph name resolution services for use when presented with
-       a subarray product id.
+def _load_s3_config(filename):
+    with open(filename, 'r') as f:
+        config = json.load(f)
+    schemas.S3_CONFIG.validate(config)
+    return config
 
-       A subarray product id has the form <subarray_name>_<data_product_name>
-       and in general the graph name will be the same as the data_product_name.
 
-       This resolver class allows specified subarray product ids to be mapped
-       to a user specified graph.
+def _redact_arg(arg, s3_config):
+    """Process one argument for _redact_keys"""
+    for mode in ['read', 'write']:
+        for name in ['access_key', 'secret_key']:
+            key = s3_config[mode][name]
+            if arg == key or arg.endswith('=' + key):
+                return arg[:-len(key)] + 'REDACTED'
+    return arg
 
-       Parameters
-       ----------
-       overrides : iterable, optional
-            Override strings in the form <subarray_product_id>:<override_graph_name>
-       """
-    def __init__(self, overrides=()):
-        self._overrides = {}
 
-        for override in overrides:
-            fields = override.split(':', 1)
-            if len(fields) < 2:
-                logger.warning("Ignoring graph resolver override {} as it does not conform to \
-                                the required <subarray_product_id>:<graph_name>".format(override))
-            self._overrides[fields[0]] = fields[1]
-            logger.info("Registering graph override {} => {}".format(fields[0], fields[1]))
+def _redact_keys(taskinfo, s3_config):
+    """Return a copy of a Mesos TaskInfo with command-line secret keys redacted.
 
-    def __call__(self, subarray_product_id):
-        """Returns a full qualified graph name from the specified subarray product id.
-           e.g. array_1_c856M4k => c856M4k
-        """
-        try:
-            base_graph_name = self._overrides[subarray_product_id]
-            # if an override is set use this instead, but warn the user about this.
-            logger.warning("Graph name specified by subarray_product_id (%s) has been overridden "
-                           "to %s", subarray_product_id, base_graph_name)
-        except KeyError:
-            # default graph name is to split out the trailing name from the
-            # subarray product id specifier
-            base_graph_name = subarray_product_id.split("_")[-1]
-        return base_graph_name
+    This is intended for putting the taskinfo into telstate without revealing
+    secrets. Any occurrences of the secrets in s3_config in a command-line
+    argument are replaced by REDACTED.
+
+    It will handle both '--secret=foo' and '--secret foo'.
+
+    .. note::
+
+        While the original `taskinfo` is not modified, the copy is not a full deep copy.
+
+    Parameters
+    ----------
+    taskinfo : :class:`addict.Dict`
+        Taskinfo structure
+
+    Returned
+    --------
+    redacted : :class:`addict.Dict`
+        Copy of `taskinfo` with secrets redacted
+    """
+    taskinfo = taskinfo.copy()
+    if taskinfo.command.arguments:
+        taskinfo.command = taskinfo.command.copy()
+        taskinfo.command.arguments = [_redact_arg(arg, s3_config)
+                                      for arg in taskinfo.command.arguments]
+    return taskinfo
 
 
 class MulticastIPResources:
@@ -466,6 +472,7 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        logger.info('Subarray product %s successfully configured', self.subarray_product_id)
 
     async def deconfigure(self, force=False):
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
@@ -500,25 +507,18 @@ class SDPSubarrayProductBase:
         if task.done():
             await task
 
-    async def capture_init(self, program_block_id):
-        def format_cbid(seq):
-            return '{}-{}'.format(program_block_id, seq)
-
+    async def capture_init(self):
         self._fail_if_busy()
         if self.state != State.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
-        if program_block_id is None:
-            # Match the layout of program block IDs
-            program_block_id = '00000000-00000'
-        # Find first unique capture block ID for that PB ID, starting from the
-        # current timestamp (this protects against the unlikely case of two
-        # capture blocks started in the same second, or oddities from clock
-        # warping).
+        # Find first unique capture block ID, starting from the current
+        # timestamp (this protects against the unlikely case of two capture
+        # blocks started in the same second, or oddities from clock warping).
         seq = int(time.time())
-        while format_cbid(seq) in _capture_block_names:
+        while str(seq) in _capture_block_names:
             seq -= 1
-        capture_block_id = format_cbid(seq)
+        capture_block_id = str(seq)
         _capture_block_names.add(capture_block_id)
         logger.info('Using capture block ID %s', capture_block_id)
 
@@ -529,6 +529,8 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
+        logger.info('Started capture block %s on subarray product %s',
+                    capture_block_id, self.subarray_product_id)
         return capture_block_id
 
     async def capture_done(self):
@@ -536,14 +538,16 @@ class SDPSubarrayProductBase:
         if self.state != State.CAPTURING:
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
-        cbid = self.current_capture_block.name
+        capture_block_id = self.current_capture_block.name
         task = asyncio.ensure_future(self._capture_done(), loop=self.loop)
         self._async_task = task
         try:
             await task
         finally:
             self._clear_async_task(task)
-        return cbid
+        logger.info('Finished capture block %s on subarray product %s',
+                    capture_block_id, self.subarray_product_id)
+        return capture_block_id
 
     def write_graphs(self, output_dir):
         """Write visualisations to `output_dir`."""
@@ -679,17 +683,18 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 req, node_type)
         return ret_args
 
-    async def _exec_node_transition(self, node, req, deps):
+    async def _exec_node_transition(self, node, reqs, deps):
         if deps:
             await asyncio.gather(*deps, loop=node.loop)
-        if req is not None:
+        if reqs:
             if node.katcp_connection is None:
                 logger.warning('Cannot issue %s to %s because there is no katcp connection',
-                               req, node.name)
+                               reqs[0], node.name)
             else:
                 # TODO: should handle katcp exceptions or failed replies
                 try:
-                    await node.issue_req(req[0], req[1:])
+                    for req in reqs:
+                        await node.issue_req(req[0], req[1:])
                 except FailReply:
                     pass   # Callee logs a warning
 
@@ -725,20 +730,23 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # behaviour predictable.
         now = time.time()   # Outside loop to be consistent across all nodes
         for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
-            req = None
+            reqs = []
             try:
-                req = node.get_transition(old_state, new_state)
+                reqs = node.get_transition(old_state, new_state)
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
-            if req is not None:
+            if reqs:
                 # Apply {} substitutions to request data
                 subst = dict(capture_block_id=capture_block.name,
                              time=now)
-                req = [field.format(**subst) for field in req]
+                reqs = [
+                    [field.format(**subst) if isinstance(field, str) else field for field in req]
+                    for req in reqs
+                ]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
-            if deps or req is not None:
-                task = asyncio.ensure_future(self._exec_node_transition(node, req, deps),
+            if deps or reqs:
+                task = asyncio.ensure_future(self._exec_node_transition(node, reqs, deps),
                                              loop=node.loop)
                 loop = node.loop
                 tasks[node] = task
@@ -864,7 +872,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     if isinstance(task, scheduler.PhysicalTask):
                         details[task.logical_node.name] = {
                             'host': task.host,
-                            'taskinfo': task.taskinfo.to_dict()
+                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
                         }
                 self.telstate.add('sdp_task_details', details, immutable=True)
                 self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
@@ -913,12 +921,13 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-2.0"
+    VERSION = "sdpcontroller-3.0"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr,
                  interface_mode=False,
-                 graph_resolver=None, image_resolver_factory=None,
+                 image_resolver_factory=None,
+                 s3_config_file=None,
                  gui_urls=None, graph_dir=None):
         # setup sensors
         self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
@@ -943,12 +952,10 @@ class SDPControllerServer(DeviceServer):
         self.gui_urls = gui_urls if gui_urls is not None else []
         self.graph_dir = graph_dir
 
-        if graph_resolver is None:
-            graph_resolver = GraphResolver()
-        self.graph_resolver = graph_resolver
         if image_resolver_factory is None:
             image_resolver_factory = scheduler.ImageResolver
         self.image_resolver_factory = image_resolver_factory
+        self.s3_config_file = s3_config_file
 
         # create a new resource pool.
         logger.debug("Building initial resource pool")
@@ -1087,6 +1094,14 @@ class SDPControllerServer(DeviceServer):
                                 "different configuration. Please deconfigure this product or "
                                 "choose a new product id to continue.".format(subarray_product_id))
 
+        if self.interface_mode:
+            s3_config = {}
+        else:
+            try:
+                s3_config = _load_s3_config(self.s3_config_file)
+            except (OSError, KeyError, ValueError) as error:
+                raise FailReply("Could not load S3 config: {}".format(str(error)))
+
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching graph {}.".format(subarray_product_id))
         ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
@@ -1102,6 +1117,7 @@ class SDPControllerServer(DeviceServer):
                                       self.sched.http_url if self.sched else '')
         resolver.service_overrides = config['config'].get('service_overrides', {})
         resolver.telstate = None
+        resolver.s3_config = s3_config
 
         # create graph object and build physical graph from specified resources
         if self.interface_mode:
@@ -1318,23 +1334,26 @@ class SDPControllerServer(DeviceServer):
             raise FailReply("This product id has no current configuration.")
 
     @time_request
-    async def request_capture_init(
-            self, ctx, subarray_product_id: str, program_block_id: str = None) -> str:
+    async def request_capture_init(self, ctx, subarray_product_id: str) -> str:
         """Request capture of the specified subarray product to start.
 
-        Note: This command is used to prepare the SDP for reception of data
-        as specified by the subarray product provided. It is necessary to call this
+        Note: This command is used to prepare the SDP for reception of data as
+        specified by the subarray product provided. It is necessary to call this
         command before issuing a start command to the CBF. Essentially the SDP
         will, once this command has returned 'OK', be in a wait state until
         reception of the stream control start packet.
 
+        Upon capture-init the subarray product starts a new capture block which
+        lasts until the next capture-done command. This corresponds to the
+        notion of a "file". The capture-init command returns an ID string that
+        uniquely identifies the capture block and can be used to link various
+        output products and data sets produced during the capture block.
+
         Request Arguments
         -----------------
         subarray_product_id : string
-            The ID of the subarray product to initialise. This must have already been
-            configured via the product-configure command.
-        program_block_id : string
-            The ID of the program block being started.
+            The ID of the subarray product to initialise. This must have
+            already been configured via the product-configure command.
 
         Returns
         -------
@@ -1346,7 +1365,7 @@ class SDPControllerServer(DeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        cbid = await sa.capture_init(program_block_id)
+        cbid = await sa.capture_init()
         return cbid
 
     @time_request
