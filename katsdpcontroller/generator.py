@@ -507,7 +507,9 @@ def n_ingest_nodes(config, name):
 def n_cal_nodes(config, name):
     """Number of processes used to implement cal for a particular output."""
     # TODO: adjust based on the number of antennas and channels
-    return 4 if not is_develop(config) else 2
+    # Set to 1 for now until split-cal flag output is properly tested
+    # return 4 if not is_develop(config) else 2
+    return 1
 
 
 def _adjust_ingest_output_channels(config, names):
