@@ -546,7 +546,15 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
 def n_ingest_nodes(config, name):
     """Number of processes used to implement ingest for a particular output."""
     # TODO: adjust based on the number of antennas and channels
-    return 4 if not config['config'].get('develop', False) else 2
+    return 4 if not is_develop(config) else 2
+
+
+def n_cal_nodes(config, name):
+    """Number of processes used to implement cal for a particular output."""
+    # TODO: adjust based on the number of antennas and channels
+    # Set to 1 for now until split-cal flag output is properly tested
+    # return 4 if not is_develop(config) else 2
+    return 1
 
 
 def _adjust_ingest_output_channels(config, names):
@@ -740,14 +748,10 @@ def _make_cal(g, config, name, l0_name):
     buffer_time = settings.get('buffer_time', 30.0 * 60.0)
     parameters = settings.get('parameters', {})
     models = settings.get('models', {})
-    if parameters:
-        raise NotImplementedError('cal parameters are not yet supported')
     if models:
         raise NotImplementedError('cal models are not yet supported')
+    n_cal = n_cal_nodes(config, name)
 
-    cal = SDPLogicalTask(name)
-    cal.image = 'katsdpcal'
-    cal.command = ['run_cal.py']
     # Some of the scaling in cal is non-linear, so we need to give smaller
     # arrays more CPU than might be suggested by linear scaling. As a
     # heuristic, we start with linear scaling for 4 CPUs for 32K, 16 antennas,
@@ -755,18 +759,18 @@ def _make_cal(g, config, name, l0_name):
     # actual integration times are just under 2s).
     # However, don't go below 2 CPUs (except in development mode) because we
     # can't have less than 1 pipeline worker.
-    cal.cpus = 4 * info.n_vis / _N16_32 * 1.99 / info.int_time
+    cpus = 4 * info.n_vis / _N16_32 * 1.99 / info.int_time / n_cal
     if not is_develop(config):
-        cal.cpus = max(cal.cpus, 2)
-    cal.cpus = min(cal.cpus, 7.9)
-    workers = max(1, int(math.ceil(cal.cpus - 1)))
+        cpus = max(cpus, 2)
+    cpus = min(cpus, 7.9)
+    workers = max(1, int(math.ceil(cpus - 1)))
     # Main memory consumer is buffers for
     # - visibilities (complex64)
     # - flags (uint8)
     # - weights (float32)
     # There are also timestamps, but they're insignificant compared to the rest.
     slots = int(math.ceil(buffer_time / info.int_time))
-    slot_size = info.n_vis * 13
+    slot_size = info.n_vis * 13 / n_cal
     buffer_size = slots * slot_size
     # Processing operations come in a few flavours:
     # - average over time: need O(1) extra slots
@@ -791,31 +795,57 @@ def _make_cal(g, config, name, l0_name):
     # - 3: conservative estimate of bloat from text-based pickling
     telstate_extra = info.n_channels * info.n_pols * info.n_antennas * 8 * 3 * 200
 
-    cal.mem = buffer_size * (1 + extra) / 1024**2 + 256
-    cal.volumes = [DATA_VOL]
-    cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    cal.interfaces[0].bandwidth_in = info.net_bandwidth
-    cal.ports = ['port']
-    cal.transitions = CAPTURE_TRANSITIONS
-    cal.deconfigure_wait = False
-    g.add_node(cal, telstate_extra=telstate_extra, config=lambda task, resolver: {
+    group_config = {
         'buffer_maxsize': buffer_size,
         'workers': workers,
-        'l0_spectral_interface': task.interfaces['sdp_10g'].name,
-        'l0_spectral_name': l0_name,
-        # cal should change to remove "spectral"; both are provided for now
-        'l0_interface': task.interfaces['sdp_10g'].name,
-        'l0_name': l0_name
-    })
+        'l0_name': l0_name,
+        'servers': n_cal
+    }
+    group_config.update(parameters)
+
+    # Virtual node which depends on the real cal nodes, so that other services
+    # can declare dependencies on cal rather than individual nodes.
+    cal_group = LogicalGroup(name)
+    g.add_node(cal_group, telstate_extra=telstate_extra,
+               config=lambda task, resolver: group_config)
     src_multicast = find_node(g, 'multicast.' + l0_name)
-    g.add_edge(cal, src_multicast, port='spead',
+    g.add_edge(cal_group, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {
-                   'l0_spectral_spead': str(endpoint),
                    'l0_spead': str(endpoint)
                })
 
-    return cal
+    for i in range(1, n_cal + 1):
+        cal = SDPLogicalTask('{}.{}'.format(name, i))
+        cal.image = 'katsdpcal'
+        cal.command = ['run_cal.py']
+        cal.cpus = cpus
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 256
+        cal.volumes = [DATA_VOL]
+        cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+        cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
+        cal.ports = ['port', 'dask_diagnostics']
+        cal.wait_ports = ['port']
+        cal.gui_urls = [{
+            'title': 'Cal diagnostics',
+            'description': 'Dask diagnostics for {0.name}',
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}/status',
+            'category': 'Plot'
+        }]
+        cal.transitions = CAPTURE_TRANSITIONS
+        cal.deconfigure_wait = False
+        g.add_node(cal, config=lambda task, resolver, server_id=i: {
+            'l0_interface': task.interfaces['sdp_10g'].name,
+            'server_id': server_id,
+            'dask_diagnostics': ('', task.ports['dask_diagnostics'])
+        })
+        # Connect to cal_group. See comments in _make_ingest for explanation.
+        g.add_edge(cal_group, cal, depends_ready=True, depends_init=True)
+        g.add_edge(cal, cal_group, depends_resources=True)
+        g.add_edge(cal, src_multicast,
+                   depends_resolve=True, depends_ready=True, depends_init=True)
+
+    return cal_group
 
 
 def _make_filewriter(g, config, name):
