@@ -225,7 +225,7 @@ class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
-        config = graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        config = {}
         for name, value in self.ports.items():
             config[name] = value
         for _src, trg, attr in graph.out_edges(self, data=True):
@@ -235,6 +235,7 @@ class SDPConfigMixin:
                 endpoint = Endpoint(trg.host, trg.ports[port])
             config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
                 self, resolver, endpoint))
+        config.update(graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver))
         overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('config')
         if overrides:
             logger.warning('Overriding config for %s', self.name)

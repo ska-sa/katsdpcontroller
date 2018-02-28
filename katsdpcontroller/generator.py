@@ -777,12 +777,20 @@ def _make_cal(g, config, name, l0_name):
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
-        cal.ports = ['port']
+        cal.ports = ['port', 'dask_diagnostics']
+        cal.wait_ports = ['port']
+        cal.gui_urls = [{
+            'title': 'Cal diagnostics',
+            'description': 'Dask diagnostics for {0.name}',
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}/status',
+            'category': 'Plot'
+        }]
         cal.transitions = CAPTURE_TRANSITIONS
         cal.deconfigure_wait = False
         g.add_node(cal, config=lambda task, resolver, server_id=i: {
             'l0_interface': task.interfaces['sdp_10g'].name,
-            'server_id': server_id
+            'server_id': server_id,
+            'dask_diagnostics': ('', task.ports['dask_diagnostics'])
         })
         # Connect to cal_group. See comments in _make_ingest for explanation.
         g.add_edge(cal_group, cal, depends_ready=True, depends_init=True)
