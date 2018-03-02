@@ -22,7 +22,7 @@ import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, State,
+    SDPControllerServer, SDPCommonResources, SDPResources, ProductState,
     _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
@@ -646,7 +646,7 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual({}, self.server.override_dicts)
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.IDLE, sa.state)
+        self.assertEqual(ProductState.IDLE, sa.state)
 
     async def test_product_configure_generate_names(self):
         """Name with trailing * must generate lowest-numbered name"""
@@ -701,9 +701,9 @@ class TestSDPController(BaseTestSDPController):
             await self.client.request(*self._configure_args(SUBARRAY_PRODUCT2))
         # Check that both products are in the right state
         self.assertIn(SUBARRAY_PRODUCT1, self.server.subarray_products)
-        self.assertEqual(State.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT1].state)
+        self.assertEqual(ProductState.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT1].state)
         self.assertIn(SUBARRAY_PRODUCT2, self.server.subarray_products)
-        self.assertEqual(State.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT2].state)
+        self.assertEqual(ProductState.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT2].state)
 
     async def test_product_deconfigure(self):
         """Checks success path of product-deconfigure"""
@@ -734,7 +734,7 @@ class TestSDPController(BaseTestSDPController):
         # Check that the subarray still exists and has the right state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def test_product_deconfigure_busy_force(self):
         """forced product-deconfigure must succeed while in capture-init"""
@@ -833,7 +833,7 @@ class TestSDPController(BaseTestSDPController):
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
         # Check that the graph transitions were called. Each call may be made
         # multiple times, depending on the number of instances of each child.
         # We thus collapse them into groups of equal calls and don't worry
@@ -857,7 +857,7 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def _test_busy(self, command, *args):
         """Test that a command fails if issued while ?capture-init or
@@ -888,7 +888,7 @@ class TestSDPController(BaseTestSDPController):
             raise ValueError('Could not find ingest node')
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -900,7 +900,7 @@ class TestSDPController(BaseTestSDPController):
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.IDLE, sa.state)
+        self.assertEqual(ProductState.IDLE, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('capture-done')

@@ -29,7 +29,7 @@ from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
 from . import scheduler, tasks, product_config, generator, schemas
-from .tasks import State, DEPENDS_INIT
+from .tasks import ProductState, DEPENDS_INIT
 
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
@@ -250,9 +250,9 @@ class SDPSubarrayProductBase:
             "JSON dictionary of capture block states for active capture blocks",
             default="{}", initial_status=Sensor.Status.NOMINAL)
         self.state_sensor = Sensor(
-            State, subarray_product_id + ".state",
+            ProductState, subarray_product_id + ".state",
             "State of the subarray product state machine")
-        self.state = State.CONFIGURING   # This sets the sensor
+        self.state = ProductState.CONFIGURING   # This sets the sensor
         logger.info("Created: {!r}".format(self))
 
     @property
@@ -321,7 +321,7 @@ class SDPSubarrayProductBase:
     async def _configure(self, ctx):
         """Asynchronous task that does he configuration."""
         await self.configure_impl(ctx)
-        self.state = State.IDLE
+        self.state = ProductState.IDLE
 
     async def _deconfigure(self, force, ready):
         """Asynchronous task that does the deconfiguration.
@@ -330,7 +330,7 @@ class SDPSubarrayProductBase:
         part (at which point the katcp request returns) is signalled by
         setting the event `ready`.
         """
-        self.state = State.DECONFIGURING
+        self.state = ProductState.DECONFIGURING
         if self.current_capture_block is not None:
             try:
                 capture_block = self.current_capture_block
@@ -363,7 +363,7 @@ class SDPSubarrayProductBase:
             await capture_block.dead_event.wait()
             self.capture_blocks.pop(name, None)
 
-        self.state = State.DEAD
+        self.state = ProductState.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
         # Setting dead_event is done by the first callback
         for callback in self.dead_callbacks:
@@ -395,7 +395,7 @@ class SDPSubarrayProductBase:
             self._capture_block_dead(capture_block)
             raise
         assert self.current_capture_block is None
-        self.state = State.CAPTURING
+        self.state = ProductState.CAPTURING
         self.current_capture_block = capture_block
         capture_block.state = CaptureBlock.State.CAPTURING
 
@@ -413,9 +413,9 @@ class SDPSubarrayProductBase:
         capture_block = self.current_capture_block
         assert capture_block is not None
         await self.capture_done_impl(capture_block)
-        assert self.state == State.CAPTURING
+        assert self.state == ProductState.CAPTURING
         assert self.current_capture_block is capture_block
-        self.state = State.IDLE
+        self.state = ProductState.IDLE
         self.current_capture_block = None
         capture_block.state = CaptureBlock.State.POSTPROCESSING
         capture_block.postprocess_task = asyncio.ensure_future(
@@ -463,7 +463,8 @@ class SDPSubarrayProductBase:
 
     async def configure(self, ctx):
         assert not self.async_busy, "configure should be the first thing to happen"
-        assert self.state == State.CONFIGURING, "configure should be the first thing to happen"
+        assert self.state == ProductState.CONFIGURING, \
+            "configure should be the first thing to happen"
         task = asyncio.ensure_future(self._configure(ctx), loop=self.loop)
         log_task_exceptions(task, "Configuring subarray product {} failed".format(
             self.subarray_product_id))
@@ -476,7 +477,7 @@ class SDPSubarrayProductBase:
 
     async def deconfigure(self, force=False):
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
-        if self.state == State.DEAD:
+        if self.state == ProductState.DEAD:
             return
         if self.async_busy:
             if not force:
@@ -485,7 +486,7 @@ class SDPSubarrayProductBase:
                 logger.warning('Subarray product %s is busy with an operation, '
                                'but deconfiguring anyway', self.subarray_product_id)
 
-        if self.state != State.IDLE:
+        if self.state != ProductState.IDLE:
             if not force:
                 raise FailReply('Subarray product is not idle and thus cannot be deconfigured. '
                                 'Please issue capture_done first.')
@@ -509,7 +510,7 @@ class SDPSubarrayProductBase:
 
     async def capture_init(self):
         self._fail_if_busy()
-        if self.state != State.IDLE:
+        if self.state != ProductState.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
         # Find first unique capture block ID, starting from the current
@@ -535,7 +536,7 @@ class SDPSubarrayProductBase:
 
     async def capture_done(self):
         self._fail_if_busy()
-        if self.state != State.CAPTURING:
+        if self.state != ProductState.CAPTURING:
             raise FailReply('Subarray product is currently in state {}, not CAPTURING as expected. '
                             'Cannot be stopped.'.format(self.state.name))
         capture_block_id = self.current_capture_block.name
@@ -706,9 +707,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         Parameters
         ----------
-        old_state : :class:`~katsdpcontroller.tasks.State`
+        old_state : :class:`~katsdpcontroller.tasks.ProductState`
             Previous state
-        new_state : :class:`~katsdpcontroller.tasks.State`
+        new_state : :class:`~katsdpcontroller.tasks.ProductState`
             New state
         reverse : bool
             If there is a `depends_init` edge from A to B in the graph, A's
@@ -767,10 +768,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 raise FailReply(
                     "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
         self.telstate.add('sdp_capture_block_id', capture_block.name)
-        await self.exec_transitions(State.IDLE, State.CAPTURING, True, capture_block)
+        await self.exec_transitions(ProductState.IDLE, ProductState.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block):
-        await self.exec_transitions(State.CAPTURING, State.IDLE, False, capture_block)
+        await self.exec_transitions(ProductState.CAPTURING, ProductState.IDLE, False, capture_block)
 
     async def postprocess_impl(self, capture_block):
         for node in self.physical_graph:

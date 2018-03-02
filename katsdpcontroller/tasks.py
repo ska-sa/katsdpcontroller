@@ -106,7 +106,7 @@ _add_prometheus_sensor('last_transfer_rate',
                        Gauge)
 
 
-class State(scheduler.OrderedEnum):
+class ProductState(scheduler.OrderedEnum):
     """State of a subarray. This does not really belong in this module, but it
     is placed here to avoid a circular dependency between :mod:`generator` and
     :mod:`sdpcontroller`.
