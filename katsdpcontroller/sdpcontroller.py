@@ -29,7 +29,7 @@ from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
 from . import scheduler, tasks, product_config, generator, schemas
-from .tasks import ProductState, DEPENDS_INIT
+from .tasks import ProductState, CaptureBlockState, DEPENDS_INIT
 
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
@@ -165,15 +165,9 @@ class CaptureBlock:
     """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
-    class State(enum.Enum):
-        INITIALISING = 0
-        CAPTURING = 1
-        POSTPROCESSING = 2
-        DEAD = 3
-
     def __init__(self, name, loop):
         self.name = name
-        self._state = CaptureBlock.State.INITIALISING
+        self._state = CaptureBlockState.INITIALISING
         self.postprocess_task = None
         self.dead_event = asyncio.Event(loop=loop)
         self.state_change_callback = None
@@ -186,7 +180,7 @@ class CaptureBlock:
     def state(self, value):
         if self._state != value:
             self._state = value
-            if value == CaptureBlock.State.DEAD:
+            if value == CaptureBlockState.DEAD:
                 self.dead_event.set()
             if self.state_change_callback is not None:
                 self.state_change_callback()
@@ -377,7 +371,7 @@ class SDPSubarrayProductBase:
             pass      # Allows this function to be called twice
         # Setting the state will trigger _update_capture_block_sensor, which
         # will update the sensor with the value removed
-        capture_block.state = CaptureBlock.State.DEAD
+        capture_block.state = CaptureBlockState.DEAD
 
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
@@ -397,7 +391,7 @@ class SDPSubarrayProductBase:
         assert self.current_capture_block is None
         self.state = ProductState.CAPTURING
         self.current_capture_block = capture_block
-        capture_block.state = CaptureBlock.State.CAPTURING
+        capture_block.state = CaptureBlockState.CAPTURING
 
     async def _capture_done(self):
         """The asynchronous task that handles ?capture-done. See
@@ -417,7 +411,7 @@ class SDPSubarrayProductBase:
         assert self.current_capture_block is capture_block
         self.state = ProductState.IDLE
         self.current_capture_block = None
-        capture_block.state = CaptureBlock.State.POSTPROCESSING
+        capture_block.state = CaptureBlockState.POSTPROCESSING
         capture_block.postprocess_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(

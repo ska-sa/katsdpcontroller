@@ -3,6 +3,7 @@ import json
 import asyncio
 import socket
 import ipaddress
+import enum
 
 from addict import Dict
 
@@ -122,6 +123,14 @@ class ProductState(scheduler.OrderedEnum):
     CAPTURING = 2
     DECONFIGURING = 3
     DEAD = 4
+
+
+class CaptureBlockState(enum.Enum):
+    """State of a single capture block."""
+    INITIALISING = 0
+    CAPTURING = 1
+    POSTPROCESSING = 2
+    DEAD = 3
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
