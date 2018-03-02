@@ -368,7 +368,9 @@ def _make_meta_writer(g, config):
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
         CaptureBlockState.POSTPROCESSING: [
-            ['write-meta', '{capture_block_id}', True],   # Light dump
+            ['write-meta', '{capture_block_id}', True]    # Light dump
+        ],
+        CaptureBlockState.DEAD: [
             ['write-meta', '{capture_block_id}', False]   # Full dump
         ]
     }

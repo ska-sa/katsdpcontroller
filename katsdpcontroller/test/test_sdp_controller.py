@@ -920,8 +920,8 @@ class TestSDPController(BaseTestSDPController):
 
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
-        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
+        # Forced deconfigure, so we only get the light dump
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         self.assertEqual({}, self.server.subarray_products)
 
@@ -1004,8 +1004,8 @@ class TestSDPController(BaseTestSDPController):
         # Check that the subarray was stopped then shut down
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
-        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
+        # Forced deconfigure, so we only get the light dump
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
         self.sched.kill.assert_called_with(mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.
