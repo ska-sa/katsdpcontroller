@@ -15,13 +15,13 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import (
-    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup, ProductState)
+    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup, CaptureBlockState)
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
-    (ProductState.IDLE, ProductState.CAPTURING): [['capture-init', '{capture_block_id}']],
-    (ProductState.CAPTURING, ProductState.IDLE): [['capture-done']]
+    CaptureBlockState.CAPTURING: [['capture-init', '{capture_block_id}']],
+    CaptureBlockState.POSTPROCESSING: [['capture-done']]
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
@@ -367,7 +367,7 @@ def _make_meta_writer(g, config):
     bandwidth = 1e9 if not is_develop(config) else 10e6
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
-        (ProductState.CAPTURING, ProductState.IDLE): [
+        CaptureBlockState.POSTPROCESSING: [
             ['write-meta', '{capture_block_id}', True],   # Light dump
             ['write-meta', '{capture_block_id}', False]   # Full dump
         ]
@@ -474,8 +474,8 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
-            (ProductState.IDLE, ProductState.CAPTURING): [['capture-start', name, '{time}']],
-            (ProductState.CAPTURING, ProductState.IDLE): [['capture-stop', name]]
+            CaptureBlockState.CAPTURING: [['capture-start', name, '{time}']],
+            CaptureBlockState.POSTPROCESSING: [['capture-stop', name]]
         }
 
         g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {

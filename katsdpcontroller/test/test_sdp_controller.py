@@ -841,7 +841,6 @@ class TestSDPController(BaseTestSDPController):
         katcp_client = self.sensor_proxy_client_class.return_value
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
-            mock.call('configure-subarray-from-telstate'),
             mock.call('capture-init', '123456789'),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]

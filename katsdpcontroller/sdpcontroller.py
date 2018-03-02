@@ -29,7 +29,7 @@ from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
 from . import scheduler, tasks, product_config, generator, schemas
-from .tasks import ProductState, CaptureBlockState, DEPENDS_INIT
+from .tasks import CaptureBlockState, DEPENDS_INIT
 
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
@@ -108,6 +108,22 @@ def _redact_keys(taskinfo, s3_config):
         taskinfo.command.arguments = [_redact_arg(arg, s3_config)
                                       for arg in taskinfo.command.arguments]
     return taskinfo
+
+
+class ProductState(scheduler.OrderedEnum):
+    """State of a subarray.
+
+    Only the following transitions can occur (TODO: make a picture):
+    - CONFIGURING -> IDLE (via product-configure)
+    - IDLE -> CAPTURING (via capture-init)
+    - CAPTURING -> IDLE (via capture-done)
+    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
+    """
+    CONFIGURING = 0
+    IDLE = 1
+    CAPTURING = 2
+    DECONFIGURING = 3
+    DEAD = 4
 
 
 class MulticastIPResources:
@@ -693,7 +709,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 except FailReply:
                     pass   # Callee logs a warning
 
-    async def exec_transitions(self, old_state, new_state, reverse, capture_block):
+    async def exec_transitions(self, state, reverse, capture_block):
         """Issue requests to nodes on state transitions.
 
         The requests are made in parallel, but respects `depends_init`
@@ -701,9 +717,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         Parameters
         ----------
-        old_state : :class:`~katsdpcontroller.tasks.ProductState`
-            Previous state
-        new_state : :class:`~katsdpcontroller.tasks.ProductState`
+        state : :class:`~katsdpcontroller.tasks.CaptureBlockState`
             New state
         reverse : bool
             If there is a `depends_init` edge from A to B in the graph, A's
@@ -727,7 +741,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
             reqs = []
             try:
-                reqs = node.get_transition(old_state, new_state)
+                reqs = node.get_transition(state)
             except AttributeError:
                 # Not all nodes are SDPPhysicalTask
                 pass
@@ -750,22 +764,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 await asyncio.gather(*tasks.values(), loop=loop)
 
     async def capture_init_impl(self, capture_block):
-        if any(node.logical_node.name.startswith('sim.') for node in self.physical_graph):
-            logger.info('SIMULATE: Configuring antennas in simulator(s)')
-            try:
-                # Replace temporary fake antennas with ones configured by kattelmod
-                await self._issue_req('configure-subarray-from-telstate', node_type='sim')
-            except asyncio.CancelledError:
-                raise
-            except Exception as error:
-                logger.error("SIMULATE: configure-subarray-from-telstate failed", exc_info=True)
-                raise FailReply(
-                    "SIMULATE: configure-subarray-from-telstate failed: {}".format(error))
         self.telstate.add('sdp_capture_block_id', capture_block.name)
-        await self.exec_transitions(ProductState.IDLE, ProductState.CAPTURING, True, capture_block)
+        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block):
-        await self.exec_transitions(ProductState.CAPTURING, ProductState.IDLE, False, capture_block)
+        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
 
     async def postprocess_impl(self, capture_block):
         for node in self.physical_graph:

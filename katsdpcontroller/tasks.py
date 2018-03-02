@@ -107,24 +107,6 @@ _add_prometheus_sensor('last_transfer_rate',
                        Gauge)
 
 
-class ProductState(scheduler.OrderedEnum):
-    """State of a subarray. This does not really belong in this module, but it
-    is placed here to avoid a circular dependency between :mod:`generator` and
-    :mod:`sdpcontroller`.
-
-    Only the following transitions can occur (TODO: make a picture):
-    - CONFIGURING -> IDLE (via product-configure)
-    - IDLE -> CAPTURING (via capture-init)
-    - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
-    """
-    CONFIGURING = 0
-    IDLE = 1
-    CAPTURING = 2
-    DECONFIGURING = 3
-    DEAD = 4
-
-
 class CaptureBlockState(enum.Enum):
     """State of a single capture block."""
     INITIALISING = 0
@@ -371,9 +353,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
-    def get_transition(self, old_state, new_state):
+    def get_transition(self, state):
         """Get state transition actions"""
-        return self.logical_node.transitions.get((old_state, new_state), [])
+        return self.logical_node.transitions.get(state, [])
 
     def _disconnect(self):
         """Close the katcp connection (if open) and remove the sensors."""
