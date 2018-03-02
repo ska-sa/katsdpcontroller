@@ -75,7 +75,6 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 class TelstateTask(SDPPhysicalTaskBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.capture_blocks = None   #: Set by sdpcontroller to mirror the subarray product
 
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
@@ -86,14 +85,6 @@ class TelstateTask(SDPPhysicalTaskBase):
         portmap.container_port = 6379
         portmap.protocol = 'tcp'
         self.taskinfo.container.docker.port_mappings = [portmap]
-
-    async def graceful_kill(self, driver, **kwargs):
-        try:
-            for capture_block in list(self.capture_blocks.values()):
-                await capture_block.dead_event.wait()
-        except Exception:
-            logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        await super().graceful_kill(driver, **kwargs)
 
 
 class IngestTask(SDPPhysicalTask):
@@ -320,6 +311,7 @@ def _make_telstate(g, config):
     telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
     telstate.physical_factory = TelstateTask
     telstate.deconfigure_wait = False
+    telstate.wait_capture_blocks = True
     g.add_node(telstate)
     return telstate
 
@@ -362,6 +354,8 @@ def _make_meta_writer(g, config):
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    meta_writer.deconfigure_wait = False
+    meta_writer.wait_capture_blocks = True
     # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
     bandwidth = 1e9 if not is_develop(config) else 10e6

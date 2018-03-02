@@ -652,7 +652,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
-        self.telstate_node.capture_blocks = self.capture_blocks
 
     def __del__(self):
         if hasattr(self, 'batch_queue'):
@@ -848,7 +847,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     async def _shutdown(self, force):
         try:
             # TODO: issue progress reports as tasks stop
-            await self.sched.kill(self.physical_graph, force=force)
+            await self.sched.kill(self.physical_graph, force=force,
+                                  capture_blocks=self.capture_blocks)
         finally:
             if hasattr(self.resolver, 'resources'):
                 self.resolver.resources.close()
@@ -1586,7 +1586,7 @@ class InterfaceModeSensors:
                 sensor_type=Address,
                 description='IP endpoint for html_port',
                 initial_status=Sensor.Status.NOMINAL),
-            'cal.sdp_l0.1.capture-block-state': dict(
+            'cal.1.capture-block-state': dict(
                 default='{}',
                 sensor_type=str,
                 description='JSON dict with the state of each capture block',

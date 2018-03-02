@@ -125,6 +125,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.gui_urls = []
         # Whether to wait for it to die before returning from product-deconfigure
         self.deconfigure_wait = True
+        # Whether to wait until all capture blocks are dead before killing
+        self.wait_capture_blocks = False
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -434,6 +436,11 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         try:
             if self.capture_block_state_observer is not None:
                 await self.capture_block_state_observer.wait_empty()
+            if self.logical_node.wait_capture_blocks:
+                capture_blocks = kwargs.get('capture_blocks', {})
+                # Explicitly copy the values because it will mutate
+                for capture_block in list(capture_blocks.values()):
+                    await capture_block.dead_event.wait()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         await super().graceful_kill(driver, **kwargs)
