@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import unittest
 from unittest import mock
+import time
 
 from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
                         assert_is, assert_is_not, assert_is_none)
@@ -1540,6 +1541,35 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.offerRescinded(self.driver, offer2.id)
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal([], self.driver.mock_calls)
+        launch.cancel()
+
+    async def test_unavailability(self):
+        """Test offers with unavailability information"""
+        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        # Provide an offer that would be sufficient if not for unavailability
+        offer0 = self._make_offers()[0]
+        offer0.unavailability.start.nanoseconds = int(time.time() * 1e9)
+        offer0.unavailability.duration.nanoseconds = int(3600e9)
+        self.sched.resourceOffers(self.driver, [offer0])
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert_equal([mock.call.declineOffer(offer0.id)], self.driver.mock_calls)
+        launch.cancel()
+
+    async def test_unavailability_past(self):
+        """Test offers with unavailability information in the past"""
+        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        # Provide an offer that would be sufficient if not for unavailability
+        offer0 = self._make_offers()[0]
+        offer0.unavailability.start.nanoseconds = int(time.time() * 1e9 - 7200e9)
+        offer0.unavailability.duration.nanoseconds = int(3600e9)
+        self.sched.resourceOffers(self.driver, [offer0])
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTED, self.nodes[0].state)
+        assert_equal([
+                mock.call.launchTasks([offer0.id], mock.ANY),
+                mock.call.suppressOffers()
+            ], self.driver.mock_calls)
         launch.cancel()
 
     async def _test_kill_in_state(self, state):

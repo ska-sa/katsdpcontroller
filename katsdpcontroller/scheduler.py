@@ -168,6 +168,7 @@ import ssl
 import ipaddress
 import decimal
 from decimal import Decimal
+import time
 
 import pkg_resources
 import docker
@@ -2129,9 +2130,33 @@ class Scheduler(pymesos.Scheduler):
 
     @run_in_event_loop
     def resourceOffers(self, driver, offers):
+        def format_time(t):
+            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+
         for offer in offers:
+            if offer.unavailability:
+                start_time_ns = offer.unavailability.start.nanoseconds
+                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
+                start_time = start_time_ns / 1e9
+                end_time = end_time_ns / 1e9
+                if end_time >= time.time():
+                    logger.debug('Declining offer %s from %s: unavailable from %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
+                    self._driver.declineOffer(offer.id)
+                    continue
+                else:
+                    logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
             self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
         self._wakeup_launcher.set()
+
+    @run_in_event_loop
+    def inverseOffers(self, driver, offers):
+        for offer in offers:
+            logger.debug('Declining inverse offer %s', offer.id.value)
+            self._driver.declineOffer(offer.id)
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
