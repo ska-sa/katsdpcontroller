@@ -693,30 +693,34 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 req, node_type)
         return ret_args
 
-    async def _exec_node_transition(self, node, reqs, deps, wait_dead, capture_block):
-        if deps:
-            await asyncio.gather(*deps, loop=node.loop)
-        if reqs:
-            if node.katcp_connection is None:
-                logger.warning('Cannot issue %s to %s because there is no katcp connection',
-                               reqs[0], node.name)
-            else:
-                # TODO: should handle katcp exceptions or failed replies
-                try:
-                    for req in reqs:
-                        await node.issue_req(req[0], req[1:])
-                except FailReply:
-                    pass   # Callee logs a warning
-        if wait_dead and isinstance(node, tasks.SDPPhysicalTask):
-            observer = node.capture_block_state_observer
-            if observer is not None:
-                logger.debug('Waiting for %s on %s', capture_block.name, node.name)
-                await observer.wait_capture_block_done(capture_block.name)
-                logger.debug('Done waiting for %s on %s', capture_block.name, node.name)
-            else:
-                logger.debug('Task %s has no capture-block-state observer', node.name)
+    async def _exec_node_transition(self, node, reqs, deps, state, capture_block):
+        try:
+            if deps:
+                await asyncio.gather(*deps, loop=node.loop)
+            if reqs:
+                if node.katcp_connection is None:
+                    logger.warning('Cannot issue %s to %s because there is no katcp connection',
+                                   reqs[0], node.name)
+                else:
+                    # TODO: should handle katcp exceptions or failed replies
+                    try:
+                        for req in reqs:
+                            await node.issue_req(req[0], req[1:])
+                    except FailReply:
+                        pass   # Callee logs a warning
+            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
+                observer = node.capture_block_state_observer
+                if observer is not None:
+                    logger.debug('Waiting for %s on %s', capture_block.name, node.name)
+                    await observer.wait_capture_block_done(capture_block.name)
+                    logger.debug('Done waiting for %s on %s', capture_block.name, node.name)
+                else:
+                    logger.debug('Task %s has no capture-block-state observer', node.name)
+        finally:
+            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTaskBase):
+                node.remove_capture_block(capture_block)
 
-    async def exec_transitions(self, state, reverse, wait_dead, capture_block):
+    async def exec_transitions(self, state, reverse, capture_block):
         """Issue requests to nodes on state transitions.
 
         The requests are made in parallel, but respects `depends_init`
@@ -730,10 +734,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             If there is a `depends_init` edge from A to B in the graph, A's
             request will be made first if `reverse` is false, otherwise B's
             request will be made first.
-        wait_dead : bool
-            If true and the node has a sensor for the capture block state, wait
-            for the capture block to be absent from the sensor before
-            considering the transition to be complete.
         capture_block : :class:`CaptureBlock`
             The capture block is that being transitioned
         """
@@ -765,25 +765,27 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     for req in reqs
                 ]
             deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
-            if deps or reqs or wait_dead:
-                task = asyncio.ensure_future(
-                    self._exec_node_transition(node, reqs, deps, wait_dead, capture_block),
-                    loop=node.loop)
-                loop = node.loop
-                tasks[node] = task
+            task = asyncio.ensure_future(
+                self._exec_node_transition(node, reqs, deps, state, capture_block),
+                loop=node.loop)
+            loop = node.loop
+            tasks[node] = task
         if tasks:
             with async_timeout.timeout(300, loop=loop):
                 await asyncio.gather(*tasks.values(), loop=loop)
 
     async def capture_init_impl(self, capture_block):
         self.telstate.add('sdp_capture_block_id', capture_block.name)
-        await self.exec_transitions(CaptureBlockState.CAPTURING, True, False, capture_block)
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTaskBase):
+                node.add_capture_block(capture_block)
+        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block):
-        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, False, capture_block)
+        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
 
     async def postprocess_impl(self, capture_block):
-        await self.exec_transitions(CaptureBlockState.DEAD, False, True, capture_block)
+        await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
         physical_graph = self._instantiate_physical_graph(self.postprocess_logical_graph,
                                                           capture_block.name)

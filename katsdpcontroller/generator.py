@@ -311,7 +311,7 @@ def _make_telstate(g, config):
     telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
     telstate.physical_factory = TelstateTask
     telstate.deconfigure_wait = False
-    telstate.wait_capture_blocks = True
+    telstate.wait_batch = True
     g.add_node(telstate)
     return telstate
 
@@ -355,7 +355,6 @@ def _make_meta_writer(g, config):
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     meta_writer.deconfigure_wait = False
-    meta_writer.wait_capture_blocks = True
     # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
     bandwidth = 1e9 if not is_develop(config) else 10e6
