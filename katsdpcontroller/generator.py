@@ -931,8 +931,8 @@ def _make_vis_writer(g, config, name):
     return vis_writer
 
 
-def _make_flag_writer(g, config, name):
-    info = L0Info(config, name)
+def _make_flag_writer(g, config, name, l0_name):
+    info = L0Info(config, l0_name)
 
     flag_writer = SDPLogicalTask('flag_writer.' + name)
     flag_writer.image = 'katsdpflagwriter'
@@ -1155,7 +1155,7 @@ def build_logical_graph(config):
                         _make_ingest(g, config, name, name2)
                         if implicit_cal:
                             _make_cal(g, config, None, name, flags_name)
-                            _make_flag_writer(g, config, flags_name)
+                            _make_flag_writer(g, config, flags_name, name)
                         _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
                         archived_streams.append(name)
@@ -1175,7 +1175,7 @@ def build_logical_graph(config):
             _make_ingest(g, config, name, None)
             if implicit_cal:
                 _make_cal(g, config, None, name, flags_name)
-                _make_flag_writer(g, config, flags_name)
+                _make_flag_writer(g, config, flags_name, name)
             _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
@@ -1187,8 +1187,6 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.cal', []):
         _make_cal(g, config, name, config['outputs'][name]['src_streams'][0], flags_name)
-        _make_flag_writer(g, config, 'l1_flags_spead', flags_name)
-
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
