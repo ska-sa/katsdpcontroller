@@ -1549,7 +1549,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Provide an offer that would be sufficient if not for unavailability
         offer0 = self._make_offers()[0]
         offer0.unavailability.start.nanoseconds = int(time.time() * 1e9)
-        offer0.unavailability.duration.nanoseconds = 10**9
+        offer0.unavailability.duration.nanoseconds = int(3600e9)
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
@@ -1561,8 +1561,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
         # Provide an offer that would be sufficient if not for unavailability
         offer0 = self._make_offers()[0]
-        offer0.unavailability.start.nanoseconds = int(time.time() * 1e9 - 2e9)
-        offer0.unavailability.duration.nanoseconds = 10**9
+        offer0.unavailability.start.nanoseconds = int(time.time() * 1e9 - 7200e9)
+        offer0.unavailability.duration.nanoseconds = int(3600e9)
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
