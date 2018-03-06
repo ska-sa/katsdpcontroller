@@ -1565,11 +1565,6 @@ class InterfaceModeSensors:
                 sensor_type=Address,
                 description='IP endpoint for port',
                 initial_status=Sensor.Status.NOMINAL),
-            'filewriter.sdp_l0.1.filename': dict(
-                default='/var/kat/data/148966XXXX.h5',
-                sensor_type=str,
-                description='Final name for file being captured',
-                initial_status=Sensor.Status.NOMINAL),
             'ingest.sdp_l0.1.capture-active': dict(
                 default=False,
                 sensor_type=bool,

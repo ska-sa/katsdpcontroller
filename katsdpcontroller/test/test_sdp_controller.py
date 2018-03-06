@@ -172,7 +172,6 @@ EXPECTED_SENSOR_LIST = (
 EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
     (SUBARRAY_PRODUCT1.encode('ascii') + b'.' + s[0],) + s[1:] for s in (
         (b'bf_ingest.beamformer.1.port', b'', b'address'),
-        (b'filewriter.sdp_l0.1.filename', b'', b'string'),
         (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
         (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
         (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
@@ -596,7 +595,7 @@ class TestSDPController(BaseTestSDPController):
                 "config": {
                     "develop": true,
                     "service_overrides": {
-                        "filewriter.sdp_l0": {
+                        "vis_writer.sdp_l0": {
                             "config": {
                                 "override_test": "value"
                             }
@@ -612,15 +611,17 @@ class TestSDPController(BaseTestSDPController):
         ts = self.telstate_class.return_value
         # Print the list to assist in debugging if the assert fails
         print(ts.add.call_args_list)
-        # This is not a complete list of calls. It check that each category of stuff
+        # This is not a complete list of calls. It checks that each category of stuff
         # is covered: base_params, per node, per edge
         ts.add.assert_any_call('subarray_product_id', SUBARRAY_PRODUCT4, immutable=True)
-        ts.add.assert_any_call('config.filewriter.sdp_l0', {
-            'file_base': '/var/kat/data',
+        ts.add.assert_any_call('config.vis_writer.sdp_l0', {
+            'npy_path': '/var/kat/data',
+            'obj_size_mb': mock.ANY,
             'port': 20000,
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
+            's3_endpoint_url': 'http://s3.invalid/',
             'override_test': 'value'
         }, immutable=True)
         # Test that the output channel rounding was done correctly

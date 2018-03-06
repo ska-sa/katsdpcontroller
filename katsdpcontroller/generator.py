@@ -546,10 +546,9 @@ def n_ingest_nodes(config, name):
 
 def n_cal_nodes(config, name):
     """Number of processes used to implement cal for a particular output."""
-    # TODO: adjust based on the number of antennas and channels
-    # Set to 1 for now until split-cal flag output is properly tested
-    # return 4 if not is_develop(config) else 2
-    return 1
+    # TODO: adjust based on the number of antennas and channels? The flagging
+    # is influenced by the choice, so it may be worth keeping a fixed number.
+    return 4 if not is_develop(config) else 2
 
 
 def _adjust_ingest_output_channels(config, names):
@@ -843,36 +842,6 @@ def _make_cal(g, config, name, l0_name):
     return cal_group
 
 
-def _make_filewriter(g, config, name):
-    info = L0Info(config, name)
-
-    filewriter = SDPLogicalTask('filewriter.' + name)
-    filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py']
-    # Don't yet have a good idea of real CPU usage. For now assume that 16
-    # antennas, 32K channels requires two CPUs (one for capture, one for
-    # writing) and scale from there.
-    filewriter.cpus = 2 * info.n_vis / _N16_32
-    # Memory pool has 8 entries, plus the socket buffer, but allocate 12 to be
-    # safe.
-    filewriter.mem = 12 * _mb(info.size) + 256
-    filewriter.ports = ['port']
-    filewriter.volumes = [DATA_VOL]
-    filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
-    filewriter.transitions = CAPTURE_TRANSITIONS
-    g.add_node(filewriter, config=lambda task, resolver: {
-        'file_base': DATA_VOL.container_path,
-        'l0_name': name,
-        'l0_interface': task.interfaces['sdp_10g'].name
-    })
-    src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(filewriter, src_multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
-    return filewriter
-
-
 def _make_vis_writer(g, config, name):
     info = L0Info(config, name)
 
@@ -1103,7 +1072,6 @@ def build_logical_graph(config):
                         _make_ingest(g, config, name, name2)
                         if implicit_cal:
                             _make_cal(g, config, None, name)
-                        _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
                         archived_streams.append(name)
                         l0_done.add(name)
@@ -1122,7 +1090,6 @@ def build_logical_graph(config):
             _make_ingest(g, config, name, None)
             if implicit_cal:
                 _make_cal(g, config, None, name)
-            _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
         else:
