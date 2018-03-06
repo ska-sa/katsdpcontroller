@@ -145,7 +145,7 @@ class MulticastIPResources:
 class SDPCommonResources:
     """Assigns multicast groups and ports across all subarrays."""
     def __init__(self, safe_multicast_cidr):
-        logger.info("Using {} for multicast subnet allocation".format(safe_multicast_cidr))
+        logger.info("Using %s for multicast subnet allocation", safe_multicast_cidr)
         self.multicast_subnets = deque(
             ipaddress.ip_network(safe_multicast_cidr).subnets(new_prefix=24))
 
@@ -159,14 +159,15 @@ class SDPResources:
             self._subnet = self._common.multicast_subnets.popleft()
         except IndexError:
             raise RuntimeError("Multicast subnets exhausted")
-        logger.info("Using {} for {}".format(self._subnet, subarray_product_id))
+        logger.info("Using %s for %s", self._subnet, subarray_product_id)
         self._multicast_resources = MulticastIPResources(self._subnet)
 
     def get_multicast_ip(self, n_addresses):
         """Assign multicast addresses for a group."""
         return self._multicast_resources.get_ip(n_addresses)
 
-    def get_port(self):
+    @staticmethod
+    def get_port():
         """Return an assigned port for a multicast group"""
         return 7148
 
@@ -263,7 +264,7 @@ class SDPSubarrayProductBase:
             ProductState, subarray_product_id + ".state",
             "State of the subarray product state machine")
         self.state = ProductState.CONFIGURING   # This sets the sensor
-        logger.info("Created: {!r}".format(self))
+        logger.info("Created: %r", self)
 
     @property
     def state(self):
@@ -349,7 +350,7 @@ class SDPSubarrayProductBase:
                 await self.capture_done_impl(capture_block)
             except asyncio.CancelledError:
                 raise
-            except Exception as error:
+            except Exception:
                 logger.error("Failed to issue capture-done during shutdown request. "
                              "Will continue with graph shutdown.", exc_info=True)
 
@@ -511,7 +512,7 @@ class SDPSubarrayProductBase:
         # Make sure that ready gets unblocked even if task throws.
         task.add_done_callback(lambda future: ready.set())
         task.add_done_callback(self._clear_async_task)
-        if (await self._replace_async_task(task)):
+        if await self._replace_async_task(task):
             await ready.wait()
         # We don't wait for task to complete, but if it's already done we
         # pass back any exceptions.
@@ -573,8 +574,8 @@ class SDPSubarrayProductBase:
                                     '{}_{}.svg'.format(self.subarray_product_id, name))
             try:
                 g.write_svg(filename)
-            except (IOError, OSError) as error:
-                logger.warn('Could not write %s: %s', filename, error)
+            except OSError as error:
+                logger.warning('Could not write %s: %s', filename, error)
 
     def __repr__(self):
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -633,8 +634,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             return logical_node.physical_factory(
                 logical_node, self.loop,
                 self.sdp_controller, self.subarray_product_id, capture_block_id)
-        else:
-            return logical_node.physical_factory(logical_node, self.loop)
+        return logical_node.physical_factory(logical_node, self.loop)
 
     def _instantiate_physical_graph(self, logical_graph, capture_block_id=None):
         mapping = {logical: self._instantiate(logical, capture_block_id)
@@ -674,7 +674,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         Exception
             Any exceptions raised by aiokatcp itself will propagate
         """
-        logger.debug("Issuing request {} to node_type {}".format(req, node_type))
+        logger.debug("Issuing request %s to node_type %s", req, node_type)
         ret_args = ""
         for node in self.physical_graph:
             katcp = getattr(node, 'katcp_connection', None)
@@ -743,7 +743,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if not reverse:
             deps_graph = deps_graph.reverse(copy=False)
 
-        tasks = {}     # Keyed by node
+        futures = {}     # Keyed by node
         # We grab the ioloop of the first task we create.
         loop = None
         # Lexicographical tie-breaking isn't strictly required, but it makes
@@ -764,15 +764,15 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     [field.format(**subst) if isinstance(field, str) else field for field in req]
                     for req in reqs
                 ]
-            deps = [tasks[trg] for trg in deps_graph.predecessors(node) if trg in tasks]
+            deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
             task = asyncio.ensure_future(
                 self._exec_node_transition(node, reqs, deps, state, capture_block),
                 loop=node.loop)
             loop = node.loop
-            tasks[node] = task
-        if tasks:
+            futures[node] = task
+        if futures:
             with async_timeout.timeout(300, loop=loop):
-                await asyncio.gather(*tasks.values(), loop=loop)
+                await asyncio.gather(*futures.values(), loop=loop)
 
     async def capture_init_impl(self, capture_block):
         self.telstate.add('sdp_capture_block_id', capture_block.name)
@@ -820,7 +820,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     if suffix in stream:
                         base_params[prefix + suffix] = stream[suffix]
 
-        logger.debug("Launching telstate. Base parameters {}".format(base_params))
+        logger.debug("Launching telstate. Base parameters %s", base_params)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
@@ -842,7 +842,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                logger.warn('Task %s is in state %s instead of READY', node.name, node.state.name)
+                logger.warning('Task %s is in state %s instead of READY',
+                               node.name, node.state.name)
                 return False
         return True
 
@@ -997,7 +998,8 @@ class SDPControllerServer(DeviceServer):
             s.set_value(0)
             self.sensors.add(s)
 
-    def _check_ntp_status(self):
+    @staticmethod
+    def _check_ntp_status():
         # Note: currently unused, because it can't talk to the host's NTP anyway
         try:
             return (subprocess.check_output(["/usr/bin/ntpq", "-p"]).find('*') > 0 and '1' or '0',
@@ -1067,13 +1069,13 @@ class SDPControllerServer(DeviceServer):
                 self.sensors.discard(product.state_sensor)
                 self.sensors.discard(product.capture_block_sensor)
                 self.mass_inform('interface-changed', 'sensor-list')
-                logger.info("Deconfigured subarray product {}".format(product.subarray_product_id))
+                logger.info("Deconfigured subarray product %s", product.subarray_product_id)
 
         if subarray_product_id in self.override_dicts:
             # this is a use-once set of overrides
             odict = self.override_dicts.pop(subarray_product_id)
-            logger.warning("Setting overrides on {} for the following: {}".format(
-                subarray_product_id, odict))
+            logger.warning("Setting overrides on %s for the following: %s",
+                           subarray_product_id, odict)
             config = product_config.override(config, odict)
             # Re-validate, since the override may have broken it
             try:
@@ -1112,7 +1114,7 @@ class SDPControllerServer(DeviceServer):
                 raise FailReply("Could not load S3 config: {}".format(str(error)))
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
-        logger.info("Launching graph {}.".format(subarray_product_id))
+        logger.info("Launching graph %s.", subarray_product_id)
         ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
                    .format(subarray_product_id))
 
@@ -1187,14 +1189,14 @@ class SDPControllerServer(DeviceServer):
         override_dict_json : string
             A json string containing a dict of config key:value overrides to use.
         """
-        logger.info("?set-config-override called on {} with {}"
-                    .format(subarray_product_id, override_dict_json))
+        logger.info("?set-config-override called on %s with %s",
+                    subarray_product_id, override_dict_json)
         try:
             odict = json.loads(override_dict_json)
-            if type(odict) is not dict:
+            if not isinstance(odict, dict):
                 raise ValueError
-            logger.info("Set override for subarray product {} for the following: {}"
-                        .format(subarray_product_id, odict))
+            logger.info("Set override for subarray product %s for the following: %s",
+                        subarray_product_id, odict)
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
             msg = ("The supplied override string {} does not appear to be a valid json string "
@@ -1221,7 +1223,7 @@ class SDPControllerServer(DeviceServer):
              The ID of the subarray product to reconfigure.
 
         """
-        logger.info("?product-reconfigure called on {}".format(subarray_product_id))
+        logger.info("?product-reconfigure called on %s", subarray_product_id)
         try:
             product = self.subarray_products[subarray_product_id]
         except KeyError:
@@ -1229,7 +1231,7 @@ class SDPControllerServer(DeviceServer):
                             "and thus cannot be reconfigured.".format(subarray_product_id))
         config = product.config
 
-        logger.info("Deconfiguring {} as part of a reconfigure request".format(subarray_product_id))
+        logger.info("Deconfiguring %s as part of a reconfigure request", subarray_product_id)
         try:
             await self.deregister_product(product)
         except Exception as error:
@@ -1237,11 +1239,11 @@ class SDPControllerServer(DeviceServer):
             logger.error(msg, exc_info=True)
             raise FailReply("{}. {}".format(msg, error))
 
-        logger.info("Waiting for {} to disappear".format(subarray_product_id))
+        logger.info("Waiting for %s to disappear", subarray_product_id)
         await product.dead_event.wait()
 
-        logger.info("Issuing new configure for {} as part of reconfigure request."
-                    .format(subarray_product_id))
+        logger.info("Issuing new configure for %s as part of reconfigure request.",
+                    subarray_product_id)
         try:
             await self.configure_product(ctx, subarray_product_id, config)
         except Exception as error:
@@ -1281,9 +1283,9 @@ class SDPControllerServer(DeviceServer):
         name : str
             Actual subarray-product-id
         """
-        logger.info("?product-configure called with: {}".format(ctx.req))
+        logger.info("?product-configure called with: %s", ctx.req)
 
-        if not re.match('^[A-Za-z0-9_]+\*?$', subarray_product_id):
+        if not re.match(r'^[A-Za-z0-9_]+\*?$', subarray_product_id):
             raise FailReply('Subarray_product_id contains illegal characters')
         try:
             config_dict = json.loads(config)
@@ -1463,7 +1465,7 @@ class SDPControllerServer(DeviceServer):
         await self.deconfigure_on_exit()
         try:
             master, slaves = await self.sched.get_master_and_slaves(timeout=5)
-        except Exception as error:
+        except Exception:
             logger.error('Failed to get list of slaves, so not powering them off.', exc_info=True)
             raise FailReply('could not get a list of slaves to power off')
         # If for some reason two slaves are running on the same machine, do

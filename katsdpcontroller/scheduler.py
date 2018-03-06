@@ -189,7 +189,8 @@ SCALAR_RESOURCES = ['cpus', 'mem', 'disk']
 GPU_SCALAR_RESOURCES = ['compute', 'mem']
 INTERFACE_SCALAR_RESOURCES = ['bandwidth_in', 'bandwidth_out']
 RANGE_RESOURCES = ['ports', 'cores']
-#: Mesos task states that indicate that the task is dead (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
+#: Mesos task states that indicate that the task is dead
+#: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset([
     'TASK_FINISHED',
     'TASK_FAILED',
@@ -211,21 +212,21 @@ logger = logging.getLogger(__name__)
 
 Volume = namedtuple('Volume', ['name', 'host_path', 'numa_node'])
 Volume.__doc__ = \
-"""Abstraction of a host path offered by an agent.
+    """Abstraction of a host path offered by an agent.
 
-Volumes are defined by setting the Mesos attribute
-:code:`katsdpcontroller.volumes`, whose value is a JSON string that adheres
-to the schema in :const:`katsdpcontroller.schemas.VOLUMES`.
+    Volumes are defined by setting the Mesos attribute
+    :code:`katsdpcontroller.volumes`, whose value is a JSON string that adheres
+    to the schema in :const:`katsdpcontroller.schemas.VOLUMES`.
 
-Attributes
-----------
-name : str
-    A logical name that indicates the purpose of the path
-host_path : str
-    Path on the host machine
-numa_node : int, optional
-    Index of the NUMA socket to which the storage is connected
-"""
+    Attributes
+    ----------
+    name : str
+        A logical name that indicates the purpose of the path
+    host_path : str
+        Path on the host machine
+    numa_node : int, optional
+        Index of the NUMA socket to which the storage is connected
+    """
 
 
 def _as_decimal(value):
@@ -389,7 +390,7 @@ async def poll_ports(host, ports, loop):
 
     # getaddrinfo always returns at least 1 (it is an error if there are no
     # matches), so we do not need to check for the empty case
-    (family, type_, proto, canonname, sockaddr) = addrs[0]
+    (family, type_, proto, _canonname, sockaddr) = addrs[0]
     for port in ports:
         while True:
             sock = socket.socket(family=family, type=type_, proto=proto)
@@ -494,8 +495,7 @@ class RangeResource:
             start, stop = rng
             if stop - start == 1:
                 return '{}'.format(start)
-            else:
-                return '{}-{}'.format(start, stop - 1)
+            return '{}-{}'.format(start, stop - 1)
         return ','.join(format_range(rng) for rng in self._ranges)
 
 
@@ -755,6 +755,7 @@ class TaskNoAgentError(InsufficientResourcesError):
     sub-class is used to indicate a more specific error.
     """
     def __init__(self, node):
+        super().__init__()
         self.node = node
 
     def __str__(self):
@@ -1130,18 +1131,18 @@ class Agent(ResourceCollector):
                     schemas.NUMA.validate(value)
                     self.numa = value
                 elif (attribute.name == 'katsdpcontroller.infiniband_devices'
-                        and attribute.type == 'TEXT'):
+                      and attribute.type == 'TEXT'):
                     value = _decode_json_base64(attribute.text.value)
                     schemas.INFINIBAND_DEVICES.validate(value)
                     self.infiniband_devices = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
-                logger.warn('Could not parse %s (%s)',
-                            attribute.name, attribute.text.value)
+                logger.warning('Could not parse %s (%s)',
+                               attribute.name, attribute.text.value)
                 logger.debug('Exception', exc_info=True)
             except jsonschema.ValidationError as e:
-                logger.warn('Validation error parsing %s: %s', value, e)
+                logger.warning('Validation error parsing %s: %s', value, e)
 
         # These resources all represent resources not yet allocated
         for r in SCALAR_RESOURCES:
@@ -1337,12 +1338,14 @@ class Agent(ResourceCollector):
                 need = _as_decimal(getattr(logical_task, r))
                 have = getattr(self, r)
                 if have < need:
-                    raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
+                    raise InsufficientResourcesError(
+                        'Not enough {} ({} < {})'.format(r, have, need))
             for r in RANGE_RESOURCES:
                 need = len(getattr(logical_task, r))
                 have = len(getattr(self, r))
                 if have < need:
-                    raise InsufficientResourcesError('Not enough {} ({} < {})'.format(r, have, need))
+                    raise InsufficientResourcesError(
+                        'Not enough {} ({} < {})'.format(r, have, need))
 
             if logical_task.cores:
                 # For tasks requesting cores we activate NUMA awareness
@@ -1353,8 +1356,7 @@ class Agent(ResourceCollector):
                         logger.debug('Failed to allocate NUMA node %d on %s',
                                      numa_node, self.agent_id, exc_info=True)
                 raise InsufficientResourcesError('No suitable NUMA node found')
-            else:
-                return self._allocate_numa_node(None, logical_task)
+            return self._allocate_numa_node(None, logical_task)
 
     def can_allocate(self, logical_task):
         """Check whether :meth:`allocate` will succeed, without modifying
@@ -1433,6 +1435,7 @@ class PhysicalNode:
         self.ready_event = asyncio.Event(loop=loop)
         self.dead_event = asyncio.Event(loop=loop)
         self.loop = loop
+        self.depends_ready = []
         self._ready_waiter = None
 
     async def resolve(self, resolver, graph, loop):
@@ -1499,8 +1502,8 @@ class PhysicalNode:
             # STARTING -> NOT_READY is permitted, for the case where a
             # launch is cancelled before the tasks are actually launched.
             if state != TaskState.NOT_READY or self.state != TaskState.STARTING:
-                logger.warn('Ignoring state change that went backwards (%s -> %s) on task %s',
-                            self.state, state, self.name)
+                logger.warning('Ignoring state change that went backwards (%s -> %s) on task %s',
+                               self.state, state, self.name)
                 return
         self.state = state
         if state == TaskState.DEAD:
@@ -1614,22 +1617,19 @@ class PhysicalTask(PhysicalNode):
     def agent(self):
         if self.allocation:
             return self.allocation.agent
-        else:
-            return None
+        return None
 
     @property
     def host(self):
         if self.allocation:
             return self.allocation.agent.host
-        else:
-            return None
+        return None
 
     @property
     def agent_id(self):
         if self.allocation:
             return self.allocation.agent.agent_id
-        else:
-            return None
+        return None
 
     def allocate(self, allocation):
         """Assign resources. This is called just before moving to
@@ -1751,7 +1751,7 @@ class PhysicalTask(PhysicalNode):
             # rdma_get_devices requires *all* the devices to be present to
             # succeed, even if they're not all used.
             if self.agent.infiniband_devices:
-                docker.devices.update(self.agent.infiniband_devices)
+                docker_devices.update(self.agent.infiniband_devices)
             else:
                 # Fallback for machines that haven't been updated with the
                 # latest agent_mkconfig.py.
@@ -1969,7 +1969,7 @@ def subgraph(graph, edge_filter, nodes=None):
         nodes = graph.nodes()
     if not callable(edge_filter):
         attr = edge_filter
-        edge_filter = lambda data: bool(data.get(attr))
+        edge_filter = lambda data: bool(data.get(attr))   # noqa: E731
     nodes = set(nodes)
     out = graph.__class__()
     out.add_nodes_from(nodes)
@@ -2099,8 +2099,7 @@ class Scheduler(pymesos.Scheduler):
         node = physical_node.logical_node
         if isinstance(node, LogicalTask):
             return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
-        else:
-            return (0, 0, 0, 0, node.name)
+        return (0, 0, 0, 0, node.name)
 
     def _clear_offers(self):
         for offers in self._offers.values():
@@ -2219,7 +2218,8 @@ class Scheduler(pymesos.Scheduler):
                     available = []
                     for agent in agents:
                         for numa_node in agent.numa:
-                            available.append(len([core for core in numa_node if core in agent.cores]))
+                            available.append(
+                                len([core for core in numa_node if core in agent.cores]))
                 else:
                     available = [len(getattr(agent, r)) for agent in agents]
                 max_resources[r] = max(available) if available else DECIMAL_ZERO
@@ -2280,7 +2280,8 @@ class Scheduler(pymesos.Scheduler):
                             need = _as_decimal(getattr(request, r))
                             if need > max_interface_resources[request.network][r]:
                                 raise TaskInsufficientInterfaceResourcesError(
-                                    node, request, r, need, max_interface_resources[request.network][r])
+                                    node, request, r, need,
+                                    max_interface_resources[request.network][r])
                     # This node doesn't fit but the reason is more complex e.g.
                     # there is enough of each resource individually but not all on
                     # the same agent or NUMA node.
@@ -2806,8 +2807,7 @@ class Scheduler(pymesos.Scheduler):
         try:
             if return_graph:
                 return self._active[task_id]
-            else:
-                return self._active[task_id][0]
+            return self._active[task_id][0]
         except KeyError:
             return None
 

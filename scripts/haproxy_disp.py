@@ -3,7 +3,8 @@
 """
 Run haproxy to reverse-proxy signal displays. To use it, run as
 
-docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller haproxy_disp.py <sdpmchost>:5001
+docker run -p <PORT>:8080 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller \
+haproxy_disp.py <sdpmchost>:5001
 
 Then connect to the machine on http://<HOST>:<PORT>/<subarray_product> to get the signal
 displays from that subarray-product. Any URL that doesn't correspond to a known subarray product
@@ -31,6 +32,33 @@ from katsdptelstate.endpoint import endpoint_parser
 
 
 logger = logging.getLogger(__name__)
+HAPROXY_HEADER = textwrap.dedent(r"""
+    global
+        maxconn 256
+
+    defaults
+        mode http
+        timeout connect 5s
+        timeout client 50s
+        timeout server 50s
+
+    frontend http-in
+        bind *:8080
+        acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+$'
+        acl has_array path_reg '^/array_\d+_[a-zA-Z0-9]+/'
+        http-request redirect code 301 prefix / drop-query append-slash if missing_slash
+        http-request set-var(req.array) path,field(2,/) if has_array
+        use_backend %[var(req.array)] if has_array
+        default_backend fallback
+
+    backend fallback
+        acl root path_reg '^/$'
+        acl favicon path_reg '^/favicon.ico$'
+        acl rotate path_reg '^/rotate'
+        acl ws path_reg '^/ws'
+        http-request redirect code 303 location / drop-query if !root !favicon !rotate !ws
+        server fallback_html_server 127.0.0.1:{port}
+    """)
 
 
 class Client(aiokatcp.Client):
@@ -120,7 +148,8 @@ async def websocket_handler(request):
                     request.app['websockets'].discard(ws)
                     await ws.close()
                 elif msg.data == 'servers':
-                    server_dict = {array: "http://{}".format(server) for array, server in request.app['servers'].items()}
+                    server_dict = {array: "http://{}".format(server)
+                                   for array, server in request.app['servers'].items()}
                     await ws.send_json(server_dict)
                 else:
                     await ws.send_str(msg.data + '/ping/')
@@ -138,8 +167,9 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('sdpmc', type=endpoint_parser(5001),
                         help='host[:port] of the SDP master controller')
-    parser.add_argument('-p', '--aioport', dest='aioport', metavar='PORT', default=5005, 
-                        help='Port to assign to the internal aiohttp webserver. [default=%default]')
+    parser.add_argument('-p', '--aioport', dest='aioport', metavar='PORT', default=5005,
+                        help='Port to assign to the internal aiohttp webserver. '
+                             '[default=%(default)s]')
     args = parser.parse_args()
 
     loop = asyncio.get_event_loop()
@@ -176,33 +206,7 @@ async def main():
                 logger.exception('Failed to get server list')
                 continue
             old_content = content
-            content = textwrap.dedent(r"""
-                global
-                    maxconn 256
-
-                defaults
-                    mode http
-                    timeout connect 5s
-                    timeout client 50s
-                    timeout server 50s
-
-                frontend http-in
-                    bind *:8080
-                    acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+$'
-                    acl has_array path_reg '^/array_\d+_[a-zA-Z0-9]+/'
-                    http-request redirect code 301 prefix / drop-query append-slash if missing_slash
-                    http-request set-var(req.array) path,field(2,/) if has_array
-                    use_backend %[var(req.array)] if has_array
-                    default_backend fallback
-
-                backend fallback
-                    acl root path_reg '^/$'
-                    acl favicon path_reg '^/favicon.ico$'
-                    acl rotate path_reg '^/rotate'
-                    acl ws path_reg '^/ws'
-                    http-request redirect code 303 location / drop-query if !root !favicon !rotate !ws
-                    server fallback_html_server 127.0.0.1:{port}
-                """.format(port=port))
+            content = HAPROXY_HEADER.format(port=port)
             for array, server in sorted(servers.items()):
                 if not server.html_endpoint:
                     logger.warning('Array %s has no signal display html port', array)
@@ -223,7 +227,8 @@ async def main():
                         '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
-                server_dict = {array: "http://{}".format(server) for array, server in servers.items()}
+                server_dict = {array: "http://{}".format(server)
+                               for array, server in servers.items()}
                 for _ws in app['websockets']:
                     await _ws.send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
