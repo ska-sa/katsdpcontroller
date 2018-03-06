@@ -126,7 +126,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Whether to wait for it to die before returning from product-deconfigure
         self.deconfigure_wait = True
         # Whether to wait until all capture blocks are completely dead before killing
-        self.wait_batch = False
+        self.wait_capture_blocks_dead = False
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -450,7 +450,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
 
     async def graceful_kill(self, driver, **kwargs):
         try:
-            if self.logical_node.wait_batch:
+            if self.logical_node.wait_capture_blocks_dead:
                 capture_blocks = kwargs.get('capture_blocks', {})
                 # Explicitly copy the values because it will mutate
                 for capture_block in list(capture_blocks.values()):

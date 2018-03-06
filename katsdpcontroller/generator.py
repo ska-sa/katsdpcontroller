@@ -311,7 +311,7 @@ def _make_telstate(g, config):
     telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
     telstate.physical_factory = TelstateTask
     telstate.deconfigure_wait = False
-    telstate.wait_batch = True
+    telstate.wait_capture_blocks_dead = True
     g.add_node(telstate)
     return telstate
 
