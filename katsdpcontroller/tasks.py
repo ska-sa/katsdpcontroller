@@ -263,9 +263,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._capture_blocks_empty.set()
 
     async def graceful_kill(self, driver, **kwargs):
-        logger.debug('Waiting for capture blocks on %s', self.name)
+        logger.info('Waiting for capture blocks on %s', self.name)
         await self._capture_blocks_empty.wait()
-        logger.debug('All capture blocks for %s completed', self.name)
+        logger.info('All capture blocks for %s completed', self.name)
         self._disconnect()
         super().kill(driver, **kwargs)
 

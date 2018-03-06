@@ -711,9 +711,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
                 observer = node.capture_block_state_observer
                 if observer is not None:
-                    logger.debug('Waiting for %s on %s', capture_block.name, node.name)
+                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
                     await observer.wait_capture_block_done(capture_block.name)
-                    logger.debug('Done waiting for %s on %s', capture_block.name, node.name)
+                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
                 else:
                     logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:

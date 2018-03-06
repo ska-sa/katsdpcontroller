@@ -900,7 +900,6 @@ class TestSDPController(BaseTestSDPController):
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
         self.assertEqual(ProductState.IDLE, sa.state)
-        print(self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.1.capture-block-state'].value)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('capture-done')
