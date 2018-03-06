@@ -22,7 +22,7 @@ import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, State,
+    SDPControllerServer, SDPCommonResources, SDPResources, ProductState,
     _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
@@ -151,7 +151,7 @@ CONFIG = '''{
             "output_channels": [0, 4096],
             "store": "ram"
         },
-        "sdp_cal": {
+        "cal": {
             "type": "sdp.cal",
             "src_streams": ["sdp_l0"],
             "buffer_time": 1800.0
@@ -176,7 +176,7 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
         (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
         (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
-        (b'cal.sdp_l0.1.capture-block-state', b'', b'string'),
+        (b'cal.1.capture-block-state', b'', b'string'),
         (b'state', b'', b'discrete',
          b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead'),
         (b'capture-block-state', b'', b'string')
@@ -482,7 +482,7 @@ class TestSDPController(BaseTestSDPController):
             # Creating the sensor here isn't quite accurate (it is a dynamic sensor
             # created on subarray activation), but it shouldn't matter.
             self.server.sensors.add(Sensor(
-                bytes, product + '.cal.sdp_l0.capture-block-state',
+                bytes, product + '.cal.1.capture-block-state',
                 'Dummy implementation of sensor', default=b'{}',
                 initial_status=Sensor.Status.NOMINAL))
         master_and_slaves_future = asyncio.Future(loop=self.loop)
@@ -646,7 +646,7 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual({}, self.server.override_dicts)
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.IDLE, sa.state)
+        self.assertEqual(ProductState.IDLE, sa.state)
 
     async def test_product_configure_generate_names(self):
         """Name with trailing * must generate lowest-numbered name"""
@@ -680,7 +680,7 @@ class TestSDPController(BaseTestSDPController):
         self.telstate_class.side_effect = redis.ConnectionError
         await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
         self.assertEqual({}, self.server.subarray_products)
 
@@ -690,7 +690,7 @@ class TestSDPController(BaseTestSDPController):
         await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.telstate_class.assert_called_once_with('host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must have cleaned up the subarray product internally
         self.assertEqual({}, self.server.subarray_products)
 
@@ -701,16 +701,16 @@ class TestSDPController(BaseTestSDPController):
             await self.client.request(*self._configure_args(SUBARRAY_PRODUCT2))
         # Check that both products are in the right state
         self.assertIn(SUBARRAY_PRODUCT1, self.server.subarray_products)
-        self.assertEqual(State.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT1].state)
+        self.assertEqual(ProductState.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT1].state)
         self.assertIn(SUBARRAY_PRODUCT2, self.server.subarray_products)
-        self.assertEqual(State.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT2].state)
+        self.assertEqual(ProductState.IDLE, self.server.subarray_products[SUBARRAY_PRODUCT2].state)
 
     async def test_product_deconfigure(self):
         """Checks success path of product-deconfigure"""
         await self._configure_subarray(SUBARRAY_PRODUCT1)
         await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1)
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY, force=False)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=False)
         # Verify the state
         self.assertEqual({}, self.server.subarray_products)
 
@@ -734,7 +734,7 @@ class TestSDPController(BaseTestSDPController):
         # Check that the subarray still exists and has the right state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def test_product_deconfigure_busy_force(self):
         """forced product-deconfigure must succeed while in capture-init"""
@@ -742,7 +742,7 @@ class TestSDPController(BaseTestSDPController):
         async with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1, '1')
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Verify the state
         self.assertEqual({}, self.server.subarray_products)
 
@@ -751,7 +751,7 @@ class TestSDPController(BaseTestSDPController):
         async with self._product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1, '1')
         # Check that the graph was shut down
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Verify the state
         self.assertEqual({}, self.server.subarray_products)
 
@@ -784,7 +784,7 @@ class TestSDPController(BaseTestSDPController):
             }''')
         await self.client.request('product-reconfigure', SUBARRAY_PRODUCT1)
         # Check that the graph was killed and restarted
-        self.sched.kill.assert_called_with(mock.ANY, force=False)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=False)
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         # Check that the override took effect
         ts = self.telstate_class.return_value
@@ -833,7 +833,7 @@ class TestSDPController(BaseTestSDPController):
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
         # Check that the graph transitions were called. Each call may be made
         # multiple times, depending on the number of instances of each child.
         # We thus collapse them into groups of equal calls and don't worry
@@ -841,7 +841,6 @@ class TestSDPController(BaseTestSDPController):
         katcp_client = self.sensor_proxy_client_class.return_value
         grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
         expected_calls = [
-            mock.call('configure-subarray-from-telstate'),
             mock.call('capture-init', '123456789'),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
         ]
@@ -857,7 +856,7 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def _test_busy(self, command, *args):
         """Test that a command fails if issued while ?capture-init or
@@ -888,23 +887,26 @@ class TestSDPController(BaseTestSDPController):
             raise ValueError('Could not find ingest node')
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        self.assertEqual(State.CAPTURING, sa.state)
+        self.assertEqual(ProductState.CAPTURING, sa.state)
 
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
-        self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.sdp_l0.capture-block-state'].value = \
-            b'{"123456789": "capturing"}'
+        cal_sensor = self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.1.capture-block-state']
+        cal_sensor.value = b'{"123456789": "capturing"}'
         await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertFalse(sa.async_busy)
-        self.assertEqual(State.IDLE, sa.state)
+        self.assertEqual(ProductState.IDLE, sa.state)
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('capture-done')
-        katcp_client.request.assert_any_call('write-meta', '123456789', True)
+        katcp_client.request.assert_called_with('write-meta', '123456789', True)
+        # Now simulate cal finishing with the capture block
+        cal_sensor.value = b'{}'
+        await asynctest.exhaust_callbacks(self.loop)
         # write-meta full dump must be last, hence assert_called_with not assert_any_call
         katcp_client.request.assert_called_with('write-meta', '123456789', False)
 
@@ -921,9 +923,9 @@ class TestSDPController(BaseTestSDPController):
 
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
-        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        # Forced deconfigure, so we only get the light dump
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         self.assertEqual({}, self.server.subarray_products)
 
     async def test_deconfigure_on_exit_busy(self):
@@ -932,7 +934,7 @@ class TestSDPController(BaseTestSDPController):
         await self._configure_subarray(SUBARRAY_PRODUCT1)
         async with self._capture_init_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.server.deconfigure_on_exit()
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         self.assertEqual({}, self.server.subarray_products)
 
     async def test_deconfigure_on_exit_cancel(self):
@@ -941,7 +943,7 @@ class TestSDPController(BaseTestSDPController):
         async with self._product_configure_slow(SUBARRAY_PRODUCT1, cancelled=True):
             await self.server.deconfigure_on_exit()
         # We must have killed off the partially-launched graph
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
 
     async def test_telstate_endpoint_all(self):
         """Test telstate-endpoint without a subarray_product_id argument"""
@@ -1005,9 +1007,9 @@ class TestSDPController(BaseTestSDPController):
         # Check that the subarray was stopped then shut down
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.request.assert_any_call('capture-done')
-        sensor_proxy_client.request.assert_any_call('write-meta', mock.ANY, True)
-        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, False)
-        self.sched.kill.assert_called_with(mock.ANY, force=True)
+        # Forced deconfigure, so we only get the light dump
+        sensor_proxy_client.request.assert_called_with('write-meta', mock.ANY, True)
+        self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Check that the shutdown was launched in two phases, non-masters
         # first.
         calls = self.sched.launch.call_args_list
