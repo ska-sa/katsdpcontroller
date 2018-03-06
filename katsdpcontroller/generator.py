@@ -944,7 +944,7 @@ def _make_flag_writer(g, config, name, l0_name):
     flag_writer.mem = max(256, _mb(4 * info.size / 10))
     flag_writer.ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = info.net_bandwith / 10
+    flag_writer.interfaces[0].bandwidth_in = info.net_bandwidth / 10
     flag_writer.volumes = [OBJ_DATA_VOL]
 
     flags_src = find_node(g, 'multicast.' + name)
@@ -1186,7 +1186,10 @@ def build_logical_graph(config):
                        'perhaps they were intended to be matched?')
 
     for name in outputs.get('sdp.cal', []):
-        _make_cal(g, config, name, config['outputs'][name]['src_streams'][0], flags_name)
+        src_name = config['outputs'][name]['src_streams'][0]
+        _make_cal(g, config, name, src_name, flags_name)
+        # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+        _make_flag_writer(g, config, flags_name, src_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
