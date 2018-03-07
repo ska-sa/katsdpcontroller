@@ -33,6 +33,7 @@ IMAGES = frozenset([
     'katsdpingest_titanx',
     'katsdpfilewriter',
     'katsdpmetawriter',
+    'katsdpflagwriter',
     'redis'
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
@@ -289,8 +290,16 @@ class L0Info(VisInfo):
         return self.n_vis * 10 + self.n_channels * 4
 
     @property
+    def flag_size(self):
+        return self.n_vis
+
+    @property
     def net_bandwidth(self, ratio=1.05, overhead=2048):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
+
+    @property
+    def flag_bandwidth(self, ratio=1.05, overhead=2048):
+        return _bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
 
 def find_node(g, name):
@@ -727,7 +736,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     return ingest_group
 
 
-def _make_cal(g, config, name, l0_name):
+def _make_cal(g, config, name, l0_name, flags_name):
     info = L0Info(config, l0_name)
     if info.n_antennas < 4:
         # Only possible to calibrate with at least 4 antennas
@@ -794,6 +803,7 @@ def _make_cal(g, config, name, l0_name):
         'buffer_maxsize': buffer_size,
         'workers': workers,
         'l0_name': l0_name,
+        'flags_name': flags_name,
         'servers': n_cal
     }
     group_config.update(parameters)
@@ -810,6 +820,13 @@ def _make_cal(g, config, name, l0_name):
                    'l0_spead': str(endpoint)
                })
 
+    # Flags output
+    flags_multicast = LogicalMulticast('multicast.' + flags_name, n_cal)
+    g.add_node(flags_multicast)
+    g.add_edge(cal_group, flags_multicast, port='spead', depends_resolve=True,
+               config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
+    g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
+
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(name, i))
         cal.image = 'katsdpcal'
@@ -819,6 +836,7 @@ def _make_cal(g, config, name, l0_name):
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
+        cal.interfaces[0].bandwidth_out = info.flag_bandwidth / n_cal
         cal.ports = ['port', 'dask_diagnostics']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
@@ -831,6 +849,7 @@ def _make_cal(g, config, name, l0_name):
         cal.deconfigure_wait = False
         g.add_node(cal, config=lambda task, resolver, server_id=i: {
             'l0_interface': task.interfaces['sdp_10g'].name,
+            'flags_interface': task.interfaces['sdp_10g'].name,
             'server_id': server_id,
             'dask_diagnostics': ('', task.ports['dask_diagnostics'])
         })
@@ -914,6 +933,44 @@ def _make_vis_writer(g, config, name):
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
     return vis_writer
+
+
+def _make_flag_writer(g, config, name, l0_name):
+    info = L0Info(config, l0_name)
+
+    flag_writer = SDPLogicalTask('flag_writer.' + name)
+    flag_writer.image = 'katsdpflagwriter'
+    flag_writer.command = ['flag_writer.py']
+
+    # Trial allocation
+    flag_writer.cpus = 1.0
+    # Sized to include space for 8x in the memory pool and 5x in the cache
+    flag_writer.mem = 256 + _mb(32 * info.flag_size)
+    flag_writer.ports = ['port']
+    flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
+    flag_writer.volumes = [OBJ_DATA_VOL]
+    flag_writer.deconfigure_wait = False
+
+    flags_src = find_node(g, 'multicast.' + name)
+
+    # Capture init / done are used to track progress of completing flags
+    # for a specified capture block id - the writer itself is free running
+    flag_writer.transitions = {
+        CaptureBlockState.CAPTURING: [['capture-init', '{capture_block_id}']],
+        CaptureBlockState.DEAD: [['capture-done', '{capture_block_id}']]
+    }
+
+    g.add_node(flag_writer, config=lambda task, resolver: {
+        'flags_name': name,
+        'flags_interface': task.interfaces['sdp_10g'].name,
+        'npy_path': OBJ_DATA_VOL.container_path,
+    })
+
+    g.add_edge(flag_writer, flags_src, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
+    return flag_writer
 
 
 def _make_beamformer_ptuse(g, config, name):
@@ -1079,6 +1136,9 @@ def build_logical_graph(config):
         if name in inputs_used and config['inputs'][name].get('simulate', False) is not False:
             _make_cbf_simulator(g, config, name)
 
+    # Hardcode flag output stream name for now
+    flags_name = 'sdp_l1_flags'
+
     # Group outputs by type
     outputs = {}
     for name, output in config['outputs'].items():
@@ -1102,7 +1162,7 @@ def build_logical_graph(config):
                         _make_timeplot(g, config, name)
                         _make_ingest(g, config, name, name2)
                         if implicit_cal:
-                            _make_cal(g, config, None, name)
+                            _make_cal(g, config, None, name, flags_name)
                         _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
                         archived_streams.append(name)
@@ -1121,7 +1181,7 @@ def build_logical_graph(config):
             _make_timeplot(g, config, name)
             _make_ingest(g, config, name, None)
             if implicit_cal:
-                _make_cal(g, config, None, name)
+                _make_cal(g, config, None, name, flags_name)
             _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
@@ -1132,7 +1192,11 @@ def build_logical_graph(config):
                        'perhaps they were intended to be matched?')
 
     for name in outputs.get('sdp.cal', []):
-        _make_cal(g, config, name, config['outputs'][name]['src_streams'][0])
+        src_name = config['outputs'][name]['src_streams'][0]
+        _make_cal(g, config, name, src_name, flags_name)
+        # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+        _make_flag_writer(g, config, flags_name, src_name)
+        archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
