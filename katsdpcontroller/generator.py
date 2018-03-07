@@ -944,8 +944,8 @@ def _make_flag_writer(g, config, name, l0_name):
 
     # Trial allocation
     flag_writer.cpus = 1.0
-    # Space for 4 dumps or a sensible minimum
-    flag_writer.mem = 256 + _mb(12 * info.flag_size)
+    # Sized to include space for 8x in the memory pool and 5x in the cache
+    flag_writer.mem = 256 + _mb(32 * info.flag_size)
     flag_writer.ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
