@@ -299,8 +299,16 @@ class L0Info(VisInfo):
         return self.n_vis * 10 + self.n_channels * 4
 
     @property
+    def flag_size(self):
+        return self.n_vis
+
+    @property
     def net_bandwidth(self, ratio=1.05, overhead=2048):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
+
+    @property
+    def flag_bandwidth(self, ratio=1.05, overhead=2048):
+        return _bandwidth(self.flag_size, self._int_time, ratio, overhead)
 
 
 def find_node(g, name):
@@ -833,6 +841,7 @@ def _make_cal(g, config, name, l0_name, flags_name):
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
+        cal.interfaces[0].bandwidth_out = info.flag_bandwidth / n_cal
         cal.ports = ['port', 'dask_diagnostics']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
@@ -941,11 +950,12 @@ def _make_flag_writer(g, config, name, l0_name):
     # Trial allocation
     flag_writer.cpus = 1.0
     # Space for 4 dumps or a sensible minimum
-    flag_writer.mem = max(256, _mb(4 * info.size / 10))
+    flag_writer.mem = 256 + _mb(12 * info.flag_size ))
     flag_writer.ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = info.net_bandwidth / 10
+    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
     flag_writer.volumes = [OBJ_DATA_VOL]
+    flag_writer.deconfigure_wait = False
 
     flags_src = find_node(g, 'multicast.' + name)
 
