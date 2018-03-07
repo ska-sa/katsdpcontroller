@@ -308,7 +308,7 @@ class L0Info(VisInfo):
 
     @property
     def flag_bandwidth(self, ratio=1.05, overhead=2048):
-        return _bandwidth(self.flag_size, self._int_time, ratio, overhead)
+        return _bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
 
 def find_node(g, name):
