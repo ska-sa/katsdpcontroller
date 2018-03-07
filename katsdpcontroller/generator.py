@@ -939,7 +939,7 @@ def _make_flag_writer(g, config, name, l0_name):
     flag_writer.command = ['flag_writer.py']
 
     # Trial allocation
-    flag_writer.cpus = 0.2
+    flag_writer.cpus = 1.0
     # Space for 4 dumps or a sensible minimum
     flag_writer.mem = max(256, _mb(4 * info.size / 10))
     flag_writer.ports = ['port']
@@ -1155,7 +1155,6 @@ def build_logical_graph(config):
                         _make_ingest(g, config, name, name2)
                         if implicit_cal:
                             _make_cal(g, config, None, name, flags_name)
-                            _make_flag_writer(g, config, flags_name, name)
                         _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
                         archived_streams.append(name)
@@ -1175,7 +1174,6 @@ def build_logical_graph(config):
             _make_ingest(g, config, name, None)
             if implicit_cal:
                 _make_cal(g, config, None, name, flags_name)
-                _make_flag_writer(g, config, flags_name, name)
             _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
@@ -1190,6 +1188,7 @@ def build_logical_graph(config):
         _make_cal(g, config, name, src_name, flags_name)
         # Pass l0 name to flag writer to allow calc of bandwidths and sizes
         _make_flag_writer(g, config, flags_name, src_name)
+        archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
