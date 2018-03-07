@@ -951,7 +951,10 @@ def _make_flag_writer(g, config, name, l0_name):
 
     # Capture init / done are used to track progress of completing flags
     # for a specified capture block id - the writer itself is free running
-    flag_writer.transitions = CAPTURE_TRANSITIONS
+    flag_writer.transitions = {
+        (State.IDLE, State.CAPTURING): [['capture-init', '{capture_block_id}']],
+        (State.CAPTURING, State.IDLE): [['capture-done', '{capture_block_id}', False]]
+    }
 
     g.add_node(flag_writer, config=lambda task, resolver: {
         'flags_name': name,
