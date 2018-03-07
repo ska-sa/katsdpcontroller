@@ -1315,7 +1315,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Provide offer suitable for launching node0. At this point all nodes
         # should launch.
         self.sched.resourceOffers(self.driver, [offer0])
-        await asynctest.exhaust_callbacks(self.loop)
+        await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
@@ -1376,6 +1376,25 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_true(launch.done())
         await launch
+
+    async def test_launch_slow_resolve(self):
+        """Like test_launch_serial, but where a task has a slow resolve call.
+
+        This is a regression test for SR-1093.
+        """
+        class SlowResolve(scheduler.PhysicalTask):
+            async def resolve(self, resolver, graph, loop):
+                await asyncio.sleep(30, loop=loop)
+                await super().resolve(resolver, graph, loop)
+
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.physical_factory = SlowResolve
+                break
+        else:
+            raise KeyError('Could not find node0')
+        self._make_physical()
+        await self.test_launch_serial()
 
     async def _transition_node0(self, target_state, nodes=None, ports=None):
         """Launch the graph and proceed until node0 is in `target_state`.
