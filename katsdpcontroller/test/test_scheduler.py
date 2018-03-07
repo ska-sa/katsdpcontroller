@@ -1538,6 +1538,18 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Once we abort, we should no longer be interested in offers
         assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
 
+    async def test_launch_resolve_raises(self):
+        async def resolve_raise(resolver, graph, loop):
+            raise ValueError('Testing')
+
+        self.nodes[0].resolve = resolve_raise
+        launch, kill = await self._transition_node0(TaskState.STARTING)
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, offers)
+        with assert_raises(ValueError) as cm:
+            await launch
+        assert_in('Testing', str(cm.exception))
+
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
         launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
