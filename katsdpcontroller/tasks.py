@@ -3,6 +3,7 @@ import json
 import asyncio
 import socket
 import ipaddress
+import enum
 
 from addict import Dict
 
@@ -106,22 +107,12 @@ _add_prometheus_sensor('last_transfer_rate',
                        Gauge)
 
 
-class State(scheduler.OrderedEnum):
-    """State of a subarray. This does not really belong in this module, but it
-    is placed here to avoid a circular dependency between :mod:`generator` and
-    :mod:`sdpcontroller`.
-
-    Only the following transitions can occur (TODO: make a picture):
-    - CONFIGURING -> IDLE (via product-configure)
-    - IDLE -> CAPTURING (via capture-init)
-    - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
-    """
-    CONFIGURING = 0
-    IDLE = 1
-    CAPTURING = 2
-    DECONFIGURING = 3
-    DEAD = 4
+class CaptureBlockState(enum.Enum):
+    """State of a single capture block."""
+    INITIALISING = 0
+    CAPTURING = 1
+    POSTPROCESSING = 2
+    DEAD = 3
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
@@ -134,6 +125,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.gui_urls = []
         # Whether to wait for it to die before returning from product-deconfigure
         self.deconfigure_wait = True
+        # Whether to wait until all capture blocks are completely dead before killing
+        self.wait_capture_blocks_dead = False
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -148,6 +141,13 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self.subarray_product_id = subarray_product_id
         # list of exposed KATCP sensors
         self.sensors = {}
+        # Capture block names for CBs that haven't terminated on this node yet.
+        # Names are used rather than the objects to reduce the number of cyclic
+        # references.
+        self._capture_blocks = set()
+        # Event set to true whenever _capture_block is empty
+        self._capture_blocks_empty = asyncio.Event(loop=loop)
+        self._capture_blocks_empty.set()
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -253,7 +253,19 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         return self.logical_node.physical_factory(
             self.logical_node, self.loop, self.sdp_controller, self.subarray_product_id)
 
+    def add_capture_block(self, capture_block):
+        self._capture_blocks.add(capture_block.name)
+        self._capture_blocks_empty.clear()
+
+    def remove_capture_block(self, capture_block):
+        self._capture_blocks.discard(capture_block.name)
+        if not self._capture_blocks:
+            self._capture_blocks_empty.set()
+
     async def graceful_kill(self, driver, **kwargs):
+        logger.info('Waiting for capture blocks on %s', self.name)
+        await self._capture_blocks_empty.wait()
+        logger.info('All capture blocks for %s completed', self.name)
         self._disconnect()
         super().kill(driver, **kwargs)
 
@@ -325,9 +337,6 @@ class CaptureBlockStateObserver:
         self._waiters.append((condition, future))
         await future
 
-    async def wait_empty(self):
-        await self.wait(lambda value: not value)
-
     async def wait_capture_block_done(self, capture_block_id):
         await self.wait(lambda value: capture_block_id not in value)
 
@@ -362,9 +371,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         self.katcp_connection = None
         self.capture_block_state_observer = None
 
-    def get_transition(self, old_state, new_state):
+    def get_transition(self, state):
         """Get state transition actions"""
-        return self.logical_node.transitions.get((old_state, new_state), [])
+        return self.logical_node.transitions.get(state, [])
 
     def _disconnect(self):
         """Close the katcp connection (if open) and remove the sensors."""
@@ -441,8 +450,11 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
 
     async def graceful_kill(self, driver, **kwargs):
         try:
-            if self.capture_block_state_observer is not None:
-                await self.capture_block_state_observer.wait_empty()
+            if self.logical_node.wait_capture_blocks_dead:
+                capture_blocks = kwargs.get('capture_blocks', {})
+                # Explicitly copy the values because it will mutate
+                for capture_block in list(capture_blocks.values()):
+                    await capture_block.dead_event.wait()
         except Exception:
             logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         await super().graceful_kill(driver, **kwargs)
