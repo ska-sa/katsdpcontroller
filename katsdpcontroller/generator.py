@@ -1193,10 +1193,10 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.cal', []):
         src_name = config['outputs'][name]['src_streams'][0]
-        _make_cal(g, config, name, src_name, flags_name)
-        # Pass l0 name to flag writer to allow calc of bandwidths and sizes
-        _make_flag_writer(g, config, flags_name, src_name)
-        archived_streams.append(flags_name)
+        if _make_cal(g, config, name, src_name, flags_name):
+            # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+            _make_flag_writer(g, config, flags_name, src_name)
+            archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
