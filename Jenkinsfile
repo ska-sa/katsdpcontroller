@@ -1,6 +1,6 @@
 #!groovy
 
-@Library('katsdpjenkins') _
+@Library('katsdpjenkins@flake8') _
 katsdp.setDependencies([
     'ska-sa/katsdpdockerbase/master',
     'ska-sa/katsdpservices/master',
