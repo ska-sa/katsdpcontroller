@@ -351,8 +351,8 @@ class SDPSubarrayProductBase:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.error("Failed to issue capture-done during shutdown request. "
-                             "Will continue with graph shutdown.", exc_info=True)
+                logger.exception("Failed to issue capture-done during shutdown request. "
+                                 "Will continue with graph shutdown.")
 
         if force:
             for capture_block in list(self.capture_blocks.values()):
@@ -1236,7 +1236,7 @@ class SDPControllerServer(DeviceServer):
             await self.deregister_product(product)
         except Exception as error:
             msg = "Unable to deconfigure as part of reconfigure"
-            logger.error(msg, exc_info=True)
+            logger.exception(msg)
             raise FailReply("{}. {}".format(msg, error))
 
         logger.info("Waiting for %s to disappear", subarray_product_id)
@@ -1248,7 +1248,7 @@ class SDPControllerServer(DeviceServer):
             await self.configure_product(ctx, subarray_product_id, config)
         except Exception as error:
             msg = "Unable to configure as part of reconfigure, original array deconfigured"
-            logger.error(msg, exc_info=True)
+            logger.exception(msg)
             raise FailReply("{}. {}".format(msg, error))
 
     @time_request
@@ -1466,7 +1466,7 @@ class SDPControllerServer(DeviceServer):
         try:
             master, slaves = await self.sched.get_master_and_slaves(timeout=5)
         except Exception:
-            logger.error('Failed to get list of slaves, so not powering them off.', exc_info=True)
+            logger.exception('Failed to get list of slaves, so not powering them off.')
             raise FailReply('could not get a list of slaves to power off')
         # If for some reason two slaves are running on the same machine, do
         # not kill it twice.

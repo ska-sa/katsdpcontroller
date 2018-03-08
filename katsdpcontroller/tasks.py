@@ -423,9 +423,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     await self.katcp_connection.wait_closed()
                     # no need for these to lurk around
                     self.katcp_connection = None
-                    logger.error("Failed to connect to %s via katcp on %s:%d. "
-                                 "Check to see if networking issues could be to blame.",
-                                 self.name, self.host, self.ports['port'], exc_info=True)
+                    logger.exception("Failed to connect to %s via katcp on %s:%d. "
+                                     "Check to see if networking issues could be to blame.",
+                                     self.name, self.host, self.ports['port'])
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0, loop=self.loop)

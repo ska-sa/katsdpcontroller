@@ -1485,8 +1485,7 @@ class PhysicalNode:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.error('exception while waiting for task %s to be ready', self.name,
-                         exc_info=True)
+            logger.exception('exception while waiting for task %s to be ready', self.name)
 
     def set_state(self, state):
         """Update :attr:`state`.
