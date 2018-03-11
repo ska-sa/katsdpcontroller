@@ -89,7 +89,7 @@ _add_prometheus_sensor('pipeline_last_slots',
 _add_prometheus_sensor('pipeline_last_time',
                        'Time taken to process the most recent buffer', Gauge)
 _add_prometheus_sensor('pipeline_exceptions',
-                       'Number of times the pipeline threw an exception', Counter),
+                       'Number of times the pipeline threw an exception', Counter)
 _add_prometheus_sensor('pipeline_active',
                        'Whether pipeline is currently computing', Gauge)
 _add_prometheus_sensor('report_last_time',
@@ -157,15 +157,15 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         if self.sdp_controller:
             self.sdp_controller.sensors.add(sensor)
         else:
-            logger.warning("Attempted to add sensor {} to node {}, but the node has "
-                           "no SDP controller available.".format(sensor.name, self.name))
+            logger.warning("Attempted to add sensor %s to node %s, but the node has "
+                           "no SDP controller available.", sensor.name, self.name)
 
     def _remove_sensors(self):
         """Removes all attached sensors. It does *not* send an
         ``interface-changed`` inform; that is left to the caller.
         """
-        for sensor_name in self.sensors.keys():
-            logger.debug("Removing sensor {}".format(sensor_name))
+        for sensor_name in self.sensors:
+            logger.debug("Removing sensor %s", sensor_name)
             del self.sdp_controller.sensors[sensor_name]
         self.sensors = {}
 
@@ -212,7 +212,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
                 host, port = addrinfo[0][4][:2]
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
             except socket.gaierror as error:
-                logger.warn('Could not resolve %s: %s', self.host, error)
+                logger.warning('Could not resolve %s: %s', self.host, error)
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
                                           status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
@@ -235,7 +235,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Apply overrides to taskinfo given by the user
         overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('taskinfo')
         if overrides:
-            logger.warn('Applying overrides to taskinfo of %s', self.name)
+            logger.warning('Applying overrides to taskinfo of %s', self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
@@ -401,8 +401,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
-                logger.info("Attempting to establish katcp connection to {}:{} for node {}".format(
-                    self.host, self.ports['port'], self.name))
+                logger.info("Attempting to establish katcp connection to %s:%s for node %s",
+                            self.host, self.ports['port'], self.name)
                 prefix = self.name + '.'
                 labels = (self.subarray_product_id, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
@@ -411,8 +411,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     host=self.host, port=self.ports['port'], loop=self.loop)
                 try:
                     await self.katcp_connection.wait_synced()
-                    logger.info("Connected to {}:{} for node {}".format(
-                        self.host, self.ports['port'], self.name))
+                    logger.info("Connected to %s:%s for node %s",
+                                self.host, self.ports['port'], self.name)
                     sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
@@ -423,9 +423,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     await self.katcp_connection.wait_closed()
                     # no need for these to lurk around
                     self.katcp_connection = None
-                    logger.error("Failed to connect to %s via katcp on %s:%d. "
-                                 "Check to see if networking issues could be to blame.",
-                                 self.name, self.host, self.ports['port'], exc_info=True)
+                    logger.exception("Failed to connect to %s via katcp on %s:%d. "
+                                     "Check to see if networking issues could be to blame.",
+                                     self.name, self.host, self.ports['port'])
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0, loop=self.loop)
@@ -438,7 +438,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
-        logger.info("Issued request {} {} to node {}".format(req, args, self.name))
+        logger.info("Issued request %s %s to node %s", req, args, self.name)
         try:
             await self.katcp_connection.wait_connected()
             reply, informs = await self.katcp_connection.request(req, *args)

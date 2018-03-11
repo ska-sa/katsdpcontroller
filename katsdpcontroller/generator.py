@@ -3,7 +3,6 @@ import logging
 import re
 import time
 import copy
-import fractions
 import urllib
 import os.path
 
@@ -74,9 +73,6 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 
 class TelstateTask(SDPPhysicalTaskBase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
         # Add a port mapping
@@ -255,8 +251,7 @@ class L0Info(VisInfo):
     def output_channels(self):
         if 'output_channels' in self.raw:
             return tuple(self.raw['output_channels'])
-        else:
-            return (0, self.src_info.n_channels)
+        return (0, self.src_info.n_channels)
 
     @property
     def n_channels(self):
@@ -576,7 +571,7 @@ def _adjust_ingest_output_channels(config, names):
         same other than for continuum_factor.
     """
     def lcm(a, b):
-        return a // fractions.gcd(a, b) * b
+        return a // math.gcd(a, b) * b
 
     n_ingest = n_ingest_nodes(config, names[0])
     outputs = [config['outputs'][name] for name in names]
@@ -1064,15 +1059,18 @@ def _make_beamformer_engineering(g, config, name):
             scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
         bf_ingest.ports = ['port']
         bf_ingest.transitions = CAPTURE_TRANSITIONS
-        g.add_node(bf_ingest, config=lambda task, resolver, src=src: {
-            'file_base': '/data',
-            'affinity': [task.cores['disk'], task.cores['network']],
-            'interface': task.interfaces['cbf'].name,
-            'ibv': True,
-            'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-            'stream_name': src,
-            'channels': '{}:{}'.format(*output_channels)
-        })
+        g.add_node(
+            bf_ingest,
+            config=lambda task, resolver, src=src, output_channels=output_channels: {
+                'file_base': '/data',
+                'affinity': [task.cores['disk'], task.cores['network']],
+                'interface': task.interfaces['cbf'].name,
+                'ibv': True,
+                'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
+                'stream_name': src,
+                'channels': '{}:{}'.format(*output_channels)
+            }
+        )
         g.add_edge(bf_ingest, src_multicast, port='spead',
                    depends_resolve=True, depends_init=True, depends_ready=True,
                    config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
