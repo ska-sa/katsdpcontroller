@@ -121,9 +121,7 @@ class HWLocParser(object):
         with nvml_manager():
             if not pynvml:
                 return out
-            driver_version = pynvml.nvmlSystemGetDriverVersion()
             cpu_to_node = self.cpu_nodes()
-            n_cpus = max(cpu_to_node.keys()) + 1
             n_devices = pynvml.nvmlDeviceGetCount()
             for i in range(n_devices):
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)
@@ -359,10 +357,14 @@ def write_dict(name, path, args, d, do_encode=False):
 def main():
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--dry-run', action='store_true', help='Report what would be done, without doing it')
-    group.add_argument('--exit-code', action='store_true', help='Use exit code 100 if there are no changes')
-    parser.add_argument('--attributes-dir', default='/etc/mesos-slave/attributes', help='Directory for attributes [%(default)s]')
-    parser.add_argument('--resources-dir', default='/etc/mesos-slave/resources', help='Directory for resources [%(default)s]')
+    group.add_argument('--dry-run', action='store_true',
+                       help='Report what would be done, without doing it')
+    group.add_argument('--exit-code', action='store_true',
+                       help='Use exit code 100 if there are no changes')
+    parser.add_argument('--attributes-dir', default='/etc/mesos-slave/attributes',
+                        help='Directory for attributes [%(default)s]')
+    parser.add_argument('--resources-dir', default='/etc/mesos-slave/resources',
+                        help='Directory for resources [%(default)s]')
     parser.add_argument('--network', dest='networks', action='append', default=[],
                         metavar='INTERFACE:NETWORK',
                         help='Map network interface to a logical network')

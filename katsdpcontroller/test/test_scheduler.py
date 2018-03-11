@@ -1,10 +1,8 @@
 import json
 import base64
 import socket
-import contextlib
 import logging
 import uuid
-import functools
 import asyncio
 import ipaddress
 import unittest
@@ -377,7 +375,7 @@ class TestAgent(unittest.TestCase):
         self.if_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
-                'numa_node': 1, 'infiniband_devices': ['/dev/infiniband/foo']}])
+              'numa_node': 1, 'infiniband_devices': ['/dev/infiniband/foo']}])
         self.if_attr_bad_json = _make_text_attr(
             'katsdpcontroller.interfaces',
             base64.urlsafe_b64encode(b'{not valid json'))
@@ -611,7 +609,7 @@ class TestAgent(unittest.TestCase):
         if_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
-                'numa_node': 1, 'infiniband_devices': []}])
+              'numa_node': 1, 'infiniband_devices': []}])
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [if_attr])])
@@ -1603,9 +1601,9 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         assert_equal([
-                mock.call.launchTasks([offer0.id], mock.ANY),
-                mock.call.suppressOffers()
-            ], self.driver.mock_calls)
+            mock.call.launchTasks([offer0.id], mock.ANY),
+            mock.call.suppressOffers()
+        ], self.driver.mock_calls)
         launch.cancel()
 
     async def _test_kill_in_state(self, state):
@@ -1681,9 +1679,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         # node1 now dies, and node0 and node2 should be killed
         status = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(AnyOrderList([
-            mock.call.killTask(self.nodes[0].taskinfo.task_id),
-            mock.call.acknowledgeStatusUpdate(status)]),
+        assert_equal(
+            AnyOrderList([
+                mock.call.killTask(self.nodes[0].taskinfo.task_id),
+                mock.call.acknowledgeStatusUpdate(status)
+            ]),
             self.driver.mock_calls)
         assert_equal(TaskState.KILLING, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
