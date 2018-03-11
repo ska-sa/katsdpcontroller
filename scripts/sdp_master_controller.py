@@ -5,7 +5,6 @@
    Copyright (c) 2013 SKA/KAT. All Rights Reserved.
 """
 
-import sys
 import os
 import os.path
 import json
@@ -24,9 +23,9 @@ from katsdpcontroller import scheduler, sdpcontroller
 
 
 def on_shutdown(loop, server):
+    # in case the exit code below borks, we allow shutdown via traditional means
     loop.remove_signal_handler(signal.SIGINT)
     loop.remove_signal_handler(signal.SIGTERM)
-     # in case the exit code below borks, we allow shutdown via traditional means
     server.halt()
 
 
@@ -93,21 +92,28 @@ if __name__ == "__main__":
                         help='disable aiomonitor debugging server')
     parser.add_argument('-i', '--interface-mode', default=False,
                         action='store_true',
-                        help='run the controller in interface only mode for testing integration and ICD compliance. (default: %(default)s)')
+                        help='run the controller in interface only mode for testing '
+                             'integration and ICD compliance. (default: %(default)s)')
     parser.add_argument('--registry', dest='private_registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images (use empty string to disable) (default: %(default)s)')
+                        help='registry from which to pull images (use empty string to disable) '
+                             '(default: %(default)s)')
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup (default: none)')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
-                        metavar='FILE', help='Configuration for connecting services to S3 (loaded on each configure)')
+                        metavar='FILE',
+                        help='Configuration for connecting services to S3 '
+                             '(loaded on each configure)')
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
-                        metavar='MULTICAST-CIDR', help='Block of multicast addresses from which to draw internal allocation. Needs to be at least /16. (default: %(default)s)')
+                        metavar='MULTICAST-CIDR',
+                        help='Block of multicast addresses from which to draw internal allocation. '
+                             'Needs to be at least /16. (default: %(default)s)')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='File containing JSON describing related GUIs, or directory with .json files (default: none)')
+                        help='File containing JSON describing related GUIs, '
+                             'or directory with .json files (default: none)')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--write-graphs', metavar='DIR',
@@ -119,7 +125,9 @@ if __name__ == "__main__":
     parser.add_argument('-v', '--verbose', dest='verbose', default=False,
                         action='store_true',
                         help='print verbose output (default: %(default)s)')
-    parser.add_argument('master', help='Zookeeper URL for discovering Mesos master e.g. zk://server.domain:2181/mesos')
+    parser.add_argument('master',
+                        help='Zookeeper URL for discovering Mesos master '
+                             'e.g. zk://server.domain:2181/mesos')
     opts = parser.parse_args()
 
     if opts.loglevel is not None:
@@ -180,9 +188,9 @@ if __name__ == "__main__":
 
     logger.info("Starting SDP...")
 
+    # expose any prometheus metrics that we create
     if opts.prometheus:
         start_http_server(8081)
-         # expose any prometheus metrics that we create
 
     if opts.aiomonitor:
         with aiomonitor.start_monitor(loop=loop):

@@ -152,7 +152,8 @@ class SensorProxyClient(aiokatcp.Client):
         else:
             return SENSOR_TYPES[type_name]
 
-    def _update_done(self, future):
+    @staticmethod
+    def _update_done(future):
         try:
             future.result()
         except asyncio.CancelledError:

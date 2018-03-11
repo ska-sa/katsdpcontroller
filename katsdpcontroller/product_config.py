@@ -1,8 +1,6 @@
 """Support for manipulating product config dictionaries."""
 
-import re
 import logging
-import copy
 import itertools
 import json
 import urllib
@@ -39,8 +37,7 @@ def override(config, overrides):
             else:
                 new_config[key] = override(config.get(key), value)
         return new_config
-    else:
-        return overrides
+    return overrides
 
 
 def _url_n_endpoints(url):

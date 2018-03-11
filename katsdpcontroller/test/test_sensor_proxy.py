@@ -8,7 +8,6 @@ Still TODO:
 - test for cancellation of the update in various cases
 """
 
-import asyncio
 import enum
 from unittest import mock
 
@@ -163,7 +162,6 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.assertEqual(status.value, actual_status)
 
     async def test_gauge(self):
-        labels = {'label1': 'labelvalue1'}
         await self._set('float-sensor', 2.5)
         self._check_prom('test_float_sensor', 2.5)
         # Change to an status where the value is not valid. The prometheus
