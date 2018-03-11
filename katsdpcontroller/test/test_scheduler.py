@@ -1549,6 +1549,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         with assert_raises(ValueError) as cm:
             await launch
         assert_in('Testing', str(cm.exception))
+        # The offers must be returned to Mesos
+        assert_equal(AnyOrderList([
+            mock.call.acceptOffers([offers[0].id], []),
+            mock.call.acceptOffers([offers[1].id], []),
+            mock.call.suppressOffers()]), self.driver.mock_calls)
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
