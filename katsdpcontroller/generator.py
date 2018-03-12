@@ -865,7 +865,7 @@ def _make_vis_writer(g, config, name):
     # Don't yet have a good idea of real CPU usage. For now assume that 32
     # antennas, 32K channels requires two CPUs (one for capture, one for
     # writing) and scale from there.
-    vis_writer.cpus = 2 * info.n_vis / _N32_32
+    vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
     # Estimate the size of the memory pool. The actual code is pretty complex,
     # so this is just to get the right scaling.
