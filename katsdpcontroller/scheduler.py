@@ -1862,9 +1862,17 @@ class _LaunchGroup:
         List of :class:`PhysicalNode`s to launch
     resolver : :class:`Resolver`
         Resolver which will be used to launch the nodes
+    resources_future : :class:`asyncio.Future`
+        A future that is set once the resources are acquired. The value is
+        ``None``, so it is only useful to get completion (it is not used
+        for exceptions; see :attr:`last_insufficient` instead).
+    last_insufficient : :class:`InsufficientResourcesError`
+        An exception describing in more detail why there were insufficient
+        resources. It is set to ``None`` once the resources are acquired.
     future : :class:`asyncio.Future`
         A future that is set with the result of the launch i.e., once the
-        group has been removed from the queue.
+        group has been removed from the queue. The value is ``None``, so it
+        is only useful to get completion and exceptions.
     deadline : float
         Loop timestamp by which the resources must be acquired. This is
         currently approximate (i.e. the actual timeout may occur at a slightly
@@ -1874,6 +1882,7 @@ class _LaunchGroup:
         self.nodes = nodes
         self.graph = graph
         self.resolver = resolver
+        self.resources_future = asyncio.Future(loop=loop)
         self.future = asyncio.Future(loop=loop)
         self.deadline = deadline
         self.last_insufficient = InsufficientResourcesError('No resource offers received')
@@ -2370,6 +2379,9 @@ class Scheduler(pymesos.Scheduler):
             else:
                 try:
                     # At this point we have a sufficient set of offers.
+                    group.last_insufficient = None
+                    if not group.resources_future.done():
+                        group.resources_future.set_result(None)
                     # Two-phase resolving
                     logger.debug('Allocating resources to tasks')
                     for (node, allocation) in allocations:
@@ -2416,7 +2428,8 @@ class Scheduler(pymesos.Scheduler):
                     queue.remove(group)
                     self._wakeup_launcher.set()
                 except Exception as error:
-                    group.future.set_exception(error)
+                    if not group.future.done():
+                        group.future.set_exception(error)
                     # Don't remove from the queue: launch() handles that
                 break
 
@@ -2564,7 +2577,8 @@ class Scheduler(pymesos.Scheduler):
         if empty:
             self._wakeup_launcher.set()
         try:
-            await asyncio.wait_for(pending.future, timeout=resources_timeout)
+            await asyncio.wait_for(pending.resources_future, timeout=resources_timeout)
+            await pending.future
         except Exception as error:
             logger.debug('Exception in launching group', exc_info=True)
             # Could be
@@ -2577,8 +2591,8 @@ class Scheduler(pymesos.Scheduler):
                     node.set_state(TaskState.NOT_READY)
             queue.remove(pending)
             self._wakeup_launcher.set()
-            if isinstance(error, asyncio.TimeoutError):
-                raise pending.last_insufficient
+            if isinstance(error, asyncio.TimeoutError) and pending.last_insufficient is not None:
+                raise pending.last_insufficient from None
             else:
                 raise
         ready_futures = [node.ready_event.wait() for node in nodes]

@@ -1313,7 +1313,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Provide offer suitable for launching node0. At this point all nodes
         # should launch.
         self.sched.resourceOffers(self.driver, [offer0])
-        await asynctest.exhaust_callbacks(self.loop)
+        await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
@@ -1374,6 +1374,25 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_true(launch.done())
         await launch
+
+    async def test_launch_slow_resolve(self):
+        """Like test_launch_serial, but where a task has a slow resolve call.
+
+        This is a regression test for SR-1093.
+        """
+        class SlowResolve(scheduler.PhysicalTask):
+            async def resolve(self, resolver, graph, loop):
+                await asyncio.sleep(30, loop=loop)
+                await super().resolve(resolver, graph, loop)
+
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.physical_factory = SlowResolve
+                break
+        else:
+            raise KeyError('Could not find node0')
+        self._make_physical()
+        await self.test_launch_serial()
 
     async def _transition_node0(self, target_state, nodes=None, ports=None):
         """Launch the graph and proceed until node0 is in `target_state`.
@@ -1516,6 +1535,23 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
         # Once we abort, we should no longer be interested in offers
         assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+
+    async def test_launch_resolve_raises(self):
+        async def resolve_raise(resolver, graph, loop):
+            raise ValueError('Testing')
+
+        self.nodes[0].resolve = resolve_raise
+        launch, kill = await self._transition_node0(TaskState.STARTING)
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, offers)
+        with assert_raises(ValueError) as cm:
+            await launch
+        assert_in('Testing', str(cm.exception))
+        # The offers must be returned to Mesos
+        assert_equal(AnyOrderList([
+            mock.call.acceptOffers([offers[0].id], []),
+            mock.call.acceptOffers([offers[1].id], []),
+            mock.call.suppressOffers()]), self.driver.mock_calls)
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
