@@ -643,12 +643,12 @@ class ImageResolver:
                 ssl_context = None
             with aiohttp.ClientSession(loop=loop, **kwargs) as session:
                 try:
-                    # Use a low timeout, so that we don't wedge the entire launch if
+                    # Use a lowish timeout, so that we don't wedge the entire launch if
                     # there is a connection problem.
-                    async with session.head(url, timeout=5, ssl_context=ssl_context) as response:
+                    async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
                         response.raise_for_status()
                         digest = response.headers['Docker-Content-Digest']
-                except aiohttp.client.ClientError as error:
+                except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
                     raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
                         from error
                 except KeyError:
