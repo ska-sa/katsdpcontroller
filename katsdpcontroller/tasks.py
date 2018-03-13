@@ -6,6 +6,7 @@ import ipaddress
 import enum
 
 from addict import Dict
+import async_timeout
 
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
@@ -113,6 +114,35 @@ class CaptureBlockState(enum.Enum):
     CAPTURING = 1
     POSTPROCESSING = 2
     DEAD = 3
+
+
+class KatcpTransition(object):
+    """A katcp request to issue on a state transition
+
+    Parameters
+    ----------
+    name : str
+        Request name
+    *args : str
+        Request arguments. String arguments are passed through
+        :meth:`str.format`: see
+        :meth:`.SDPSubarrayProduct.exec_node_transitions` for the keys that can
+        be substituted.
+    timeout : float
+        Maximum time to wait for the query to succeed.
+    """
+    def __init__(self, name, *args, timeout=None):
+        self.name = name
+        self.args = args
+        if timeout is None:
+            raise ValueError('timeout is required')
+        self.timeout = timeout
+
+    def format(self, *args, **kwargs):
+        """Apply string formatting to each argument and return a new object"""
+        formatted_args = [arg.format(*args, **kwargs) if isinstance(arg, str) else arg
+                          for arg in self.args]
+        return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
@@ -430,7 +460,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0, loop=self.loop)
 
-    async def issue_req(self, req, args=()):
+    async def issue_req(self, req, args=(), timeout=None):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
@@ -438,12 +468,15 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
-        logger.info("Issued request %s %s to node %s", req, args, self.name)
+        logger.info("Issuing request %s %s to node %s (timeout %gs)",
+                    req, args, self.name, timeout)
         try:
-            await self.katcp_connection.wait_connected()
-            reply, informs = await self.katcp_connection.request(req, *args)
+            with async_timeout.timeout(timeout):
+                await self.katcp_connection.wait_connected()
+                reply, informs = await self.katcp_connection.request(req, *args)
+            logger.info("Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
-        except (FailReply, InvalidReply, OSError) as error:
+        except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
             logger.warning('%s', msg)
             raise FailReply(msg) from error
