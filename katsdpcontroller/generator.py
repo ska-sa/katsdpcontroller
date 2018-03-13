@@ -14,13 +14,18 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import (
-    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup, CaptureBlockState)
+    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup,
+    CaptureBlockState, KatcpTransition)
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
-    CaptureBlockState.CAPTURING: [['capture-init', '{capture_block_id}']],
-    CaptureBlockState.POSTPROCESSING: [['capture-done']]
+    CaptureBlockState.CAPTURING: [
+        KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
+    ],
+    CaptureBlockState.POSTPROCESSING: [
+        KatcpTransition('capture-done', timeout=120)
+    ]
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
@@ -365,10 +370,10 @@ def _make_meta_writer(g, config):
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
         CaptureBlockState.POSTPROCESSING: [
-            ['write-meta', '{capture_block_id}', True]    # Light dump
+            KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)    # Light dump
         ],
         CaptureBlockState.DEAD: [
-            ['write-meta', '{capture_block_id}', False]   # Full dump
+            KatcpTransition('write-meta', '{capture_block_id}', False, timeout=300)   # Full dump
         ]
     }
 
@@ -473,8 +478,12 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
-            CaptureBlockState.CAPTURING: [['capture-start', name, '{time}']],
-            CaptureBlockState.POSTPROCESSING: [['capture-stop', name]]
+            CaptureBlockState.CAPTURING: [
+                KatcpTransition('capture-start', name, '{time}', timeout=30)
+            ],
+            CaptureBlockState.POSTPROCESSING: [
+                KatcpTransition('capture-stop', name, timeout=60)
+            ]
         }
 
         g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {
@@ -874,7 +883,16 @@ def _make_filewriter(g, config, name):
     filewriter.volumes = [DATA_VOL]
     filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
-    filewriter.transitions = CAPTURE_TRANSITIONS
+    # Give it more than the usual timeout for capture-done, because finalising
+    # a file can be slow.
+    filewriter.transitions = {
+        CaptureBlockState.CAPTURING: CAPTURE_TRANSITIONS[CaptureBlockState.CAPTURING],
+        CaptureBlockState.POSTPROCESSING: [
+            KatcpTransition('capture-done', timeout=300)
+        ]
+    }
+
+    CAPTURE_TRANSITIONS
     g.add_node(filewriter, config=lambda task, resolver: {
         'file_base': DATA_VOL.container_path,
         'l0_name': name,
@@ -952,8 +970,12 @@ def _make_flag_writer(g, config, name, l0_name):
     # Capture init / done are used to track progress of completing flags
     # for a specified capture block id - the writer itself is free running
     flag_writer.transitions = {
-        CaptureBlockState.CAPTURING: [['capture-init', '{capture_block_id}']],
-        CaptureBlockState.DEAD: [['capture-done', '{capture_block_id}']]
+        CaptureBlockState.CAPTURING: [
+            KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
+        ],
+        CaptureBlockState.DEAD: [
+            KatcpTransition('capture-done', '{capture_block_id}', timeout=60)
+        ]
     }
 
     g.add_node(flag_writer, config=lambda task, resolver: {

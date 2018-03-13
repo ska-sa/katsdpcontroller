@@ -19,7 +19,6 @@ import faulthandler
 import networkx
 import networkx.drawing.nx_pydot
 
-import async_timeout
 import jsonschema
 import netifaces
 
@@ -657,42 +656,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if hasattr(self, 'batch_queue'):
             self.sched.remove_queue(self.batch_queue)
 
-    async def _issue_req(self, req, args=(), node_type='ingest'):
-        """Issue a request against all nodes of a particular type. Typical
-        usage is to issue a command such as 'capture-init' to all ingest nodes.
-        A single failure is treated as terminal.
-
-        Returns
-        -------
-        results : str
-            Human-readable representation of the ok replies
-
-        Raises
-        ------
-        aiokatcp.FailReply
-            If any of the underlying requests fail
-        Exception
-            Any exceptions raised by aiokatcp itself will propagate
-        """
-        logger.debug("Issuing request %s to node_type %s", req, node_type)
-        ret_args = ""
-        for node in self.physical_graph:
-            katcp = getattr(node, 'katcp_connection', None)
-            if katcp is None:
-                # Can happen either if node is not an SDPPhysicalTask or if
-                # it has no katcp connection
-                continue
-            # filter out node_type(s) we don't want
-            if (not node.logical_node.name.startswith(node_type + '.')
-                    and node.logical_node.name != node_type):
-                continue
-            reply, informs = await node.issue_req(req, args)
-            ret_args += "," + (reply[-1] if reply else 'ok')
-        if ret_args == "":
-            ret_args = "Note: Req {} not issued as no nodes of type {} found.".format(
-                req, node_type)
-        return ret_args
-
     async def _exec_node_transition(self, node, reqs, deps, state, capture_block):
         try:
             if deps:
@@ -705,7 +668,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     # TODO: should handle katcp exceptions or failed replies
                     try:
                         for req in reqs:
-                            await node.issue_req(req[0], req[1:])
+                            await node.issue_req(req.name, req.args, timeout=req.timeout)
                     except FailReply:
                         pass   # Callee logs a warning
             if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
@@ -760,10 +723,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 # Apply {} substitutions to request data
                 subst = dict(capture_block_id=capture_block.name,
                              time=now)
-                reqs = [
-                    [field.format(**subst) if isinstance(field, str) else field for field in req]
-                    for req in reqs
-                ]
+                reqs = [req.format(**subst) for req in reqs]
             deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
             task = asyncio.ensure_future(
                 self._exec_node_transition(node, reqs, deps, state, capture_block),
@@ -771,8 +731,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             loop = node.loop
             futures[node] = task
         if futures:
-            with async_timeout.timeout(300, loop=loop):
-                await asyncio.gather(*futures.values(), loop=loop)
+            await asyncio.gather(*futures.values(), loop=loop)
 
     async def capture_init_impl(self, capture_block):
         self.telstate.add('sdp_capture_block_id', capture_block.name)
