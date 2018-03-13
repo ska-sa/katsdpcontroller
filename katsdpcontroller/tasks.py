@@ -468,7 +468,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
-        logger.info("Issuing request %s %s to node %s", req, args, self.name)
+        logger.info("Issuing request %s %s to node %s (timeout %gs)",
+                    req, args, self.name, timeout)
         try:
             with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
