@@ -43,6 +43,8 @@ _add_prometheus_sensor('input_dumps_total', 'Number of payload dumps received', 
 _add_prometheus_sensor('output_bytes_total', 'Number of payload bytes sent', Counter)
 _add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Counter)
 _add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
+_add_prometheus_sensor('output_chunks_total', 'Number of payload chunks written', Counter)
+_add_prometheus_sensor('output_seconds_total', 'Total time spent on writing output', Counter)
 _add_prometheus_sensor('last_dump_timestamp',
                        'Timestamp of most recently received dump in Unix seconds', Gauge)
 
