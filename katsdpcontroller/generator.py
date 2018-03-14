@@ -876,20 +876,17 @@ def _make_vis_writer(g, config, name):
     # writing) and scale from there.
     vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
-    # Estimate the size of the memory pool. The actual code is pretty complex,
-    # so this is just to get the right scaling.
-    target_obj_size = 10e6
+    # Estimate the size of the memory pool.
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
-    # Number of chunks per dump (at minimum one for vis, flags, weights, weights_channel)
-    n_chunks = max(4 * n_substreams, info.size / target_obj_size)
-    GRAPH_SIZE_TO_WRITE = 200   # From vis_writer.py
-    n_dumps_per_write = int(math.ceil(GRAPH_SIZE_TO_WRITE / n_chunks))
-    n_dumps_to_buffer = 2 * (n_dumps_per_write + 1) + 4
-    memory_pool = n_dumps_to_buffer * info.size
+    memory_pool = (4 + 3 / n_substreams) * info.size
+    # Socket buffer allocated per endpoint, but it is bounded at 256MB by the
+    # OS config.
+    socket_buffers = min(256 * 1024**2 * n_substreams, info.size)
 
-    # It's only a rough estimate, so double it to be on the safe side
-    vis_writer.mem = _mb(2 * memory_pool) + 256
+    # Double the memory allocation to be on the safe side. This gives some
+    # headroom for page cache etc.
+    vis_writer.mem = 2 * _mb(memory_pool + socket_buffers) + 256
     vis_writer.ports = ['port']
     vis_writer.volumes = [OBJ_DATA_VOL]
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -898,7 +895,7 @@ def _make_vis_writer(g, config, name):
     g.add_node(vis_writer, config=lambda task, resolver: {
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name,
-        'obj_size_mb': _mb(target_obj_size),
+        'obj_size_mb': 10.0,
         'npy_path': OBJ_DATA_VOL.container_path,
         's3_endpoint_url': resolver.s3_config['url']
     })
