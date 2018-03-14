@@ -43,10 +43,12 @@ _add_prometheus_sensor('input_dumps_total', 'Number of payload dumps received', 
 _add_prometheus_sensor('output_bytes_total', 'Number of payload bytes sent', Counter)
 _add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Counter)
 _add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
-
-# ingest
+_add_prometheus_sensor('output_chunks_total', 'Number of payload chunks written', Counter)
+_add_prometheus_sensor('output_seconds_total', 'Total time spent on writing output', Counter)
 _add_prometheus_sensor('last_dump_timestamp',
                        'Timestamp of most recently received dump in Unix seconds', Gauge)
+
+# ingest
 _add_prometheus_sensor(
     'input_no_descriptor_heaps_total',
     'Number of heaps rejected because descriptors not yet received', Counter)
@@ -106,6 +108,14 @@ _add_prometheus_sensor('key_failures',
 _add_prometheus_sensor('last_transfer_rate',
                        'Rate of last data transfer to S3 endpoint in bytes per second.',
                        Gauge)
+_add_prometheus_sensor('last_dump_duration',
+                       'Time taken to write the last dump to disk', Gauge)
+
+# flag writer
+_add_prometheus_sensor('output_objects_total',
+                       'Number of objects written to disk in this session', Counter)
+_add_prometheus_sensor('input_partial_dumps_total',
+                       'Number of partial dumps stored (due to age or early done)', Counter)
 
 
 class CaptureBlockState(enum.Enum):
