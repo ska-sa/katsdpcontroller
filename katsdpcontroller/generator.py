@@ -752,7 +752,7 @@ def _make_cal(g, config, name, l0_name, flags_name):
         settings = config['outputs'][name]
     # We want ~30 min of data in the buffer, to allow for a single batch of
     # 15 minutes.
-    buffer_time = settings.get('buffer_time', 30.0 * 60.0)
+    buffer_time = settings.get('buffer_time', 25.0 * 60.0)
     parameters = settings.get('parameters', {})
     models = settings.get('models', {})
     if models:
