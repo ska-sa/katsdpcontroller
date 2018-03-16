@@ -20,7 +20,7 @@ setup(
         ],
     setup_requires=['katversion'],
     install_requires=[
-        'pymesos>=0.2.10',   # 0.2.10 implements suppressOffers
+        'pymesos>=0.3.1',   # 0.3.1 implements declineInverseOffers
         'addict!=2.0.*',
         'aiohttp',
         'aiomonitor',
