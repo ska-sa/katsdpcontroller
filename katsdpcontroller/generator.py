@@ -878,7 +878,7 @@ def _make_filewriter(g, config, name):
     # Eventually it will be deleted entirely (1.95 instead of 2.0 since the
     # actual integration time is not exactly 2s).
     if info.n_vis / info.int_time > _N16_32 / 1.95:
-        logger.info('Disabling filewriter because data rate is too high')
+        logger.warning('Disabling filewriter because data rate is too high')
         return None
 
     filewriter = SDPLogicalTask('filewriter.' + name)
