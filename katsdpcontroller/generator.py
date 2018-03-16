@@ -557,12 +557,18 @@ def n_ingest_nodes(config, name):
     return 4 if not is_develop(config) else 2
 
 
-def n_cal_nodes(config, name):
+def n_cal_nodes(config, name, l0_name):
     """Number of processes used to implement cal for a particular output."""
-    # TODO: adjust based on the number of antennas and channels
-    # Set to 1 for now until split-cal flag output is properly tested
-    # return 4 if not is_develop(config) else 2
-    return 1
+    # Use single cal for 4K or less: it doesn't need the performance, and
+    # a unified cal report is more convenient (revisit once split cal supports
+    # a unified cal report).
+    info = L0Info(config, l0_name)
+    if info.n_channels <= 4096:
+        return 1
+    elif not is_develop(config):
+        return 4
+    else:
+        return 2
 
 
 def _adjust_ingest_output_channels(config, names):
@@ -751,14 +757,14 @@ def _make_cal(g, config, name, l0_name, flags_name):
         settings = {}
     else:
         settings = config['outputs'][name]
-    # We want ~30 min of data in the buffer, to allow for a single batch of
+    # We want ~25 min of data in the buffer, to allow for a single batch of
     # 15 minutes.
-    buffer_time = settings.get('buffer_time', 30.0 * 60.0)
+    buffer_time = settings.get('buffer_time', 25.0 * 60.0)
     parameters = settings.get('parameters', {})
     models = settings.get('models', {})
     if models:
         raise NotImplementedError('cal models are not yet supported')
-    n_cal = n_cal_nodes(config, name)
+    n_cal = n_cal_nodes(config, name, l0_name)
 
     # Some of the scaling in cal is non-linear, so we need to give smaller
     # arrays more CPU than might be suggested by linear scaling. As a
@@ -868,6 +874,12 @@ def _make_cal(g, config, name, l0_name, flags_name):
 
 def _make_filewriter(g, config, name):
     info = L0Info(config, name)
+    # Disable file writer for large arrays, since it is unlikely to keep up.
+    # Eventually it will be deleted entirely (1.95 instead of 2.0 since the
+    # actual integration time is not exactly 2s).
+    if info.n_vis / info.int_time > _N16_32 / 1.95:
+        logger.warning('Disabling filewriter because data rate is too high')
+        return None
 
     filewriter = SDPLogicalTask('filewriter.' + name)
     filewriter.image = 'katsdpfilewriter'
@@ -906,6 +918,7 @@ def _make_filewriter(g, config, name):
 
 
 def _make_vis_writer(g, config, name):
+    ibv = not is_develop(config)
     info = L0Info(config, name)
 
     vis_writer = SDPLogicalTask('vis_writer.' + name)
@@ -914,7 +927,7 @@ def _make_vis_writer(g, config, name):
     # Don't yet have a good idea of real CPU usage. For now assume that 32
     # antennas, 32K channels requires two CPUs (one for capture, one for
     # writing) and scale from there.
-    vis_writer.cpus = 2 * info.n_vis / _N32_32
+    vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
     # Estimate the size of the memory pool.
     src_multicast = find_node(g, 'multicast.' + name)
@@ -929,12 +942,14 @@ def _make_vis_writer(g, config, name):
     vis_writer.mem = 2 * _mb(memory_pool + socket_buffers) + 256
     vis_writer.ports = ['port']
     vis_writer.volumes = [OBJ_DATA_VOL]
-    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g', infiniband=ibv)]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
     vis_writer.transitions = CAPTURE_TRANSITIONS
+
     g.add_node(vis_writer, config=lambda task, resolver: {
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name,
+        'l0_ibv': ibv,
         'obj_size_mb': 10.0,
         'npy_path': OBJ_DATA_VOL.container_path,
         's3_endpoint_url': resolver.s3_config['url']
@@ -946,6 +961,7 @@ def _make_vis_writer(g, config, name):
 
 
 def _make_flag_writer(g, config, name, l0_name):
+    ibv = not is_develop(config)
     info = L0Info(config, l0_name)
 
     flag_writer = SDPLogicalTask('flag_writer.' + name)
@@ -957,7 +973,7 @@ def _make_flag_writer(g, config, name, l0_name):
     # Sized to include space for 8x in the memory pool and 5x in the cache
     flag_writer.mem = 256 + _mb(32 * info.flag_size)
     flag_writer.ports = ['port']
-    flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g', infiniband=ibv)]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
     flag_writer.volumes = [OBJ_DATA_VOL]
     flag_writer.deconfigure_wait = False
@@ -978,6 +994,7 @@ def _make_flag_writer(g, config, name, l0_name):
     g.add_node(flag_writer, config=lambda task, resolver: {
         'flags_name': name,
         'flags_interface': task.interfaces['sdp_10g'].name,
+        'flags_ibv': ibv,
         'npy_path': OBJ_DATA_VOL.container_path,
     })
 
