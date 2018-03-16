@@ -557,11 +557,18 @@ def n_ingest_nodes(config, name):
     return 4 if not is_develop(config) else 2
 
 
-def n_cal_nodes(config, name):
+def n_cal_nodes(config, name, l0_name):
     """Number of processes used to implement cal for a particular output."""
-    # TODO: adjust based on the number of antennas and channels? The flagging
-    # is influenced by the choice, so it may be worth keeping a fixed number.
-    return 4 if not is_develop(config) else 2
+    # Use single cal for 4K or less: it doesn't need the performance, and
+    # a unified cal report is more convenient (revisit once split cal supports
+    # a unified cal report).
+    info = L0Info(config, l0_name)
+    if info.n_channels <= 4096:
+        return 1
+    elif not is_develop(config):
+        return 4
+    else:
+        return 2
 
 
 def _adjust_ingest_output_channels(config, names):
@@ -757,7 +764,7 @@ def _make_cal(g, config, name, l0_name, flags_name):
     models = settings.get('models', {})
     if models:
         raise NotImplementedError('cal models are not yet supported')
-    n_cal = n_cal_nodes(config, name)
+    n_cal = n_cal_nodes(config, name, l0_name)
 
     # Some of the scaling in cal is non-linear, so we need to give smaller
     # arrays more CPU than might be suggested by linear scaling. As a
@@ -863,6 +870,51 @@ def _make_cal(g, config, name, l0_name, flags_name):
                    depends_resolve=True, depends_ready=True, depends_init=True)
 
     return cal_group
+
+
+def _make_filewriter(g, config, name):
+    info = L0Info(config, name)
+    # Disable file writer for large arrays, since it is unlikely to keep up.
+    # Eventually it will be deleted entirely (1.95 instead of 2.0 since the
+    # actual integration time is not exactly 2s).
+    if info.n_vis / info.int_time > _N16_32 / 1.95:
+        logger.info('Disabling filewriter because data rate is too high')
+        return None
+
+    filewriter = SDPLogicalTask('filewriter.' + name)
+    filewriter.image = 'katsdpfilewriter'
+    filewriter.command = ['file_writer.py']
+    # Don't yet have a good idea of real CPU usage. For now assume that 16
+    # antennas, 32K channels requires two CPUs (one for capture, one for
+    # writing) and scale from there.
+    filewriter.cpus = 2 * info.n_vis / _N16_32
+    # Memory pool has 8 entries, plus the socket buffer, but allocate 12 to be
+    # safe.
+    filewriter.mem = 12 * _mb(info.size) + 256
+    filewriter.ports = ['port']
+    filewriter.volumes = [DATA_VOL]
+    filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
+    # Give it more than the usual timeout for capture-done, because finalising
+    # a file can be slow.
+    filewriter.transitions = {
+        CaptureBlockState.CAPTURING: CAPTURE_TRANSITIONS[CaptureBlockState.CAPTURING],
+        CaptureBlockState.POSTPROCESSING: [
+            KatcpTransition('capture-done', timeout=300)
+        ]
+    }
+
+    CAPTURE_TRANSITIONS
+    g.add_node(filewriter, config=lambda task, resolver: {
+        'file_base': DATA_VOL.container_path,
+        'l0_name': name,
+        'l0_interface': task.interfaces['sdp_10g'].name
+    })
+    src_multicast = find_node(g, 'multicast.' + name)
+    g.add_edge(filewriter, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
+    return filewriter
 
 
 def _make_vis_writer(g, config, name):
@@ -1145,6 +1197,7 @@ def build_logical_graph(config):
                         _make_ingest(g, config, name, name2)
                         if implicit_cal:
                             _make_cal(g, config, None, name, flags_name)
+                        _make_filewriter(g, config, name)
                         _make_vis_writer(g, config, name)
                         archived_streams.append(name)
                         l0_done.add(name)
@@ -1163,6 +1216,7 @@ def build_logical_graph(config):
             _make_ingest(g, config, name, None)
             if implicit_cal:
                 _make_cal(g, config, None, name, flags_name)
+            _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
         else:
