@@ -311,7 +311,7 @@ def find_node(g, name):
 
 def _make_telstate(g, config):
     telstate = SDPLogicalTask('telstate')
-    telstate.cpus = 0.1
+    telstate.cpus = 0.4
     telstate.mem = 8192
     telstate.disk = telstate.mem
     telstate.image = 'redis'
@@ -503,8 +503,8 @@ def _make_timeplot(g, config, spectral_name):
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
     # Exact requirement not known (also depends on number of users). Give it
-    # 2 CPUs (max it can use) for 32 antennas, 32K channels and scale from there.
-    timeplot.cpus = 2 * min(1.0, spectral_info.n_vis / _N32_32)
+    # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
+    timeplot.cpus = 2 * min(1.0, spectral_info.n_vis / _N16_32)
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
