@@ -842,7 +842,7 @@ def _make_cal(g, config, name, l0_name, flags_name):
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
         cal.cpus = cpus
-        cal.mem = buffer_size * (1 + extra) / 1024**2 + 256
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 512
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
