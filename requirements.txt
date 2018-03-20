@@ -27,7 +27,7 @@ numpy
 pkginfo
 prometheus_client==0.1.0
 pydotplus==2.0.2
-pymesos==0.2.15
+pymesos==0.3.1
 pyparsing==2.2.0           # via pydotplus
 redis                      # via katsdptelstate
 requests==2.18.4           # via docker

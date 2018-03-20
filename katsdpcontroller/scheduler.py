@@ -2163,7 +2163,7 @@ class Scheduler(pymesos.Scheduler):
     def inverseOffers(self, driver, offers):
         for offer in offers:
             logger.debug('Declining inverse offer %s', offer.id.value)
-            self._driver.declineOffer(offer.id)
+            self._driver.declineInverseOffer(offer.id)
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
