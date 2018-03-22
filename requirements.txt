@@ -2,12 +2,12 @@ addict==2.1.1
 aioconsole==0.1.7          # via aiomonitor
 aiohttp==2.3.6
 aiohttp-jinja2==0.14.0
-aiokatcp==0.2
+aiokatcp==0.3.1
 aiomonitor==0.3.0
 async-timeout==2.0.0
 certifi                    # via requests
 chardet==3.0.4             # via aiohttp, requests
-decorator==4.1.2           # networkx requires >= 4.1, katsdpdockerbase is currently 4.0.4
+decorator
 docker-pycreds==0.2.1      # via docker
 docker==2.7.0
 fakenewsredis              # via katsdptelstate
