@@ -10,7 +10,7 @@ chardet==3.0.4             # via aiohttp, requests
 decorator
 docker-pycreds==0.2.1      # via docker
 docker==2.7.0
-fakenewsredis              # via katsdptelstate
+fakeredis                  # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
 idna==2.6                  # via requests
