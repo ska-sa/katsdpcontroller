@@ -563,12 +563,12 @@ def n_cal_nodes(config, name, l0_name):
     # a unified cal report is more convenient (revisit once split cal supports
     # a unified cal report).
     info = L0Info(config, l0_name)
-    if info.n_channels <= 4096:
-        return 1
-    elif not is_develop(config):
-        return 4
-    else:
+    if is_develop(config):
         return 2
+    elif info.n_channels <= 4096:
+        return 1
+    else:
+        return 4
 
 
 def _adjust_ingest_output_channels(config, names):
