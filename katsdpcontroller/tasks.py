@@ -4,6 +4,7 @@ import asyncio
 import socket
 import ipaddress
 import enum
+import os
 
 from addict import Dict
 import async_timeout
@@ -188,6 +189,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Event set to true whenever _capture_block is empty
         self._capture_blocks_empty = asyncio.Event(loop=loop)
         self._capture_blocks_empty.set()
+        # Set to true if the image uses katsdpservices.setup_logging() and hence
+        # can log directly to logstash without logspout.
+        self.katsdpservices_logging = False
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -256,21 +260,29 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
                                           status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
-        # Provide info about which container this is for logspout to collect
+        # Provide info about which container this is for logspout to collect.
+        labels = {
+            'task': self.logical_node.name,
+            'task_id': self.taskinfo.task_id.value,
+            'subarray_product_id': self.subarray_product_id
+        }
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task={}'.format(self.logical_node.name)},
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'
-                      .format(self.taskinfo.task_id.value)},
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'
-                      .format(self.subarray_product_id)}
-        ])
-        # Request SDP services to escape newlines, for the benefit of
-        # logstash.
-        self.taskinfo.command.environment.setdefault('variables', []).append(
-            {'name': 'KATSDP_LOG_ONELINE', 'value': '1'})
+            {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
+            for (key, value) in labels.items()])
+
+        # Set extra fields for SDP services to log to logspout
+        if self.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
+            extras = dict(labels)
+            extras['docker.image'] = self.taskinfo.container.docker.image
+            env = {
+                'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
+                'KATSDP_LOG_GELF_EXTRAS': json.dumps(extras),
+                'KATSDP_LOG_GELF_LOCALNAME': self.host,
+                'LOGSPOUT': 'ignore'
+            }
+            self.taskinfo.command.environment.setdefault('variables', []).extend([
+                {'name': key, 'value': value} for (key, value) in env.items()
+            ])
 
         # Apply overrides to taskinfo given by the user
         overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('taskinfo')
@@ -410,6 +422,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
+        self.katsdpservices_logging = True
 
     def get_transition(self, state):
         """Get state transition actions"""
