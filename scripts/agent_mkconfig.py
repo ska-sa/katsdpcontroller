@@ -285,7 +285,7 @@ def encode(d):
     if isinstance(d, numbers.Real):
         return repr(float(d))
     else:
-        s = json.dumps(d)
+        s = json.dumps(d, sort_keys=True)
         while len(s) % 3:
             s += ' '
         return base64.urlsafe_b64encode(s.encode('utf-8')).decode('ascii')
