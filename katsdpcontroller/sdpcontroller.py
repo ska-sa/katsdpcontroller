@@ -1,6 +1,4 @@
-"""Core classes for the SDP Controller.
-
-"""
+"""Core classes for the SDP Controller."""
 
 import time
 import logging
@@ -263,7 +261,8 @@ class SDPSubarrayProductBase:
             ProductState, subarray_product_id + ".state",
             "State of the subarray product state machine")
         self.state = ProductState.CONFIGURING   # This sets the sensor
-        logger.info("Created: %r", self)
+        self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=subarray_product_id))
+        self.logger.info("Created: %r", self)
 
     @property
     def state(self):
@@ -350,14 +349,14 @@ class SDPSubarrayProductBase:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Failed to issue capture-done during shutdown request. "
-                                 "Will continue with graph shutdown.")
+                self.logger.exception("Failed to issue capture-done during shutdown request. "
+                                      "Will continue with graph shutdown.")
 
         if force:
             for capture_block in list(self.capture_blocks.values()):
                 if capture_block.postprocess_task is not None:
-                    logger.warning('Cancelling postprocessing for capture block %s',
-                                   capture_block.name)
+                    self.logger.warning('Cancelling postprocessing for capture block %s',
+                                        capture_block.name)
                     capture_block.postprocess_task.cancel()
                 else:
                     self._capture_block_dead(capture_block)
@@ -483,7 +482,7 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
-        logger.info('Subarray product %s successfully configured', self.subarray_product_id)
+        self.logger.info('Subarray product %s successfully configured', self.subarray_product_id)
 
     async def deconfigure(self, force=False):
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
@@ -493,17 +492,17 @@ class SDPSubarrayProductBase:
             if not force:
                 self._fail_if_busy()
             else:
-                logger.warning('Subarray product %s is busy with an operation, '
-                               'but deconfiguring anyway', self.subarray_product_id)
+                self.logger.warning('Subarray product %s is busy with an operation, '
+                                    'but deconfiguring anyway', self.subarray_product_id)
 
         if self.state != ProductState.IDLE:
             if not force:
                 raise FailReply('Subarray product is not idle and thus cannot be deconfigured. '
                                 'Please issue capture_done first.')
             else:
-                logger.warning('Subarray product %s is in state %s, but deconfiguring anyway',
-                               self.subarray_product_id, self.state.name)
-        logger.info("Deconfiguring subarray product %s", self.subarray_product_id)
+                self.logger.warning('Subarray product %s is in state %s, but deconfiguring anyway',
+                                    self.subarray_product_id, self.state.name)
+        self.logger.info("Deconfiguring subarray product %s", self.subarray_product_id)
 
         ready = asyncio.Event(loop=self.loop)
         task = asyncio.ensure_future(self._deconfigure(force, ready), loop=self.loop)
@@ -531,7 +530,7 @@ class SDPSubarrayProductBase:
             seq -= 1
         capture_block_id = str(seq)
         _capture_block_names.add(capture_block_id)
-        logger.info('Using capture block ID %s', capture_block_id)
+        self.logger.info('Using capture block ID %s', capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, self.loop)
         task = asyncio.ensure_future(self._capture_init(capture_block), loop=self.loop)
@@ -540,8 +539,8 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
-        logger.info('Started capture block %s on subarray product %s',
-                    capture_block_id, self.subarray_product_id)
+        self.logger.info('Started capture block %s on subarray product %s',
+                         capture_block_id, self.subarray_product_id)
         return capture_block_id
 
     async def capture_done(self):
@@ -556,8 +555,8 @@ class SDPSubarrayProductBase:
             await task
         finally:
             self._clear_async_task(task)
-        logger.info('Finished capture block %s on subarray product %s',
-                    capture_block_id, self.subarray_product_id)
+        self.logger.info('Finished capture block %s on subarray product %s',
+                         capture_block_id, self.subarray_product_id)
         return capture_block_id
 
     def write_graphs(self, output_dir):
@@ -574,7 +573,7 @@ class SDPSubarrayProductBase:
             try:
                 g.write_svg(filename)
             except OSError as error:
-                logger.warning('Could not write %s: %s', filename, error)
+                self.logger.warning('Could not write %s: %s', filename, error)
 
     def __repr__(self):
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -586,7 +585,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
+        self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id, self.logger)
         sensors = self._interface_mode_sensors.sensors
         self._capture_block_states = [
             sensor for sensor in sensors.values() if sensor.name.endswith('.capture-block-state')]
@@ -618,7 +617,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         self._update_capture_block_state(capture_block.name, None)
 
     async def configure_impl(self, ctx):
-        logger.warning("No components will be started - running in interface mode")
+        self.logger.warning("No components will be started - running in interface mode")
         # Add dummy sensors for this product
         self._interface_mode_sensors.add_sensors(self.sdp_controller)
 
@@ -662,8 +661,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 await asyncio.gather(*deps, loop=node.loop)
             if reqs:
                 if node.katcp_connection is None:
-                    logger.warning('Cannot issue %s to %s because there is no katcp connection',
-                                   reqs[0], node.name)
+                    self.logger.warning(
+                        'Cannot issue %s to %s because there is no katcp connection',
+                        reqs[0], node.name)
                 else:
                     # TODO: should handle katcp exceptions or failed replies
                     try:
@@ -674,11 +674,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
                 observer = node.capture_block_state_observer
                 if observer is not None:
-                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
+                    self.logger.info('Waiting for %s on %s', capture_block.name, node.name)
                     await observer.wait_capture_block_done(capture_block.name)
-                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
+                    self.logger.info('Done waiting for %s on %s', capture_block.name, node.name)
                 else:
-                    logger.debug('Task %s has no capture-block-state observer', node.name)
+                    self.logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:
             if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTaskBase):
                 node.remove_capture_block(capture_block)
@@ -779,7 +779,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     if suffix in stream:
                         base_params[prefix + suffix] = stream[suffix]
 
-        logger.debug("Launching telstate. Base parameters %s", base_params)
+        self.logger.debug("Launching telstate. Base parameters %s", base_params)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
@@ -787,7 +787,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         self.resolver.telstate = self.telstate
 
-        logger.debug("base params: %s", base_params)
+        self.logger.debug("base params: %s", base_params)
         # set the configuration
         for k, v in base_params.items():
             self.telstate.add(k, v, immutable=True)
@@ -801,8 +801,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                logger.warning('Task %s is in state %s instead of READY',
-                               node.name, node.state.name)
+                self.logger.warning('Task %s is in state %s instead of READY',
+                                    node.name, node.state.name)
                 return False
         return True
 
@@ -832,7 +832,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 if not alive:
                     ret_msg = ("Some nodes in the graph failed to start. "
                                "Check the error log for specific details.")
-                    logger.error(ret_msg)
+                    self.logger.error(ret_msg)
                     raise FailReply(ret_msg)
                 # Record the TaskInfo for each task in telstate, as well as details
                 # about the image resolver.
@@ -1021,6 +1021,9 @@ class SDPControllerServer(DeviceServer):
         str
             Final name of the subarray-product.
         """
+        product_logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=subarray_product_id))
+
         def remove_product(product):
             # Protect against potential race conditions
             if self.subarray_products.get(product.subarray_product_id) is product:
@@ -1028,20 +1031,21 @@ class SDPControllerServer(DeviceServer):
                 self.sensors.discard(product.state_sensor)
                 self.sensors.discard(product.capture_block_sensor)
                 self.mass_inform('interface-changed', 'sensor-list')
-                logger.info("Deconfigured subarray product %s", product.subarray_product_id)
+                product_logger.info("Deconfigured subarray product %s",
+                                    product.subarray_product_id)
 
         if subarray_product_id in self.override_dicts:
             # this is a use-once set of overrides
             odict = self.override_dicts.pop(subarray_product_id)
-            logger.warning("Setting overrides on %s for the following: %s",
-                           subarray_product_id, odict)
+            product_logger.warning("Setting overrides on %s for the following: %s",
+                                   subarray_product_id, odict)
             config = product_config.override(config, odict)
             # Re-validate, since the override may have broken it
             try:
                 product_config.validate(config)
             except (ValueError, jsonschema.ValidationError) as error:
                 retmsg = "Overrides make the config invalid: {}".format(error)
-                logger.error(retmsg)
+                product_logger.error(retmsg)
                 raise FailReply(retmsg)
 
         if subarray_product_id.endswith('*'):
@@ -1057,7 +1061,8 @@ class SDPControllerServer(DeviceServer):
         elif subarray_product_id in self.subarray_products:
             dp = self.subarray_products[subarray_product_id]
             if dp.config == config:
-                logger.info("Subarray product with this configuration already exists. Pass.")
+                product_logger.info("Subarray product with this configuration already exists. "
+                                    "Pass.")
                 return subarray_product_id
             else:
                 raise FailReply("A subarray product with this id ({0}) already exists, but has a "
@@ -1072,8 +1077,8 @@ class SDPControllerServer(DeviceServer):
             except (OSError, KeyError, ValueError) as error:
                 raise FailReply("Could not load S3 config: {}".format(str(error)))
 
-        logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
-        logger.info("Launching graph %s.", subarray_product_id)
+        product_logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
+        product_logger.info("Launching subarray product %s.", subarray_product_id)
         ctx.inform("Starting configuration of new product {}. This may take a few minutes..."
                    .format(subarray_product_id))
 
@@ -1120,7 +1125,8 @@ class SDPControllerServer(DeviceServer):
                 await self.deregister_product(product, force=True)
             except Exception:
                 logger.warning("Failed to deconfigure product %s during master controller exit. "
-                               "Forging ahead...", subarray_product_id, exc_info=True)
+                               "Forging ahead...", subarray_product_id, exc_info=True,
+                               extra=dict(subarray_product_id=subarray_product_id))
 
     async def stop(self, cancel: bool = True):
         # TODO: set a flag to prevent new async requests being entertained
@@ -1148,19 +1154,21 @@ class SDPControllerServer(DeviceServer):
         override_dict_json : string
             A json string containing a dict of config key:value overrides to use.
         """
-        logger.info("?set-config-override called on %s with %s",
-                    subarray_product_id, override_dict_json)
+        product_logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=subarray_product_id))
+        product_logger.info("?set-config-override called on %s with %s",
+                            subarray_product_id, override_dict_json)
         try:
             odict = json.loads(override_dict_json)
             if not isinstance(odict, dict):
                 raise ValueError
-            logger.info("Set override for subarray product %s for the following: %s",
-                        subarray_product_id, odict)
+            product_logger.info("Set override for subarray product %s to the following: %s",
+                                subarray_product_id, odict)
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
         except ValueError as e:
             msg = ("The supplied override string {} does not appear to be a valid json string "
                    "containing a dict. {}".format(override_dict_json, e))
-            logger.error(msg)
+            product_logger.error(msg)
             raise FailReply(msg)
         return "Set {} override keys for subarray product {}".format(
             len(self.override_dicts[subarray_product_id]), subarray_product_id)
@@ -1182,7 +1190,9 @@ class SDPControllerServer(DeviceServer):
              The ID of the subarray product to reconfigure.
 
         """
-        logger.info("?product-reconfigure called on %s", subarray_product_id)
+        product_logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=subarray_product_id))
+        product_logger.info("?product-reconfigure called on %s", subarray_product_id)
         try:
             product = self.subarray_products[subarray_product_id]
         except KeyError:
@@ -1190,24 +1200,25 @@ class SDPControllerServer(DeviceServer):
                             "and thus cannot be reconfigured.".format(subarray_product_id))
         config = product.config
 
-        logger.info("Deconfiguring %s as part of a reconfigure request", subarray_product_id)
+        product_logger.info("Deconfiguring %s as part of a reconfigure request",
+                            subarray_product_id)
         try:
             await self.deregister_product(product)
         except Exception as error:
             msg = "Unable to deconfigure as part of reconfigure"
-            logger.exception(msg)
+            product_logger.exception(msg)
             raise FailReply("{}. {}".format(msg, error))
 
-        logger.info("Waiting for %s to disappear", subarray_product_id)
+        product_logger.info("Waiting for %s to disappear", subarray_product_id)
         await product.dead_event.wait()
 
-        logger.info("Issuing new configure for %s as part of reconfigure request.",
-                    subarray_product_id)
+        product_logger.info("Issuing new configure for %s as part of reconfigure request.",
+                            subarray_product_id)
         try:
             await self.configure_product(ctx, subarray_product_id, config)
         except Exception as error:
             msg = "Unable to configure as part of reconfigure, original array deconfigured"
-            logger.exception(msg)
+            product_logger.exception(msg)
             raise FailReply("{}. {}".format(msg, error))
 
     @time_request
@@ -1242,7 +1253,9 @@ class SDPControllerServer(DeviceServer):
         name : str
             Actual subarray-product-id
         """
-        logger.info("?product-configure called with: %s", ctx.req)
+        product_logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=subarray_product_id))
+        product_logger.info("?product-configure called with: %s", ctx.req)
 
         if not re.match(r'^[A-Za-z0-9_]+\*?$', subarray_product_id):
             raise FailReply('Subarray_product_id contains illegal characters')
@@ -1251,7 +1264,7 @@ class SDPControllerServer(DeviceServer):
             product_config.validate(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = "Failed to process config: {}".format(error)
-            logger.error(retmsg)
+            product_logger.error(retmsg)
             raise FailReply(retmsg)
 
         subarray_product_id = await self.configure_product(ctx, subarray_product_id, config_dict)
@@ -1505,16 +1518,18 @@ class SDPControllerServer(DeviceServer):
 
 
 class InterfaceModeSensors:
-    def __init__(self, subarray_product_id):
+    def __init__(self, subarray_product_id, logger):
         """Manage dummy subarray product sensors on a SDPControllerServer instance
 
         Parameters
         ----------
         subarray_product_id : str
             Subarray product id, e.g. `array_1_c856M4k`
-
+        logger : logging.LoggerAdapter
+            Logger with context for subarray_product_id
         """
         self.subarray_product_id = subarray_product_id
+        self.logger = logger
         self.sensors = {}
 
     def add_sensors(self, server):
@@ -1556,8 +1571,8 @@ class InterfaceModeSensors:
             for postfix, sensor_params in interface_sensor_params.items():
                 sensor_name = self.subarray_product_id + '.' + postfix
                 if sensor_name in self.sensors:
-                    logger.info('Simulated sensor %r already exists, skipping',
-                                sensor_name)
+                    self.logger.info('Simulated sensor %r already exists, skipping',
+                                     sensor_name)
                     continue
                 sensor_params['name'] = sensor_name
                 sensor = Sensor(**sensor_params)
