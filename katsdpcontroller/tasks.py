@@ -276,7 +276,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             extras['docker.image'] = self.taskinfo.container.docker.image
             env = {
                 'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
-                'KATSDP_LOG_GELF_EXTRAS': json.dumps(extras),
+                'KATSDP_LOG_GELF_EXTRA': json.dumps(extras),
                 'KATSDP_LOG_GELF_LOCALNAME': self.host,
                 'LOGSPOUT': 'ignore'
             }
