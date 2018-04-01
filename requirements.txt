@@ -39,4 +39,4 @@ urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 yarl==0.16.0               # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
-git+ssh://git@github.com/ska-sa/katsdpservices@graypy#egg=katsdpservices
+git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
