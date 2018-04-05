@@ -4,6 +4,7 @@ import asyncio
 import socket
 import ipaddress
 import enum
+import os
 
 from addict import Dict
 import async_timeout
@@ -173,6 +174,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
         super().__init__(logical_task, loop)
+        self.logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=subarray_product_id, child_task=self.name))
         if capture_block_id is None:
             self.name = '.'.join([subarray_product_id, logical_task.name])
         else:
@@ -188,6 +191,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Event set to true whenever _capture_block is empty
         self._capture_blocks_empty = asyncio.Event(loop=loop)
         self._capture_blocks_empty.set()
+        # Set to true if the image uses katsdpservices.setup_logging() and hence
+        # can log directly to logstash without logspout.
+        self.katsdpservices_logging = False
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -197,15 +203,15 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         if self.sdp_controller:
             self.sdp_controller.sensors.add(sensor)
         else:
-            logger.warning("Attempted to add sensor %s to node %s, but the node has "
-                           "no SDP controller available.", sensor.name, self.name)
+            self.logger.warning("Attempted to add sensor %s to node %s, but the node has "
+                                "no SDP controller available.", sensor.name, self.name)
 
     def _remove_sensors(self):
         """Removes all attached sensors. It does *not* send an
         ``interface-changed`` inform; that is left to the caller.
         """
         for sensor_name in self.sensors:
-            logger.debug("Removing sensor %s", sensor_name)
+            self.logger.debug("Removing sensor %s", sensor_name)
             del self.sdp_controller.sensors[sensor_name]
         self.sensors = {}
 
@@ -252,30 +258,38 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
                 host, port = addrinfo[0][4][:2]
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
             except socket.gaierror as error:
-                logger.warning('Could not resolve %s: %s', self.host, error)
+                self.logger.warning('Could not resolve %s: %s', self.host, error)
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
                                           status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
-        # Provide info about which container this is for logspout to collect
+        # Provide info about which container this is for logspout to collect.
+        labels = {
+            'task': self.logical_node.name,
+            'task_id': self.taskinfo.task_id.value,
+            'subarray_product_id': self.subarray_product_id
+        }
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task={}'.format(self.logical_node.name)},
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.task_id={}'
-                      .format(self.taskinfo.task_id.value)},
-            {'key': 'label',
-             'value': 'za.ac.kat.sdp.katsdpcontroller.subarray_product_id={}'
-                      .format(self.subarray_product_id)}
-        ])
-        # Request SDP services to escape newlines, for the benefit of
-        # logstash.
-        self.taskinfo.command.environment.setdefault('variables', []).append(
-            {'name': 'KATSDP_LOG_ONELINE', 'value': '1'})
+            {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
+            for (key, value) in labels.items()])
+
+        # Set extra fields for SDP services to log to logspout
+        if self.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
+            extras = dict(labels)
+            extras['docker.image'] = self.taskinfo.container.docker.image
+            env = {
+                'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
+                'KATSDP_LOG_GELF_EXTRA': json.dumps(extras),
+                'KATSDP_LOG_GELF_LOCALNAME': self.host,
+                'LOGSPOUT': 'ignore'
+            }
+            self.taskinfo.command.environment.setdefault('variables', []).extend([
+                {'name': key, 'value': value} for (key, value) in env.items()
+            ])
 
         # Apply overrides to taskinfo given by the user
         overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('taskinfo')
         if overrides:
-            logger.warning('Applying overrides to taskinfo of %s', self.name)
+            self.logger.warning('Applying overrides to taskinfo of %s', self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
@@ -303,9 +317,9 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._capture_blocks_empty.set()
 
     async def graceful_kill(self, driver, **kwargs):
-        logger.info('Waiting for capture blocks on %s', self.name)
+        self.logger.info('Waiting for capture blocks on %s', self.name)
         await self._capture_blocks_empty.wait()
-        logger.info('All capture blocks for %s completed', self.name)
+        self.logger.info('All capture blocks for %s completed', self.name)
         self._disconnect()
         super().kill(driver, **kwargs)
 
@@ -338,9 +352,10 @@ class CaptureBlockStateObserver:
     """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """
-    def __init__(self, sensor, loop):
+    def __init__(self, sensor, loop, logger):
         self.sensor = sensor
         self.loop = loop
+        self.logger = logger
         self._last = {}
         self._waiters = []    # Each a tuple of a predicate and a future
         self(sensor, sensor.reading)
@@ -351,10 +366,10 @@ class CaptureBlockStateObserver:
             try:
                 value = json.loads(reading.value.decode('utf-8'))
             except ValueError:
-                logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
+                self.logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
             else:
                 if not isinstance(value, dict):
-                    logger.warning('%s is not a dict: %r', sensor.name, reading.value)
+                    self.logger.warning('%s is not a dict: %r', sensor.name, reading.value)
                 else:
                     self._last = value
                     self._trigger()
@@ -410,6 +425,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
+        self.katsdpservices_logging = True
 
     def get_transition(self, state):
         """Get state transition actions"""
@@ -428,7 +444,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 self.katcp_connection.close()
                 need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
-                logger.error('Failed to shut down katcp connection to %s', self.name)
+                self.logger.error('Failed to shut down katcp connection to %s', self.name)
             self.katcp_connection = None
         if self.capture_block_state_observer is not None:
             self.capture_block_state_observer.close()
@@ -441,8 +457,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
-                logger.info("Attempting to establish katcp connection to %s:%s for node %s",
-                            self.host, self.ports['port'], self.name)
+                self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
+                                 self.host, self.ports['port'], self.name)
                 prefix = self.name + '.'
                 labels = (self.subarray_product_id, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
@@ -451,21 +467,21 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     host=self.host, port=self.ports['port'], loop=self.loop)
                 try:
                     await self.katcp_connection.wait_synced()
-                    logger.info("Connected to %s:%s for node %s",
-                                self.host, self.ports['port'], self.name)
+                    self.logger.info("Connected to %s:%s for node %s",
+                                     self.host, self.ports['port'], self.name)
                     sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
-                            sensor, loop=self.loop)
+                            sensor, loop=self.loop, logger=self.logger)
                     return
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
                     # no need for these to lurk around
                     self.katcp_connection = None
-                    logger.exception("Failed to connect to %s via katcp on %s:%d. "
-                                     "Check to see if networking issues could be to blame.",
-                                     self.name, self.host, self.ports['port'])
+                    self.logger.exception("Failed to connect to %s via katcp on %s:%d. "
+                                          "Check to see if networking issues could be to blame.",
+                                          self.name, self.host, self.ports['port'])
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0, loop=self.loop)
@@ -478,17 +494,17 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
-        logger.info("Issuing request %s %s to node %s (timeout %gs)",
-                    req, args, self.name, timeout)
+        self.logger.info("Issuing request %s %s to node %s (timeout %gs)",
+                         req, args, self.name, timeout)
         try:
             with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
                 reply, informs = await self.katcp_connection.request(req, *args)
-            logger.info("Request %s %s to node %s successful", req, args, self.name)
+            self.logger.info("Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
-            logger.warning('%s', msg)
+            self.logger.warning('%s', msg)
             raise FailReply(msg) from error
 
     async def graceful_kill(self, driver, **kwargs):
@@ -499,7 +515,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 for capture_block in list(capture_blocks.values()):
                     await capture_block.dead_event.wait()
         except Exception:
-            logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
+            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
         await super().graceful_kill(driver, **kwargs)
 
 
