@@ -31,7 +31,9 @@ CAPTURE_TRANSITIONS = {
 IMAGES = frozenset([
     'beamform',
     'katcbfsim',
+    'katsdpbfingest',
     'katsdpcal',
+    'katsdpcam2telstate',
     'katsdpdisp',
     'katsdpingest',
     'katsdpingest_titanx',
@@ -327,7 +329,7 @@ def _make_telstate(g, config):
 
 def _make_cam2telstate(g, config, name):
     cam2telstate = SDPLogicalTask('cam2telstate')
-    cam2telstate.image = 'katsdpingest'
+    cam2telstate.image = 'katsdpcam2telstate'
     cam2telstate.command = ['cam2telstate.py']
     cam2telstate.cpus = 0.2
     cam2telstate.mem = 256
@@ -1072,7 +1074,7 @@ def _make_beamformer_engineering(g, config, name):
         fraction = (output_channels[1] - output_channels[0]) / info.n_channels
 
         bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
-        bf_ingest.image = 'katsdpingest'
+        bf_ingest.image = 'katsdpbfingest'
         bf_ingest.command = ['schedrr', 'bf_ingest.py']
         bf_ingest.cpus = 2
         bf_ingest.cores = ['disk', 'network']
