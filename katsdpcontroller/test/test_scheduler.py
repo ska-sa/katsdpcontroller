@@ -1136,9 +1136,11 @@ class TestScheduler(asynctest.ClockedTestCase):
             _make_json_attr('katsdpcontroller.gpus', [
                 {'driver_version': '123.45',
                  'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+                 'uuid': 'GPU-123',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
                 {'driver_version': '123.45',
                  'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+                 'uuid': 'GPU-456',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
             ]),
             _make_json_attr('katsdpcontroller.volumes', [
@@ -1147,6 +1149,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             _make_json_attr('katsdpcontroller.interfaces', [
                 {'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
                  'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
+            _make_json_attr('katsdpcontroller.nvidia_container_runtime', True),
             self.numa_attr
         ]
         self._make_physical()
@@ -1237,27 +1240,21 @@ class TestScheduler(asynctest.ClockedTestCase):
         expected_taskinfo0.command.shell = False
         expected_taskinfo0.command.value = 'hello'
         expected_taskinfo0.command.arguments = ['--port=30000']
+        expected_taskinfo0.command.environment.variables = [
+            Dict(name='NVIDIA_VISIBLE_DEVICES', value='GPU-456')]
         expected_taskinfo0.container.type = 'DOCKER'
         expected_taskinfo0.container.docker.image = 'sdp/image0:latest'
         expected_taskinfo0.container.docker.parameters = AnyOrderList([
-            Dict(key='device', value='/dev/nvidia1'),
-            Dict(key='device', value='/dev/nvidiactl'),
-            Dict(key='device', value='/dev/nvidia-uvm'),
             Dict(key='ulimit', value='memlock=-1'),
             Dict(key='device', value='/dev/infiniband/rdma_cm'),
-            Dict(key='device', value='/dev/infiniband/uverbs0')
+            Dict(key='device', value='/dev/infiniband/uverbs0'),
+            Dict(key='runtime', value='nvidia')
         ])
-        volume_gpu = Dict()
-        volume_gpu.mode = 'RO'
-        volume_gpu.container_path = '/usr/local/nvidia'
-        volume_gpu.source.type = 'DOCKER_VOLUME'
-        volume_gpu.source.docker_volume.driver = 'nvidia-docker'
-        volume_gpu.source.docker_volume.name = 'nvidia_driver_123.45'
         volume = Dict()
         volume.mode = 'RW'
         volume.host_path = '/host0'
         volume.container_path = '/container-path'
-        expected_taskinfo0.container.volumes = AnyOrderList([volume_gpu, volume])
+        expected_taskinfo0.container.volumes = [volume]
         expected_taskinfo0.resources = _make_resources({
             'cpus': 1.0, 'ports': [(30000, 30001)],
             'katsdpcontroller.gpu.1.compute': 0.5,
