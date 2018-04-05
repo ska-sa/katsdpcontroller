@@ -17,7 +17,6 @@ import json
 import numbers
 from collections import OrderedDict
 import xml.etree.ElementTree
-import subprocess
 
 import netifaces
 import psutil
