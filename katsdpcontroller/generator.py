@@ -1166,9 +1166,6 @@ def build_logical_graph(config):
         if name in inputs_used and config['inputs'][name]['simulate'] is not False:
             _make_cbf_simulator(g, config, name)
 
-    # Hardcode flag output stream name for now
-    flags_name = 'sdp_l1_flags'
-
     # Group outputs by type
     outputs = {}
     for name, output in config['outputs'].items():
