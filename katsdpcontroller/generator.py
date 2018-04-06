@@ -1181,11 +1181,14 @@ def build_logical_graph(config):
             for name2 in outputs['sdp.vis']:
                 if name2 not in l0_done and config['outputs'][name2]['continuum_factor'] > 1:
                     # Temporarily alter it to check if they're the same other
-                    # than continuum_factor
+                    # than continuum_factor and archive.
                     cont_factor = config['outputs'][name2]['continuum_factor']
+                    archive = config['outputs'][name2]['archive']
                     config['outputs'][name2]['continuum_factor'] = 1
+                    config['outputs'][name2]['archive'] = config['outputs'][name]['archive']
                     match = (config['outputs'][name] == config['outputs'][name2])
                     config['outputs'][name2]['continuum_factor'] = cont_factor
+                    config['outputs'][name2]['archive'] = archive
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
