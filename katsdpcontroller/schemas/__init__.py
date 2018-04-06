@@ -2,6 +2,7 @@
 
 import json
 import codecs
+from distutils.version import StrictVersion
 
 import pkg_resources
 import jsonschema
@@ -30,12 +31,14 @@ class MultiVersionValidator(object):
     def __init__(self, name):
         self._template = _env.get_template(name)
         # Load the mini-schema that just validates the version
-        schema = json.loads(self._template.module.validate_version())
+        module = self._template.make_module(vars={"version": ""})
+        schema = json.loads(module.validate_version())
         self._version_validator = _make_validator(schema)
 
     def validate(self, doc):
         self._version_validator.validate(doc)
-        schema = json.loads(self._template.render(version=doc["version"]))
+        version = StrictVersion(doc["version"])
+        schema = json.loads(self._template.render(version=version))
         validator = _make_validator(schema)
         validator.validate(doc)
 
@@ -45,7 +48,8 @@ class MultiVersionValidator(object):
         except jsonschema.ValidationError:
             return self._version_validator.iter_errors(doc)
         else:
-            schema = json.loads(self._template.render(version=doc["version"]))
+            version = StrictVersion(doc["version"])
+            schema = json.loads(self._template.render(version=version))
             validator = _make_validator(schema)
             return validator.iter_errors(doc)
 
