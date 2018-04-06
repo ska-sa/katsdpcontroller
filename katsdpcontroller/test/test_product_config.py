@@ -118,7 +118,7 @@ class TestValidate:
                     "type": "sdp.cal",
                     "src_streams": ["l0"]
                 },
-                "flags": {
+                "sdp_l1_flags": {
                     "type": "sdp.flags",
                     "src_streams": ["l0"],
                     "calibration": ["cal"],
@@ -131,7 +131,7 @@ class TestValidate:
         self.config_v1_0["version"] = "1.0"
         self.config_v1_0["outputs"]["l0"]["type"] = "sdp.l0"
         del self.config_v1_0["outputs"]["cal"]
-        del self.config_v1_0["outputs"]["flags"]
+        del self.config_v1_0["outputs"]["sdp_l1_flags"]
         del self.config_v1_0["outputs"]["l0"]["archive"]
 
     def test_good(self):
@@ -251,20 +251,20 @@ class TestValidate:
         assert_in("already has a flags output", str(cm.exception))
 
     def test_calibration_does_not_exist(self):
-        self.config["outputs"]["flags"]["calibration"] = ["bad"]
+        self.config["outputs"]["sdp_l1_flags"]["calibration"] = ["bad"]
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("does not exist", str(cm.exception))
 
     def test_calibration_wrong_type(self):
-        self.config["outputs"]["flags"]["calibration"] = ["l0"]
+        self.config["outputs"]["sdp_l1_flags"]["calibration"] = ["l0"]
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("has wrong type", str(cm.exception))
 
     def test_calibration_wrong_src_streams(self):
         self.config["outputs"]["another_l0"] = self.config["outputs"]["l0"]
-        self.config["outputs"]["flags"]["src_streams"] = ["another_l0"]
+        self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("has different src_streams", str(cm.exception))
@@ -292,22 +292,15 @@ class TestValidate:
         expected["outputs"]["l0"]["excise"] = True
         expected["outputs"]["l0"]["output_channels"] = [0, 4096]
         expected["outputs"]["beamformer_engineering"]["output_channels"] = [0, 4096]
-        # Rename cal -> cal_l0
-        expected["outputs"]["cal_l0"] = expected["outputs"]["cal"]
-        del expected["outputs"]["cal"]
-        expected["outputs"]["cal_l0"]["parameters"] = {}
-        expected["outputs"]["cal_l0"]["models"] = {}
-        # Rename flags -> flags_cal_l0
-        expected["outputs"]["flags_cal_l0"] = expected["outputs"]["flags"]
-        del expected["outputs"]["flags"]
-        expected["outputs"]["flags_cal_l0"]["calibration"] = ["cal_l0"]
+        expected["outputs"]["cal"]["parameters"] = {}
+        expected["outputs"]["cal"]["models"] = {}
         expected["config"]["develop"] = False
         expected["config"]["service_overrides"] = {}
         assert_equal(config, expected)
 
     def test_normalise_name_conflict(self):
-        self.config_v1_0["outputs"]["cal_l0"] = self.config_v1_0["outputs"]["l0"]
+        self.config_v1_0["outputs"]["cal"] = self.config_v1_0["outputs"]["l0"]
         config = product_config.normalise(self.config_v1_0)
-        assert_in("cal0_l0", config["outputs"])
-        assert_equal("sdp.vis", config["outputs"]["cal_l0"]["type"])
-        assert_equal("sdp.cal", config["outputs"]["cal0_l0"]["type"])
+        assert_in("cal0", config["outputs"])
+        assert_equal("sdp.vis", config["outputs"]["cal"]["type"])
+        assert_equal("sdp.cal", config["outputs"]["cal0"]["type"])

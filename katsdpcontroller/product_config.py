@@ -209,13 +209,12 @@ def normalise(config):
       - parameters, models
       - develop, service_overrides
     """
-    def unique_name(prefix, base, current):
-        proposed = '{}_{}'.format(prefix, base)
-        if proposed not in current:
-            return proposed
+    def unique_name(base, current):
+        if base not in current:
+            return base
         seq = 0
         while True:
-            proposed = '{}{}_{}'.format(prefix, seq, base)
+            proposed = '{}{}'.format(base, seq)
             if proposed not in current:
                 return proposed
             seq += 1
@@ -231,7 +230,7 @@ def normalise(config):
                     "type": "sdp.cal",
                     "src_streams": [name]
                 }
-                config['outputs'][unique_name('cal', name, config['outputs'])] = cal
+                config['outputs'][unique_name('cal', config['outputs'])] = cal
 
     # Upgrade to 2.0
     if config['version'] == '1.1':
@@ -247,7 +246,7 @@ def normalise(config):
                     "calibration": [name],
                     "archive": True
                 }
-                config['outputs'][unique_name('flags', name, config['outputs'])] = flags
+                config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
