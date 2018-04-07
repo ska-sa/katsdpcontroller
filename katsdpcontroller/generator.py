@@ -775,9 +775,13 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # actual integration times are just under 2s).
     # However, don't go below 2 CPUs (except in development mode) because we
     # can't have less than 1 pipeline worker.
+
+    # TODO: As a quick scaling fix for current observations (April 2018) we
+    # ensure a minimum of 4 CPUs in non development mode to cater for observations
+    # with lots of back to back cal visits.
     cpus = 4 * info.n_vis / _N16_32 * 1.99 / info.int_time / n_cal
     if not is_develop(config):
-        cpus = max(cpus, 2)
+        cpus = max(cpus, 4)
     cpus = min(cpus, 7.9)
     workers = max(1, int(math.ceil(cpus - 1)))
     # Main memory consumer is buffers for
@@ -844,7 +848,10 @@ def _make_cal(g, config, name, l0_name, flags_name):
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
         cal.cpus = cpus
-        cal.mem = buffer_size * (1 + extra) / 1024**2 + 512
+        # TODO: There is currently (Apr 2018) an unknown additional memory
+        # usage in the cal report - include some safety margin (10GiB) for this
+        # (especially since 32k at less than 8s is some way off)
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 512 + 10240
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
