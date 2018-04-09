@@ -851,7 +851,10 @@ def _make_cal(g, config, name, l0_name, flags_name):
         # TODO: There is currently (Apr 2018) an unknown additional memory
         # usage in the cal report - include some safety margin (10GiB) for this
         # (especially since 32k at less than 8s is some way off)
-        cal.mem = buffer_size * (1 + extra) / 1024**2 + 512 + 10240
+        margin = 0
+        if not is_develop(config):
+            margin = 10240
+        cal.mem = buffer_size * (1 + extra) / 1024**2 + 512 + margin
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
