@@ -621,7 +621,6 @@ class TestSDPController(BaseTestSDPController):
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
-            'l0_ibv': False,
             's3_endpoint_url': 'http://s3.invalid/',
             'override_test': 'value'
         }, immutable=True)
