@@ -312,9 +312,16 @@ def find_node(g, name):
 
 
 def _make_telstate(g, config):
+    # Pointing sensors can account for substantial memory per antennas over a
+    # long-lived subarray.
+    n_antennas = 0
+    for stream in config['inputs'].values():
+        if stream['type'] == 'cbf.antenna-channelised-voltage':
+            n_antennas += len(stream['antennas'])
+
     telstate = SDPLogicalTask('telstate')
     telstate.cpus = 0.4
-    telstate.mem = 8192
+    telstate.mem = 2048 + 250 * n_antennas
     telstate.disk = telstate.mem
     telstate.image = 'redis'
     telstate.ports = ['telstate']
