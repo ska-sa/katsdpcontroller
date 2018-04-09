@@ -564,7 +564,6 @@ def n_cal_nodes(config, name, l0_name):
     # Use single cal for 4K or less: it doesn't need the performance, and
     # a unified cal report is more convenient (revisit once split cal supports
     # a unified cal report).
-    return 1
     info = L0Info(config, l0_name)
     if is_develop(config):
         return 2
