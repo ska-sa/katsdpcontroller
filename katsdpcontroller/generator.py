@@ -769,15 +769,23 @@ def _make_cal(g, config, name, l0_name, flags_name):
     n_cal = n_cal_nodes(config, name, l0_name)
 
     # Some of the scaling in cal is non-linear, so we need to give smaller
-    # arrays more CPU than might be suggested by linear scaling. As a
-    # heuristic, we start with linear scaling for 4 CPUs for 32K, 16 antennas,
-    # 2s, but clamp to just below 8 CPUs (we use 1.99s instead of 2s since
-    # actual integration times are just under 2s).
-    # However, don't go below 2 CPUs (except in development mode) because we
-    # can't have less than 1 pipeline worker.
-    cpus = 4 * info.n_vis / _N16_32 * 1.99 / info.int_time / n_cal
+    # arrays more CPU than might be suggested by linear scaling. In particular,
+    # 32K mode is flagged by averaging down to 8K first, so flagging performance
+    # (which tends to dominate runtime) scales as if there were 8K channels.
+    # Longer integration times are also less efficient (because there are fixed
+    # costs per scan, so we scale as if for 4s dumps if longer dumps are used.
+    effective_vis = info.n_baselines * min(8192, info.n_channels)
+    effective_int = min(info.int_time, 4.0)
+    # This scale factor gives 34 total CPUs for 64A, 32K, 4+s integration, which
+    # will get clamped down slightly.
+    cpus = 2e-6 * effective_vis / effective_int / n_cal
+    # Always (except in development mode) have at least a whole CPU for the
+    # pipeline.
     if not is_develop(config):
-        cpus = max(cpus, 2)
+        cpus = max(cpus, 1)
+    # Reserve a separate CPU for the accumulator
+    cpus += 1
+    # Clamp to what the machines can provide
     cpus = min(cpus, 7.9)
     workers = max(1, int(math.ceil(cpus - 1)))
     # Main memory consumer is buffers for
