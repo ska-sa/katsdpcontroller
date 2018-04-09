@@ -564,6 +564,7 @@ def n_cal_nodes(config, name, l0_name):
     # Use single cal for 4K or less: it doesn't need the performance, and
     # a unified cal report is more convenient (revisit once split cal supports
     # a unified cal report).
+    return 1
     info = L0Info(config, l0_name)
     if is_develop(config):
         return 2
@@ -920,7 +921,6 @@ def _make_filewriter(g, config, name):
 
 
 def _make_vis_writer(g, config, name):
-    ibv = not is_develop(config)
     info = L0Info(config, name)
 
     vis_writer = SDPLogicalTask('vis_writer.' + name)
@@ -944,14 +944,13 @@ def _make_vis_writer(g, config, name):
     vis_writer.mem = 2 * _mb(memory_pool + socket_buffers) + 256
     vis_writer.ports = ['port']
     vis_writer.volumes = [OBJ_DATA_VOL]
-    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g', infiniband=ibv)]
+    vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
     g.add_node(vis_writer, config=lambda task, resolver: {
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name,
-        'l0_ibv': ibv,
         'obj_size_mb': 10.0,
         'npy_path': OBJ_DATA_VOL.container_path,
         's3_endpoint_url': resolver.s3_config['url']
