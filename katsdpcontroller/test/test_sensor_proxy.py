@@ -44,6 +44,7 @@ class DummyServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(bool, 'bool-sensor', 'Boolean sensor'))
         self.sensors.add(Sensor(Address, 'address-sensor', 'Address sensor'))
         self.sensors.add(Sensor(MyEnum, 'enum-sensor', 'Enum sensor'))
+        self.sensors.add(Sensor(float, 'dynamic-sensor', 'Test for prometheus_factory'))
         self.sensors['enum-sensor'].set_value(MyEnum.NO, timestamp=123456789)
 
     def add_sensor(self, sensor):
@@ -78,6 +79,13 @@ class TestSensorProxyClient(asynctest.TestCase):
             'int_sensor': self._make_prom_sensor('int_sensor', 'A counter', Counter),
             'float_sensor': self._make_prom_sensor('float_sensor', 'A gauge', Gauge)
         }
+
+        def prom_factory(name, sensor):
+            if sensor.name == 'prefix-dynamic-sensor':
+                self.assertEqual(name, 'dynamic_sensor')
+                return self._make_prom_sensor('dynamic_sensor', sensor.description, Counter)
+            return None, None
+
         self.mirror = mock.create_autospec(aiokatcp.DeviceServer, instance=True)
         self.mirror.sensors = aiokatcp.SensorSet([])
         self.server = DummyServer('127.0.0.1', 0)
@@ -85,7 +93,8 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.addCleanup(self.server.stop)
         port = self.server.server.sockets[0].getsockname()[1]
         self.client = SensorProxyClient(self.mirror, 'prefix-',
-                                        prom_sensors, ['labelvalue1'], '127.0.0.1', port)
+                                        prom_sensors, ['labelvalue1'], prom_factory,
+                                        '127.0.0.1', port)
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
         await self.client.wait_synced()
@@ -185,3 +194,7 @@ class TestSensorProxyClient(asynctest.TestCase):
         # Set back to a valid status
         await self._set('int-sensor', 8)
         self._check_prom('test_int_sensor', 18)
+
+    async def test_prometheus_factory(self):
+        await self._set('dynamic-sensor', 3.5)
+        self._check_prom('test_dynamic_sensor', 3.5)
