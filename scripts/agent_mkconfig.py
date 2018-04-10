@@ -17,6 +17,7 @@ import json
 import numbers
 from collections import OrderedDict
 import xml.etree.ElementTree
+
 import netifaces
 import psutil
 try:
@@ -74,6 +75,7 @@ class GPU(object):
         cuda_device = pycuda.driver.Device(pci_bus_id)
         self.compute_capability = cuda_device.compute_capability()
         self.device_attributes = {}
+        self.uuid = pynvml.nvmlDeviceGetUUID(handle)
         for key, value in cuda_device.get_attributes().items():
             if isinstance(value, (int, float, str)):
                 # Some of the attributes use Boost.Python's enum, which is
@@ -174,6 +176,15 @@ def collapse_ranges(values):
     return '[' + ','.join(out) + ']'
 
 
+def has_nvidia_container_runtime():
+    output = subprocess.check_output(['docker', 'info', '--format={{json .}}'])
+    data = json.loads(output.decode('utf-8'))
+    try:
+        return 'nvidia' in data['Runtimes']
+    except KeyError:
+        return False
+
+
 def attributes_resources(args):
     hwloc = HWLocParser()
     attributes = OrderedDict()
@@ -252,7 +263,8 @@ def attributes_resources(args):
             'driver_version': gpu.driver_version,
             'name': gpu.name,
             'compute_capability': gpu.compute_capability,
-            'device_attributes': gpu.device_attributes
+            'device_attributes': gpu.device_attributes,
+            'uuid': gpu.uuid
         }
         for dev in ['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools']:
             if os.path.exists(dev):
@@ -269,6 +281,7 @@ def attributes_resources(args):
         attributes['katsdpcontroller.priority'] = args.priority
 
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
+    attributes['katsdpcontroller.nvidia_container_runtime'] = has_nvidia_container_runtime()
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     # Mesos sees "cpus" and "mem" in our custom resource names, and skips the
     # automatic detection. We have to recreate its logic.
