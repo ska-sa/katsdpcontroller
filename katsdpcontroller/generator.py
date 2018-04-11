@@ -35,7 +35,6 @@ IMAGES = frozenset([
     'katsdpcal',
     'katsdpcam2telstate',
     'katsdpdisp',
-    'katsdpingest',
     'katsdpingest_titanx',
     'katsdpfilewriter',
     'katsdpmetawriter',
