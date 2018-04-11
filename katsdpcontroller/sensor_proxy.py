@@ -110,7 +110,7 @@ class SensorProxyClient(aiokatcp.Client):
         self.prometheus_sensors = prometheus_sensors
         self.prometheus_labels = prometheus_labels
         if prometheus_factory is None:
-            prometheus_factory = lambda name, sensor: (None, None)
+            prometheus_factory = lambda name, sensor: (None, None)     # noqa: E731
         self.prometheus_factory = prometheus_factory
         self.add_connected_callback(self.__connected)
         self.add_disconnected_callback(self.__disconnected)
