@@ -155,6 +155,8 @@ async def websocket_handler(request):
                     await ws.send_str(msg.data + '/ping/')
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 logger.error('ws connection closed with exception %s', ws.exception())
+    except asyncio.CancelledError:
+        logger.info("Connection cancelled...")
     except Exception:
         logger.exception("Exception in websocket msg handler")
     finally:
