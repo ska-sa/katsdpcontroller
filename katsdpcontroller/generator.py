@@ -39,7 +39,7 @@ IMAGES = frozenset([
     'katsdpfilewriter',
     'katsdpmetawriter',
     'katsdpflagwriter',
-    'redis'
+    'katsdptelstate'
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
@@ -322,10 +322,12 @@ def _make_telstate(g, config):
     telstate.cpus = 0.4
     telstate.mem = 2048 + 250 * n_antennas
     telstate.disk = telstate.mem
-    telstate.image = 'redis'
+    telstate.image = 'katsdptelstate'
     telstate.ports = ['telstate']
     # Run it in /mnt/mesos/sandbox so that the dump.rdb ends up there.
-    telstate.command = ['sh', '-c', 'cd /mnt/mesos/sandbox && exec redis-server']
+    telstate.container.docker.setdefault('parameters', []).append(
+        {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
+    telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     telstate.physical_factory = TelstateTask
     telstate.deconfigure_wait = False
     telstate.wait_capture_blocks_dead = True
