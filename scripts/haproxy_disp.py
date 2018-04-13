@@ -137,7 +137,7 @@ def request_handler(request):
 
 
 async def websocket_handler(request):
-    ws = aiohttp.web.WebSocketResponse()
+    ws = aiohttp.web.WebSocketResponse(timeout=60, autoping=True, heartbeat=30)
     await ws.prepare(request)
 
     request.app['websockets'].add(ws)
