@@ -339,7 +339,7 @@ def _make_cam2telstate(g, config, name):
     cam2telstate = SDPLogicalTask('cam2telstate')
     cam2telstate.image = 'katsdpcam2telstate'
     cam2telstate.command = ['cam2telstate.py']
-    cam2telstate.cpus = 0.2
+    cam2telstate.cpus = 0.4
     cam2telstate.mem = 256
     cam2telstate.ports = ['port']
     url = config['inputs'][name]['url']
