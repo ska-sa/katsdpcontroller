@@ -89,18 +89,29 @@ class SensorProxyClient(aiokatcp.Client):
         Prometheus metrics. These should be integer, float or boolean sensors (TODO:
         enforce this). The first metric must be a Gauge or Counter and receives
         the sensor value. The second must be a Gauge and receives the katcp
-        status value.
+        status value. Note that this dictionary is *modified* if a
+        `prometheus_factory` is specified.
     prometheus_labels : list
         Labels to apply to the metrics in `prometheus_sensors`.
+    prometheus_factory : callable
+        Used to dynamically add new entries to `prometheus_sensors`. It is
+        called with a normalised name and a sensor and must return either
+        ``None, None``, or a pair of metrics as for `prometheus_sensors`. This
+        argument may be ``None`` to not specify a factory.
     args, kwargs
         Passed to the base class
     """
-    def __init__(self, server, prefix, prometheus_sensors, prometheus_labels, *args, **kwargs):
+    def __init__(self, server, prefix,
+                 prometheus_sensors, prometheus_labels, prometheus_factory,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.server = server
         self.prefix = prefix
         self.prometheus_sensors = prometheus_sensors
         self.prometheus_labels = prometheus_labels
+        if prometheus_factory is None:
+            prometheus_factory = lambda name, sensor: (None, None)     # noqa: E731
+        self.prometheus_factory = prometheus_factory
         self.add_connected_callback(self.__connected)
         self.add_disconnected_callback(self.__disconnected)
         # Indexed by unqualified sensor name; None if no observer is needed.
@@ -122,18 +133,20 @@ class SensorProxyClient(aiokatcp.Client):
         """Make a :class:`PrometheusObserver` for client sensor `name`, if appropriate.
         Otherwise returns ``None``.
         """
+        normalised_name = name.replace(".", "_").replace("-", "_")
         try:
-            normalised_name = name.replace(".", "_").replace("-", "_")
             value_metric, status_metric = self.prometheus_sensors[normalised_name]
-            # It's tempting to push this work onto the caller, but that
-            # causes the metric to be instantiated with the labels
-            # whether the matching sensor exists or not.
-            value_metric = value_metric.labels(*self.prometheus_labels)
-            status_metric = status_metric.labels(*self.prometheus_labels)
         except KeyError:
-            return None
-        else:
-            return PrometheusObserver(sensor, value_metric, status_metric)
+            value_metric, status_metric = self.prometheus_factory(normalised_name, sensor)
+            if value_metric is None:
+                return None
+            self.prometheus_sensors[normalised_name] = (value_metric, status_metric)
+        # It's tempting to push this work onto the caller, but that
+        # causes the metric to be instantiated with the labels
+        # whether the matching sensor exists or not.
+        value_metric = value_metric.labels(*self.prometheus_labels)
+        status_metric = status_metric.labels(*self.prometheus_labels)
+        return PrometheusObserver(sensor, value_metric, status_metric)
 
     def _make_type(self, type_name, parameters):
         """Get the sensor type for a given type name"""

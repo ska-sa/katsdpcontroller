@@ -5,6 +5,7 @@ import socket
 import ipaddress
 import enum
 import os
+import re
 
 from addict import Dict
 import async_timeout
@@ -18,14 +19,6 @@ from katsdptelstate.endpoint import Endpoint
 from . import scheduler, sensor_proxy, product_config
 
 
-def _add_prometheus_sensor(name, description, class_):
-    PROMETHEUS_SENSORS[name] = (
-        class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
-        Gauge('katsdpcontroller_' + name + '_status',
-              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
-    )
-
-
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
 DEPENDS_INIT = 'depends_init'
@@ -34,6 +27,35 @@ PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Some of these will match multiple nodes, which is fine since they get labels
 # in Prometheus.
 PROMETHEUS_SENSORS = {}
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)\b', re.IGNORECASE)
+
+
+def _add_prometheus_sensor(name, description, class_):
+    PROMETHEUS_SENSORS[name] = (
+        class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
+        Gauge('katsdpcontroller_' + name + '_status',
+              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
+    )
+
+
+def _prometheus_factory(name, sensor):
+    match = _HINT_RE.search(sensor.description)
+    if not match:
+        return None, None
+    type_ = match.group('type').lower()
+    if type_ == 'counter':
+        class_ = Counter
+    elif type_ == 'gauge':
+        class_ = Gauge
+    else:
+        logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
+        return None, None
+    return (
+        class_('katsdpcontroller_' + name, sensor.description, PROMETHEUS_LABELS),
+        Gauge('katsdpcontroller_' + name + '_status',
+              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
+    )
+
 
 # common
 _add_prometheus_sensor('input_bytes_total', 'Number of payload bytes received', Counter)
@@ -463,7 +485,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                 labels = (self.subarray_product_id, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
-                    PROMETHEUS_SENSORS, labels,
+                    PROMETHEUS_SENSORS, labels, _prometheus_factory,
                     host=self.host, port=self.ports['port'], loop=self.loop)
                 try:
                     await self.katcp_connection.wait_synced()
