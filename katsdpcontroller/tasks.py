@@ -30,14 +30,6 @@ PROMETHEUS_SENSORS = {}
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)\b', re.IGNORECASE)
 
 
-def _add_prometheus_sensor(name, description, class_):
-    PROMETHEUS_SENSORS[name] = (
-        class_('katsdpcontroller_' + name, description, PROMETHEUS_LABELS),
-        Gauge('katsdpcontroller_' + name + '_status',
-              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
-    )
-
-
 def _prometheus_factory(name, sensor):
     match = _HINT_RE.search(sensor.description)
     if not match:
@@ -55,90 +47,6 @@ def _prometheus_factory(name, sensor):
         Gauge('katsdpcontroller_' + name + '_status',
               'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
     )
-
-
-# common
-_add_prometheus_sensor('input_bytes_total', 'Number of payload bytes received', Counter)
-_add_prometheus_sensor('input_heaps_total', 'Number of payload heaps received', Counter)
-_add_prometheus_sensor('input_incomplete_heaps_total',
-                       'Number of incomplete heaps that were dropped', Counter)
-_add_prometheus_sensor('input_dumps_total', 'Number of payload dumps received', Counter)
-_add_prometheus_sensor('output_bytes_total', 'Number of payload bytes sent', Counter)
-_add_prometheus_sensor('output_heaps_total', 'Number of payload heaps sent', Counter)
-_add_prometheus_sensor('output_dumps_total', 'Number of payload dumps sent', Counter)
-_add_prometheus_sensor('output_chunks_total', 'Number of payload chunks written', Counter)
-_add_prometheus_sensor('output_seconds_total', 'Total time spent on writing output', Counter)
-_add_prometheus_sensor('last_dump_timestamp',
-                       'Timestamp of most recently received dump in Unix seconds', Gauge)
-
-# ingest
-_add_prometheus_sensor(
-    'input_no_descriptor_heaps_total',
-    'Number of heaps rejected because descriptors not yet received', Counter)
-_add_prometheus_sensor(
-    'input_bad_timestamp_heaps_total',
-    'Number of heaps rejected because timestamp not aligned to integration boundary', Counter)
-_add_prometheus_sensor(
-    'input_too_old_heaps_total',
-    'Number of heaps rejected because timestamp is prior to the start time', Counter)
-_add_prometheus_sensor(
-    'input_bad_channel_heaps_total',
-    'Number of heaps rejected because channel offset is not aligned to the substreams', Counter)
-_add_prometheus_sensor(
-    'descriptors_received',
-    'Whether the SPEAD descriptors have been received', Gauge)
-_add_prometheus_sensor('output_n_ants', 'Number of antennas in output stream', Gauge)
-_add_prometheus_sensor('output_n_inputs', 'Number of single-pol signals in output stream', Gauge)
-_add_prometheus_sensor('output_n_bls', 'Number of baseline products in output stream', Gauge)
-_add_prometheus_sensor('output_n_chans', 'Number of channels in output stream', Gauge)
-_add_prometheus_sensor('output_int_time', 'Integration time of output stream', Gauge)
-
-# file writer
-_add_prometheus_sensor('disk_free', 'Disk free on filewriter partition in Bytes', Gauge)
-
-# cal
-_add_prometheus_sensor('accumulator_batches',
-                       'Number of batches completed by the accumulator', Counter)
-_add_prometheus_sensor('slots', 'Total number of buffer slots', Gauge)
-_add_prometheus_sensor('accumulator_slots',
-                       'Number of buffer slots the current accumulation has written to', Gauge)
-_add_prometheus_sensor('free_slots', 'Number of unused buffer slots', Gauge)
-_add_prometheus_sensor('pipeline_slots', 'Number of buffer slots in use by the pipeline', Gauge)
-_add_prometheus_sensor('accumulator_capture_active', 'Whether an observation is in progress', Gauge)
-_add_prometheus_sensor('accumulator_input_heaps', 'Number of L0 heaps received', Counter)
-_add_prometheus_sensor('accumulator_last_wait',
-                       'Time the accumulator had to wait for a free buffer', Gauge)
-_add_prometheus_sensor('accumulator_observations',
-                       'Number of observations completed by the accumulator', Counter)
-_add_prometheus_sensor('pipeline_last_slots',
-                       'Number of slots filled in the most recent buffer', Gauge)
-_add_prometheus_sensor('pipeline_last_time',
-                       'Time taken to process the most recent buffer', Gauge)
-_add_prometheus_sensor('pipeline_exceptions',
-                       'Number of times the pipeline threw an exception', Counter)
-_add_prometheus_sensor('pipeline_active',
-                       'Whether pipeline is currently computing', Gauge)
-_add_prometheus_sensor('report_last_time',
-                       'Elapsed time to generate most recent report', Gauge)
-_add_prometheus_sensor('reports_written', 'Number of calibration reports written', Counter)
-_add_prometheus_sensor('report_active',
-                       'Whether the report writer is active', Gauge)
-
-# meta writer
-_add_prometheus_sensor('key_failures',
-                       'Count of the number of failures to write a desired key to the RDB dump.',
-                       Counter)
-_add_prometheus_sensor('last_transfer_rate',
-                       'Rate of last data transfer to S3 endpoint in bytes per second.',
-                       Gauge)
-_add_prometheus_sensor('last_dump_duration',
-                       'Time taken to write the last dump to disk', Gauge)
-
-# flag writer
-_add_prometheus_sensor('output_objects_total',
-                       'Number of objects written to disk in this session', Counter)
-_add_prometheus_sensor('input_partial_dumps_total',
-                       'Number of partial dumps stored (due to age or early done)', Counter)
 
 
 class CaptureBlockState(enum.Enum):
