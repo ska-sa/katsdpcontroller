@@ -27,7 +27,7 @@ PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Some of these will match multiple nodes, which is fine since they get labels
 # in Prometheus.
 PROMETHEUS_SENSORS = {}
-_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)\b')
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)\b', re.IGNORECASE)
 
 
 def _add_prometheus_sensor(name, description, class_):
@@ -42,7 +42,7 @@ def _prometheus_factory(name, sensor):
     match = _HINT_RE.search(sensor.description)
     if not match:
         return None, None
-    type_ = match.group('type')
+    type_ = match.group('type').lower()
     if type_ == 'counter':
         class_ = Counter
     elif type_ == 'gauge':
