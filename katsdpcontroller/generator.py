@@ -315,7 +315,7 @@ def _make_telstate(g, config):
     # long-lived subarray.
     n_antennas = 0
     for stream in config['inputs'].values():
-        if stream['type'] == 'cbf.antenna-channelised-voltage':
+        if stream['type'] == 'cbf.antenna_channelised_voltage':
             n_antennas += len(stream['antennas'])
 
     telstate = SDPLogicalTask('telstate')
