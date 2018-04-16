@@ -320,7 +320,7 @@ def _make_telstate(g, config):
 
     telstate = SDPLogicalTask('telstate')
     telstate.cpus = 0.4
-    telstate.mem = 2048 + 250 * n_antennas
+    telstate.mem = 2048 + 400 * n_antennas
     telstate.disk = telstate.mem
     telstate.image = 'katsdptelstate'
     telstate.ports = ['telstate']
