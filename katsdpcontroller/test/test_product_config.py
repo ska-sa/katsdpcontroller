@@ -239,6 +239,13 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("not a multiple of", str(cm.exception))
 
+    def test_mismatched_beamformer_pols(self):
+        self.config["inputs"]["myacv"] = self.config["inputs"]["i0_antenna_channelised_voltage"]
+        self.config["inputs"]["i0_tied_array_channelised_voltage_0y"]["src_streams"] = ["myacv"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("streams do not come from the same channeliser", str(cm.exception))
+
     def test_multiple_flags_per_cal(self):
         self.config["outputs"]["flags2"] = {
             "type": "sdp.flags",

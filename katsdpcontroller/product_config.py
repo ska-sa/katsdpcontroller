@@ -161,6 +161,16 @@ def validate(config):
                         if not 0 <= c[0] < c[1] <= acv['n_chans']:
                             raise ValueError('Channel range {}:{} is invalid'.format(c[0], c[1]))
 
+            # Beamformer pols must have same channeliser
+            if output['type'] in ['sdp.beamformer', 'sdp.beamformer_engineering']:
+                common_acv = None
+                for src_name in output['src_streams']:
+                    src = config['inputs'][src_name]
+                    acv_name = src['src_streams'][0]
+                    if common_acv is not None and acv_name != common_acv:
+                        raise ValueError('Source streams do not come from the same channeliser')
+                    common_acv = acv_name
+
             if output['type'] in ['sdp.l0', 'sdp.vis']:
                 continuum_factor = output['continuum_factor']
                 src = config['inputs'][output['src_streams'][0]]
@@ -261,13 +271,10 @@ def normalise(config):
         if output['type'] in ['sdp.vis', 'sdp.beamformer_engineering']:
             if 'output_channels' not in output:
                 n_chans = None
-                for src_name in output['src_streams']:
-                    src = config['inputs'][src_name]
-                    acv = config['inputs'][src['src_streams'][0]]
-                    acv_chans = acv['n_chans']
-                    if n_chans is None or acv_chans < n_chans:
-                        n_chans = acv_chans
-                assert n_chans is not None, "no src_streams found?!"
+                src = config['inputs'][output['src_streams'][0]]
+                acv = config['inputs'][src['src_streams'][0]]
+                acv_chans = acv['n_chans']
+                n_chans = acv_chans
                 output['output_channels'] = [0, n_chans]
         if output['type'] == 'sdp.cal':
             output.setdefault('parameters', {})
