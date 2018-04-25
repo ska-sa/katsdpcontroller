@@ -110,6 +110,8 @@ class IngestTask(SDPPhysicalTask):
 
 
 def is_develop(config):
+    # This gets called as part of validation, so it cannot assume that
+    # normalise() has been called.
     return config['config'].get('develop', False)
 
 
@@ -255,9 +257,7 @@ class L0Info(VisInfo):
 
     @property
     def output_channels(self):
-        if 'output_channels' in self.raw:
-            return tuple(self.raw['output_channels'])
-        return (0, self.src_info.n_channels)
+        return tuple(self.raw['output_channels'])
 
     @property
     def n_channels(self):
@@ -393,9 +393,7 @@ def _make_meta_writer(g, config):
 
 def _make_cbf_simulator(g, config, name):
     type_ = config['inputs'][name]['type']
-    settings = config['inputs'][name].get('simulate', {})
-    if settings is True:
-        settings = {}
+    settings = config['inputs'][name]['simulate']
     assert type_ in ('cbf.baseline_correlation_products', 'cbf.tied_array_channelised_voltage')
     # Determine number of simulators to run.
     n_sim = 1
@@ -584,8 +582,7 @@ def n_cal_nodes(config, name, l0_name):
 def _adjust_ingest_output_channels(config, names):
     """Modify the config dictionary to set output channels for ingest.
 
-    The range is set to the full band if not currently set; otherwise, it
-    is widened where necessary to meet alignment requirements.
+    It is widened where necessary to meet alignment requirements.
 
     Parameters
     ----------
@@ -603,7 +600,7 @@ def _adjust_ingest_output_channels(config, names):
     src = config['inputs'][outputs[0]['src_streams'][0]]
     acv = config['inputs'][src['src_streams'][0]]
     n_chans = acv['n_chans']
-    requested = outputs[0].get('output_channels', [0, n_chans])
+    requested = outputs[0]['output_channels']
     alignment = 1
     # This is somewhat stricter than katsdpingest actually requires, which is
     # simply that each ingest node is aligned to the continuum factor.
@@ -762,16 +759,12 @@ def _make_cal(g, config, name, l0_name, flags_name):
         # Only possible to calibrate with at least 4 antennas
         return None
 
-    if name is None:
-        name = 'cal.' + l0_name
-        settings = {}
-    else:
-        settings = config['outputs'][name]
+    settings = config['outputs'][name]
     # We want ~25 min of data in the buffer, to allow for a single batch of
     # 15 minutes.
     buffer_time = settings.get('buffer_time', 25.0 * 60.0)
-    parameters = settings.get('parameters', {})
-    models = settings.get('models', {})
+    parameters = settings['parameters']
+    models = settings['models']
     if models:
         raise NotImplementedError('cal models are not yet supported')
     n_cal = n_cal_nodes(config, name, l0_name)
@@ -831,9 +824,10 @@ def _make_cal(g, config, name, l0_name, flags_name):
         'buffer_maxsize': buffer_size,
         'workers': workers,
         'l0_name': l0_name,
-        'flags_name': flags_name,
         'servers': n_cal
     }
+    if flags_name is not None:
+        group_config['flags_name'] = flags_name
     group_config.update(parameters)
 
     # Virtual node which depends on the real cal nodes, so that other services
@@ -849,11 +843,12 @@ def _make_cal(g, config, name, l0_name, flags_name):
                })
 
     # Flags output
-    flags_multicast = LogicalMulticast('multicast.' + flags_name, n_cal)
-    g.add_node(flags_multicast)
-    g.add_edge(cal_group, flags_multicast, port='spead', depends_resolve=True,
-               config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
-    g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
+    if flags_name is not None:
+        flags_multicast = LogicalMulticast('multicast.' + flags_name, n_cal)
+        g.add_node(flags_multicast)
+        g.add_edge(cal_group, flags_multicast, port='spead', depends_resolve=True,
+                   config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
+        g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
 
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(name, i))
@@ -922,7 +917,6 @@ def _make_filewriter(g, config, name):
         ]
     }
 
-    CAPTURE_TRANSITIONS
     g.add_node(filewriter, config=lambda task, resolver: {
         'file_base': DATA_VOL.container_path,
         'l0_name': name,
@@ -1074,7 +1068,7 @@ def _make_beamformer_engineering(g, config, name):
     nodes = []
     for i, src in enumerate(srcs):
         info = TiedArrayChannelisedVoltageInfo(config, src)
-        requested_channels = output.get('output_channels', [0, info.n_channels])
+        requested_channels = output['output_channels']
         # Round to fit the endpoints, as required by bf_ingest.
         src_multicast = find_node(g, 'multicast.' + src)
         n_endpoints = len(endpoint_list_parser(None)(src_multicast.endpoint.host))
@@ -1183,11 +1177,8 @@ def build_logical_graph(config):
     cbf_streams = inputs.get('cbf.baseline_correlation_products', [])
     cbf_streams.extend(inputs.get('cbf.tied_array_channelised_voltage', []))
     for name in cbf_streams:
-        if name in inputs_used and config['inputs'][name].get('simulate', False) is not False:
+        if name in inputs_used and config['inputs'][name]['simulate'] is not False:
             _make_cbf_simulator(g, config, name)
-
-    # Hardcode flag output stream name for now
-    flags_name = 'sdp_l1_flags'
 
     # Group outputs by type
     outputs = {}
@@ -1195,32 +1186,31 @@ def build_logical_graph(config):
         outputs.setdefault(output['type'], []).append(name)
 
     # Pair up spectral and continuum L0 outputs
-    implicit_cal = (config['version'] == '1.0')
     l0_done = set()
-    for name in outputs.get('sdp.l0', []):
+    for name in outputs.get('sdp.vis', []):
         if config['outputs'][name]['continuum_factor'] == 1:
-            for name2 in outputs['sdp.l0']:
+            for name2 in outputs['sdp.vis']:
                 if name2 not in l0_done and config['outputs'][name2]['continuum_factor'] > 1:
                     # Temporarily alter it to check if they're the same other
-                    # than continuum_factor
+                    # than continuum_factor and archive.
                     cont_factor = config['outputs'][name2]['continuum_factor']
+                    archive = config['outputs'][name2]['archive']
                     config['outputs'][name2]['continuum_factor'] = 1
+                    config['outputs'][name2]['archive'] = config['outputs'][name]['archive']
                     match = (config['outputs'][name] == config['outputs'][name2])
                     config['outputs'][name2]['continuum_factor'] = cont_factor
+                    config['outputs'][name2]['archive'] = archive
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_timeplot(g, config, name)
                         _make_ingest(g, config, name, name2)
-                        if implicit_cal:
-                            _make_cal(g, config, None, name, flags_name)
-                        _make_filewriter(g, config, name)
-                        _make_vis_writer(g, config, name)
-                        archived_streams.append(name)
                         l0_done.add(name)
                         l0_done.add(name2)
+                        break
+
     l0_spectral_only = False
     l0_continuum_only = False
-    for name in set(outputs.get('sdp.l0', [])) - l0_done:
+    for name in set(outputs.get('sdp.vis', [])) - l0_done:
         is_spectral = config['outputs'][name]['continuum_factor'] == 1
         if is_spectral:
             l0_spectral_only = True
@@ -1230,23 +1220,31 @@ def build_logical_graph(config):
         if is_spectral:
             _make_timeplot(g, config, name)
             _make_ingest(g, config, name, None)
-            if implicit_cal:
-                _make_cal(g, config, None, name, flags_name)
-            _make_filewriter(g, config, name)
-            _make_vis_writer(g, config, name)
-            archived_streams.append(name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
         logger.warning('Both continuum-only and spectral-only L0 streams found - '
                        'perhaps they were intended to be matched?')
 
+    for name in outputs.get('sdp.vis', []):
+        if config['outputs'][name]['archive']:
+            _make_filewriter(g, config, name)
+            _make_vis_writer(g, config, name)
+            archived_streams.append(name)
+
     for name in outputs.get('sdp.cal', []):
         src_name = config['outputs'][name]['src_streams'][0]
+        # Check for a corresponding flags output
+        flags_name = None
+        for name2 in outputs.get('sdp.flags', []):
+            if config['outputs'][name2]['calibration'][0] == name:
+                flags_name = name2
+                break
         if _make_cal(g, config, name, src_name, flags_name):
-            # Pass l0 name to flag writer to allow calc of bandwidths and sizes
-            _make_flag_writer(g, config, flags_name, src_name)
-            archived_streams.append(flags_name)
+            if flags_name is not None and config['outputs'][flags_name]['archive']:
+                # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+                _make_flag_writer(g, config, flags_name, src_name)
+                archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):

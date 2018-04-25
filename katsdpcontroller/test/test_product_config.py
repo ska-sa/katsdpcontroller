@@ -1,6 +1,8 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import jsonschema
+import copy
+
 from nose.tools import assert_equal, assert_in, assert_raises
 
 from .. import product_config
@@ -42,7 +44,7 @@ class TestValidate:
 
     def setup(self):
         self.config = {
-            "version": "1.1",
+            "version": "2.0",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -96,11 +98,12 @@ class TestValidate:
             },
             "outputs": {
                 "l0": {
-                    "type": "sdp.l0",
+                    "type": "sdp.vis",
                     "src_streams": ["i0_baseline_correlation_products"],
                     "output_int_time": 4.0,
                     "output_channels": [0, 4096],
-                    "continuum_factor": 1
+                    "continuum_factor": 1,
+                    "archive": True
                 },
                 "beamformer_engineering": {
                     "type": "sdp.beamformer_engineering",
@@ -114,13 +117,26 @@ class TestValidate:
                 "cal": {
                     "type": "sdp.cal",
                     "src_streams": ["l0"]
+                },
+                "sdp_l1_flags": {
+                    "type": "sdp.flags",
+                    "src_streams": ["l0"],
+                    "calibration": ["cal"],
+                    "archive": True
                 }
             },
             "config": {}
         }
+        self.config_v1_0 = copy.deepcopy(self.config)
+        self.config_v1_0["version"] = "1.0"
+        self.config_v1_0["outputs"]["l0"]["type"] = "sdp.l0"
+        del self.config_v1_0["outputs"]["cal"]
+        del self.config_v1_0["outputs"]["sdp_l1_flags"]
+        del self.config_v1_0["outputs"]["l0"]["archive"]
 
     def test_good(self):
         product_config.validate(self.config)
+        product_config.validate(self.config_v1_0)
 
     def test_bad_version(self):
         self.config["version"] = "1.10"
@@ -223,16 +239,75 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("not a multiple of", str(cm.exception))
 
+    def test_mismatched_beamformer_pols(self):
+        self.config["inputs"]["myacv"] = self.config["inputs"]["i0_antenna_channelised_voltage"]
+        self.config["inputs"]["i0_tied_array_channelised_voltage_0y"]["src_streams"] = ["myacv"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("streams do not come from the same channeliser", str(cm.exception))
+
+    def test_multiple_flags_per_cal(self):
+        self.config["outputs"]["flags2"] = {
+            "type": "sdp.flags",
+            "src_streams": ["l0"],
+            "calibration": ["cal"],
+            "archive": True
+        }
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("already has a flags output", str(cm.exception))
+
+    def test_calibration_does_not_exist(self):
+        self.config["outputs"]["sdp_l1_flags"]["calibration"] = ["bad"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("does not exist", str(cm.exception))
+
+    def test_calibration_wrong_type(self):
+        self.config["outputs"]["sdp_l1_flags"]["calibration"] = ["l0"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("has wrong type", str(cm.exception))
+
+    def test_calibration_wrong_src_streams(self):
+        self.config["outputs"]["another_l0"] = self.config["outputs"]["l0"]
+        self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("has different src_streams", str(cm.exception))
+
     def test_v1_0_sdp_cal(self):
         self.config["version"] = "1.0"
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config)
 
     def test_v1_0_simulate_dict(self):
-        self.config["version"] = "1.0"
-        del self.config["outputs"]["cal"]
-        # Confirm that this is now valid 1.0
-        product_config.validate(self.config)
-        self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
         with assert_raises(jsonschema.ValidationError):
-            product_config.validate(self.config)
+            product_config.validate(self.config_v1_0)
+
+    def test_normalise(self):
+        # Adjust some things to get full test coverage
+        del self.config_v1_0["outputs"]["l0"]["output_channels"]
+        del self.config_v1_0["outputs"]["beamformer_engineering"]["output_channels"]
+        self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = True
+        config = product_config.normalise(self.config_v1_0)
+        expected = self.config
+        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        expected["inputs"]["i0_tied_array_channelised_voltage_0x"]["simulate"] = False
+        expected["inputs"]["i0_tied_array_channelised_voltage_0y"]["simulate"] = False
+        expected["outputs"]["l0"]["excise"] = True
+        expected["outputs"]["l0"]["output_channels"] = [0, 4096]
+        expected["outputs"]["beamformer_engineering"]["output_channels"] = [0, 4096]
+        expected["outputs"]["cal"]["parameters"] = {}
+        expected["outputs"]["cal"]["models"] = {}
+        expected["config"]["develop"] = False
+        expected["config"]["service_overrides"] = {}
+        assert_equal(config, expected)
+
+    def test_normalise_name_conflict(self):
+        self.config_v1_0["outputs"]["cal"] = self.config_v1_0["outputs"]["l0"]
+        config = product_config.normalise(self.config_v1_0)
+        assert_in("cal0", config["outputs"])
+        assert_equal("sdp.vis", config["outputs"]["cal"]["type"])
+        assert_equal("sdp.cal", config["outputs"]["cal0"]["type"])

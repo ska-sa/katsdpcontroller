@@ -1047,6 +1047,8 @@ class SDPControllerServer(DeviceServer):
                 retmsg = "Overrides make the config invalid: {}".format(error)
                 product_logger.error(retmsg)
                 raise FailReply(retmsg)
+            # Re-normalise, in case the override denormalised it
+            config = product_config.normalise(config)
 
         if subarray_product_id.endswith('*'):
             # Requested a unique name. NB: it is important not to yield
@@ -1262,6 +1264,7 @@ class SDPControllerServer(DeviceServer):
         try:
             config_dict = json.loads(config)
             product_config.validate(config_dict)
+            config_dict = product_config.normalise(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = "Failed to process config: {}".format(error)
             product_logger.error(retmsg)

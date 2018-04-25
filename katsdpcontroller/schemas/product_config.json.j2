@@ -6,11 +6,16 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1"]
+            "enum": ["1.0", "1.1", "2.0"]
         }
     }
 }
 {% endmacro %}
+{% if version >= "2.0" %}
+{%     set sdp_vis = "sdp.vis" %}
+{% else %}
+{%     set sdp_vis = "sdp.l0" %}
+{% endif %}
 
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
@@ -55,7 +60,7 @@
             "items": {"$ref": "#/definitions/nonneg_integer"}
         },
         "simulate": {
-{% if version != "1.0" %}
+{% if version >= "1.1" %}
             "oneOf": [
                 {"type": "boolean"},
                 {
@@ -224,9 +229,12 @@
                     "properties": {
                         "type": {
                             "enum": [
-                                "sdp.l0",
-{% if version != "1.0" %}
+                                "{{sdp_vis}}",
+{% if version >= "1.1" %}
                                 "sdp.cal",
+{% endif %}
+{% if version >= "2.0" %}
+                                "sdp.flags",
 {% endif %}
                                 "sdp.beamformer",
                                 "sdp.beamformer_engineering"
@@ -240,13 +248,16 @@
                             "oneOf": [
                                 {
                                     "properties": {
-                                        "type": {"enum": ["sdp.l0"]},
+                                        "type": {"enum": ["{{sdp_vis}}"]},
                                         "src_streams": {"$ref": "#/definitions/singleton"},
                                         "output_int_time": {"type": "number"},
                                         "output_channels": {"$ref": "#/definitions/channel_range"},
                                         "continuum_factor": {
                                             "$ref": "#/definitions/positive_integer"
                                         },
+{% if version >= "2.0" %}
+                                        "archive": {"type": "boolean"},
+{% endif %}
                                         "excise": {"type": "boolean", "default": true}
                                     },
                                     "required": [
@@ -257,7 +268,7 @@
                                 {
                                     "properties": {
                                         "type": {
-                                            "not": {"enum": ["sdp.l0"]}
+                                            "not": {"enum": ["{{sdp_vis}}"]}
                                         }
                                     }
                                 }
@@ -305,7 +316,7 @@
                                 }
                             ]
                         }
-{% if version != "1.0" %}
+{% if version >= "1.1" %}
                         ,
                         {
                             "oneOf": [
@@ -361,6 +372,35 @@
                                     "properties": {
                                         "type": {
                                             "not": {"enum": ["sdp.cal"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+{% endif %}
+{% if version >= "2.0" %}
+                        ,
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.flags"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "calibration": {"$ref": "#/definitions/singleton"},
+                                        "rate_ratio": {
+                                            "type": "number",
+                                            "minimum": 1.0,
+                                            "exclusiveMinimum": true
+                                        },
+                                        "archive": {"type": "boolean"}
+                                    },
+                                    "required": ["src_streams", "calibration", "archive"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.flags"]}
                                         }
                                     }
                                 }

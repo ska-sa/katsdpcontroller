@@ -4,6 +4,7 @@ import logging
 import itertools
 import json
 import urllib
+import copy
 
 import jsonschema
 
@@ -94,9 +95,11 @@ def validate(config):
         'cbf.antenna_channelised_voltage': [],
         'cam.http': [],
         'sdp.l0': ['cbf.baseline_correlation_products'],
+        'sdp.vis': ['cbf.baseline_correlation_products'],
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
-        'sdp.cal': ['sdp.l0']
+        'sdp.cal': ['sdp.l0', 'sdp.vis'],
+        'sdp.flags': ['sdp.vis']
     }
     for name, stream in itertools.chain(config['inputs'].items(),
                                         config['outputs'].items()):
@@ -141,6 +144,7 @@ def validate(config):
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
 
+    has_flags = set()
     for name, output in config['outputs'].items():
         try:
             # Names of inputs and outputs must be disjoint
@@ -148,7 +152,7 @@ def validate(config):
                 raise ValueError('cannot be both an input and an output')
 
             # Channel ranges must be non-empty and not overflow
-            if output['type'] in ['sdp.l0', 'sdp.beamformer_engineering']:
+            if output['type'] in ['sdp.l0', 'sdp.vis', 'sdp.beamformer_engineering']:
                 if 'output_channels' in output:
                     c = output['output_channels']
                     for src_name in output['src_streams']:
@@ -157,7 +161,17 @@ def validate(config):
                         if not 0 <= c[0] < c[1] <= acv['n_chans']:
                             raise ValueError('Channel range {}:{} is invalid'.format(c[0], c[1]))
 
-            if output['type'] == 'sdp.l0':
+            # Beamformer pols must have same channeliser
+            if output['type'] in ['sdp.beamformer', 'sdp.beamformer_engineering']:
+                common_acv = None
+                for src_name in output['src_streams']:
+                    src = config['inputs'][src_name]
+                    acv_name = src['src_streams'][0]
+                    if common_acv is not None and acv_name != common_acv:
+                        raise ValueError('Source streams do not come from the same channeliser')
+                    common_acv = acv_name
+
+            if output['type'] in ['sdp.l0', 'sdp.vis']:
                 continuum_factor = output['continuum_factor']
                 src = config['inputs'][output['src_streams'][0]]
                 acv = config['inputs'][src['src_streams'][0]]
@@ -172,12 +186,109 @@ def validate(config):
                         'continuum channels ({}) not a multiple of number of ingests ({})'.format(
                             n_chans, n_ingest))
 
+            if output['type'] in ['sdp.flags']:
+                calibration = output['calibration'][0]
+                if calibration not in config['outputs']:
+                    raise ValueError('calibration ({}) does not exist'.format(calibration))
+                elif config['outputs'][calibration]['type'] != 'sdp.cal':
+                    raise ValueError('calibration ({}) has wrong type {}'
+                                     .format(calibration, config['outputs'][calibration]['type']))
+                if calibration in has_flags:
+                    raise ValueError('calibration ({}) already has a flags output'
+                                     .format(calibration))
+                if output['src_streams'] != config['outputs'][calibration]['src_streams']:
+                    raise ValueError('calibration ({}) has different src_streams'
+                                     .format(calibration))
+                has_flags.add(calibration)
+
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
 
 
+def normalise(config):
+    """Convert a config dictionary to a canonical form and return it.
+
+    It is assumed to already have passed :func:`validate`. The following
+    changes are made:
+
+    - It is upgraded to the newest version.
+    - The following fields are filled in with defaults if not provided:
+      - simulate (and True is converted to a dict)
+      - excise
+      - output_channels
+      - parameters, models
+      - develop, service_overrides
+    """
+    def unique_name(base, current):
+        if base not in current:
+            return base
+        seq = 0
+        while True:
+            proposed = '{}{}'.format(base, seq)
+            if proposed not in current:
+                return proposed
+            seq += 1
+
+    config = copy.deepcopy(config)
+    # Upgrade to 1.1
+    if config['version'] == '1.0':
+        config['version'] = '1.1'
+        # list() because we're mutating the outputs as we go
+        for name, output in list(config['outputs'].items()):
+            if output['type'] == 'sdp.l0' and output['continuum_factor'] == 1:
+                cal = {
+                    "type": "sdp.cal",
+                    "src_streams": [name]
+                }
+                config['outputs'][unique_name('cal', config['outputs'])] = cal
+
+    # Upgrade to 2.0
+    if config['version'] == '1.1':
+        config['version'] = '2.0'
+        for name, output in list(config['outputs'].items()):
+            if output['type'] == 'sdp.l0':
+                output['type'] = 'sdp.vis'
+                output['archive'] = (output['continuum_factor'] == 1)
+            elif output['type'] == 'sdp.cal':
+                flags = {
+                    "type": "sdp.flags",
+                    "src_streams": output['src_streams'],
+                    "calibration": [name],
+                    "archive": True
+                }
+                config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
+
+    # Fill in defaults
+    for name, stream in config['inputs'].items():
+        if stream['type'] in ['cbf.baseline_correlation_products',
+                              'cbf.tied_array_channelised_voltage']:
+            if stream.setdefault('simulate', False) is True:
+                stream['simulate'] = {}
+
+    for name, output in config['outputs'].items():
+        if output['type'] == 'sdp.vis':
+            output.setdefault('excise', True)
+        if output['type'] in ['sdp.vis', 'sdp.beamformer_engineering']:
+            if 'output_channels' not in output:
+                n_chans = None
+                src = config['inputs'][output['src_streams'][0]]
+                acv = config['inputs'][src['src_streams'][0]]
+                acv_chans = acv['n_chans']
+                n_chans = acv_chans
+                output['output_channels'] = [0, n_chans]
+        if output['type'] == 'sdp.cal':
+            output.setdefault('parameters', {})
+            output.setdefault('models', {})
+
+    config['config'].setdefault('develop', False)
+    config['config'].setdefault('service_overrides', {})
+
+    validate(config)     # Should never fail if the input was valid
+    return config
+
+
 def parse(config_bytes):
-    """Parse and validate a config dictionary.
+    """Load and validate a config dictionary.
 
     Raises
     ------
