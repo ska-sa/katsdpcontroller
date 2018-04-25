@@ -555,6 +555,7 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
     ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
     ans += n_bls * 10                               # bls_ordering
+    ans += n_bls * 8 * 4                            # sd_flag_fraction
     # There are a few scalar values, but that doesn't add up to enough to worry about
     return ans
 
