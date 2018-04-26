@@ -34,11 +34,31 @@
       if (arrays.length == 1 && rotate_frame.src.startsWith(urls[arrays[0]])) { return; }
        // don't rotate if we have only one to display and are currently showing it
        // or none to dispay
-      console.log("Rotating to frame " + url_id + " : " + urls[arrays[url_id]]);
-      rotate_frame.src = urls[arrays[url_id]];
-      url_id = url_id + 1;
-      if (url_id == arrays.length) { url_id = 0;}
+
+      url = urls[arrays[url_id]];
+
+      conn = new XMLHttpRequest();
+      conn.timeout = 1000;
+      conn.onreadystatechange = function () {
+       if (conn.readyState != 4) { return;}
+       if (conn.readyState == 4 && conn.status == 200) {
+        console.log("Rotating to frame " + url_id + " : " + url);
+        rotate_frame.src = url;
+       } else {
+        console.log("Unable to connect to " + url + ". It is either down or doesn't support CORS");
+        set_content("URL " + url + " is not currently active. Will retry...");
+        // check to see if this URL is available yet, and if not let the user
+        // know that we will retry.
+       }
+       url_id = (url_id + 1) % arrays.length;
+       rotater = setInterval(rotate, {{args.rotate_interval}});
+      }
+      clearInterval(rotater);
+      console.log("Checking validity of URL: " + url);
+      conn.open("GET", url, true);
+      conn.send()
      }
+
 
      function restart_ws() {
       if (retry_count > 4) {
