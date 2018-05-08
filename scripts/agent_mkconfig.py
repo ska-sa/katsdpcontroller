@@ -295,7 +295,7 @@ def encode(d):
     JSON, then to base64url. The JSON string is padded with spaces so that the base64
     string has no = pad characters, which are outside the legal set for Mesos.
     """
-    if isinstance(d, numbers.Real):
+    if isinstance(d, numbers.Real) and not isinstance(d, bool):
         return repr(float(d))
     else:
         s = json.dumps(d, sort_keys=True)
