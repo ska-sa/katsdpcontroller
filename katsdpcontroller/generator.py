@@ -928,7 +928,6 @@ def _make_vis_writer(g, config, name):
 
 
 def _make_flag_writer(g, config, name, l0_name):
-    ibv = not is_develop(config)
     info = L0Info(config, l0_name)
 
     flag_writer = SDPLogicalTask('flag_writer.' + name)
@@ -940,7 +939,7 @@ def _make_flag_writer(g, config, name, l0_name):
     # Sized to include space for 8x in the memory pool and 5x in the cache
     flag_writer.mem = 256 + _mb(32 * info.flag_size)
     flag_writer.ports = ['port']
-    flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g', infiniband=ibv)]
+    flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
     flag_writer.volumes = [OBJ_DATA_VOL]
     flag_writer.deconfigure_wait = False
@@ -961,8 +960,7 @@ def _make_flag_writer(g, config, name, l0_name):
     g.add_node(flag_writer, config=lambda task, resolver: {
         'flags_name': name,
         'flags_interface': task.interfaces['sdp_10g'].name,
-        'flags_ibv': ibv,
-        'npy_path': OBJ_DATA_VOL.container_path,
+        'npy_path': OBJ_DATA_VOL.container_path
     })
 
     g.add_edge(flag_writer, flags_src, port='spead',
