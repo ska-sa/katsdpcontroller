@@ -886,50 +886,6 @@ def _make_cal(g, config, name, l0_name, flags_name):
     return cal_group
 
 
-def _make_filewriter(g, config, name):
-    info = L0Info(config, name)
-    # Disable file writer for large arrays, since it is unlikely to keep up.
-    # Eventually it will be deleted entirely (1.95 instead of 2.0 since the
-    # actual integration time is not exactly 2s).
-    if info.n_vis / info.int_time > _N16_32 / 1.95:
-        logger.warning('Disabling filewriter because data rate is too high')
-        return None
-
-    filewriter = SDPLogicalTask('filewriter.' + name)
-    filewriter.image = 'katsdpfilewriter'
-    filewriter.command = ['file_writer.py']
-    # Don't yet have a good idea of real CPU usage. For now assume that 16
-    # antennas, 32K channels requires two CPUs (one for capture, one for
-    # writing) and scale from there.
-    filewriter.cpus = 2 * info.n_vis / _N16_32
-    # Memory pool has 8 entries, plus the socket buffer, but allocate 12 to be
-    # safe.
-    filewriter.mem = 12 * _mb(info.size) + 256
-    filewriter.ports = ['port']
-    filewriter.volumes = [DATA_VOL]
-    filewriter.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    filewriter.interfaces[0].bandwidth_in = info.net_bandwidth
-    # Give it more than the usual timeout for capture-done, because finalising
-    # a file can be slow.
-    filewriter.transitions = {
-        CaptureBlockState.CAPTURING: CAPTURE_TRANSITIONS[CaptureBlockState.CAPTURING],
-        CaptureBlockState.POSTPROCESSING: [
-            KatcpTransition('capture-done', timeout=300)
-        ]
-    }
-
-    g.add_node(filewriter, config=lambda task, resolver: {
-        'file_base': DATA_VOL.container_path,
-        'l0_name': name,
-        'l0_interface': task.interfaces['sdp_10g'].name
-    })
-    src_multicast = find_node(g, 'multicast.' + name)
-    g.add_edge(filewriter, src_multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
-    return filewriter
-
-
 def _make_vis_writer(g, config, name):
     info = L0Info(config, name)
 
@@ -1229,7 +1185,6 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.vis', []):
         if config['outputs'][name]['archive']:
-            _make_filewriter(g, config, name)
             _make_vis_writer(g, config, name)
             archived_streams.append(name)
 
@@ -1271,7 +1226,7 @@ def build_logical_graph(config):
             if node is not meta_writer:
                 g.add_edge(meta_writer, node, depends_init=True)
             # Increase memory allocation where it depends on telstate content
-            if node is telstate or node is meta_writer or node.name.startswith('filewriter.'):
+            if node is telstate or node is meta_writer:
                 node.mem += _mb(telstate_extra)
             # MESOS-7197 causes the master to crash if we ask for too little of
             # a resource. Enforce some minima.
