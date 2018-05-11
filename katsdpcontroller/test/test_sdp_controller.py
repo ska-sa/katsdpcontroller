@@ -14,7 +14,6 @@ from addict import Dict
 import aiokatcp
 from aiokatcp import Message, FailReply, Sensor
 from aiokatcp.test.test_utils import timelimit
-import redis
 import pymesos
 import networkx
 import netifaces
@@ -678,7 +677,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        self.telstate_class.side_effect = redis.ConnectionError
+        self.telstate_class.side_effect = katsdptelstate.ConnectionError
         await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
