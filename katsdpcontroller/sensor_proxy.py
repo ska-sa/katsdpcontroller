@@ -25,11 +25,14 @@ logger = logging.getLogger(__name__)
 
 class PrometheusObserver:
     """Watches a sensor and mirrors updates into a Prometheus Gauge or Counter"""
-    def __init__(self, sensor, value_metric, status_metric):
+    def __init__(self, sensor, value_metric, status_metric, label_values):
         self._sensor = sensor
         self._old_value = 0.0
-        self._value_metric = value_metric
-        self._status_metric = status_metric
+        self._value_metric_root = value_metric
+        self._status_metric_root = status_metric
+        self._value_metric = value_metric.labels(*label_values)
+        self._status_metric = status_metric.labels(*label_values)
+        self._label_values = tuple(label_values)
         sensor.attach(self)
 
     def __call__(self, sensor, reading):
@@ -63,7 +66,8 @@ class PrometheusObserver:
     def close(self):
         """Shut down observing"""
         self._sensor.detach(self)
-        self._status_metric.set(aiokatcp.Sensor.Status.UNREACHABLE.value)
+        self._status_metric_root.remove(*self._label_values)
+        self._value_metric_root.remove(*self._label_values)
 
 
 class DiscreteMixin:
@@ -141,12 +145,7 @@ class SensorProxyClient(aiokatcp.Client):
             if value_metric is None:
                 return None
             self.prometheus_sensors[normalised_name] = (value_metric, status_metric)
-        # It's tempting to push this work onto the caller, but that
-        # causes the metric to be instantiated with the labels
-        # whether the matching sensor exists or not.
-        value_metric = value_metric.labels(*self.prometheus_labels)
-        status_metric = status_metric.labels(*self.prometheus_labels)
-        return PrometheusObserver(sensor, value_metric, status_metric)
+        return PrometheusObserver(sensor, value_metric, status_metric, self.prometheus_labels)
 
     def _make_type(self, type_name, parameters):
         """Get the sensor type for a given type name"""
