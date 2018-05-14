@@ -468,7 +468,7 @@ class PhysicalGroup(SDPConfigMixin, scheduler.PhysicalExternal):
 class PoweroffLogicalTask(scheduler.LogicalTask):
     """Logical task for powering off a machine."""
     def __init__(self, host):
-        super().__init__('kibisis')
+        super().__init__('kibisis.' + host)
         self.host = host
         # Use minimal resources, to reduce chance it that it won't fit
         self.cpus = 0.001
