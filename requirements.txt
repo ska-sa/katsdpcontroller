@@ -5,6 +5,7 @@ aiohttp-jinja2==0.14.0
 aiokatcp==0.3.1
 aiomonitor==0.3.0
 async-timeout==2.0.0
+attrs==18.1.0              # via prometheus_async
 certifi                    # via requests
 chardet==3.0.4             # via aiohttp, requests
 decorator
@@ -40,6 +41,7 @@ six                        # via docker and others
 terminaltables==3.1.0      # via aiomonitor
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
+wrapt==1.10.11             # via prometheus_async
 yarl==1.1.1                # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
