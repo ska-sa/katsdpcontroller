@@ -1,6 +1,6 @@
 addict==2.1.1
 aioconsole==0.1.7          # via aiomonitor
-aiohttp==2.3.6
+aiohttp==2.3.10
 aiohttp-jinja2==0.14.0
 aiokatcp==0.3.1
 aiomonitor==0.3.0
@@ -21,11 +21,13 @@ katversion
 kazoo==2.4.0
 multidict==3.3.2           # via aiohttp, yarl
 markupsafe                 # via jinja2
+monotonic==1.5             # via prometheus_async
 netifaces
 networkx==2.0
 numpy
 pkginfo
-prometheus_client==0.1.0
+prometheus_async==18.1.0
+prometheus_client==0.2.0
 pydotplus==2.0.2
 pygelf                     # via katsdpservices
 pymesos==0.3.1
