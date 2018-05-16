@@ -2079,7 +2079,7 @@ class Scheduler(pymesos.Scheduler):
         """
         if self.http_server:
             raise RuntimeError('Already started')
-        self.http_handler = self.app.make_handler()
+        self.http_handler = self.app.make_handler(loop=self._loop, access_log=None)
         # We want a single port serving both IPv4 and IPv6. By default asyncio
         # will create a separate socket for each, and if http_port is 0 (used
         # by unit tests) they end up with different ports.
