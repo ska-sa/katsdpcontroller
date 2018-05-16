@@ -2031,6 +2031,9 @@ class Scheduler(pymesos.Scheduler):
     resources_timeout : float or None
         Default time limit for resources to become available once a task is ready to
         launch.
+    app : :class:`aiohttp.web.Application`
+        Web application used internally for scheduling. Prior to calling
+        :meth:`start` it can be modified e.g. to add additional endpoints.
     http_port : int
         Actual HTTP port used by :attr:`http_server` (after :meth:`start`)
     http_handler : :class:`aiohttp.web.Server`
@@ -2061,16 +2064,22 @@ class Scheduler(pymesos.Scheduler):
         self.http_url = http_url
         self._launcher_task = loop.create_task(self._launcher())
 
-    async def start(self):
-        """Start the internal HTTP server running. This must be called before any launches."""
-        if self.http_server:
-            raise RuntimeError('Already started')
+        # Configure the web app
         app = aiohttp.web.Application(loop=self._loop)
         app['katsdpcontroller_scheduler'] = self
         app.router.add_get('/tasks/{id}/wait_start', wait_start_handler)
         app.router.add_static('/static',
                               pkg_resources.resource_filename('katsdpcontroller', 'static'))
-        self.http_handler = app.make_handler()
+        self.app = app
+
+    async def start(self):
+        """Start the internal HTTP server running. This must be called before any launches.
+
+        This starts up the webapp, so any additions to it must be made first.
+        """
+        if self.http_server:
+            raise RuntimeError('Already started')
+        self.http_handler = self.app.make_handler()
         # We want a single port serving both IPv4 and IPv6. By default asyncio
         # will create a separate socket for each, and if http_port is 0 (used
         # by unit tests) they end up with different ports.

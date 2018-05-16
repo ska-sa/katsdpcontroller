@@ -1,10 +1,11 @@
 addict==2.1.1
 aioconsole==0.1.7          # via aiomonitor
-aiohttp==2.3.6
+aiohttp==2.3.10
 aiohttp-jinja2==0.14.0
 aiokatcp==0.3.1
 aiomonitor==0.3.0
 async-timeout==2.0.0
+attrs==18.1.0              # via prometheus_async
 certifi                    # via requests
 chardet==3.0.4             # via aiohttp, requests
 decorator
@@ -14,18 +15,21 @@ fakeredis                  # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
 idna==2.6                  # via requests
+idna-ssl==1.0.1            # via aiohttp
 ipaddress                  # via katsdptelstate
 jinja2==2.10               # via aiohttp-jinja2
 jsonschema==2.6.0
 katversion
 kazoo==2.4.0
-multidict==3.3.2           # via aiohttp, yarl
+multidict==4.1.0           # via aiohttp, yarl
 markupsafe                 # via jinja2
+monotonic==1.5             # via prometheus_async
 netifaces
 networkx==2.0
 numpy
 pkginfo
-prometheus_client==0.1.0
+prometheus_async==18.1.0
+prometheus_client==0.2.0
 pydotplus==2.0.2
 pygelf                     # via katsdpservices
 pymesos==0.3.1
@@ -37,6 +41,7 @@ six                        # via docker and others
 terminaltables==3.1.0      # via aiomonitor
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
-yarl==0.16.0               # via aiohttp
+wrapt==1.10.11             # via prometheus_async
+yarl==1.1.1                # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices

@@ -22,7 +22,7 @@ setup(
     install_requires=[
         'pymesos>=0.3.1',   # 0.3.1 implements declineInverseOffers
         'addict!=2.0.*',
-        'aiohttp',
+        'aiohttp~=2.0',
         'aiomonitor',
         'async_timeout',
         'decorator',
@@ -37,7 +37,8 @@ setup(
         'katsdptelstate',
         'katsdpservices',
         'kazoo',
-        'prometheus_client'
+        'prometheus_client',
+        'prometheus_async'
     ],
     tests_require=tests_require,
     extras_require={

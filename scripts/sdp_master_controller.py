@@ -14,7 +14,7 @@ import logging
 import asyncio
 
 import addict
-from prometheus_client import start_http_server
+import prometheus_async
 import pymesos
 import aiomonitor
 import katsdpservices
@@ -84,9 +84,6 @@ if __name__ == "__main__":
                         help='port that slaves communicate with (default=%(default)s)')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port (default=auto)')
-    parser.add_argument('--no-prometheus', dest='prometheus', default=True,
-                        action='store_false',
-                        help='disable Prometheus client HTTP service')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
@@ -172,6 +169,7 @@ if __name__ == "__main__":
         sched = None
     else:
         sched = scheduler.Scheduler(loop, opts.http_port, opts.http_url)
+        sched.app.router.add_route('GET', '/metrics', prometheus_async.aio.web.server_stats)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, opts.master, use_addict=True,
             implicit_acknowledgements=False)
@@ -187,10 +185,6 @@ if __name__ == "__main__":
         graph_dir=opts.write_graphs)
 
     logger.info("Starting SDP...")
-
-    # expose any prometheus metrics that we create
-    if opts.prometheus:
-        start_http_server(8081)
 
     if opts.aiomonitor:
         with aiomonitor.start_monitor(loop=loop):
