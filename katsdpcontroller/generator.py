@@ -807,9 +807,10 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # of the HH and VV products for each scan. The number of scans is unknown,
     # but should always be less than 1000, and we allow a factor of 2 for
     # operations that work on it (which cancels the factor of 1/2 for only
-    # having 2 of the 4 pol products).
+    # having 2 of the 4 pol products). The scaling by n_cal is because there
+    # are 1024 channels *per node* while info.n_channels is over all nodes.
     extra = max(workers / slots, min(16 * workers, info.n_baselines) / info.n_baselines) * 4
-    extra += 1000 * 1024 / (slots * info.n_channels)
+    extra += 1000 * 1024 * n_cal / (slots * info.n_channels)
 
     # Extra memory allocation for tasks that deal with bandpass calibration
     # solutions in telescope state. The exact size of these depends on how
