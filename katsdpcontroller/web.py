@@ -1,7 +1,6 @@
 """Utility code for interfacing with aiohttp"""
 
 import logging
-import re
 
 import aiohttp.helpers
 
