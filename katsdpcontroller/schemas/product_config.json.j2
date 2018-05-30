@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0"]
+            "enum": ["1.0", "1.1", "2.0", "2.1"]
         }
     }
 }
@@ -363,6 +363,9 @@
                                             "type": "object",
                                             "additionalProperties": {"type": "string"}
                                         },
+{% if version >= "2.1" %}
+                                        "max_scans": {"$ref": "#/definitions/positive_integer"},
+{% endif %}
                                         "buffer_time": {"$ref": "#/definitions/positive_number"}
                                     },
                                     "required": ["src_streams"],

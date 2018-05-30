@@ -764,6 +764,9 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # We want ~25 min of data in the buffer, to allow for a single batch of
     # 15 minutes.
     buffer_time = settings.get('buffer_time', 25.0 * 60.0)
+    # Some pathological observations use more than this, but they can override
+    # the default.
+    max_scans = settings.get('max_scans', 1000)
     parameters = settings['parameters']
     models = settings['models']
     if models:
@@ -804,13 +807,12 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # - compute flags per baseline: works on 16 baselines at a time.
     # In each case we arbitrarily allow for 4 times the result, per worker.
     # There is also a time- and channel-averaged version (down to 1024 channels)
-    # of the HH and VV products for each scan. The number of scans is unknown,
-    # but should always be less than 1000, and we allow a factor of 2 for
+    # of the HH and VV products for each scan. We allow a factor of 2 for
     # operations that work on it (which cancels the factor of 1/2 for only
     # having 2 of the 4 pol products). The scaling by n_cal is because there
     # are 1024 channels *per node* while info.n_channels is over all nodes.
     extra = max(workers / slots, min(16 * workers, info.n_baselines) / info.n_baselines) * 4
-    extra += 1000 * 1024 * n_cal / (slots * info.n_channels)
+    extra += max_scans * 1024 * n_cal / (slots * info.n_channels)
 
     # Extra memory allocation for tasks that deal with bandpass calibration
     # solutions in telescope state. The exact size of these depends on how
@@ -824,6 +826,7 @@ def _make_cal(g, config, name, l0_name, flags_name):
 
     group_config = {
         'buffer_maxsize': buffer_size,
+        'max_scans': max_scans,
         'workers': workers,
         'l0_name': l0_name,
         'servers': n_cal
