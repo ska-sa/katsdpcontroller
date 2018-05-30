@@ -19,7 +19,15 @@ import pymesos
 import aiomonitor
 import katsdpservices
 
-from katsdpcontroller import scheduler, sdpcontroller
+from katsdpcontroller import scheduler, sdpcontroller, web
+
+
+async def quiet_prometheus_stats(request):
+    response = await prometheus_async.aio.web.server_stats(request)
+    if response.status == 200:
+        # Avoid spamming logs (feeds into web.AccessLogger).
+        response.log_level = logging.DEBUG
+    return response
 
 
 def on_shutdown(loop, server):
@@ -58,9 +66,9 @@ def load_gui_urls_dir(dirname):
     return gui_urls
 
 
-async def run(loop, sched, server):
+async def run(loop, sched, server, http_handler):
     if sched is not None:
-        await sched.start()
+        await sched.start(http_handler)
     await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
@@ -167,9 +175,11 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     if opts.interface_mode:
         sched = None
+        http_handler = None
     else:
         sched = scheduler.Scheduler(loop, opts.http_port, opts.http_url)
-        sched.app.router.add_route('GET', '/metrics', prometheus_async.aio.web.server_stats)
+        sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
+        http_handler = sched.app.make_handler(loop=loop, access_log_class=web.AccessLogger)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, opts.master, use_addict=True,
             implicit_acknowledgements=False)
@@ -188,7 +198,7 @@ if __name__ == "__main__":
 
     if opts.aiomonitor:
         with aiomonitor.start_monitor(loop=loop):
-            loop.run_until_complete(run(loop, sched, server))
+            loop.run_until_complete(run(loop, sched, server, http_handler))
     else:
-        loop.run_until_complete(run(loop, sched, server))
+        loop.run_until_complete(run(loop, sched, server, http_handler))
     loop.close()

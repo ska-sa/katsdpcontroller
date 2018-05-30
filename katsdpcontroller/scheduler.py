@@ -2072,14 +2072,23 @@ class Scheduler(pymesos.Scheduler):
                               pkg_resources.resource_filename('katsdpcontroller', 'static'))
         self.app = app
 
-    async def start(self):
+    async def start(self, handler=None):
         """Start the internal HTTP server running. This must be called before any launches.
 
         This starts up the webapp, so any additions to it must be made first.
+
+        Parameters
+        ----------
+        handler : :class:`aiohttp.web_server.Server`, optional
+            HTTP server, overriding the default. It must be created with the
+            same event loop as self.
         """
         if self.http_server:
             raise RuntimeError('Already started')
-        self.http_handler = self.app.make_handler(loop=self._loop, access_log=None)
+        if handler is None:
+            self.http_handler = self.app.make_handler(loop=self._loop)
+        else:
+            self.http_handler = handler
         # We want a single port serving both IPv4 and IPv6. By default asyncio
         # will create a separate socket for each, and if http_port is 0 (used
         # by unit tests) they end up with different ports.
