@@ -258,6 +258,11 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
+    # Update to 2.1
+    if config['version'] == '2.0':
+        # 2.1 is fully backwards-compatible
+        config['version'] = '2.1'
+
     # Fill in defaults
     for name, stream in config['inputs'].items():
         if stream['type'] in ['cbf.baseline_correlation_products',
