@@ -217,7 +217,7 @@ def attributes_resources(args):
                 speed = f.read().strip()
                 # This dummy value has been observed on a NIC which had been
                 # configured but had no cable attached.
-                if speed == '4294967295':
+                if speed == '4294967295' or float(speed) < 0:
                     raise ValueError('cable unplugged?')
                 speed = float(speed) * 1e6  # /sys/class/net has speed in Mbps
         except (IOError, OSError, ValueError) as error:
