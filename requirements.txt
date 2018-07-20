@@ -1,27 +1,27 @@
 addict==2.1.1
-aioconsole==0.1.7          # via aiomonitor
-aiohttp==2.3.10
+aioconsole                 # via aiomonitor
+aiohttp
 aiohttp-jinja2==0.14.0
-aiokatcp==0.3.1
-aiomonitor==0.3.0
-async-timeout==2.0.0
+aiokatcp
+aiomonitor
+async-timeout
 attrs==18.1.0              # via prometheus_async
 certifi                    # via requests
-chardet==3.0.4             # via aiohttp, requests
+chardet                    # via aiohttp, requests
 decorator
 docker-pycreds==0.2.1      # via docker
 docker==2.7.0
 fakeredis                  # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
-idna==2.6                  # via requests
-idna-ssl==1.0.1            # via aiohttp
+idna                       # via requests
+idna-ssl                   # via aiohttp
 ipaddress                  # via katsdptelstate
 jinja2==2.10               # via aiohttp-jinja2
 jsonschema==2.6.0
 katversion
 kazoo==2.4.0
-multidict==4.1.0           # via aiohttp, yarl
+multidict                  # via aiohttp, yarl
 markupsafe                 # via jinja2
 monotonic==1.5             # via prometheus_async
 netifaces
@@ -38,10 +38,10 @@ redis                      # via katsdptelstate
 requests==2.18.4           # via docker
 rfc3987==1.3.7
 six                        # via docker and others
-terminaltables==3.1.0      # via aiomonitor
+terminaltables             # via aiomonitor
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 wrapt==1.10.11             # via prometheus_async
-yarl==1.1.1                # via aiohttp
+yarl                       # via aiohttp
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
