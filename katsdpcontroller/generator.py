@@ -720,7 +720,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         ingest.physical_factory = IngestTask
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
-        ingest.ports = ['port']
+        ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+        ingest.wait_ports = ['port']
         ingest.gpus = [scheduler.GPURequest()]
         if not develop:
             ingest.gpus[-1].name = INGEST_GPU_NAME
