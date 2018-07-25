@@ -505,8 +505,9 @@ def _make_cbf_simulator(g, config, name):
 
 def _make_timeplot(g, config, spectral_name):
     spectral_info = L0Info(config, spectral_name)
+    n_ingest = n_ingest_nodes(config, spectral_name)
+    multicast = find_node(g, 'multicast.timeplot.' + spectral_name)
 
-    # signal display node
     timeplot = SDPLogicalTask('timeplot.' + spectral_name)
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
@@ -524,8 +525,9 @@ def _make_timeplot(g, config, spectral_name):
     # add a fixed amount since in very small arrays the 20% might not cover
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
-    timeplot.ports = ['spead_port', 'html_port']
-    timeplot.wait_ports = ['html_port']
+    timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+    timeplot.interfaces[0].bandwidth_in = _timeplot_bandwidth(spectral_info, n_ingest)
+    timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
@@ -533,12 +535,20 @@ def _make_timeplot(g, config, spectral_name):
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
+
     g.add_node(timeplot, config=lambda task, resolver: {
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'l0_name': spectral_name,
+        'spead_interface': task.interfaces['sdp_10g'].name,
         'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
     })
+    g.add_edge(timeplot, multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {
+                   'spead': endpoint.host,
+                   'spead_port': endpoint.port
+               })
     return timeplot
 
 
@@ -558,6 +568,25 @@ def _timeplot_frame_size(spectral_info, n_cont_channels):
     ans += n_bls * 8 * 4                            # sd_flag_fraction
     # There are a few scalar values, but that doesn't add up to enough to worry about
     return ans
+
+
+def _timeplot_continuum_factor(spectral_info, n_ingest):
+    factor = 1
+    # Aim for about 256 signal display coarse channels
+    while (spectral_info.n_channels % (factor * n_ingest * 2) == 0
+           and spectral_info.n_channels // factor >= 384):
+        factor *= 2
+    return factor
+
+
+def _timeplot_bandwidth(spectral_info, n_ingest):
+    """Bandwidth for the timeplot stream (summed over all ingests)"""
+    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_frame_size = _timeplot_frame_size(
+        spectral_info, spectral_info.n_channels // sd_continuum_factor)
+    # The rates are low, so we allow plenty of padding in case the calculation is
+    # missing something.
+    return _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
 
 
 def n_ingest_nodes(config, name):
@@ -638,17 +667,9 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # Virtual ingest node which depends on the real ingest nodes, so that other
     # services can declare dependencies on ingest rather than individual nodes.
     ingest_group = LogicalGroup('ingest.' + name)
-    sd_continuum_factor = 1
-    # Aim for about 256 signal display coarse channels
-    while (spectral_info.n_channels % (sd_continuum_factor * n_ingest * 2) == 0
-           and spectral_info.n_channels // sd_continuum_factor >= 384):
-        sd_continuum_factor *= 2
 
-    sd_frame_size = _timeplot_frame_size(
-        spectral_info, spectral_info.n_channels // sd_continuum_factor)
-    # The rates are low, so we allow plenty of padding in case the calculation is
-    # missing something.
-    sd_spead_rate = _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
+    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_spead_rate = _timeplot_bandwidth(spectral_info, n_ingest)
     output_channels_str = '{}:{}'.format(*spectral_info.output_channels)
     group_config = {
         'continuum_factor': continuum_info.raw['continuum_factor'] if continuum_name else 1,
@@ -677,28 +698,30 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         g.add_edge(ingest_group, spectral_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
         g.add_edge(spectral_multicast, ingest_group, depends_init=True, depends_ready=True)
+        # Signal display stream
+        timeplot_multicast = LogicalMulticast('multicast.timeplot.' + name, 1)
+        g.add_node(timeplot_multicast)
+        g.add_edge(ingest_group, timeplot_multicast, port='spead', depends_resolve=True,
+                   config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
+        g.add_edge(timeplot_multicast, ingest_group, depends_init=True, depends_ready=True)
     if continuum_name:
         continuum_multicast = LogicalMulticast('multicast.' + continuum_name, n_ingest)
         g.add_node(continuum_multicast)
         g.add_edge(ingest_group, continuum_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
         g.add_edge(continuum_multicast, ingest_group, depends_init=True, depends_ready=True)
+
     src_multicast = find_node(g, 'multicast.' + src)
     g.add_edge(ingest_group, src_multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
 
-    # TODO: get timeplot to use multicast
-    if spectral_name:
-        timeplot = find_node(g, 'timeplot.' + spectral_name)
-        g.add_edge(ingest_group, timeplot, port='spead_port',
-                   config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
-        g.add_edge(timeplot, ingest_group, depends_ready=True)  # Attributes passed via telstate
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
         ingest.image = 'katsdpingest_titanx'
         ingest.command = ['ingest.py']
-        ingest.ports = ['port']
+        ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+        ingest.wait_ports = ['port']
         ingest.gpus = [scheduler.GPURequest()]
         if not develop:
             ingest.gpus[-1].name = INGEST_GPU_NAME
@@ -726,7 +749,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         ingest.interfaces[0].bandwidth_in = src_info.net_bandwidth / n_ingest
         net_bandwidth = 0.0
         if spectral_name:
-            net_bandwidth += spectral_info.net_bandwidth
+            net_bandwidth += spectral_info.net_bandwidth + sd_spead_rate
         if continuum_name:
             net_bandwidth += continuum_info.net_bandwidth
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
@@ -738,6 +761,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             }
             if spectral_name:
                 conf.update(l0_spectral_interface=task.interfaces['sdp_10g'].name)
+                conf.update(sdisp_interface=task.interfaces['sdp_10g'].name)
             if continuum_name:
                 conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
             return conf
@@ -1161,8 +1185,8 @@ def build_logical_graph(config):
                     config['outputs'][name2]['archive'] = archive
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
-                        _make_timeplot(g, config, name)
                         _make_ingest(g, config, name, name2)
+                        _make_timeplot(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
                         break
@@ -1177,8 +1201,8 @@ def build_logical_graph(config):
             l0_continuum_only = True
         _adjust_ingest_output_channels(config, [name])
         if is_spectral:
-            _make_timeplot(g, config, name)
             _make_ingest(g, config, name, None)
+            _make_timeplot(g, config, name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
