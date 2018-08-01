@@ -13,7 +13,7 @@ def find_images():
     images = set(katsdpcontroller.generator.IMAGES)
     # Add some repositories that do not form part of the graph
     images.add('katsdpcontroller')
-    images.add('docker-base')
+    images.add('docker-base-runtime')
     return images
 
 

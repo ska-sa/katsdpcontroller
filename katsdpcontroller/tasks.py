@@ -473,7 +473,7 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
         # Use minimal resources, to reduce chance it that it won't fit
         self.cpus = 0.001
         self.mem = 64
-        self.image = 'docker-base'
+        self.image = 'docker-base-runtime'
         self.command = ['/sbin/poweroff']
 
         # See https://groups.google.com/forum/#!topic/coreos-dev/AXCs_2_J6Mc
