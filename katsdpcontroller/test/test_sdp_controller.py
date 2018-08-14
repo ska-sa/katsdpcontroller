@@ -267,7 +267,9 @@ class TestSDPControllerInterface(BaseTestSDPController):
     """Testing of the SDP controller in interface mode."""
     async def setUp(self):
         await self.setup_server('127.0.0.1', 0, None, interface_mode=True,
-                                safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+                                safe_multicast_cidr="225.100.0.0/16",
+                                batch_role='batch',
+                                loop=self.loop)
         self.create_patch('time.time', return_value=123456789.5)
         # Isolate tests from each other by resetting this
         _capture_block_names.clear()
@@ -474,7 +476,8 @@ class TestSDPController(BaseTestSDPController):
             }''')
         await self.setup_server(
             '127.0.0.1', 0, self.sched, s3_config_file='s3_config.json',
-            safe_multicast_cidr="225.100.0.0/16", loop=self.loop)
+            safe_multicast_cidr="225.100.0.0/16", loop=self.loop,
+            batch_role='batch')
         for product in [SUBARRAY_PRODUCT1, SUBARRAY_PRODUCT2,
                         SUBARRAY_PRODUCT3, SUBARRAY_PRODUCT4]:
             # Creating the sensor here isn't quite accurate (it is a dynamic sensor

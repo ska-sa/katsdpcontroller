@@ -1074,7 +1074,7 @@ def _decode_json_base64(value):
 
 
 class Agent(ResourceCollector):
-    """Collects multiple offers for a single Mesos agent and allows
+    """Collects multiple offers for a single Mesos agent and role and allows
     :class:`ResourceAllocation`s to be made from it.
 
     Parameters
@@ -1090,6 +1090,7 @@ class Agent(ResourceCollector):
             raise ValueError('At least one offer must be specified')
         self.offers = offers
         self.agent_id = offers[0].agent_id.value
+        self.role = offers[0].allocation_info.role
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
@@ -1792,6 +1793,9 @@ class PhysicalTask(PhysicalNode):
                 'value': ','.join(gpu_uuids)
             })
 
+        for resource in taskinfo.resources:
+            resource.allocation_info.role = self.agent.role
+
         # container.linux_info.capabilities doesn't work with Docker
         # containerizer (https://issues.apache.org/jira/browse/MESOS-6163), so
         # pass in the parameters.
@@ -1904,13 +1908,16 @@ class LaunchQueue:
 
     Parameters
     ----------
+    role : str
+        Mesos role used for tasks in the queue
     name : str, optional
         Name of the queue for ``__repr__``
     priority : int
         Priority of the tasks in the queue. A smaller numeric value indicates a
         higher-priority queue (ala UNIX nice).
     """
-    def __init__(self, name='', *, priority=0):
+    def __init__(self, role, name='', *, priority=0):
+        self.role = role
         self.name = name
         self.priority = priority
         self._groups = deque()
@@ -2007,11 +2014,17 @@ class Scheduler(pymesos.Scheduler):
 
     The following invariants are maintained at each yield point:
     - each dictionary within :attr:`_offers` is non-empty
+    - every role in :attr:`_roles_wanted` is non-suppressed (there may be
+      additional non-suppressed roles, but they will be suppressed when an
+      offer arrives)
+    - every role in :attr:`_offers` also appears in :attr:`_roles_wanted`
 
     Parameters
     ----------
     loop : :class:`asyncio.AbstractEventLoop`
         Event loop
+    default_role : str
+        Mesos role used by the default queue
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
@@ -2035,15 +2048,16 @@ class Scheduler(pymesos.Scheduler):
     http_server : :class:`asyncio.Server`
         Embedded HTTP server
     """
-    def __init__(self, loop, http_port, http_url=None):
+    def __init__(self, loop, default_role, http_port, http_url=None):
         self._loop = loop
         self._driver = None
-        self._offers = {}           #: offers keyed by slave ID then offer ID
+        self._offers = {}           #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event(loop=self._loop)
-        self._default_queue = LaunchQueue()
+        self._default_queue = LaunchQueue(default_role)
         self._queues = [self._default_queue]
-        self._offers_suppressed = False
+        #: Mesos roles for which we want to (and expect to) receive offers
+        self._roles_needed = set()
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
@@ -2138,19 +2152,30 @@ class Scheduler(pymesos.Scheduler):
             return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
         return (0, 0, 0, 0, node.name)
 
-    def _clear_offers(self):
-        for offers in self._offers.values():
-            self._driver.acceptOffers([offer.id for offer in offers.values()], [])
-        self._offers = {}
-        if not self._offers_suppressed:
-            self._driver.suppressOffers()
-            self._offers_suppressed = True
+    def _update_roles(self, new_roles):
+        revive_roles = new_roles - self._roles_needed
+        suppress_roles = self._roles_needed - new_roles
+        self._roles_needed = new_roles
+        if revive_roles:
+            self._driver.reviveOffers(revive_roles)
+        if suppress_roles:
+            self._driver.suppressOffers(suppress_roles)
+            # Decline all held offers that aren't needed any more
+            to_decline = []
+            for role in suppress_roles:
+                role_offers = self._offers.pop(role, {})
+                for agent_offers in role_offers.values():
+                    to_decline.extend([offer.id for offer in agent_offers.values()])
+            if to_decline:
+                self._driver.declineOffer(to_decline)
 
-    def _remove_offer(self, agent_id, offer_id):
+    def _remove_offer(self, role, agent_id, offer_id):
         try:
-            del self._offers[agent_id][offer_id]
-            if not self._offers[agent_id]:
-                del self._offers[agent_id]
+            del self._offers[role][agent_id][offer_id]
+            if not self._offers[role][agent_id]:
+                del self._offers[role][agent_id]
+            if not self._offers[role]:
+                del self._offers[role]
         except KeyError:
             # There are various race conditions that mean an offer could be
             # removed twice (e.g. if we launch a task with an offer at the
@@ -2169,6 +2194,8 @@ class Scheduler(pymesos.Scheduler):
         def format_time(t):
             return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
 
+        to_decline = []
+        to_suppress = set()
         for offer in offers:
             if offer.unavailability:
                 start_time_ns = offer.unavailability.start.nanoseconds
@@ -2179,13 +2206,31 @@ class Scheduler(pymesos.Scheduler):
                     logger.debug('Declining offer %s from %s: unavailable from %s to %s',
                                  offer.id.value, offer.hostname,
                                  format_time(start_time), format_time(end_time))
-                    self._driver.declineOffer(offer.id)
+                    to_decline.append(offer.id)
                     continue
                 else:
                     logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
                                  offer.id.value, offer.hostname,
                                  format_time(start_time), format_time(end_time))
-            self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
+            role = offer.allocation_info.role
+            if role in self._roles_needed:
+                logger.debug('Adding offer %s on %s with role %s to pool',
+                             offer.id.value, offer.agent_id.value, role)
+                role_offers = self._offers.setdefault(role, {})
+                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+                agent_offers[offer.id.value] = offer
+            else:
+                # This can happen either due to a race or at startup, when
+                # we haven't yet suppressed roles.
+                logger.debug('Declining offer %s on %s with role %s',
+                             offer.id.value, offer.agent_id.value, role)
+                to_decline.append(offer.id)
+                to_suppress.add(role)
+
+        if to_decline:
+            self._driver.declineOffer(to_decline)
+        if to_suppress:
+            self._driver.suppressOffers(to_suppress)
         self._wakeup_launcher.set()
 
     @run_in_event_loop
@@ -2196,9 +2241,13 @@ class Scheduler(pymesos.Scheduler):
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
-        for agent_id, offers in list(self._offers.items()):
-            if offer_id.value in offers:
-                self._remove_offer(agent_id, offer_id.value)
+        # TODO: this is not very efficient. A secondary lookup from offer id to
+        # the relevant offer info would speed it up.
+        for role, role_offers in self._offers.items():
+            for agent_id, agent_offers in role_offers.items():
+                if offer_id.value in offers:
+                    self._remove_offer(role, agent_id, offer_id.value)
+                    return
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
@@ -2354,28 +2403,27 @@ class Scheduler(pymesos.Scheduler):
     async def _launch_once(self):
         """Run single iteration of :meth:`_launcher`"""
         candidates = [(queue, queue.front()) for queue in self._queues if queue]
-        if not candidates:
-            self._clear_offers()
-            return
-        elif not self._offers and self._offers_suppressed:
-            self._driver.reviveOffers()
-            self._offers_suppressed = False
-            return
+        if candidates:
+            # Filter out any candidates other than the highest priority
+            priority = min(queue.priority for (queue, group) in candidates)
+            candidates = [candidate for candidate in candidates
+                          if candidate[0].priority == priority]
+            # Order by deadline, to give some degree of fairness
+            candidates.sort(key=lambda x: x[1].deadline)
+        # Revive/suppress to match the necessary roles
+        roles = set(queue.role for (queue, group) in candidates)
+        self._update_roles(roles)
 
-        # Filter out any candidates other than the highest priority
-        priority = min(queue.priority for (queue, group) in candidates)
-        candidates = [candidate for candidate in candidates if candidate[0].priority == priority]
-        # Order by deadline, to give some degree of fairness
-        candidates.sort(key=lambda x: x[1].deadline)
         for queue, group in candidates:
             nodes = group.nodes
+            role = queue.role
             try:
                 # Due to concurrency, another coroutine may have altered
                 # the state of the tasks since they were put onto the
                 # pending list (e.g. by killing them). Filter those out.
                 nodes = [node for node in nodes if node.state == TaskState.STARTING]
                 agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
-                          for agent_id, offers in self._offers.items()]
+                          for agent_id, offers in self._offers.get(role, {}).items()]
                 # Back up the original agents so that if allocation fails we can
                 # diagnose it.
                 orig_agents = copy.deepcopy(agents)
@@ -2448,7 +2496,7 @@ class Scheduler(pymesos.Scheduler):
                         # quickly.
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
-                            self._remove_offer(agent.agent_id, offer_id.value)
+                            self._remove_offer(role, agent.agent_id, offer_id.value)
                         logger.info('Launched %d tasks on %s',
                                     len(taskinfos[agent]), agent.agent_id)
                     for node in nodes:

@@ -313,11 +313,14 @@ class TestTaskIDAllocator:
         assert_equal('test-baz-00000001', tid1)
 
 
-def _make_resources(resources):
+def _make_resources(resources, role='default', is_taskinfo=False):
     out = AnyOrderList()
     for name, value in resources.items():
         resource = Dict()
         resource.name = name
+        if not is_taskinfo:
+            resource.role = '*'
+        resource.allocation_info.role = role
         if isinstance(value, (int, float)):
             resource.type = 'SCALAR'
             resource.scalar.value = float(value)
@@ -342,13 +345,14 @@ def _make_json_attr(name, value):
     return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode('utf-8')))
 
 
-def _make_offer(framework_id, agent_id, host, resources, attrs=()):
+def _make_offer(framework_id, agent_id, host, resources, attrs=(), role='default'):
     offer = Dict()
     offer.id.value = uuid.uuid4().hex
     offer.framework_id.value = framework_id
     offer.agent_id.value = agent_id
+    offer.allocation_info.role = role
     offer.hostname = host
-    offer.resources = _make_resources(resources)
+    offer.resources = _make_resources(resources, role)
     offer.attributes = attrs
     return offer
 
@@ -1153,7 +1157,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.numa_attr
         ]
         self._make_physical()
-        self.sched = scheduler.Scheduler(self.loop, 0, 'http://scheduler/')
+        self.sched = scheduler.Scheduler(self.loop, 'default', 0, 'http://scheduler/')
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
                                            self.sched.http_url)
         self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
@@ -1173,9 +1177,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(
             AnyOrderList([
-                mock.call.acceptOffers(AnyOrderList([offers[0].id, offers[2].id]), []),
-                mock.call.acceptOffers([offers[1].id], []),
-                mock.call.suppressOffers()
+                mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
+                mock.call.suppressOffers({'default'})
             ]), self.driver.mock_calls)
 
     async def test_launch_cycle(self):
@@ -1205,18 +1208,18 @@ class TestScheduler(asynctest.ClockedTestCase):
             await self.sched.launch(physical_graph, self.resolver, target)
 
     async def test_add_queue_twice(self):
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         self.sched.add_queue(queue)
         with assert_raises(ValueError):
             self.sched.add_queue(queue)
 
     async def test_remove_nonexistent_queue(self):
         with assert_raises(ValueError):
-            self.sched.remove_queue(scheduler.LaunchQueue())
+            self.sched.remove_queue(scheduler.LaunchQueue('default'))
 
     async def test_launch_bad_queue(self):
         """Launch raises ValueError if queue has been added"""
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         with assert_raises(ValueError):
             await self.sched.launch(self.physical_graph, self.resolver, queue=queue)
 
@@ -1261,7 +1264,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             'katsdpcontroller.gpu.1.mem': 256.0,
             'katsdpcontroller.interface.0.bandwidth_in': 500e6,
             'katsdpcontroller.interface.0.bandwidth_out': 200e6
-        })
+        }, is_taskinfo=True)
         expected_taskinfo0.discovery.visibility = 'EXTERNAL'
         expected_taskinfo0.discovery.name = 'node0'
         expected_taskinfo0.discovery.ports.ports = [Dict(number=30000, name='port', protocol='tcp')]
@@ -1282,7 +1285,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
         expected_taskinfo1.container.docker.parameters = [{'key': 'cpuset-cpus', 'value': '0,2'}]
-        expected_taskinfo1.resources = _make_resources({'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
+        expected_taskinfo1.resources = _make_resources(
+            {'cpus': 0.5, 'cores': [(0, 1), (2, 3)]}, is_taskinfo=True)
         expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'
         expected_taskinfo1.discovery.ports.ports = []
@@ -1296,7 +1300,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
-        assert_equal([], self.driver.mock_calls)
+        assert_equal([mock.call.reviveOffers({'default'})], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
@@ -1312,6 +1316,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
+        assert_equal(expected_taskinfo0.resources, self.nodes[0].taskinfo.resources)
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
         assert_equal('agentid0', self.nodes[0].agent_id)
@@ -1328,7 +1333,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
-            mock.call.suppressOffers()
+            mock.call.suppressOffers({'default'})
         ]), self.driver.mock_calls)
         self.driver.reset_mock()
 
@@ -1456,7 +1461,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.nodes[1].logical_node.command = [
             'test', '--host={host}', '--another={endpoints[node2_foo]}']
         # Schedule the nodes separately on separate queues
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         self.sched.add_queue(queue)
         launch0, kill0 = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
         launch1 = asyncio.ensure_future(
@@ -1531,7 +1536,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.NOT_READY, self.nodes[1].state)
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
         # Once we abort, we should no longer be interested in offers
-        assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+        assert_equal([mock.call.suppressOffers({'default'})], self.driver.mock_calls)
 
     async def test_launch_resolve_raises(self):
         async def resolve_raise(resolver, graph, loop):
@@ -1546,9 +1551,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_in('Testing', str(cm.exception))
         # The offers must be returned to Mesos
         assert_equal(AnyOrderList([
-            mock.call.acceptOffers([offers[0].id], []),
-            mock.call.acceptOffers([offers[1].id], []),
-            mock.call.suppressOffers()]), self.driver.mock_calls)
+            mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
+            mock.call.suppressOffers({'default'})]), self.driver.mock_calls)
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
@@ -1584,7 +1588,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer(offer0.id)], self.driver.mock_calls)
+        assert_equal([mock.call.declineOffer([offer0.id])], self.driver.mock_calls)
         launch.cancel()
 
     async def test_unavailability_past(self):
@@ -1599,7 +1603,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         assert_equal([
             mock.call.launchTasks([offer0.id], mock.ANY),
-            mock.call.suppressOffers()
+            mock.call.suppressOffers({'default'})
         ], self.driver.mock_calls)
         launch.cancel()
 
@@ -1706,6 +1710,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             The batch_run asynchronous task
         """
         if state >= TaskState.STARTED:
+            await asynctest.exhaust_callbacks(self.loop)
             self.sched.resourceOffers(self.driver, self._make_offers())
             await asynctest.exhaust_callbacks(self.loop)
             assert_equal(TaskState.STARTED, self.batch_node.state)
@@ -1789,12 +1794,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
-        assert_in(mock.call.suppressOffers(), self.driver.mock_calls)
-        pos = self.driver.mock_calls.index(mock.call.suppressOffers())
+        assert_in(mock.call.suppressOffers({'default'}), self.driver.mock_calls)
+        pos = self.driver.mock_calls.index(mock.call.suppressOffers({'default'}))
         assert_true(1 <= pos < len(self.driver.mock_calls) - 2)
         del self.driver.mock_calls[pos]
         assert_equal([
-            mock.call.reviveOffers(),
+            mock.call.reviveOffers({'default'}),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status1),
             mock.call.killTask(self.nodes[0].taskinfo.task_id),
