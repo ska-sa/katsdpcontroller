@@ -742,14 +742,6 @@ class InsufficientResourcesError(RuntimeError):
     pass
 
 
-class NoOffersError(InsufficientResourcesError):
-    """Indicates that resources were insufficient because no offers were
-    received before the timeout.
-    """
-    def __init__(self):
-        super().__init__("No offers were received")
-
-
 class TaskNoAgentError(InsufficientResourcesError):
     """Indicates that no agent was suitable for a task. Where possible, a
     sub-class is used to indicate a more specific error.
