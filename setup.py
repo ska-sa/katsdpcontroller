@@ -20,7 +20,7 @@ setup(
         ],
     setup_requires=['katversion'],
     install_requires=[
-        'pymesos>=0.3.1',   # 0.3.1 implements declineInverseOffers
+        'pymesos>=0.3.6',   # 0.3.6 implements reviveOffers with roles
         'addict!=2.0.*',
         'aiohttp~=2.0',
         'aiomonitor',
