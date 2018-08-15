@@ -32,7 +32,6 @@ prometheus_async==18.1.0
 prometheus_client==0.2.0
 pydotplus==2.0.2
 pygelf                     # via katsdpservices
-pymesos==0.3.1
 pyparsing==2.2.0           # via pydotplus
 redis                      # via katsdptelstate
 requests==2.19.1           # via docker
@@ -43,5 +42,8 @@ urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 wrapt==1.10.11             # via prometheus_async
 yarl                       # via aiohttp
+
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
+# Temporary, until https://github.com/douban/pymesos/pull/110 is in a release
+git+ssh://git@github.com/bmerry/pymesos#egg=pymesos
