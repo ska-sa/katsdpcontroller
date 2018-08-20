@@ -1,11 +1,23 @@
 {
-    "read": {
-        "access_key": "dummy",
-        "secret_key": "dummy"
+    "continuum": {
+        "write": {
+            "access_key": "dummy",
+            "secret_key": "dummy"
+        },
+        "url": "http://s3.invalid/"
     },
-    "write": {
-        "access_key": "dummy",
-        "secret_key": "dummy"
+    "spectral": {
+        "write": {
+            "access_key": "dummy",
+            "secret_key": "dummy"
+        },
+        "url": "http://s3.invalid/"
     },
-    "url": "http://s3.invalid/"
+    "archive": {
+        "write": {
+            "access_key": "dummy",
+            "secret_key": "dummy"
+        },
+        "url": "http://s3.invalid/"
+    }
 }

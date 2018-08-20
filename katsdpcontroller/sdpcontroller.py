@@ -68,11 +68,13 @@ def _load_s3_config(filename):
 
 def _redact_arg(arg, s3_config):
     """Process one argument for _redact_keys"""
-    for mode in ['read', 'write']:
-        for name in ['access_key', 'secret_key']:
-            key = s3_config[mode][name]
-            if arg == key or arg.endswith('=' + key):
-                return arg[:-len(key)] + 'REDACTED'
+    for config in s3_config.values():
+        for mode in ['read', 'write']:
+            if mode in config:
+                for name in ['access_key', 'secret_key']:
+                    key = config[mode][name]
+                    if arg == key or arg.endswith('=' + key):
+                        return arg[:-len(key)] + 'REDACTED'
     return arg
 
 
