@@ -36,9 +36,8 @@ IMAGES = frozenset([
     'katsdpcam2telstate',
     'katsdpdisp',
     'katsdpingest_titanx',
-    'katsdpfilewriter',
+    'katsdpdatawriter',
     'katsdpmetawriter',
-    'katsdpflagwriter',
     'katsdptelstate'
 ])
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
@@ -918,7 +917,7 @@ def _make_vis_writer(g, config, name):
     info = L0Info(config, name)
 
     vis_writer = SDPLogicalTask('vis_writer.' + name)
-    vis_writer.image = 'katsdpfilewriter'
+    vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
     # antennas, 32K channels requires two CPUs (one for capture, one for
@@ -936,7 +935,8 @@ def _make_vis_writer(g, config, name):
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
     vis_writer.mem = 2 * _mb(memory_pool + socket_buffers) + 256
-    vis_writer.ports = ['port']
+    vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    vis_writer.wait_ports = ['port']
     vis_writer.volumes = [OBJ_DATA_VOL]
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
@@ -959,14 +959,15 @@ def _make_flag_writer(g, config, name, l0_name):
     info = L0Info(config, l0_name)
 
     flag_writer = SDPLogicalTask('flag_writer.' + name)
-    flag_writer.image = 'katsdpflagwriter'
+    flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
     # Trial allocation
     flag_writer.cpus = 1.0
     # Sized to include space for 8x in the memory pool and 5x in the cache
     flag_writer.mem = 256 + _mb(32 * info.flag_size)
-    flag_writer.ports = ['port']
+    flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
     flag_writer.volumes = [OBJ_DATA_VOL]
