@@ -351,7 +351,7 @@ def _make_cam2telstate(g, config, name):
 
 def _make_meta_writer(g, config):
     def make_config(task, resolver):
-        s3_url = urllib.parse.urlsplit(resolver.s3_config['url'])
+        s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['url'])
         return {
             's3_host': s3_url.hostname,
             's3_port': s3_url.port,
@@ -364,8 +364,8 @@ def _make_meta_writer(g, config):
     # they are redacted from telstate
     meta_writer.command = [
         'meta_writer.py',
-        '--access-key', '{resolver.s3_config[write][access_key]}',
-        '--secret-key', '{resolver.s3_config[write][secret_key]}'
+        '--access-key', '{resolver.s3_config[archive][write][access_key]}',
+        '--secret-key', '{resolver.s3_config[archive][write][secret_key]}'
     ]
     meta_writer.cpus = 0.2
     # Only a base allocation: it also gets telstate_extra added
@@ -947,7 +947,7 @@ def _make_vis_writer(g, config, name):
         'l0_interface': task.interfaces['sdp_10g'].name,
         'obj_size_mb': 10.0,
         'npy_path': OBJ_DATA_VOL.container_path,
-        's3_endpoint_url': resolver.s3_config['url']
+        's3_endpoint_url': resolver.s3_config['archive']['url']
     })
     g.add_edge(vis_writer, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,

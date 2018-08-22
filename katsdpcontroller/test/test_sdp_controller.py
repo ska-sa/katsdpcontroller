@@ -201,13 +201,16 @@ EXPECTED_REQUEST_LIST = [
 class TestRedactKeys(unittest.TestCase):
     def setUp(self):
         self.s3_config = {
-            'read': {
-                'access_key': 'ACCESS_KEY',
-                'secret_key': 'tellno1'
-            },
-            'write': {
-                'access_key': 's3cr3t',
-                'secret_key': 'mores3cr3t'
+            'archive': {
+                'read': {
+                    'access_key': 'ACCESS_KEY',
+                    'secret_key': 'tellno1'
+                },
+                'write': {
+                    'access_key': 's3cr3t',
+                    'secret_key': 'mores3cr3t'
+                },
+                'url': 'http://invalid/'
             }
         }
 
@@ -462,15 +465,39 @@ class TestSDPController(BaseTestSDPController):
         self.open_mock = self.create_patch('builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.set_read_data_for('s3_config.json', '''
             {
-                "read": {
-                    "access_key": "not-really-an-access-key",
-                    "secret_key": "tellno1"
+                "continuum": {
+                    "read": {
+                        "access_key": "not-really-an-access-key",
+                        "secret_key": "tellno1"
+                    },
+                    "write": {
+                        "access_key": "another-fake-key",
+                        "secret_key": "s3cr3t"
+                    },
+                    "url": "http://continuum.s3.invalid/"
                 },
-                "write": {
-                    "access_key": "another-fake-key",
-                    "secret_key": "s3cr3t"
+                "spectral": {
+                    "read": {
+                        "access_key": "not-really-an-access-key",
+                        "secret_key": "tellno1"
+                    },
+                    "write": {
+                        "access_key": "another-fake-key",
+                        "secret_key": "s3cr3t"
+                    },
+                    "url": "http://spectral.s3.invalid/"
                 },
-                "url": "http://s3.invalid/"
+                "archive": {
+                    "read": {
+                        "access_key": "not-really-an-access-key",
+                        "secret_key": "tellno1"
+                    },
+                    "write": {
+                        "access_key": "another-fake-key",
+                        "secret_key": "s3cr3t"
+                    },
+                    "url": "http://archive.s3.invalid/"
+                }
             }''')
         await self.setup_server(
             '127.0.0.1', 0, self.sched, s3_config_file='s3_config.json',
@@ -620,7 +647,7 @@ class TestSDPController(BaseTestSDPController):
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
-            's3_endpoint_url': 'http://s3.invalid/',
+            's3_endpoint_url': 'http://archive.s3.invalid/',
             'override_test': 'value'
         }, immutable=True)
         # Test that the output channel rounding was done correctly

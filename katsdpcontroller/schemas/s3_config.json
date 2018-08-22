@@ -9,15 +9,24 @@
                 "access_key": {"$ref": "#/definitions/key"},
                 "secret_key": {"$ref": "#/definitions/key"}
             }
+        },
+        "store": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "read": {"$ref": "#/definitions/key_pair"},
+                "write": {"$ref": "#/definitions/key_pair"},
+                "url": { "type": "string", "format": "uri" }
+            },
+            "required": ["write", "url"]
         }
     },
     "type": "object",
     "additionalProperties": false,
     "properties": {
-        "read": {"$ref": "#/definitions/key_pair"},
-        "write": {"$ref": "#/definitions/key_pair"},
-        "url": { "type": "string", "format": "uri" }
+        "continuum": {"$ref": "#/definitions/store"},
+        "spectral": {"$ref": "#/definitions/store"},
+        "archive": {"$ref": "#/definitions/store"}
     },
-    "required": ["read", "write", "url"]
+    "required": ["continuum", "spectral", "archive"]
 }
-
