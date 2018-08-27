@@ -525,7 +525,7 @@ def _make_timeplot(g, config, spectral_name):
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
     timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    timeplot.interfaces[0].bandwidth_in = _timeplot_bandwidth(spectral_info, n_ingest)
+    timeplot.interfaces[0].bandwidth_in = _timeplot_bandwidth(spectral_info, n_ingest) * n_ingest
     timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
@@ -551,15 +551,16 @@ def _make_timeplot(g, config, spectral_name):
     return timeplot
 
 
-def _timeplot_frame_size(spectral_info, n_cont_channels):
-    """Approximate size of the data sent from all ingest processes to timeplot per heap"""
+def _timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
+    """Approximate size of the data sent from one ingest process to timeplot, per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
     n_perc_signals = 5 * 8
-    n_spec_channels = spectral_info.n_channels
+    n_spec_channels = spectral_info.n_channels // n_ingest
+    n_cont_channels //= n_ingest
     n_bls = spectral_info.n_baselines
     ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * 9  # sd_data + sd_flags
     ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
-    ans += n_cont_channels * n_bls * 9              # sd_blmx_data + sd_blmx_flags
+    ans += n_cont_channels * n_bls * 9              # sd_blmxdata + sd_blmxflags
     ans += n_bls * 12                               # sd_timeseries + sd_timeseriesabs
     ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
@@ -579,10 +580,10 @@ def _timeplot_continuum_factor(spectral_info, n_ingest):
 
 
 def _timeplot_bandwidth(spectral_info, n_ingest):
-    """Bandwidth for the timeplot stream (summed over all ingests)"""
+    """Bandwidth for the timeplot stream from a single ingest"""
     sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
     sd_frame_size = _timeplot_frame_size(
-        spectral_info, spectral_info.n_channels // sd_continuum_factor)
+        spectral_info, spectral_info.n_channels // sd_continuum_factor, n_ingest)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     return _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
@@ -673,7 +674,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     group_config = {
         'continuum_factor': continuum_info.raw['continuum_factor'] if continuum_name else 1,
         'sd_continuum_factor': sd_continuum_factor,
-        'sd_spead_rate': sd_spead_rate / n_ingest,
+        'sd_spead_rate': sd_spead_rate,
         'cbf_ibv': not develop,
         'cbf_name': src,
         'servers': n_ingest,
@@ -748,7 +749,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         ingest.interfaces[0].bandwidth_in = src_info.net_bandwidth / n_ingest
         net_bandwidth = 0.0
         if spectral_name:
-            net_bandwidth += spectral_info.net_bandwidth + sd_spead_rate
+            net_bandwidth += spectral_info.net_bandwidth + sd_spead_rate * n_ingest
         if continuum_name:
             net_bandwidth += continuum_info.net_bandwidth
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
