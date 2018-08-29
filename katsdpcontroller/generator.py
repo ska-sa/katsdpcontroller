@@ -425,8 +425,8 @@ def _make_cbf_simulator(g, config, name):
             })
         else:
             conf.update({
-                'beamformer-timesteps': info.raw['spectra_per_heap'],
-                'beamformer-bits': info.raw['beng_out_bits_per_sample']
+                'beamformer_timesteps': info.raw['spectra_per_heap'],
+                'beamformer_bits': info.raw['beng_out_bits_per_sample']
             })
         if 'center_freq' in settings:
             conf['cbf_center_freq'] = float(settings['center_freq'])
