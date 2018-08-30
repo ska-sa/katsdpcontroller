@@ -411,7 +411,7 @@ class Resource:
         """Add a Mesos resource message to the internal resource list"""
         if resource.name != self.name:
             raise ValueError('Name mismatch {} != {}'.format(self.name, resource.name))
-        # Keeps the most specificly reserved resources at the end
+        # Keeps the most specifically reserved resources at the end
         # so that they're used first before unreserved resources.
         pos = 0
         role = resource.get('role', '*')
@@ -1266,7 +1266,7 @@ class AgentGPU(GPUResources):
 
 
 class AgentInterface(InterfaceResources):
-    """A single interface on an agent machine, trackign both attributes and free resources.
+    """A single interface on an agent machine, tracking both attributes and free resources.
 
     Attributes
     ----------
