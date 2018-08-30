@@ -316,6 +316,16 @@ class ResourceRequest:
 
     This is an abstract base class. See :class:`ScalarResourceRequest` and
     :class:`RangeResourceRequest`.
+
+    Attributes
+    ----------
+    value
+        Resource request (read-write). Requesters set this field to indicate
+        their requirements. The type depends on the subclass.
+    amount
+        Requested amount (read-only). Subclasses provide this property to
+        indicate how much of the resource is needed, as a real number
+        (typically :class:`int` or :class:`Decimal`).
     """
     pass
 
