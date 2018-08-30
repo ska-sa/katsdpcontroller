@@ -123,8 +123,10 @@ if __name__ == "__main__":
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--write-graphs', metavar='DIR',
                         help='Write visualisations of the processing graph to directory')
-    parser.add_argument('--role', default='katsdpcontroller',
-                        help='Mesos role for the framework (default: %(default)s)')
+    parser.add_argument('--realtime-role', default='realtime',
+                        help='Mesos role for realtime capture tasks (default: %(default)s)')
+    parser.add_argument('--batch-role', default='batch',
+                        help='Mesos role for batch processing tasks (default: %(default)s)')
     parser.add_argument('--principal', default='katsdpcontroller',
                         help='Mesos principal for the principal (default: %(default)s')
     parser.add_argument('-v', '--verbose', dest='verbose', default=False,
@@ -170,14 +172,15 @@ if __name__ == "__main__":
     framework_info.name = 'katsdpcontroller'
     framework_info.checkpoint = True
     framework_info.principal = opts.principal
-    framework_info.role = opts.role
+    framework_info.roles = [opts.realtime_role, opts.batch_role]
+    framework_info.capabilities = [{'type': 'MULTI_ROLE'}]
 
     loop = asyncio.get_event_loop()
     if opts.interface_mode:
         sched = None
         http_handler = None
     else:
-        sched = scheduler.Scheduler(loop, opts.http_port, opts.http_url)
+        sched = scheduler.Scheduler(loop, opts.realtime_role, opts.http_port, opts.http_url)
         sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
         http_handler = sched.app.make_handler(loop=loop, access_log_class=web.AccessLogger)
         driver = pymesos.MesosSchedulerDriver(
@@ -187,6 +190,7 @@ if __name__ == "__main__":
         driver.start()
     server = sdpcontroller.SDPControllerServer(
         opts.host, opts.port, sched, loop,
+        batch_role=opts.batch_role,
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
         s3_config_file=opts.s3_config_file,

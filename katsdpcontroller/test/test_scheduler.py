@@ -8,9 +8,11 @@ import ipaddress
 import unittest
 from unittest import mock
 import time
+from decimal import Decimal
 
 from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
-                        assert_is, assert_is_not, assert_is_none)
+                        assert_is, assert_is_not, assert_is_none, assert_is_instance,
+                        assert_count_equal)
 import networkx
 import pymesos
 from addict import Dict
@@ -46,91 +48,192 @@ class AnyOrderList(list):
         return NotImplemented
 
 
+class TestScalarResource:
+    """Tests for :class:`katsdpcontroller.scheduler.ScalarResource`"""
+    def setUp(self):
+        self.resource = scheduler.ScalarResource('cpus')
+        self.parts = [self._make_part('foo', 3.6), self._make_part('*', 2.2)]
+
+    def _make_part(self, role, value):
+        return Dict({
+            'name': 'cpus',
+            'type': 'SCALAR',
+            'role': role,
+            'scalar': {'value': value},
+            'allocation_info': {'role': 'foo/bar'}
+        })
+
+    def test_empty(self):
+        assert_equal('cpus', self.resource.name)
+        assert_is_instance(self.resource.available, Decimal)
+        assert_equal(0, self.resource.available)
+        assert_false(self.resource)
+        assert_count_equal([], self.resource.info())
+
+    def test_construct(self):
+        for part in self.parts:
+            self.resource.add(part)
+        assert_equal(Decimal('5.8'), self.resource.available)
+        assert_true(self.resource)
+        assert_count_equal(self.parts, self.resource.info())
+
+    def test_construct_other_order(self):
+        for part in reversed(self.parts):
+            self.resource.add(part)
+        assert_equal(Decimal('5.8'), self.resource.available)
+        assert_true(self.resource)
+        assert_count_equal(self.parts, self.resource.info())
+
+    def test_add_wrong_name(self):
+        self.parts[0].name = 'mem'
+        with assert_raises(ValueError):
+            self.resource.add(self.parts[0])
+
+    def test_add_wrong_type(self):
+        self.parts[0].type = 'RANGES'
+        with assert_raises(TypeError):
+            self.resource.add(self.parts[0])
+
+    def test_allocate(self):
+        for part in self.parts:
+            self.resource.add(part)
+        alloced = self.resource.allocate(Decimal('3.9'))
+        assert_count_equal(
+            [self._make_part('foo', 3.6), self._make_part('*', 0.3)],
+            alloced.info())
+        assert_equal(Decimal('3.9'), alloced.available)
+        assert_count_equal([self._make_part('*', 1.9)], self.resource.info())
+        assert_equal(Decimal('1.9'), self.resource.available)
+
+    def test_allocate_all(self):
+        for part in self.parts:
+            self.resource.add(part)
+        alloced = self.resource.allocate(Decimal('5.8'))
+        assert_count_equal(self.parts, alloced.info())
+        assert_equal(Decimal('5.8'), alloced.available)
+        assert_count_equal([], self.resource.info())
+        assert_equal(Decimal('0.0'), self.resource.available)
+
+    def test_over_allocate(self):
+        with assert_raises(ValueError):
+            self.resource.allocate(Decimal('3.99'))
+
+    def test_empty_request(self):
+        request = self.resource.empty_request()
+        assert_is_instance(request, scheduler.ScalarResourceRequest)
+        assert_equal(Decimal('0.000'), request.amount)
+
+
 class TestRangeResource:
     """Tests for :class:`katsdpcontroller.scheduler.RangeResource`"""
-    def test_len(self):
-        rr = scheduler.RangeResource()
-        assert_equal(0, len(rr))
-        rr.add_range(5, 8)
-        rr.add_range(20, 30)
-        assert_equal(13, len(rr))
-        rr.popleft()
-        rr.pop()
-        assert_equal(11, len(rr))
-        rr.add_range(20, 10)
-        assert_equal(11, len(rr))
-
-    def test_add_resource(self):
-        rr = scheduler.RangeResource()
-        resource = Dict()
-        resource.ranges.range = [
-            Dict(begin=5, end=7),
-            Dict(begin=20, end=29)
+    def setUp(self):
+        self.resource = scheduler.RangeResource('ports')
+        self.parts = [
+            self._make_part('foo', [(5, 6), (20, 22)]),
+            self._make_part('*', [(10, 12), (30, 30)])
         ]
-        rr.add_resource(resource)
-        assert_equal([(5, 8), (20, 30)], list(rr._ranges))
-        assert_equal(13, len(rr))
 
-    def test_iter(self):
-        rr = scheduler.RangeResource()
-        rr.add_range(9, 10)
-        rr.add_range(5, 8)
-        assert_equal([9, 5, 6, 7], list(iter(rr)))
+    @classmethod
+    def _make_part(cls, role, ranges):
+        return Dict({
+            'name': 'ports',
+            'type': 'RANGES',
+            'role': role,
+            'allocation_info': {'role': 'foo/bar'},
+            'ranges': {'range': [{'begin': r[0], 'end': r[1]} for r in ranges]}
+        })
 
-    def test_remove(self):
-        rr = scheduler.RangeResource()
-        rr.add_range(9, 10)
-        rr.add_range(5, 8)
-        rr.add_range(20, 25)
+    def test_empty(self):
+        assert_equal('ports', self.resource.name)
+        assert_is_instance(self.resource.available, int)
+        assert_equal(0, self.resource.available)
+        assert_false(self.resource)
+        assert_equal([], list(self.resource.info()))
+
+    def test_construct(self):
+        for part in self.parts:
+            self.resource.add(part)
+        assert_equal(9, len(self.resource))
+        assert_equal(9, self.resource.available)
+        assert_equal([5, 6, 20, 21, 22, 10, 11, 12, 30], list(self.resource))
+        assert_count_equal(self.parts, list(self.resource.info()))
+
+    def test_add_wrong_type(self):
+        self.parts[0].type = 'SCALAR'
+        with assert_raises(TypeError):
+            self.resource.add(self.parts[0])
+
+    def test_allocate(self):
+        for part in self.parts:
+            self.resource.add(part)
+        alloced = self.resource.allocate(6)
+        assert_equal(6, alloced.available)
+        assert_count_equal(
+            [
+                self._make_part('foo', [(5, 6), (20, 22)]),
+                self._make_part('*', [(10, 10)])
+            ], alloced.info())
+        assert_equal([5, 6, 20, 21, 22, 10], list(alloced))
+        assert_equal(3, self.resource.available)
+        assert_count_equal(
+            [self._make_part('*', [(11, 12), (30, 30)])],
+            self.resource.info())
+
+    def test_allocate_minimum(self):
+        for part in self.parts:
+            self.resource.add(part)
+        alloced = self.resource.allocate(6, minimum=11)
+        assert_equal(6, alloced.available)
+        assert_count_equal(
+            [
+                self._make_part('foo', [(20, 22)]),
+                self._make_part('*', [(11, 12), (30, 30)])
+            ], alloced.info())
+        assert_equal([20, 21, 22, 11, 12, 30], list(alloced))
+        assert_equal(3, self.resource.available)
+        assert_count_equal(
+            [
+                self._make_part('foo', [(5, 6)]),
+                self._make_part('*', [(10, 10)])
+            ], self.resource.info())
+
+    def test_allocate_minimum_middle(self):
+        self.resource.add(self.parts[1])
+        alloced = self.resource.allocate(1, minimum=11)
+        assert_equal(1, alloced.available)
+        assert_count_equal(
+            [self._make_part('*', [(11, 11)])],
+            alloced.info())
+        assert_equal([11], list(alloced))
+        assert_equal(3, self.resource.available)
+        assert_count_equal(
+            [self._make_part('*', [(10, 10), (12, 12), (30, 30)])],
+            self.resource.info())
+
+    def test_over_allocate_minimum(self):
+        for part in self.parts:
+            self.resource.add(part)
         with assert_raises(ValueError):
-            rr.remove(8)
-        with assert_raises(ValueError):
-            rr.remove(10)
-        rr.remove(9)
-        assert_equal([5, 6, 7, 20, 21, 22, 23, 24], list(rr))
-        rr.remove(22)
-        assert_equal([5, 6, 7, 20, 21, 23, 24], list(rr))
-        rr.remove(24)
-        assert_equal([5, 6, 7, 20, 21, 23], list(rr))
+            self.resource.allocate(6, minimum=21)
 
-    def test_popleft(self):
-        rr = scheduler.RangeResource()
-        rr.add_range(9, 10)
-        rr.add_range(5, 8)
-        out = []
-        for _ in range(4):
-            out.append(rr.popleft())
-        assert_false(rr)
-        assert_equal([9, 5, 6, 7], out)
-        assert_raises(IndexError, rr.popleft)
+    def test_subset(self):
+        for part in self.parts:
+            self.resource.add(part)
+        sub = self.resource.subset([5, 6, 10, 12, 40])
+        assert_equal(4, sub.available)
+        assert_count_equal(
+            [
+                self._make_part('foo', [(5, 5), (6, 6)]),
+                self._make_part('*', [(10, 10), (12, 12)])
+            ], sub.info())
 
-    def test_pop(self):
-        rr = scheduler.RangeResource()
-        rr.add_range(9, 10)
-        rr.add_range(5, 8)
-        out = []
-        for _ in range(4):
-            out.append(rr.pop())
-        assert_false(rr)
-        assert_equal([7, 6, 5, 9], out)
-        assert_raises(IndexError, rr.pop)
-
-    def test_popleft_min(self):
-        rr = scheduler.RangeResource()
-        rr.add_range(4, 7)
-        rr.add_range(9, 10)
-        rr.add_range(17, 20)
-        assert_raises(IndexError, rr.popleft_min, 20)
-        assert_equal(9, rr.popleft_min(8))
-        assert_equal(18, rr.popleft_min(18))
-        assert_equal([4, 5, 6, 17, 19], list(rr))
-
-    def test_str(self):
-        rr = scheduler.RangeResource()
-        assert_equal('', str(rr))
-        rr.add_range(9, 10)
-        rr.add_range(5, 8)
-        assert_equal('9,5-7', str(rr))
+    def test_subset_empty(self):
+        for part in self.parts:
+            self.resource.add(part)
+        sub = self.resource.subset([40])
+        assert_equal(0, sub.available)
+        assert_false(sub)
+        assert_count_equal([], sub.info())
 
 
 class TestPollPorts(asynctest.TestCase):
@@ -313,11 +416,12 @@ class TestTaskIDAllocator:
         assert_equal('test-baz-00000001', tid1)
 
 
-def _make_resources(resources):
+def _make_resources(resources, role='default'):
     out = AnyOrderList()
     for name, value in resources.items():
         resource = Dict()
         resource.name = name
+        resource.allocation_info.role = role
         if isinstance(value, (int, float)):
             resource.type = 'SCALAR'
             resource.scalar.value = float(value)
@@ -342,13 +446,14 @@ def _make_json_attr(name, value):
     return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode('utf-8')))
 
 
-def _make_offer(framework_id, agent_id, host, resources, attrs=()):
+def _make_offer(framework_id, agent_id, host, resources, attrs=(), role='default'):
     offer = Dict()
     offer.id.value = uuid.uuid4().hex
     offer.framework_id.value = framework_id
     offer.agent_id.value = agent_id
+    offer.allocation_info.role = role
     offer.hostname = host
-    offer.resources = _make_resources(resources)
+    offer.resources = _make_resources(resources, role)
     offer.attributes = attrs
     return offer
 
@@ -406,13 +511,13 @@ class TestAgent(unittest.TestCase):
         attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr, self.priority_attr]
         offers = [
             self._make_offer({'cpus': 4.0, 'mem': 1024.0,
-                              'ports': [(100, 200), (300, 350)], 'cores': [(0, 8)]}, attrs),
+                              'ports': [(100, 200), (300, 350)], 'cores': [(0, 7)]}, attrs),
             self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5,
                               'katsdpcontroller.gpu.0.compute': 0.25,
                               'katsdpcontroller.gpu.0.mem': 256.0,
                               'katsdpcontroller.interface.0.bandwidth_in': 1e9,
                               'katsdpcontroller.interface.0.bandwidth_out': 1e9,
-                              'cores': [(8, 9)]}, attrs),
+                              'cores': [(7, 8)]}, attrs),
             self._make_offer({'katsdpcontroller.gpu.0.compute': 0.5,
                               'katsdpcontroller.gpu.0.mem': 1024.0,
                               'katsdpcontroller.gpu.1.compute': 0.125,
@@ -426,23 +531,24 @@ class TestAgent(unittest.TestCase):
         assert_equal(len(attrs), len(agent.attributes))
         for attr, agent_attr in zip(attrs, agent.attributes):
             assert_equal(attr, agent_attr)
-        assert_equal(4.5, agent.cpus)
-        assert_equal(1147.5, agent.mem)
-        assert_equal(1024.5, agent.disk)
+        assert_equal(4.5, agent.resources['cpus'].available)
+        assert_equal(1147.5, agent.resources['mem'].available)
+        assert_equal(1024.5, agent.resources['disk'].available)
         assert_equal(2, len(agent.gpus))
-        assert_equal(0.75, agent.gpus[0].compute)
-        assert_equal(1280.0, agent.gpus[0].mem)
-        assert_equal(0.125, agent.gpus[1].compute)
-        assert_equal(2048.0, agent.gpus[1].mem)
-        assert_equal(list(range(0, 9)), list(agent.cores))
-        assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.ports))
+        assert_equal(0.75, agent.gpus[0].resources['compute'].available)
+        assert_equal(1280.0, agent.gpus[0].resources['mem'].available)
+        assert_equal(0.125, agent.gpus[1].resources['compute'].available)
+        assert_equal(2048.0, agent.gpus[1].resources['mem'].available)
+        assert_equal([0, 2, 4, 6], list(agent.numa_cores[0]))
+        assert_equal([1, 3, 5, 7], list(agent.numa_cores[1]))
+        assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.resources['ports']))
         assert_equal(1, len(agent.interfaces))
         assert_equal('eth0', agent.interfaces[0].name)
         assert_equal('net0', agent.interfaces[0].network)
         assert_equal(ipaddress.IPv4Address('192.168.254.254'), agent.interfaces[0].ipv4_address)
         assert_equal(1, agent.interfaces[0].numa_node)
-        assert_equal(11e8, agent.interfaces[0].bandwidth_in)
-        assert_equal(12e8, agent.interfaces[0].bandwidth_out)
+        assert_equal(11e8, agent.interfaces[0].resources['bandwidth_in'].available)
+        assert_equal(12e8, agent.interfaces[0].resources['bandwidth_out'].available)
         assert_equal(['/dev/infiniband/foo'], agent.interfaces[0].infiniband_devices)
         assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
                       scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
@@ -471,7 +577,7 @@ class TestAgent(unittest.TestCase):
         offers[0].resources[0].disk.source.type = 'PATH'
         offers[0].resources[0].disk.source.path.root = '/mnt/data'
         agent = scheduler.Agent(offers)
-        assert_equal(0, agent.disk)
+        assert_equal(0, agent.resources['disk'].available)
 
     def test_bad_json(self):
         """A warning must be printed if an interface description is not valid JSON"""
@@ -657,32 +763,33 @@ class TestAgent(unittest.TestCase):
                 'katsdpcontroller.interface.0.bandwidth_out': 2100e6
             }, [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr])])
         ra = agent.allocate(task)
-        assert_equal(4.0, ra.cpus)
-        assert_equal(128.0, ra.mem)
+        assert_equal(4.0, ra.resources['cpus'].available)
+        assert_equal(128.0, ra.resources['mem'].available)
         assert_equal(1, len(ra.interfaces))
-        assert_equal(1000e6, ra.interfaces[0].bandwidth_in)
-        assert_equal(500e6, ra.interfaces[0].bandwidth_out)
+        assert_equal(1000e6, ra.interfaces[0].resources['bandwidth_in'].available)
+        assert_equal(500e6, ra.interfaces[0].resources['bandwidth_out'].available)
         assert_equal(0, ra.interfaces[0].index)
         assert_equal([scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      ra.volumes)
         assert_equal(2, len(ra.gpus))
-        assert_equal(0.5, ra.gpus[0].compute)
-        assert_equal(1024.0, ra.gpus[0].mem)
+        assert_equal(0.5, ra.gpus[0].resources['compute'].available)
+        assert_equal(1024.0, ra.gpus[0].resources['mem'].available)
         assert_equal(1, ra.gpus[0].index)
-        assert_equal(0.5, ra.gpus[1].compute)
-        assert_equal(256.0, ra.gpus[1].mem)
+        assert_equal(0.5, ra.gpus[1].resources['compute'].available)
+        assert_equal(256.0, ra.gpus[1].resources['mem'].available)
         assert_equal(0, ra.gpus[1].index)
-        assert_equal([3, 5, 7], ra.cores)
+        assert_equal([3, 5, 7], list(ra.resources['cores']))
         # Check that the resources were subtracted
-        assert_equal(0.0, agent.cpus)
-        assert_equal(72.0, agent.mem)
-        assert_equal([4, 6], list(agent.cores))
-        assert_equal(1000e6, agent.interfaces[0].bandwidth_in)
-        assert_equal(1600e6, agent.interfaces[0].bandwidth_out)
-        assert_equal(0.25, agent.gpus[0].compute)
-        assert_equal(0.0, agent.gpus[0].mem)
-        assert_equal(0.25, agent.gpus[1].compute)
-        assert_equal(1024.0, agent.gpus[1].mem)
+        assert_equal(0.0, agent.resources['cpus'].available)
+        assert_equal(72.0, agent.resources['mem'].available)
+        assert_equal([4, 6], list(agent.numa_cores[0]))
+        assert_equal([], list(agent.numa_cores[1]))
+        assert_equal(1000e6, agent.interfaces[0].resources['bandwidth_in'].available)
+        assert_equal(1600e6, agent.interfaces[0].resources['bandwidth_out'].available)
+        assert_equal(0.25, agent.gpus[0].resources['compute'].available)
+        assert_equal(0.0, agent.gpus[0].resources['mem'].available)
+        assert_equal(0.25, agent.gpus[1].resources['compute'].available)
+        assert_equal(1024.0, agent.gpus[1].resources['mem'].available)
 
 
 class TestPhysicalTask:
@@ -698,10 +805,10 @@ class TestPhysicalTask:
             scheduler.InterfaceRequest('net1'),
             scheduler.InterfaceRequest('net0')]
         self.logical_task.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
-        self.eth0 = scheduler.InterfaceResourceAllocation(0)
+        self.eth0 = scheduler.InterfaceResources(0)
         self.eth0.bandwidth_in = 500e6
         self.eth0.bandwidth_out = 600e6
-        self.eth1 = scheduler.InterfaceResourceAllocation(1)
+        self.eth1 = scheduler.InterfaceResources(1)
         self.eth1.bandwidth_in = 300e6
         self.eth1.bandwidth_out = 200e6
         self.vol0 = scheduler.Volume('vol0', '/host0', numa_node=1)
@@ -711,7 +818,8 @@ class TestPhysicalTask:
                 {"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"}
             ]),
             _make_json_attr('katsdpcontroller.volumes',
-                            [{"name": "vol0", "host_path": "/host0", "numa_node": 1}])
+                            [{"name": "vol0", "host_path": "/host0", "numa_node": 1}]),
+            _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         ]
         offers = [_make_offer('framework', 'agentid', 'agenthost',
                               {'cpus': 8.0, 'mem': 256.0,
@@ -722,13 +830,7 @@ class TestPhysicalTask:
                                'katsdpcontroller.interface.1.bandwidth_out': 1000e6},
                               attributes)]
         agent = scheduler.Agent(offers)
-        self.allocation = scheduler.ResourceAllocation(agent)
-        self.allocation.cpus = self.logical_task.cpus
-        self.allocation.mem = self.logical_task.mem
-        self.allocation.ports = [30000, 30001]
-        self.allocation.cores = [1, 2, 3]
-        self.allocation.interfaces = [self.eth1, self.eth0]
-        self.allocation.volumes = [self.vol0]
+        self.allocation = agent.allocate(self.logical_task)
 
     def test_properties_init(self):
         """Resolved properties are ``None`` on construction"""
@@ -760,7 +862,7 @@ class TestPhysicalTask:
                      physical_task.interfaces['net1'].ipv4_address)
         assert_equal({}, physical_task.endpoints)
         assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
-        assert_equal({'core1': 1, 'core2': 2, 'core3': 3}, physical_task.cores)
+        assert_equal({'core1': 2, 'core2': 4, 'core3': 6}, physical_task.cores)
 
 
 class TestDiagnoseInsufficient(unittest.TestCase):
@@ -1153,7 +1255,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.numa_attr
         ]
         self._make_physical()
-        self.sched = scheduler.Scheduler(self.loop, 0, 'http://scheduler/')
+        self.sched = scheduler.Scheduler(self.loop, 'default', 0, 'http://scheduler/')
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
                                            self.sched.http_url)
         self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
@@ -1173,9 +1275,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(
             AnyOrderList([
-                mock.call.acceptOffers(AnyOrderList([offers[0].id, offers[2].id]), []),
-                mock.call.acceptOffers([offers[1].id], []),
-                mock.call.suppressOffers()
+                mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
+                mock.call.suppressOffers({'default'})
             ]), self.driver.mock_calls)
 
     async def test_launch_cycle(self):
@@ -1205,18 +1306,18 @@ class TestScheduler(asynctest.ClockedTestCase):
             await self.sched.launch(physical_graph, self.resolver, target)
 
     async def test_add_queue_twice(self):
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         self.sched.add_queue(queue)
         with assert_raises(ValueError):
             self.sched.add_queue(queue)
 
     async def test_remove_nonexistent_queue(self):
         with assert_raises(ValueError):
-            self.sched.remove_queue(scheduler.LaunchQueue())
+            self.sched.remove_queue(scheduler.LaunchQueue('default'))
 
     async def test_launch_bad_queue(self):
         """Launch raises ValueError if queue has been added"""
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         with assert_raises(ValueError):
             await self.sched.launch(self.physical_graph, self.resolver, queue=queue)
 
@@ -1282,7 +1383,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         expected_taskinfo1.container.type = 'DOCKER'
         expected_taskinfo1.container.docker.image = 'sdp/image1:latest'
         expected_taskinfo1.container.docker.parameters = [{'key': 'cpuset-cpus', 'value': '0,2'}]
-        expected_taskinfo1.resources = _make_resources({'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
+        expected_taskinfo1.resources = _make_resources(
+            {'cpus': 0.5, 'cores': [(0, 1), (2, 3)]})
         expected_taskinfo1.discovery.visibility = 'EXTERNAL'
         expected_taskinfo1.discovery.name = 'node1'
         expected_taskinfo1.discovery.ports.ports = []
@@ -1296,7 +1398,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
-        assert_equal([], self.driver.mock_calls)
+        assert_equal([mock.call.reviveOffers({'default'})], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
@@ -1312,6 +1414,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
+        assert_equal(expected_taskinfo0.resources, self.nodes[0].taskinfo.resources)
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
         assert_equal('agentid0', self.nodes[0].agent_id)
@@ -1328,7 +1431,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
-            mock.call.suppressOffers()
+            mock.call.suppressOffers({'default'})
         ]), self.driver.mock_calls)
         self.driver.reset_mock()
 
@@ -1456,7 +1559,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.nodes[1].logical_node.command = [
             'test', '--host={host}', '--another={endpoints[node2_foo]}']
         # Schedule the nodes separately on separate queues
-        queue = scheduler.LaunchQueue()
+        queue = scheduler.LaunchQueue('default')
         self.sched.add_queue(queue)
         launch0, kill0 = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
         launch1 = asyncio.ensure_future(
@@ -1531,7 +1634,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.NOT_READY, self.nodes[1].state)
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
         # Once we abort, we should no longer be interested in offers
-        assert_equal([mock.call.suppressOffers()], self.driver.mock_calls)
+        assert_equal([mock.call.suppressOffers({'default'})], self.driver.mock_calls)
 
     async def test_launch_resolve_raises(self):
         async def resolve_raise(resolver, graph, loop):
@@ -1546,9 +1649,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_in('Testing', str(cm.exception))
         # The offers must be returned to Mesos
         assert_equal(AnyOrderList([
-            mock.call.acceptOffers([offers[0].id], []),
-            mock.call.acceptOffers([offers[1].id], []),
-            mock.call.suppressOffers()]), self.driver.mock_calls)
+            mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
+            mock.call.suppressOffers({'default'})]), self.driver.mock_calls)
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
@@ -1584,7 +1686,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer(offer0.id)], self.driver.mock_calls)
+        assert_equal([mock.call.declineOffer([offer0.id])], self.driver.mock_calls)
         launch.cancel()
 
     async def test_unavailability_past(self):
@@ -1599,7 +1701,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         assert_equal([
             mock.call.launchTasks([offer0.id], mock.ANY),
-            mock.call.suppressOffers()
+            mock.call.suppressOffers({'default'})
         ], self.driver.mock_calls)
         launch.cancel()
 
@@ -1706,6 +1808,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             The batch_run asynchronous task
         """
         if state >= TaskState.STARTED:
+            await asynctest.exhaust_callbacks(self.loop)
             self.sched.resourceOffers(self.driver, self._make_offers())
             await asynctest.exhaust_callbacks(self.loop)
             assert_equal(TaskState.STARTED, self.batch_node.state)
@@ -1789,12 +1892,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
-        assert_in(mock.call.suppressOffers(), self.driver.mock_calls)
-        pos = self.driver.mock_calls.index(mock.call.suppressOffers())
+        assert_in(mock.call.suppressOffers({'default'}), self.driver.mock_calls)
+        pos = self.driver.mock_calls.index(mock.call.suppressOffers({'default'}))
         assert_true(1 <= pos < len(self.driver.mock_calls) - 2)
         del self.driver.mock_calls[pos]
         assert_equal([
-            mock.call.reviveOffers(),
+            mock.call.reviveOffers({'default'}),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status1),
             mock.call.killTask(self.nodes[0].taskinfo.task_id),

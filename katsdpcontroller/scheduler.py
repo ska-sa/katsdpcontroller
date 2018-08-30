@@ -153,7 +153,6 @@ changing resources or attributes and restarting.
 import os.path
 import logging
 import json
-import itertools
 import re
 import base64
 import socket
@@ -185,10 +184,6 @@ from katsdptelstate.endpoint import Endpoint
 from . import schemas
 
 
-SCALAR_RESOURCES = ['cpus', 'mem', 'disk']
-GPU_SCALAR_RESOURCES = ['compute', 'mem']
-INTERFACE_SCALAR_RESOURCES = ['bandwidth_in', 'bandwidth_out']
-RANGE_RESOURCES = ['ports', 'cores']
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset([
@@ -233,97 +228,6 @@ def _as_decimal(value):
     """Forces `value` to a Decimal with 3 decimal places"""
     with decimal.localcontext(DECIMAL_CAST_CONTEXT):
         return Decimal(value).quantize(DECIMAL_ZERO)
-
-
-class GPURequest:
-    """Request for resources on a single GPU. These resources are not isolated,
-    so the request functions purely to ensure that the scheduler does not try
-    to over-allocate a GPU.
-
-    Attributes
-    ----------
-    compute : float or Decimal
-        Fraction of GPU's compute resource consumed
-    mem : float or Decimal
-        Memory usage (megabytes)
-    affinity : bool
-        If true, the GPU must be on the same NUMA node as the chosen CPU
-        cores (ignored if no CPU cores are reserved).
-    name : str, optional
-        If specified, the name of the GPU must match this.
-    """
-    def __init__(self):
-        for r in GPU_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
-        self.affinity = False
-        self.name = None
-
-    def matches(self, agent_gpu, numa_node):
-        if self.name is not None and self.name != agent_gpu.name:
-            return False
-        return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
-
-
-class InterfaceRequest:
-    """Request for resources on a network interface. At the moment only
-    a logical network name can be specified, but this may be augmented in
-    future to allocate bandwidth.
-
-    Attributes
-    ----------
-    network : str
-        Logical network name
-    infiniband : bool
-        If true, the device must support Infiniband APIs (e.g. ibverbs), and
-        the corresponding devices will be passed through.
-    affinity : bool
-        If true, the network device must be on the same NUMA node as the chosen
-        CPU cores (ignored if no CPU cores are reserved).
-    bandwidth_in : float or Decimal
-        Ingress bandwidth, in bps
-    bandwidth_out : float or Decimal
-        Egress bandwidth, in bps
-    """
-    def __init__(self, network, infiniband=False, affinity=False):
-        self.network = network
-        self.infiniband = infiniband
-        self.affinity = affinity
-        for r in INTERFACE_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
-
-    def matches(self, interface, numa_node):
-        if self.affinity and numa_node is not None and interface.numa_node != numa_node:
-            return False
-        if self.infiniband and not interface.infiniband_devices:
-            return False
-        return self.network == interface.network
-
-
-class VolumeRequest:
-    """Request to mount a host directory on the agent.
-
-    Attributes
-    ----------
-    name : str
-        Logical name advertised by the agent
-    container_path : str
-        Mount point inside the container
-    mode : {'RW', 'RO'}
-        Read-write or Read-Only mode
-    affinity : bool
-        If true, the storage must be on the same NUMA node as the chosen
-        CPU cores (ignored if no CPU cores are reserved).
-    """
-    def __init__(self, name, container_path, mode, affinity=False):
-        self.name = name
-        self.container_path = container_path
-        self.mode = mode
-        self.affinity = affinity
-
-    def matches(self, volume, numa_node):
-        if self.affinity and numa_node is not None and volume.numa_node != numa_node:
-            return False
-        return volume.name == self.name
 
 
 class OrderedEnum(Enum):
@@ -406,100 +310,439 @@ async def poll_ports(host, ports, loop):
         logger.debug('Port %d on %s ready', port, host)
 
 
-class RangeResource:
-    """More convenient wrapper over Mesos' presentation of a range resource
-    (list of contiguous ranges). It provides Pythonic idioms to allow it
-    to be treated similarly to a list, while keeping storage compact.
+class ResourceRequest:
+    """
+    Request for some quantity of a Mesos resource.
+
+    This is an abstract base class. See :class:`ScalarResourceRequest` and
+    :class:`RangeResourceRequest`.
+
+    Attributes
+    ----------
+    value
+        Resource request (read-write). Requesters set this field to indicate
+        their requirements. The type depends on the subclass.
+    amount
+        Requested amount (read-only). Subclasses provide this property to
+        indicate how much of the resource is needed, as a real number
+        (typically :class:`int` or :class:`Decimal`).
+    """
+    pass
+
+
+class ScalarResourceRequest(ResourceRequest):
+    """
+    Request for some amount of a scalar resource.
+
+    The amount requested can be specified as any type convertible to
+    :class:`Decimal` (the default value is float). It is converted to
+    3 decimal places before use.
+
+    Attributes
+    ----------
+    value : real
+        Requested amount
+    amount : :class:`Decimal`
+        Requested amount, with exactly 3 decimal places (read-only)
+    """
+
+    def __init__(self):
+        self.value = 0.0
+
+    @property
+    def amount(self):
+        return _as_decimal(self.value)
+
+
+class RangeResourceRequest(ResourceRequest):
+    """
+    Request for some resources from a range resource.
+
+    The value is required in the form of a list of unique names, which are
+    meaningful only to the caller (:class:`PhysicalTask` provides a mapping
+    from these names to the assigned resources). Names can be ``None`` if no
+    name is required.
+
+    Attributes
+    ----------
+    value : list of str
+        Names to associate with resources
+    amount : int
+        Number of resources requested (read-only)
     """
     def __init__(self):
-        self._ranges = deque()
-        self._len = 0
+        self.value = []
+
+    @property
+    def amount(self):
+        return len(self.value)
+
+
+class Resource:
+    """
+    Model a single resource, in either an offer or a task info.
+
+    It collects multiple Mesos Resource messages with the same name. It also
+    allows a subset of the resource to be allocated and returned.
+
+    This is an abstract base class. Use :class:`ScalarResource` or
+    :class:`RangeResource`.
+
+    Attributes
+    ----------
+    name : str
+        Resource name
+    available : real
+        Amount of the resource that is available in this object
+    parts : list
+        The internal representations of the pieces of the resource. This should
+        only be accessed by subclasses.
+    """
+
+    ZERO = 0
+    REQUEST_CLASS = ResourceRequest
+
+    def __init__(self, name):
+        self.name = name
+        self.parts = []
+        self.available = self.ZERO
+
+    def add(self, resource):
+        """Add a Mesos resource message to the internal resource list"""
+        if resource.name != self.name:
+            raise ValueError('Name mismatch {} != {}'.format(self.name, resource.name))
+        # Keeps the most specifically reserved resources at the end
+        # so that they're used first before unreserved resources.
+        pos = 0
+        role = resource.get('role', '*')
+        while (pos < len(self.parts)
+               and len(self.parts[pos].get('role', '*')) < len(role)):
+            pos += 1
+        transformed = self._transform(resource)
+        self.parts.insert(pos, transformed)
+        self.available += self._available(transformed)
+
+    def __bool__(self):
+        return bool(self.available)
+
+    def allocate(self, amount, **kwargs):
+        """Allocate a quantity of the resource.
+
+        Returns another Resource object of the same type with the requested
+        amount of resources. The resources are subtracted from this object.
+        """
+        if not kwargs:
+            available = self.available
+        else:
+            available = sum((self._available(part, **kwargs) for part in self.parts),
+                            self.ZERO)
+        if amount > available:
+            raise ValueError('Requested amount {} of {} is more than available {} (kwargs={})'
+                             .format(amount, self.name, available, kwargs))
+        out = type(self)(self.name)
+        pos = len(self.parts) - 1
+        with decimal.localcontext(DECIMAL_CONTEXT):
+            while amount > self.ZERO:
+                assert self.parts, "self.available is out of sync"
+                part_available = self._available(self.parts[pos], **kwargs)
+                use = min(part_available, amount)
+                out.parts.append(self._allocate(self.parts[pos], use, **kwargs))
+                if self._available(self.parts[pos]) == 0:
+                    del self.parts[pos]
+                amount -= use
+                self.available -= use
+                out.available += use
+                pos -= 1
+        out.parts.reverse()   # Put output pieces into same order as input
+        return out
+
+    def info(self):
+        """Iterate over the messages that should be placed in task info"""
+        for part in self.parts:
+            yield self._untransform(part)
+
+    def _transform(self, resource):
+        """Convert a resource into the internal representation."""
+        raise NotImplementedError    # pragma: nocover
+
+    def _untransform(self, resource):
+        """Convert a resource from the internal representation."""
+        raise NotImplementedError    # pragma: nocover
+
+    def _available(self, resource, **kwargs):
+        """Amount of resource available in a (transformed) part.
+
+        Subclasses may accept kwargs to specify additional constraints
+        on the manner of the allocation.
+        """
+        raise NotImplementedError    # pragma: nocover
+
+    def _allocate(self, resource, amount, **kwargs):
+        """Take a piece of a resource.
+
+        Returns the allocated part, and modifies `resource` in place.
+        `amount` must be at most the result of
+        ``self._available(resource, **kwargs)``.
+        """
+        raise NotImplementedError    # pragma: nocover
+
+    @classmethod
+    def empty_request(cls):
+        return cls.REQUEST_CLASS()
+
+
+class ScalarResource(Resource):
+    """Resource model for Mesos scalar resources"""
+
+    ZERO = DECIMAL_ZERO
+    REQUEST_CLASS = ScalarResourceRequest
+
+    def _transform(self, resource):
+        if resource.type != 'SCALAR':
+            raise TypeError('Expected SCALAR resource, got {}'.format(resource.type))
+        resource = copy.deepcopy(resource)
+        resource.scalar.value = _as_decimal(resource.scalar.value)
+        return resource
+
+    def _untransform(self, resource):
+        resource = copy.deepcopy(resource)
+        resource.scalar.value = float(resource.scalar.value)
+        return resource
+
+    def _available(self, resource):
+        return resource.scalar.value
+
+    def _allocate(self, resource, amount):
+        out = copy.deepcopy(resource)
+        out.scalar.value = amount
+        with decimal.localcontext(DECIMAL_CONTEXT):
+            resource.scalar.value -= amount
+        return out
+
+    def allocate(self, amount):
+        return super().allocate(_as_decimal(amount))
+
+
+class RangeResource(Resource):
+    """Resource model for Mesos range resources"""
+
+    REQUEST_CLASS = RangeResourceRequest
+
+    def _transform(self, resource):
+        if resource.type != 'RANGES':
+            raise TypeError('Expected RANGES resource, got {}'.format(resource.type))
+        resource = copy.deepcopy(resource)
+        # Ensures we take resources from the first range first
+        resource.ranges.range.reverse()
+        return resource
+
+    def _untransform(self, resource):
+        return self._transform(resource)
+
+    def _available(self, resource, *, minimum=None):
+        total = 0
+        for r in resource.ranges.range:
+            if minimum is None:
+                total += r.end - r.begin + 1
+            elif minimum <= r.end:
+                total += r.end - max(r.begin, minimum) + 1
+        return total
+
+    def _allocate(self, resource, amount, *, minimum=None):
+        out = copy.deepcopy(resource)
+        out.ranges.range.clear()
+        pos = len(resource.ranges.range) - 1
+        while amount > 0:
+            r = resource.ranges.range[pos]
+            use = 0
+            if minimum is None or minimum <= r.begin:
+                use = min(amount, r.end - r.begin + 1)
+                out.ranges.range.append(Dict({'begin': r.begin, 'end': r.begin + use - 1}))
+                r.begin += use
+            elif minimum <= r.end:
+                use = min(amount, r.end - minimum + 1)
+                out.ranges.range.append(Dict({'begin': minimum, 'end': minimum + use - 1}))
+                if minimum + use <= r.end:
+                    # Note: this will cause the empty check lower down to check
+                    # this range, instead of r. That's harmless, since we only
+                    # get here if both are non-empty.
+                    resource.ranges.range.insert(
+                        pos,
+                        Dict({'begin': minimum + use, 'end': r.end}))
+                r.end = minimum - 1
+            if r.begin > r.end:
+                del resource.ranges.range[pos]
+            amount -= use
+            pos -= 1
+        # Put into transformed form
+        out.ranges.range.reverse()
+        return out
+
+    def _subset_part(self, part, group):
+        out = copy.deepcopy(part)
+        out.ranges.range.clear()
+        for r in part.ranges.range:
+            for i in range(r.end, r.begin - 1, -1):
+                if i in group:
+                    out.ranges.range.append(Dict({'begin': i, 'end': i}))
+        return out
+
+    def subset(self, group):
+        """Get a new RangeResources containing only the items that are in `group`.
+
+        The original is not modified.
+
+        This is **not** an efficient implementation. It is currently used for
+        partitioning CPU cores into NUMA nodes, where there are dozens of
+        cores and a handful of NUMA nodes.
+        """
+        group = frozenset(group)
+        out = type(self)(self.name)
+        for part in self.parts:
+            new_part = self._subset_part(part, group)
+            if new_part.ranges.range:
+                out.parts.append(new_part)
+                out.available += self._available(new_part)
+        return out
 
     def __len__(self):
-        return self._len
-
-    def add_range(self, start, stop):
-        """Append the half-open range `[start, stop)`."""
-        if stop > start:
-            self._ranges.append((start, stop))
-            self._len += stop - start
-
-    def add_resource(self, resource):
-        """Append a :class:`mesos_pb2.Resource`."""
-        for r in resource.ranges.range:
-            self.add_range(r.begin, r.end + 1)   # Mesos has inclusive ranges
+        return self.available
 
     def __iter__(self):
-        return itertools.chain(*[range(start, stop) for (start, stop) in self._ranges])
-
-    def remove(self, item):
-        for i, (start, stop) in enumerate(self._ranges):
-            if item >= start and item < stop:
-                if item == start and item + 1 == stop:
-                    del self._ranges[i]
-                elif item == start:
-                    self._ranges[i] = (start + 1, stop)
-                elif item + 1 == stop:
-                    self._ranges[i] = (start, stop - 1)
-                else:
-                    # Need to split the range. deque doesn't have .insert, so we
-                    # have to fake it using rotations.
-                    self._ranges.rotate(-i)
-                    self._ranges[0] = (item + 1, stop)
-                    self._ranges.append((start, item))
-                    self._ranges.rotate(i + 1)
-                return
-        raise ValueError('item not in list')
-
-    def popleft(self):
-        if not self._ranges:
-            raise IndexError('pop from empty list')
-        start, stop = self._ranges[0]
-        ans = start
-        if stop - start > 1:
-            self._ranges[0] = (start + 1, stop)
-        else:
-            self._ranges.popleft()
-        self._len -= 1
-        return ans
-
-    def pop(self):
-        if not self._ranges:
-            raise IndexError('pop from empty list')
-        start, stop = self._ranges[-1]
-        ans = stop - 1
-        if stop - start > 1:
-            self._ranges[-1] = (start, stop - 1)
-        else:
-            self._ranges.pop()
-        self._len -= 1
-        return ans
-
-    def popleft_min(self, bound):
-        """Remove the first element greater than or equal to `bound`.
-
-        Raises
-        ------
-        IndexError
-            If no such element exists
-        """
-        for _, (start, stop) in enumerate(self._ranges):
-            if stop > bound:
-                value = max(start, bound)
-                self.remove(value)
-                return value
-        raise IndexError('no element greater than or equal to bound')
-
-    def __str__(self):
-        def format_range(rng):
-            start, stop = rng
-            if stop - start == 1:
-                return '{}'.format(start)
-            return '{}-{}'.format(start, stop - 1)
-        return ','.join(format_range(rng) for rng in self._ranges)
+        for part in reversed(self.parts):
+            for r in reversed(part.ranges.range):
+                yield from range(r.begin, r.end + 1)
 
 
-class GPUResourceAllocation:
+class ResourceRequestDescriptor:
+    def __init__(self, name):
+        self._name = name
+
+    def __get__(self, instance, owner):
+        return instance.requests[self._name].value
+
+    def __set__(self, instance, value):
+        instance.requests[self._name].value = value
+
+
+def resource_requests(resources):
+    """Class decorator that adds resource requests to a class.
+
+    It
+    - Adds a :attr:`requests` member dictionary holding the request objects
+    - Adds descriptors to allow each request value to be accessed as an
+      attribute of the object.
+    """
+    @decorator
+    def init_decorator(func, *args, **kwargs):
+        func(*args, **kwargs)
+        args[0].requests = {name: cls.empty_request() for name, cls in resources.items()}
+
+    def cls_decorator(cls):
+        cls.__init__ = init_decorator(cls.__init__)
+        for name in resources:
+            setattr(cls, name, ResourceRequestDescriptor(name))
+        return cls
+
+    return cls_decorator
+
+
+GLOBAL_RESOURCES = {'cpus': ScalarResource, 'mem': ScalarResource, 'disk': ScalarResource,
+                    'ports': RangeResource, 'cores': RangeResource}
+GPU_RESOURCES = {'compute': ScalarResource, 'mem': ScalarResource}
+INTERFACE_RESOURCES = {'bandwidth_in': ScalarResource, 'bandwidth_out': ScalarResource}
+
+
+@resource_requests(GPU_RESOURCES)
+class GPURequest:
+    """Request for resources on a single GPU. These resources are not isolated,
+    so the request functions purely to ensure that the scheduler does not try
+    to over-allocate a GPU.
+
+    Attributes
+    ----------
+    compute : float or Decimal
+        Fraction of GPU's compute resource consumed
+    mem : float or Decimal
+        Memory usage (megabytes)
+    affinity : bool
+        If true, the GPU must be on the same NUMA node as the chosen CPU
+        cores (ignored if no CPU cores are reserved).
+    name : str, optional
+        If specified, the name of the GPU must match this.
+    """
+    def __init__(self):
+        self.affinity = False
+        self.name = None
+
+    def matches(self, agent_gpu, numa_node):
+        if self.name is not None and self.name != agent_gpu.name:
+            return False
+        return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
+
+
+@resource_requests(INTERFACE_RESOURCES)
+class InterfaceRequest:
+    """Request for resources on a network interface. At the moment only
+    a logical network name can be specified, but this may be augmented in
+    future to allocate bandwidth.
+
+    Attributes
+    ----------
+    network : str
+        Logical network name
+    infiniband : bool
+        If true, the device must support Infiniband APIs (e.g. ibverbs), and
+        the corresponding devices will be passed through.
+    affinity : bool
+        If true, the network device must be on the same NUMA node as the chosen
+        CPU cores (ignored if no CPU cores are reserved).
+    bandwidth_in : float or Decimal
+        Ingress bandwidth, in bps
+    bandwidth_out : float or Decimal
+        Egress bandwidth, in bps
+    """
+    def __init__(self, network, infiniband=False, affinity=False):
+        self.network = network
+        self.infiniband = infiniband
+        self.affinity = affinity
+
+    def matches(self, interface, numa_node):
+        if self.affinity and numa_node is not None and interface.numa_node != numa_node:
+            return False
+        if self.infiniband and not interface.infiniband_devices:
+            return False
+        return self.network == interface.network
+
+
+class VolumeRequest:
+    """Request to mount a host directory on the agent.
+
+    Attributes
+    ----------
+    name : str
+        Logical name advertised by the agent
+    container_path : str
+        Mount point inside the container
+    mode : {'RW', 'RO'}
+        Read-write or Read-Only mode
+    affinity : bool
+        If true, the storage must be on the same NUMA node as the chosen
+        CPU cores (ignored if no CPU cores are reserved).
+    """
+    def __init__(self, name, container_path, mode, affinity=False):
+        self.name = name
+        self.container_path = container_path
+        self.mode = mode
+        self.affinity = affinity
+
+    def matches(self, volume, numa_node):
+        if self.affinity and numa_node is not None and volume.numa_node != numa_node:
+            return False
+        return volume.name == self.name
+
+
+class GPUResources:
     """Collection of specific resources allocated from a single agent GPU.
 
     Attributes
@@ -509,12 +752,12 @@ class GPUResourceAllocation:
     """
     def __init__(self, index):
         self.index = index
-        for r in GPU_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
+        prefix = 'katsdpcontroller.gpu.{}.'.format(index)
+        self.resources = {name: cls(prefix + name) for name, cls in GPU_RESOURCES.items()}
 
 
-class InterfaceResourceAllocation:
-    """Collection of specific resources allocated from a single agent network interface.
+class InterfaceResources:
+    """Collection of specific resources for a single agent network interface.
 
     Attributes
     ----------
@@ -523,8 +766,8 @@ class InterfaceResourceAllocation:
     """
     def __init__(self, index):
         self.index = index
-        for r in INTERFACE_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
+        prefix = 'katsdpcontroller.interface.{}.'.format(index)
+        self.resources = {name: cls(prefix + name) for name, cls in INTERFACE_RESOURCES.items()}
 
 
 class ResourceAllocation:
@@ -537,10 +780,7 @@ class ResourceAllocation:
     """
     def __init__(self, agent):
         self.agent = agent
-        for r in SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
-        for r in RANGE_RESOURCES:
-            setattr(self, r, [])
+        self.resources = {name: cls(name) for name, cls in GLOBAL_RESOURCES.items()}
         self.gpus = []
         self.interfaces = []
         self.volumes = []
@@ -742,14 +982,6 @@ class InsufficientResourcesError(RuntimeError):
     pass
 
 
-class NoOffersError(InsufficientResourcesError):
-    """Indicates that resources were insufficient because no offers were
-    received before the timeout.
-    """
-    def __init__(self):
-        super().__init__("No offers were received")
-
-
 class TaskNoAgentError(InsufficientResourcesError):
     """Indicates that no agent was suitable for a task. Where possible, a
     sub-class is used to indicate a more specific error.
@@ -938,6 +1170,7 @@ class LogicalExternal(LogicalNode):
         self.wait_ports = []
 
 
+@resource_requests(GLOBAL_RESOURCES)
 class LogicalTask(LogicalNode):
     """A node in a logical graph that indicates how to run a task
     and what resources it requires, but does not correspond to any specific
@@ -948,11 +1181,11 @@ class LogicalTask(LogicalNode):
 
     Attributes
     ----------
-    cpus : float or Decimal
+    cpus : Decimal
         Mesos CPU shares.
-    mem : float or Decimal
+    mem : Decimal
         Mesos memory reservation (megabytes)
-    disk : float or Decimal
+    disk : Decimal
         Mesos disk reservation (megabytes)
     max_run_time : float or None
         Maximum time to run with :meth:`batch_run` (seconds)
@@ -999,10 +1232,6 @@ class LogicalTask(LogicalNode):
     """
     def __init__(self, name):
         super().__init__(name)
-        for r in SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
-        for r in RANGE_RESOURCES:
-            setattr(self, r, [])
         self.max_run_time = None
         self.gpus = []
         self.interfaces = []
@@ -1023,21 +1252,10 @@ class LogicalTask(LogicalNode):
         return True
 
 
-class ResourceCollector:
-    def inc_attr(self, key, delta):
-        delta = _as_decimal(delta)
-        with decimal.localcontext(DECIMAL_CONTEXT) as ctx:
-            # Make sure we crash if we don't get exact arithmetic in the sum
-            ctx.traps[decimal.Inexact] = True
-            setattr(self, key, getattr(self, key) + delta)
-
-    def add_range_attr(self, key, resource):
-        getattr(self, key).add_resource(resource)
-
-
-class AgentGPU(ResourceCollector):
+class AgentGPU(GPUResources):
     """A single GPU on an agent machine, tracking both attributes and free resources."""
-    def __init__(self, spec):
+    def __init__(self, spec, index):
+        super().__init__(index)
         self.devices = spec['devices']
         self.uuid = spec.get('uuid')
         self.driver_version = spec['driver_version']
@@ -1045,12 +1263,10 @@ class AgentGPU(ResourceCollector):
         self.compute_capability = tuple(spec['compute_capability'])
         self.device_attributes = spec['device_attributes']
         self.numa_node = spec.get('numa_node')
-        for r in GPU_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
 
 
-class AgentInterface(ResourceCollector):
-    """A single interface on an agent machine, trackign both attributes and free resources.
+class AgentInterface(InterfaceResources):
+    """A single interface on an agent machine, tracking both attributes and free resources.
 
     Attributes
     ----------
@@ -1064,15 +1280,16 @@ class AgentInterface(ResourceCollector):
         Index of the NUMA socket to which the NIC is connected
     infiniband_devices : list of str
         Device inodes that should be passed into Docker containers to use Infiniband libraries
+    resources : list of :class:`Resource`
+        Available resources
     """
-    def __init__(self, spec):
+    def __init__(self, spec, index):
+        super().__init__(index)
         self.name = spec['name']
         self.network = spec['network']
         self.ipv4_address = ipaddress.IPv4Address(spec['ipv4_address'])
         self.numa_node = spec.get('numa_node')
         self.infiniband_devices = spec.get('infiniband_devices', [])
-        for r in INTERFACE_SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
 
 
 def _decode_json_base64(value):
@@ -1081,8 +1298,8 @@ def _decode_json_base64(value):
     return json.loads(json_bytes.decode('utf-8'))
 
 
-class Agent(ResourceCollector):
-    """Collects multiple offers for a single Mesos agent and allows
+class Agent:
+    """Collects multiple offers for a single Mesos agent and role and allows
     :class:`ResourceAllocation`s to be made from it.
 
     Parameters
@@ -1098,6 +1315,7 @@ class Agent(ResourceCollector):
             raise ValueError('At least one offer must be specified')
         self.offers = offers
         self.agent_id = offers[0].agent_id.value
+        self.role = offers[0].allocation_info.role
         self.host = offers[0].hostname
         self.attributes = offers[0].attributes
         self.interfaces = []
@@ -1113,7 +1331,7 @@ class Agent(ResourceCollector):
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     schemas.INTERFACES.validate(value)
-                    self.interfaces = [AgentInterface(item) for item in value]
+                    self.interfaces = [AgentInterface(item, i) for i, item in enumerate(value)]
                 elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     schemas.VOLUMES.validate(value)
@@ -1127,7 +1345,7 @@ class Agent(ResourceCollector):
                 elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     schemas.GPUS.validate(value)
-                    self.gpus = [AgentGPU(item) for item in value]
+                    self.gpus = [AgentGPU(item, i) for i, item in enumerate(value)]
                 elif attribute.name == 'katsdpcontroller.numa' and attribute.type == 'TEXT':
                     value = _decode_json_base64(attribute.text.value)
                     schemas.NUMA.validate(value)
@@ -1152,42 +1370,41 @@ class Agent(ResourceCollector):
                 logger.warning('Validation error parsing %s: %s', value, e)
 
         # These resources all represent resources not yet allocated
-        for r in SCALAR_RESOURCES:
-            setattr(self, r, DECIMAL_ZERO)
-        for r in RANGE_RESOURCES:
-            setattr(self, r, RangeResource())
+        self.resources = {name: cls(name) for name, cls in GLOBAL_RESOURCES.items()}
         for offer in offers:
             for resource in offer.resources:
                 # Skip specialised resource types and use only general-purpose
                 # resources.
                 if 'disk' in resource and 'source' in resource.disk:
                     continue
-                if resource.name in SCALAR_RESOURCES:
-                    self.inc_attr(resource.name, resource.scalar.value)
-                elif resource.name in RANGE_RESOURCES:
-                    self.add_range_attr(resource.name, resource)
+                if resource.name in self.resources:
+                    self.resources[resource.name].add(resource)
                 elif resource.name.startswith('katsdpcontroller.gpu.'):
                     parts = resource.name.split('.', 3)
                     # TODO: catch exceptions here
                     index = int(parts[2])
                     resource_name = parts[3]
-                    if resource_name in GPU_SCALAR_RESOURCES:
-                        self.gpus[index].inc_attr(resource_name, resource.scalar.value)
+                    if resource_name in self.gpus[index].resources:
+                        self.gpus[index].resources[resource_name].add(resource)
                 elif resource.name.startswith('katsdpcontroller.interface.'):
                     parts = resource.name.split('.', 3)
                     # TODO: catch exceptions here
                     index = int(parts[2])
                     resource_name = parts[3]
-                    if resource_name in INTERFACE_SCALAR_RESOURCES:
-                        self.interfaces[index].inc_attr(resource_name, resource.scalar.value)
+                    if resource_name in self.interfaces[index].resources:
+                        self.interfaces[index].resources[resource_name].add(resource)
         if self.priority is None:
             self.priority = float(len(self.gpus) +
                                   len(self.interfaces) +
                                   len(self.volumes))
+        # Split offers of cores by NUMA node
+        self.numa_cores = [self.resources['cores'].subset(numa_node)
+                           for numa_node in self.numa]
+        del self.resources['cores']   # Prevent accidentally allocating from this
         logger.debug('Agent %s has priority %f', self.agent_id, self.priority)
 
     @classmethod
-    def _match_children(cls, numa_node, requested, actual, scalar_resources, msg):
+    def _match_children(cls, numa_node, requested, actual, msg):
         """Match requests for child devices (e.g. GPUs) against actual supply.
 
         This uses a very simple first-come-first-served algorithm which could
@@ -1201,8 +1418,6 @@ class Agent(ResourceCollector):
             List of request objects (e.g. :class:`GPURequest`)
         actual : list
             List of objects representing available resources (e.g. :class:`AgentGPU`)
-        scalar_resources : list
-            Names of scalar resource types to match between `requested` and `actual`
         msg : str
             Name for the children e.g. "GPU" (used only for debug messages)
 
@@ -1227,12 +1442,12 @@ class Agent(ResourceCollector):
                 if not request.matches(item, numa_node):
                     continue
                 good = True
-                for r in scalar_resources:
-                    need = _as_decimal(getattr(request, r))
-                    have = getattr(item, r)
+                for name in request.requests:
+                    need = request.requests[name].amount
+                    have = item.resources[name].available
                     if have < need:
                         logger.debug('Not enough %s on %s %d for request %d',
-                                     r, msg, j, i)
+                                     name, msg, j, i)
                         good = False
                         break
                 if good:
@@ -1247,21 +1462,18 @@ class Agent(ResourceCollector):
     def _allocate_numa_node(self, numa_node, logical_task):
         # Check that there are sufficient cores on this node
         if numa_node is not None:
-            # TODO: would be more efficient to replace self.numa with a map
-            # from core to node
-            cores = deque(core for core in self.numa[numa_node] if core in self.cores)
+            cores = self.numa_cores[numa_node]
         else:
-            cores = deque()
-        need = len(logical_task.cores)
-        have = len(cores)
+            cores = RangeResource('cores')
+        need = logical_task.requests['cores'].amount
+        have = cores.available
         if need > have:
             raise InsufficientResourcesError('not enough cores on node {} ({} < {})'.format(
                 numa_node, have, need))
 
         # Match network requests to interfaces
         interface_map = self._match_children(
-            numa_node, logical_task.interfaces, self.interfaces,
-            INTERFACE_SCALAR_RESOURCES, 'interface')
+            numa_node, logical_task.interfaces, self.interfaces, 'interface')
         # Match volume requests to volumes
         for request in logical_task.volumes:
             if not any(request.matches(volume, numa_node) for volume in self.volumes):
@@ -1271,44 +1483,30 @@ class Agent(ResourceCollector):
                     raise InsufficientResourcesError(
                         'Volume {} not present on NUMA node {}'.format(request.name, numa_node))
         # Match GPU requests to GPUs
-        gpu_map = self._match_children(
-            numa_node, logical_task.gpus, self.gpus,
-            GPU_SCALAR_RESOURCES, 'GPU')
+        gpu_map = self._match_children(numa_node, logical_task.gpus, self.gpus, 'GPU')
 
         # Have now verified that the task fits. Create the resources for it
         alloc = ResourceAllocation(self)
-        for r in SCALAR_RESOURCES:
-            need = _as_decimal(getattr(logical_task, r))
-            self.inc_attr(r, -need)
-            setattr(alloc, r, need)
-        for r in RANGE_RESOURCES:
-            if r == 'cores':
-                for _name in logical_task.cores:
-                    value = cores.popleft()
-                    alloc.cores.append(value)
-                    self.cores.remove(value)
-            elif r == 'ports':
-                for _name in logical_task.ports:
-                    try:
-                        value = self.ports.popleft_min(self._min_port)
-                    except IndexError:
-                        value = self.ports.popleft()
-                    alloc.ports.append(value)
+        for name, request in logical_task.requests.items():
+            if name == 'cores':
+                res = cores.allocate(request.amount)
+            elif name == 'ports':
+                try:
+                    res = self.resources[name].allocate(request.amount, minimum=self._min_port)
+                except ValueError:
+                    res = self.resources[name].allocate(request.amount)
             else:
-                for _name in getattr(logical_task, r):
-                    value = getattr(self, r).popleft()
-                    getattr(alloc, r).append(value)
+                res = self.resources[name].allocate(request.amount)
+            alloc.resources[name] = res
 
         alloc.interfaces = [None] * len(logical_task.interfaces)
         for i, interface in enumerate(self.interfaces):
             idx = interface_map[i]
             if idx is not None:
                 request = logical_task.interfaces[idx]
-                interface_alloc = InterfaceResourceAllocation(i)
-                for r in INTERFACE_SCALAR_RESOURCES:
-                    need = _as_decimal(getattr(request, r))
-                    interface.inc_attr(r, -need)
-                    setattr(interface_alloc, r, need)
+                interface_alloc = InterfaceResources(i)
+                for name, req in request.requests.items():
+                    interface_alloc.resources[name] = interface.resources[name].allocate(req.amount)
                 alloc.interfaces[idx] = interface_alloc
         for request in logical_task.volumes:
             alloc.volumes.append(next(volume for volume in self.volumes
@@ -1318,11 +1516,9 @@ class Agent(ResourceCollector):
             idx = gpu_map[i]
             if idx is not None:
                 request = logical_task.gpus[idx]
-                gpu_alloc = GPUResourceAllocation(i)
-                for r in GPU_SCALAR_RESOURCES:
-                    need = _as_decimal(getattr(request, r))
-                    gpu.inc_attr(r, -need)
-                    setattr(gpu_alloc, r, need)
+                gpu_alloc = GPUResources(i)
+                for name, req in request.requests.items():
+                    gpu_alloc.resources[name] = gpu.resources[name].allocate(req.amount)
                 alloc.gpus[idx] = gpu_alloc
         return alloc
 
@@ -1338,32 +1534,27 @@ class Agent(ResourceCollector):
         InsufficientResourcesError
             if there are not enough resources to add the task
         """
-        with decimal.localcontext(DECIMAL_CONTEXT):
-            if not logical_task.valid_agent(self):
-                raise InsufficientResourcesError('Task does not match this agent')
-            for r in SCALAR_RESOURCES:
-                need = _as_decimal(getattr(logical_task, r))
-                have = getattr(self, r)
-                if have < need:
-                    raise InsufficientResourcesError(
-                        'Not enough {} ({} < {})'.format(r, have, need))
-            for r in RANGE_RESOURCES:
-                need = len(getattr(logical_task, r))
-                have = len(getattr(self, r))
-                if have < need:
-                    raise InsufficientResourcesError(
-                        'Not enough {} ({} < {})'.format(r, have, need))
+        if not logical_task.valid_agent(self):
+            raise InsufficientResourcesError('Task does not match this agent')
+        for name, request in logical_task.requests.items():
+            if name == 'cores':
+                continue    # Handled specially lower down
+            need = request.amount
+            have = self.resources[name].available
+            if have < need:
+                raise InsufficientResourcesError(
+                    'Not enough {} ({} < {})'.format(name, have, need))
 
-            if logical_task.cores:
-                # For tasks requesting cores we activate NUMA awareness
-                for numa_node in range(len(self.numa)):
-                    try:
-                        return self._allocate_numa_node(numa_node, logical_task)
-                    except InsufficientResourcesError:
-                        logger.debug('Failed to allocate NUMA node %d on %s',
-                                     numa_node, self.agent_id, exc_info=True)
-                raise InsufficientResourcesError('No suitable NUMA node found')
-            return self._allocate_numa_node(None, logical_task)
+        if logical_task.requests['cores'].amount:
+            # For tasks requesting cores we activate NUMA awareness
+            for numa_node in range(len(self.numa)):
+                try:
+                    return self._allocate_numa_node(numa_node, logical_task)
+                except InsufficientResourcesError:
+                    logger.debug('Failed to allocate NUMA node %d on %s',
+                                 numa_node, self.agent_id, exc_info=True)
+            raise InsufficientResourcesError('No suitable NUMA node found')
+        return self._allocate_numa_node(None, logical_task)
 
     def can_allocate(self, logical_task):
         """Check whether :meth:`allocate` will succeed, without modifying
@@ -1616,8 +1807,9 @@ class PhysicalTask(PhysicalNode):
         self.taskinfo = None
         self.allocation = None
         self.status = None
-        for r in RANGE_RESOURCES:
-            setattr(self, r, {})
+        for name, cls in GLOBAL_RESOURCES.items():
+            if issubclass(cls, RangeResource):
+                setattr(self, name, {})
 
     @property
     def agent(self):
@@ -1649,12 +1841,13 @@ class PhysicalTask(PhysicalNode):
         self.allocation = allocation
         for request, value in zip(self.logical_node.interfaces, self.allocation.interfaces):
             self.interfaces[request.network] = self.allocation.agent.interfaces[value.index]
-        for r in RANGE_RESOURCES:
-            d = {}
-            for name, value in zip(getattr(self.logical_node, r), getattr(self.allocation, r)):
-                if name is not None:
-                    d[name] = value
-            setattr(self, r, d)
+        for resource in self.allocation.resources.values():
+            if isinstance(resource, RangeResource):
+                d = {}
+                for name, value in zip(self.logical_node.requests[resource.name].value, resource):
+                    if name is not None:
+                        d[name] = value
+                setattr(self, resource.name, d)
 
     async def resolve(self, resolver, graph, loop):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
@@ -1713,41 +1906,18 @@ class PhysicalTask(PhysicalNode):
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
-        for r in SCALAR_RESOURCES:
-            value = _as_decimal(getattr(self.logical_node, r))
-            if value > DECIMAL_ZERO:
-                resource = Dict()
-                resource.name = r
-                resource.type = 'SCALAR'
-                resource.scalar.value = float(value)
-                taskinfo.resources.append(resource)
-        for r in RANGE_RESOURCES:
-            value = getattr(self.allocation, r)
-            if value:
-                resource = Dict()
-                resource.name = r
-                resource.type = 'RANGES'
-                resource.ranges.range = []
-                for item in value:
-                    resource.ranges.range.append(Dict(begin=item, end=item))
-                taskinfo.resources.append(resource)
+        for resource in self.allocation.resources.values():
+            taskinfo.resources.extend(resource.info())
 
-        if self.allocation.cores:
-            core_list = ','.join(str(core) for core in self.allocation.cores)
+        if self.allocation.resources['cores']:
+            core_list = ','.join(str(core) for core in self.allocation.resources['cores'])
             docker_parameters.append({'key': 'cpuset-cpus', 'value': core_list})
 
         any_infiniband = False
         for request, interface_alloc in zip(self.logical_node.interfaces,
                                             self.allocation.interfaces):
-            for r in INTERFACE_SCALAR_RESOURCES:
-                value = getattr(interface_alloc, r)
-                if value:
-                    resource = Dict()
-                    resource.name = 'katsdpcontroller.interface.{}.{}'.format(
-                        interface_alloc.index, r)
-                    resource.type = 'SCALAR'
-                    resource.scalar.value = float(value)
-                    taskinfo.resources.append(resource)
+            for resource in interface_alloc.resources.values():
+                taskinfo.resources.extend(resource.info())
             if request.infiniband:
                 any_infiniband = True
         if any_infiniband:
@@ -1768,14 +1938,8 @@ class PhysicalTask(PhysicalNode):
         # UUIDs for GPUs to be handled by nvidia-container-runtime
         gpu_uuids = []
         for gpu_alloc in self.allocation.gpus:
-            for r in GPU_SCALAR_RESOURCES:
-                value = getattr(gpu_alloc, r)
-                if value:
-                    resource = Dict()
-                    resource.name = 'katsdpcontroller.gpu.{}.{}'.format(gpu_alloc.index, r)
-                    resource.type = 'SCALAR'
-                    resource.scalar.value = float(value)
-                    taskinfo.resources.append(resource)
+            for resource in gpu_alloc.resources.values():
+                taskinfo.resources.extend(resource.info())
             gpu = self.agent.gpus[gpu_alloc.index]
             if self.agent.nvidia_container_runtime and gpu.uuid:
                 gpu_uuids.append(gpu.uuid)
@@ -1834,8 +1998,9 @@ class PhysicalTask(PhysicalNode):
         from the logical task.
         """
         args = {}
-        for r in RANGE_RESOURCES:
-            args[r] = getattr(self, r)
+        for r, cls in GLOBAL_RESOURCES.items():
+            if issubclass(cls, RangeResource):
+                args[r] = getattr(self, r)
         args['interfaces'] = self.interfaces
         args['endpoints'] = self.endpoints
         args['host'] = self.host
@@ -1912,13 +2077,16 @@ class LaunchQueue:
 
     Parameters
     ----------
+    role : str
+        Mesos role used for tasks in the queue
     name : str, optional
         Name of the queue for ``__repr__``
     priority : int
         Priority of the tasks in the queue. A smaller numeric value indicates a
         higher-priority queue (ala UNIX nice).
     """
-    def __init__(self, name='', *, priority=0):
+    def __init__(self, role, name='', *, priority=0):
+        self.role = role
         self.name = name
         self.priority = priority
         self._groups = deque()
@@ -2015,11 +2183,17 @@ class Scheduler(pymesos.Scheduler):
 
     The following invariants are maintained at each yield point:
     - each dictionary within :attr:`_offers` is non-empty
+    - every role in :attr:`_roles_wanted` is non-suppressed (there may be
+      additional non-suppressed roles, but they will be suppressed when an
+      offer arrives)
+    - every role in :attr:`_offers` also appears in :attr:`_roles_wanted`
 
     Parameters
     ----------
     loop : :class:`asyncio.AbstractEventLoop`
         Event loop
+    default_role : str
+        Mesos role used by the default queue
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
@@ -2043,15 +2217,16 @@ class Scheduler(pymesos.Scheduler):
     http_server : :class:`asyncio.Server`
         Embedded HTTP server
     """
-    def __init__(self, loop, http_port, http_url=None):
+    def __init__(self, loop, default_role, http_port, http_url=None):
         self._loop = loop
         self._driver = None
-        self._offers = {}           #: offers keyed by slave ID then offer ID
+        self._offers = {}           #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event(loop=self._loop)
-        self._default_queue = LaunchQueue()
+        self._default_queue = LaunchQueue(default_role)
         self._queues = [self._default_queue]
-        self._offers_suppressed = False
+        #: Mesos roles for which we want to (and expect to) receive offers
+        self._roles_needed = set()
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
@@ -2146,19 +2321,30 @@ class Scheduler(pymesos.Scheduler):
             return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
         return (0, 0, 0, 0, node.name)
 
-    def _clear_offers(self):
-        for offers in self._offers.values():
-            self._driver.acceptOffers([offer.id for offer in offers.values()], [])
-        self._offers = {}
-        if not self._offers_suppressed:
-            self._driver.suppressOffers()
-            self._offers_suppressed = True
+    def _update_roles(self, new_roles):
+        revive_roles = new_roles - self._roles_needed
+        suppress_roles = self._roles_needed - new_roles
+        self._roles_needed = new_roles
+        if revive_roles:
+            self._driver.reviveOffers(revive_roles)
+        if suppress_roles:
+            self._driver.suppressOffers(suppress_roles)
+            # Decline all held offers that aren't needed any more
+            to_decline = []
+            for role in suppress_roles:
+                role_offers = self._offers.pop(role, {})
+                for agent_offers in role_offers.values():
+                    to_decline.extend([offer.id for offer in agent_offers.values()])
+            if to_decline:
+                self._driver.declineOffer(to_decline)
 
-    def _remove_offer(self, agent_id, offer_id):
+    def _remove_offer(self, role, agent_id, offer_id):
         try:
-            del self._offers[agent_id][offer_id]
-            if not self._offers[agent_id]:
-                del self._offers[agent_id]
+            del self._offers[role][agent_id][offer_id]
+            if not self._offers[role][agent_id]:
+                del self._offers[role][agent_id]
+            if not self._offers[role]:
+                del self._offers[role]
         except KeyError:
             # There are various race conditions that mean an offer could be
             # removed twice (e.g. if we launch a task with an offer at the
@@ -2177,6 +2363,8 @@ class Scheduler(pymesos.Scheduler):
         def format_time(t):
             return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
 
+        to_decline = []
+        to_suppress = set()
         for offer in offers:
             if offer.unavailability:
                 start_time_ns = offer.unavailability.start.nanoseconds
@@ -2187,13 +2375,31 @@ class Scheduler(pymesos.Scheduler):
                     logger.debug('Declining offer %s from %s: unavailable from %s to %s',
                                  offer.id.value, offer.hostname,
                                  format_time(start_time), format_time(end_time))
-                    self._driver.declineOffer(offer.id)
+                    to_decline.append(offer.id)
                     continue
                 else:
                     logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
                                  offer.id.value, offer.hostname,
                                  format_time(start_time), format_time(end_time))
-            self._offers.setdefault(offer.agent_id.value, {})[offer.id.value] = offer
+            role = offer.allocation_info.role
+            if role in self._roles_needed:
+                logger.debug('Adding offer %s on %s with role %s to pool',
+                             offer.id.value, offer.agent_id.value, role)
+                role_offers = self._offers.setdefault(role, {})
+                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+                agent_offers[offer.id.value] = offer
+            else:
+                # This can happen either due to a race or at startup, when
+                # we haven't yet suppressed roles.
+                logger.debug('Declining offer %s on %s with role %s',
+                             offer.id.value, offer.agent_id.value, role)
+                to_decline.append(offer.id)
+                to_suppress.add(role)
+
+        if to_decline:
+            self._driver.declineOffer(to_decline)
+        if to_suppress:
+            self._driver.suppressOffers(to_suppress)
         self._wakeup_launcher.set()
 
     @run_in_event_loop
@@ -2204,9 +2410,13 @@ class Scheduler(pymesos.Scheduler):
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
-        for agent_id, offers in list(self._offers.items()):
-            if offer_id.value in offers:
-                self._remove_offer(agent_id, offer_id.value)
+        # TODO: this is not very efficient. A secondary lookup from offer id to
+        # the relevant offer info would speed it up.
+        for role, role_offers in self._offers.items():
+            for agent_id, agent_offers in role_offers.items():
+                if offer_id.value in agent_offers:
+                    self._remove_offer(role, agent_id, offer_id.value)
+                    return
 
     @run_in_event_loop
     def statusUpdate(self, driver, status):
@@ -2252,27 +2462,20 @@ class Scheduler(pymesos.Scheduler):
             total_resources = {}
             total_gpu_resources = {}
             total_interface_resources = {}   # Double-hash, indexed by network then resource
-            for r in SCALAR_RESOURCES:
-                available = [getattr(agent, r) for agent in agents]
-                max_resources[r] = max(available) if available else DECIMAL_ZERO
-                total_resources[r] = sum(available)
-            for r in RANGE_RESOURCES:
+            for r, cls in GLOBAL_RESOURCES.items():
                 # Cores are special because only the cores on a single NUMA node
                 # can be allocated together
                 if r == 'cores':
-                    available = []
-                    for agent in agents:
-                        for numa_node in agent.numa:
-                            available.append(
-                                len([core for core in numa_node if core in agent.cores]))
+                    available = [cores.available
+                                 for agent in agents for cores in agent.numa_cores]
                 else:
-                    available = [len(getattr(agent, r)) for agent in agents]
-                max_resources[r] = max(available) if available else DECIMAL_ZERO
-                total_resources[r] = sum(available)
-            for r in GPU_SCALAR_RESOURCES:
-                available = [getattr(gpu, r) for agent in agents for gpu in agent.gpus]
-                max_gpu_resources[r] = max(available) if available else DECIMAL_ZERO
-                total_gpu_resources[r] = sum(available)
+                    available = [agent.resources[r].available for agent in agents]
+                max_resources[r] = max(available) if available else cls.ZERO
+                total_resources[r] = sum(available, cls.ZERO)
+            for r, cls in GPU_RESOURCES.items():
+                available = [gpu.resources[r].available for agent in agents for gpu in agent.gpus]
+                max_gpu_resources[r] = max(available) if available else cls.ZERO
+                total_gpu_resources[r] = sum(available, cls.ZERO)
 
             # Collect together all interfaces on the same network
             networks = {}
@@ -2282,8 +2485,8 @@ class Scheduler(pymesos.Scheduler):
             for network, interfaces in networks.items():
                 max_interface_resources[network] = {}
                 total_interface_resources[network] = {}
-                for r in INTERFACE_SCALAR_RESOURCES:
-                    available = [getattr(interface, r) for interface in interfaces]
+                for r in INTERFACE_RESOURCES:
+                    available = [interface.resources[r].available for interface in interfaces]
                     max_interface_resources[network][r] = max(available)
                     total_interface_resources[network][r] = sum(available)
 
@@ -2306,23 +2509,19 @@ class Scheduler(pymesos.Scheduler):
                                    for agent in agents for gpu in agent.gpus):
                             raise TaskNoGPUError(node, i)
                     # Check if there is some specific resource that is lacking.
-                    for r in SCALAR_RESOURCES:
-                        need = _as_decimal(getattr(logical_task, r))
-                        if need > max_resources[r]:
-                            raise TaskInsufficientResourcesError(node, r, need, max_resources[r])
-                    for r in RANGE_RESOURCES:
-                        need = len(getattr(logical_task, r))
+                    for r in GLOBAL_RESOURCES:
+                        need = logical_task.requests[r].amount
                         if need > max_resources[r]:
                             raise TaskInsufficientResourcesError(node, r, need, max_resources[r])
                     for i, request in enumerate(logical_task.gpus):
-                        for r in GPU_SCALAR_RESOURCES:
-                            need = _as_decimal(getattr(request, r))
+                        for r in GPU_RESOURCES:
+                            need = request.requests[r].amount
                             if need > max_gpu_resources[r]:
                                 raise TaskInsufficientGPUResourcesError(
                                     node, i, r, need, max_gpu_resources[r])
                     for request in logical_task.interfaces:
-                        for r in INTERFACE_SCALAR_RESOURCES:
-                            need = _as_decimal(getattr(request, r))
+                        for r in INTERFACE_RESOURCES:
+                            need = request.requests[r].amount
                             if need > max_interface_resources[request.network][r]:
                                 raise TaskInsufficientInterfaceResourcesError(
                                     node, request, r, need,
@@ -2335,24 +2534,23 @@ class Scheduler(pymesos.Scheduler):
             # Nodes are all individually launchable, but we weren't able to launch
             # all of them due to some contention. Check if any one resource is
             # over-subscribed.
-            for r in SCALAR_RESOURCES:
-                need = sum(_as_decimal(getattr(node.logical_node, r)) for node in nodes)
+            for r, cls in GLOBAL_RESOURCES.items():
+                need = sum((node.logical_node.requests[r].amount for node in nodes),
+                           cls.ZERO)
                 if need > total_resources[r]:
                     raise GroupInsufficientResourcesError(r, need, total_resources[r])
-            for r in RANGE_RESOURCES:
-                need = sum(len(getattr(node.logical_node, r)) for node in nodes)
-                if need > total_resources[r]:
-                    raise GroupInsufficientResourcesError(r, need, total_resources[r])
-            for r in GPU_SCALAR_RESOURCES:
-                need = sum(_as_decimal(getattr(request, r))
-                           for node in nodes for request in node.logical_node.gpus)
+            for r, cls in GPU_RESOURCES.items():
+                need = sum((request.requests[r].amount
+                            for node in nodes for request in node.logical_node.gpus),
+                           cls.ZERO)
                 if need > total_gpu_resources[r]:
                     raise GroupInsufficientGPUResourcesError(r, need, total_gpu_resources[r])
             for network in networks:
-                for r in INTERFACE_SCALAR_RESOURCES:
-                    need = sum(_as_decimal(getattr(request, r))
-                               for node in nodes for request in node.logical_node.interfaces
-                               if request.network == network)
+                for r, cls in INTERFACE_RESOURCES.items():
+                    need = sum((request.requests[r].amount
+                                for node in nodes for request in node.logical_node.interfaces
+                                if request.network == network),
+                               cls.ZERO)
                     if need > total_interface_resources[network][r]:
                         raise GroupInsufficientInterfaceResourcesError(
                             network, r, need, total_interface_resources[network][r])
@@ -2362,28 +2560,27 @@ class Scheduler(pymesos.Scheduler):
     async def _launch_once(self):
         """Run single iteration of :meth:`_launcher`"""
         candidates = [(queue, queue.front()) for queue in self._queues if queue]
-        if not candidates:
-            self._clear_offers()
-            return
-        elif not self._offers and self._offers_suppressed:
-            self._driver.reviveOffers()
-            self._offers_suppressed = False
-            return
+        if candidates:
+            # Filter out any candidates other than the highest priority
+            priority = min(queue.priority for (queue, group) in candidates)
+            candidates = [candidate for candidate in candidates
+                          if candidate[0].priority == priority]
+            # Order by deadline, to give some degree of fairness
+            candidates.sort(key=lambda x: x[1].deadline)
+        # Revive/suppress to match the necessary roles
+        roles = set(queue.role for (queue, group) in candidates)
+        self._update_roles(roles)
 
-        # Filter out any candidates other than the highest priority
-        priority = min(queue.priority for (queue, group) in candidates)
-        candidates = [candidate for candidate in candidates if candidate[0].priority == priority]
-        # Order by deadline, to give some degree of fairness
-        candidates.sort(key=lambda x: x[1].deadline)
         for queue, group in candidates:
             nodes = group.nodes
+            role = queue.role
             try:
                 # Due to concurrency, another coroutine may have altered
                 # the state of the tasks since they were put onto the
                 # pending list (e.g. by killing them). Filter those out.
                 nodes = [node for node in nodes if node.state == TaskState.STARTING]
                 agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
-                          for agent_id, offers in self._offers.items()]
+                          for agent_id, offers in self._offers.get(role, {}).items()]
                 # Back up the original agents so that if allocation fails we can
                 # diagnose it.
                 orig_agents = copy.deepcopy(agents)
@@ -2393,7 +2590,7 @@ class Scheduler(pymesos.Scheduler):
                 # there is no other choice. Should eventually look into smarter
                 # algorithms e.g. Dominant Resource Fairness
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                agents.sort(key=lambda agent: (agent.priority, agent.mem))
+                agents.sort(key=lambda agent: (agent.priority, agent.resources['mem'].available))
                 nodes.sort(key=self._node_sort_key, reverse=True)
                 allocations = []
                 for node in nodes:
@@ -2442,7 +2639,7 @@ class Scheduler(pymesos.Scheduler):
                     taskinfos = {agent: [] for agent in agents}
                     for (node, allocation) in allocations:
                         taskinfos[node.agent].append(node.taskinfo)
-                        for port in allocation.ports:
+                        for port in list(allocation.resources['ports']):
                             prev = new_min_ports.get(node.agent_id, 0)
                             new_min_ports[node.agent_id] = max(prev, port + 1)
                         self._active[node.taskinfo.task_id.value] = (node, group.graph)
@@ -2456,7 +2653,7 @@ class Scheduler(pymesos.Scheduler):
                         # quickly.
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
-                            self._remove_offer(agent.agent_id, offer_id.value)
+                            self._remove_offer(role, agent.agent_id, offer_id.value)
                         logger.info('Launched %d tasks on %s',
                                     len(taskinfos[agent]), agent.agent_id)
                     for node in nodes:
@@ -2867,10 +3064,11 @@ __all__ = [
     'LogicalExternal', 'PhysicalExternal',
     'LogicalTask', 'PhysicalTask', 'TaskState',
     'Volume',
+    'ResourceRequest', 'ScalarResourceRequest', 'RangeResourceRequest',
+    'Resource', 'ScalarResource', 'RangeResource',
     'ResourceAllocation',
-    'GPUResourceAllocation', 'InterfaceResourceAllocation',
+    'GPUResources', 'InterfaceResources',
     'InsufficientResourcesError',
-    'NoOffersError',
     'TaskNoAgentError',
     'TaskInsufficientResourcesError',
     'TaskInsufficientGPUResourcesError',

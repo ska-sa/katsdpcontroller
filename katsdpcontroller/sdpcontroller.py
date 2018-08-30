@@ -645,7 +645,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                  sdp_controller, telstate_name='telstate'):
         super().__init__(sched, config, resolver, subarray_product_id, loop, sdp_controller)
         # Priority is lower (higher number) than the default queue
-        self.batch_queue = scheduler.LaunchQueue(subarray_product_id, priority=BATCH_PRIORITY)
+        self.batch_queue = scheduler.LaunchQueue(
+            sdp_controller.batch_role, subarray_product_id, priority=BATCH_PRIORITY)
         sched.add_queue(self.batch_queue)
         # generate physical nodes
         self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
@@ -895,7 +896,7 @@ class SDPControllerServer(DeviceServer):
     VERSION = "sdpcontroller-3.0"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
-    def __init__(self, host, port, sched, loop, safe_multicast_cidr,
+    def __init__(self, host, port, sched, loop, safe_multicast_cidr, batch_role,
                  interface_mode=False,
                  image_resolver_factory=None,
                  s3_config_file=None,
@@ -922,6 +923,7 @@ class SDPControllerServer(DeviceServer):
         self.sched = sched
         self.gui_urls = gui_urls if gui_urls is not None else []
         self.graph_dir = graph_dir
+        self.batch_role = batch_role
 
         if image_resolver_factory is None:
             image_resolver_factory = scheduler.ImageResolver
