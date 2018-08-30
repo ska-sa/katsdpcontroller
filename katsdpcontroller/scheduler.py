@@ -437,8 +437,8 @@ class Resource:
             available = sum((self._available(part, **kwargs) for part in self.parts),
                             self.ZERO)
         if amount > available:
-            raise ValueError('Requested amount {} of {} is more than available {}'
-                             .format(amount, self.name, available))
+            raise ValueError('Requested amount {} of {} is more than available {} (kwargs={})'
+                             .format(amount, self.name, available, kwargs))
         out = type(self)(self.name)
         pos = len(self.parts) - 1
         with decimal.localcontext(DECIMAL_CONTEXT):
