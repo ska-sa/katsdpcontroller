@@ -930,7 +930,9 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
+    # WIP: Testing factor 8 x allocation to see if memory issues on 31 Aug
+    # are solved.
+    return 8 * _mb(memory_pool + worker_mem + socket_buffers) + 256
 
 
 def _make_vis_writer(g, config, name):
