@@ -914,6 +914,25 @@ def _make_cal(g, config, name, l0_name, flags_name):
     return cal_group
 
 
+def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
+    """Compute memory requirement (in MB) for vis_writer or flag_writer"""
+    # Estimate the size of the memory pool. An extra item is added because
+    # the value is copied when added to the rechunker, although this does
+    # not actually come from the memory pool.
+    heap_size = dump_size / n_substreams
+    memory_pool = (3 + 10 * n_substreams) * heap_size
+    # Estimate the size of the in-flight objects for the workers.
+    worker_mem = (workers + 1) * obj_size
+
+    # Socket buffer allocated per endpoint, but it is bounded at 256MB by the
+    # OS config.
+    socket_buffers = min(256 * 1024**2, heap_size) * n_substreams
+
+    # Double the memory allocation to be on the safe side. This gives some
+    # headroom for page cache etc.
+    return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
+
+
 def _make_vis_writer(g, config, name):
     info = L0Info(config, name)
 
@@ -925,17 +944,14 @@ def _make_vis_writer(g, config, name):
     # writing) and scale from there.
     vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
-    # Estimate the size of the memory pool.
+    obj_size = 10e6
+    workers = 50
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
-    memory_pool = (4 + 3 / n_substreams) * info.size
-    # Socket buffer allocated per endpoint, but it is bounded at 256MB by the
-    # OS config.
-    socket_buffers = min(256 * 1024**2 * n_substreams, info.size)
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = 2 * _mb(memory_pool + socket_buffers) + 256
+    vis_writer.mem = _writer_mem_mb(info.size, obj_size, n_substreams, workers)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.volumes = [OBJ_DATA_VOL]
@@ -946,7 +962,8 @@ def _make_vis_writer(g, config, name):
     g.add_node(vis_writer, config=lambda task, resolver: {
         'l0_name': name,
         'l0_interface': task.interfaces['sdp_10g'].name,
-        'obj_size_mb': 10.0,
+        'obj_size_mb': _mb(obj_size),
+        'workers': workers,
         'npy_path': OBJ_DATA_VOL.container_path,
         's3_endpoint_url': resolver.s3_config['archive']['url']
     })
@@ -963,18 +980,21 @@ def _make_flag_writer(g, config, name, l0_name):
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
+    flags_src = find_node(g, 'multicast.' + name)
+    n_substreams = flags_src.n_addresses
+    workers = 50
+    # Flag writer doesn't do any rechunking yet
+    obj_size = info.flag_size / n_substreams
+
     # Trial allocation
     flag_writer.cpus = 1.0
-    # Sized to include space for 8x in the memory pool and 5x in the cache
-    flag_writer.mem = 256 + _mb(32 * info.flag_size)
+    flag_writer.mem = _writer_mem_mb(info.flag_size, obj_size, n_substreams, workers)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
     flag_writer.volumes = [OBJ_DATA_VOL]
     flag_writer.deconfigure_wait = False
-
-    flags_src = find_node(g, 'multicast.' + name)
 
     # Capture init / done are used to track progress of completing flags
     # for a specified capture block id - the writer itself is free running
@@ -990,7 +1010,8 @@ def _make_flag_writer(g, config, name, l0_name):
     g.add_node(flag_writer, config=lambda task, resolver: {
         'flags_name': name,
         'flags_interface': task.interfaces['sdp_10g'].name,
-        'npy_path': OBJ_DATA_VOL.container_path
+        'npy_path': OBJ_DATA_VOL.container_path,
+        'workers': workers
     })
 
     g.add_edge(flag_writer, flags_src, port='spead',
