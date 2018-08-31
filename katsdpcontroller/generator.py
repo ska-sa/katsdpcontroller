@@ -127,7 +127,7 @@ def _round_up(value, period):
     return _round_down(value - 1, period) + period
 
 
-def _bandwidth(size, time, ratio=1.05, overhead=2048):
+def _bandwidth(size, time, ratio=1.05, overhead=128):
     """Convert a heap size to a bandwidth in bits per second.
 
     Parameters
@@ -216,7 +216,7 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
         return self.n_vis * 8     # size of complex64
 
     @property
-    def net_bandwidth(self, ratio=1.05, overhead=2048):
+    def net_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
 
 
@@ -242,7 +242,7 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
         return self.raw['spectra_per_heap'] * self.n_samples_between_spectra / self.adc_sample_rate
 
     @property
-    def net_bandwidth(self, ratio=1.05, overhead=2048):
+    def net_bandwidth(self, ratio=1.05, overhead=128):
         """Network bandwidth in bits per second"""
         heap_size = self.size / self.n_substreams
         return _bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
@@ -294,11 +294,11 @@ class L0Info(VisInfo):
         return self.n_vis
 
     @property
-    def net_bandwidth(self, ratio=1.05, overhead=2048):
+    def net_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
 
     @property
-    def flag_bandwidth(self, ratio=1.05, overhead=2048):
+    def flag_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
 
