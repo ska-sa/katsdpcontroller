@@ -549,6 +549,8 @@ class TestSDPController(BaseTestSDPController):
                     node.allocation = mock.MagicMock()
                     node.allocation.agent.host = 'host.' + node.logical_node.name
                     node.allocation.agent.gpus[0].name = 'GeForce GTX TITAN X'
+                    node.allocation.agent.gpus[0].numa_node = 0
+                    node.allocation.gpus[0].index = 0
                     for request in node.logical_node.interfaces:
                         interface = mock.Mock()
                         interface.name = 'em1'

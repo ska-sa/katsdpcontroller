@@ -1034,6 +1034,7 @@ def _make_beamformer_ptuse(g, config, name):
     # GPUs may be needed.
     bf_ingest.gpus[0].compute = 1.0
     bf_ingest.gpus[0].mem = 7 * 1024  # Overkill for now, but may be needed for dedispersion
+    bf_ingest.gpus[0].affinity = True
     bf_ingest.cpus = 4
     bf_ingest.cores = ['capture0', 'capture1', 'processing', 'python']
     # 32GB of psrdada buffers, regardless of channels
@@ -1056,6 +1057,7 @@ def _make_beamformer_ptuse(g, config, name):
                      task.cores['capture1'],
                      task.cores['processing'],
                      task.cores['python']],
+        'numa': task.agent.gpus[task.allocation.gpus[0].index].numa_node,
         'interface': task.interfaces['cbf'].name
     })
     for src, pol in zip(srcs, 'xy'):
