@@ -44,7 +44,7 @@ IMAGES = frozenset([
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
-#: Maximum number of custom signals requested by timeplot
+#: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
@@ -502,7 +502,7 @@ def _make_cbf_simulator(g, config, name):
     return sim_group
 
 
-def _make_timeplot(g, config, spectral_name):
+def _make_correlator_timeplot(g, config, spectral_name):
     spectral_info = L0Info(config, spectral_name)
     n_ingest = n_ingest_nodes(config, spectral_name)
     multicast = find_node(g, 'multicast.timeplot.' + spectral_name)
@@ -525,12 +525,13 @@ def _make_timeplot(g, config, spectral_name):
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
     timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    timeplot.interfaces[0].bandwidth_in = _timeplot_bandwidth(spectral_info, n_ingest) * n_ingest
+    timeplot.interfaces[0].bandwidth_in = \
+        _correlator_timeplot_bandwidth(spectral_info, n_ingest) * n_ingest
     timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
-        'description': 'Signal displays for {0.subarray_product_id}',
+        'description': 'Signal displays for {0.subarray_product_id} %s' % (spectral_name,),
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
@@ -551,7 +552,7 @@ def _make_timeplot(g, config, spectral_name):
     return timeplot
 
 
-def _timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
+def _correlator_timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
     """Approximate size of the data sent from one ingest process to timeplot, per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
     n_perc_signals = 5 * 8
@@ -570,7 +571,7 @@ def _timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
     return ans
 
 
-def _timeplot_continuum_factor(spectral_info, n_ingest):
+def _correlator_timeplot_continuum_factor(spectral_info, n_ingest):
     factor = 1
     # Aim for about 256 signal display coarse channels
     while (spectral_info.n_channels % (factor * n_ingest * 2) == 0
@@ -579,10 +580,10 @@ def _timeplot_continuum_factor(spectral_info, n_ingest):
     return factor
 
 
-def _timeplot_bandwidth(spectral_info, n_ingest):
-    """Bandwidth for the timeplot stream from a single ingest"""
-    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
-    sd_frame_size = _timeplot_frame_size(
+def _correlator_timeplot_bandwidth(spectral_info, n_ingest):
+    """Bandwidth for the correlator timeplot stream from a single ingest"""
+    sd_continuum_factor = _correlator_timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_frame_size = _correlator_timeplot_frame_size(
         spectral_info, spectral_info.n_channels // sd_continuum_factor, n_ingest)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
@@ -668,8 +669,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # services can declare dependencies on ingest rather than individual nodes.
     ingest_group = LogicalGroup('ingest.' + name)
 
-    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
-    sd_spead_rate = _timeplot_bandwidth(spectral_info, n_ingest)
+    sd_continuum_factor = _correlator_timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_spead_rate = _correlator_timeplot_bandwidth(spectral_info, n_ingest)
     output_channels_str = '{}:{}'.format(*spectral_info.output_channels)
     group_config = {
         'continuum_factor': continuum_info.raw['continuum_factor'] if continuum_name else 1,
@@ -1209,7 +1210,7 @@ def build_logical_graph(config):
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_ingest(g, config, name, name2)
-                        _make_timeplot(g, config, name)
+                        _make_correlator_timeplot(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
                         break
@@ -1225,7 +1226,7 @@ def build_logical_graph(config):
         _adjust_ingest_output_channels(config, [name])
         if is_spectral:
             _make_ingest(g, config, name, None)
-            _make_timeplot(g, config, name)
+            _make_correlator_timeplot(g, config, name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
