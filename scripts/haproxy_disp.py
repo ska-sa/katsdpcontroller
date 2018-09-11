@@ -44,11 +44,12 @@ HAPROXY_HEADER = textwrap.dedent(r"""
 
     frontend http-in
         bind *:8080
-        acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+$'
-        acl has_array path_reg '^/array_\d+_[a-zA-Z0-9]+/'
+        acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+/[^/]+$'
+        acl has_array_stream path_reg '^/array_\d+_[a-zA-Z0-9]+/[^/]+/'
         http-request redirect code 301 prefix / drop-query append-slash if missing_slash
-        http-request set-var(req.array) path,field(2,/) if has_array
-        use_backend %[var(req.array)] if has_array
+        http-request set-var(req.array) path,field(2,/) if has_array_stream
+        http-request set-var(req.stream) path,field(3,/) if has_array_stream
+        use_backend %[var(req.array)]_%[var(req.stream)] if has_array_stream
         default_backend fallback
 
     backend fallback
@@ -100,7 +101,7 @@ class Server:
 async def get_servers(client):
     servers = defaultdict(Server)
     if client.is_connected:
-        sensor_regex = r'^(array_\d+_[A-Za-z0-9]+)\.timeplot\.[^.]*\.html_port$'
+        sensor_regex = r'^(array_\d+_[A-Za-z0-9]+)\.timeplot\.([^.]*)\.html_port$'
         with async_timeout.timeout(30):
             reply, informs = await client.request('sensor-value', '/' + sensor_regex + '/')
         for inform in informs:
@@ -118,7 +119,8 @@ async def get_servers(client):
                 logger.warning('sensor %s does not match the requested regex, ignoring', name)
                 continue
             array = match.group(1)
-            servers[array].html_endpoint = value
+            stream = match.group(2)
+            servers[(array, stream)].html_endpoint = value
     logger.info("Get servers complete: %d found", len(servers))
     return servers
 
@@ -148,8 +150,8 @@ async def websocket_handler(request):
                     request.app['websockets'].discard(ws)
                     await ws.close()
                 elif msg.data == 'servers':
-                    server_dict = {array: "http://{}".format(server)
-                                   for array, server in request.app['servers'].items()}
+                    server_dict = {pretty(array_stream): "http://{}".format(server)
+                                   for array_stream, server in request.app['servers'].items()}
                     await ws.send_json(server_dict)
                 else:
                     await ws.send_str(msg.data + '/ping/')
@@ -163,6 +165,10 @@ async def websocket_handler(request):
         request.app['websockets'].discard(ws)
         logger.info("Websocket %s closed.", ws)
     return ws
+
+
+def pretty(array_stream):
+    return "{0[0]} {0[1]}".format(array_stream)
 
 
 async def main():
@@ -209,16 +215,17 @@ async def main():
                 continue
             old_content = content
             content = HAPROXY_HEADER.format(port=port)
-            for array, server in sorted(servers.items()):
+            for array_stream, server in sorted(servers.items()):
+                array, stream = array_stream
                 if not server.html_endpoint:
-                    logger.warning('Array %s has no signal display html port', array)
+                    logger.warning('Stream %s/%s has no signal display html port', array, stream)
                     continue
                 logger.info("Adding server %s", server.html_endpoint)
                 content += textwrap.dedent(r"""
-                    backend {array}
-                        http-request set-path %[path,regsub(^/.*?/,/)]
-                        server {array}_html_server {server.html_endpoint}
-                    """.format(array=array, server=server))
+                    backend {array}_{stream}
+                        http-request set-path %[path,regsub(^/.*?/.*?/,/)]
+                        server {array}_{stream}_html_server {server.html_endpoint}
+                    """.format(array=array, stream=stream, server=server))
             if content != old_content:
                 cfg.seek(0)
                 cfg.truncate(0)
@@ -229,8 +236,8 @@ async def main():
                         '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
-                server_dict = {array: "http://{}".format(server)
-                               for array, server in servers.items()}
+                server_dict = {pretty(array_stream): "http://{}".format(server)
+                               for array_stream, server in servers.items()}
                 for _ws in app['websockets']:
                     await _ws.send_str(json.dumps(server_dict))
                 logger.info('haproxy (re)started with servers %s', servers)
