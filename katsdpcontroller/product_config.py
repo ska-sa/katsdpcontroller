@@ -99,7 +99,8 @@ def validate(config):
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
         'sdp.cal': ['sdp.l0', 'sdp.vis'],
-        'sdp.flags': ['sdp.vis']
+        'sdp.flags': ['sdp.vis'],
+        'sdp.continuum_image': ['sdp.flags']
     }
     for name, stream in itertools.chain(config['inputs'].items(),
                                         config['outputs'].items()):
@@ -258,10 +259,10 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
-    # Update to 2.1
-    if config['version'] == '2.0':
-        # 2.1 is fully backwards-compatible
-        config['version'] = '2.1'
+    # Update to 2.2
+    if config['version'] in ['2.0', '2.1']:
+        # 2.2 is fully backwards-compatible to 2.0
+        config['version'] = '2.2'
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
@@ -284,6 +285,9 @@ def normalise(config):
         if output['type'] == 'sdp.cal':
             output.setdefault('parameters', {})
             output.setdefault('models', {})
+        if output['type'] == 'sdp.continuum_image':
+            output.setdefault('uvblavg_parameters', {})
+            output.setdefault('mfimage_parameters', {})
 
     config['config'].setdefault('develop', False)
     config['config'].setdefault('service_overrides', {})

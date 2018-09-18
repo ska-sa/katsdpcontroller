@@ -1251,10 +1251,14 @@ def build_logical_graph(config):
                 # Pass l0 name to flag writer to allow calc of bandwidths and sizes
                 _make_flag_writer(g, config, flags_name, src_name)
                 archived_streams.append(flags_name)
+
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
         _make_beamformer_engineering(g, config, name)
+
+    for name in outputs.get('sdp.continuum_image', []):
+        raise NotImplementedError('Continuum imaging is not yet implemented')
 
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.

@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1"]
+            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2"]
         }
     }
 }
@@ -236,6 +236,9 @@
 {% if version >= "2.0" %}
                                 "sdp.flags",
 {% endif %}
+{% if version >= "2.2" %}
+                                "sdp.continuum_image",
+{% endif %}
                                 "sdp.beamformer",
                                 "sdp.beamformer_engineering"
                             ]
@@ -404,6 +407,34 @@
                                     "properties": {
                                         "type": {
                                             "not": {"enum": ["sdp.flags"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+{% endif %}
+{% if version >= "2.2" %}
+                        ,
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.continuum_image"]},
+                                        "src_streams": {"$ref": "#/definitions/singleton"},
+                                        "uvblavg_parameters": {"type": "object"},
+                                        "mfimage_parameters": {"type": "object"},
+                                        "max_realtime": {
+                                            "type": "number",
+                                            "minimum": 0
+                                        }
+                                    },
+                                    "required": ["src_streams"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.continuum_image"]}
                                         }
                                     }
                                 }

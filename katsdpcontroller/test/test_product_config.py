@@ -44,7 +44,7 @@ class TestValidate:
 
     def setup(self):
         self.config = {
-            "version": "2.1",
+            "version": "2.2",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
