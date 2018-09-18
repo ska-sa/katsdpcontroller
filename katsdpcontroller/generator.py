@@ -400,7 +400,7 @@ def _make_cam2telstate(g, config, name):
 
 
 def _make_meta_writer(g, config):
-    def make_config(task, resolver):
+    def make_meta_writer_config(task, resolver):
         s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['url'])
         return {
             's3_host': s3_url.hostname,
@@ -437,7 +437,7 @@ def _make_meta_writer(g, config):
         ]
     }
 
-    g.add_node(meta_writer, config=make_config)
+    g.add_node(meta_writer, config=make_meta_writer_config)
     return meta_writer
 
 
@@ -455,7 +455,7 @@ def _make_cbf_simulator(g, config, name):
         info = TiedArrayChannelisedVoltageInfo(config, name)
     ibv = not is_develop(config)
 
-    def make_config(task, resolver):
+    def make_cbf_simulator_config(task, resolver):
         substreams = info.n_channels // info.n_channels_per_substream
         conf = {
             'cbf_channels': info.n_channels,
@@ -488,7 +488,7 @@ def _make_cbf_simulator(g, config, name):
         return conf
 
     sim_group = LogicalGroup('sim.' + name)
-    g.add_node(sim_group, config=make_config)
+    g.add_node(sim_group, config=make_cbf_simulator_config)
     multicast = find_node(g, 'multicast.' + name)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -577,7 +577,7 @@ def _make_timeplot(g, name, description,
         'category': 'Plot'
     }]
 
-    g.add_node(timeplot, config=lambda task, resolver: dict(**{
+    g.add_node(timeplot, config=lambda task, resolver: dict({
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'spead_interface': task.interfaces['sdp_10g'].name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
@@ -613,16 +613,21 @@ def _make_timeplot_correlator(g, config, spectral_name):
 
 
 def _make_timeplot_beamformer(g, config, name):
-    """Make timeplot server for the beamformer."""
+    """Make timeplot server for the beamformer, plus a beamformer capture to feed it."""
     info = TiedArrayChannelisedVoltageInfo(config, name)
+    develop = is_develop(config)
+    beamformer = _make_beamformer_engineering_pol(
+        g, info, 'bf_ingest_timeplot.{}'.format(name), name, True, False, 0, develop)
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
     # could potentially be reduced further.
-    return _make_timeplot(
+    timeplot = _make_timeplot(
         g, name=name, description=name,
         cpus=0.5, timeplot_buffer_mb=128,
         bandwidth=_beamformer_timeplot_bandwidth(info),
         extra_config={'max_custom_signals': 1})
+
+    return beamformer, timeplot
 
 
 def _correlator_timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
@@ -842,7 +847,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             net_bandwidth += continuum_info.net_bandwidth
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
 
-        def make_config(task, resolver, server_id=i):
+        def make_ingest_config(task, resolver, server_id=i):
             conf = {
                 'cbf_interface': task.interfaces['cbf'].name,
                 'server_id': server_id
@@ -853,7 +858,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             if continuum_name:
                 conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
             return conf
-        g.add_node(ingest, config=make_config)
+        g.add_node(ingest, config=make_ingest_config)
         # Connect to ingest_group. We need a ready dependency of the group on
         # the node, so that other nodes depending on the group indirectly wait
         # for all nodes; the resource dependency is to prevent the nodes being
@@ -1210,7 +1215,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     bf_ingest.ports = ['port']
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
-    def make_config(task, resolver):
+    def make_beamformer_engineering_pol_config(task, resolver):
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
@@ -1230,7 +1235,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
             })
         return config
 
-    g.add_node(bf_ingest, config=make_config)
+    g.add_node(bf_ingest, config=make_beamformer_engineering_pol_config)
     g.add_edge(bf_ingest, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -1262,13 +1267,6 @@ def _make_beamformer_engineering(g, config, name):
         nodes.append(_make_beamformer_engineering_pol(
             g, info, 'bf_ingest.{}.{}'.format(name, i + 1), src, False, ram, i, develop))
     return nodes
-
-
-def _make_beamformer_timeplot(g, config, name):
-    info = TiedArrayChannelisedVoltageInfo(config, name)
-    develop = is_develop(config)
-    return _make_beamformer_engineering_pol(
-        g, info, 'bf_ingest_timeplot.{}'.format(name), name, True, False, 0, develop)
 
 
 def build_logical_graph(config):
@@ -1399,7 +1397,6 @@ def build_logical_graph(config):
     # Collect all tied-array-channelised-voltage streams and make signal displays for them
     for name in inputs.get('cbf.tied_array_channelised_voltage', []):
         if name in inputs_used:
-            _make_beamformer_timeplot(g, config, name)
             _make_timeplot_beamformer(g, config, name)
 
     # Count large allocations in telstate, which affects memory usage of
