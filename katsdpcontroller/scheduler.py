@@ -1211,10 +1211,11 @@ class LogicalTask(LogicalNode):
         as a non-root user.
     image : str
         Base name of the Docker image (without registry or tag).
-    container : :class:`addict.Dict`
-        Modify this to override properties of the container. The `image` and
-        field is set by the :class:`ImageResolver`, overriding anything set
-        here.
+    taskinfo : :class:`addict.Dict`
+        A template for the final taskinfo message passed to Mesos. It will be
+        copied into the physical task before being populated with computed
+        fields. This is primarily intended to allow setting fields that are not
+        otherwise configurable. Use with care.
     command : list of str
         Command to run inside the image. Each element is passed through
         :meth:`str.format` to generate a command for the physical node. The
@@ -1240,8 +1241,9 @@ class LogicalTask(LogicalNode):
         self.image = None
         self.command = []
         self.wrapper = None
-        self.container = Dict()
-        self.container.type = 'DOCKER'
+        self.taskinfo = Dict()
+        self.taskinfo.container.type = 'DOCKER'
+        self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
     def valid_agent(self, agent):
@@ -1871,7 +1873,7 @@ class PhysicalTask(PhysicalNode):
 
         docker_devices = set()
         docker_parameters = []
-        taskinfo = Dict()
+        taskinfo = copy.deepcopy(self.logical_node.taskinfo)
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
@@ -1900,8 +1902,6 @@ class PhysicalTask(PhysicalNode):
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
-        taskinfo.command.shell = False
-        taskinfo.container = copy.deepcopy(self.logical_node.container)
         image_path = await resolver.image_resolver(self.logical_node.image, loop)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
