@@ -129,6 +129,8 @@ if __name__ == "__main__":
                         help='Mesos role for batch processing tasks (default: %(default)s)')
     parser.add_argument('--principal', default='katsdpcontroller',
                         help='Mesos principal for the principal (default: %(default)s')
+    parser.add_argument('--user', default='root',
+                        help='User to run as on the Mesos agents (default: %(default)s')
     parser.add_argument('-v', '--verbose', dest='verbose', default=False,
                         action='store_true',
                         help='print verbose output (default: %(default)s)')
@@ -168,7 +170,7 @@ if __name__ == "__main__":
         parser.error('--s3-config-file is required (unless --interface-mode is given)')
 
     framework_info = addict.Dict()
-    framework_info.user = 'root'
+    framework_info.user = opts.user
     framework_info.name = 'katsdpcontroller'
     framework_info.checkpoint = True
     framework_info.principal = opts.principal
