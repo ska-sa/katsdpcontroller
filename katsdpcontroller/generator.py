@@ -46,6 +46,8 @@ _N32_32 = 32 * 33 * 2 * 32768
 _N16_32 = 16 * 17 * 2 * 32768
 #: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
+#: Speed at which flags are transmitted, relative to real time
+FLAGS_RATE_RATIO = 8.0
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Like DATA_VOL, but for high speed data to be transferred to an object store
@@ -779,7 +781,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     return ingest_group
 
 
-def _make_cal(g, config, name, l0_name, flags_name):
+def _make_cal(g, config, name, l0_name, flags_names):
     info = L0Info(config, l0_name)
     if info.n_antennas < 4:
         # Only possible to calibrate with at least 4 antennas
@@ -821,10 +823,11 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # Main memory consumer is buffers for
     # - visibilities (complex64)
     # - flags (uint8)
+    # - excision flags (single bit each)
     # - weights (float32)
     # There are also timestamps, but they're insignificant compared to the rest.
     slots = int(math.ceil(buffer_time / info.int_time))
-    slot_size = info.n_vis * 13 / n_cal
+    slot_size = info.n_vis * 13.125 / n_cal
     buffer_size = slots * slot_size
     # Processing operations come in a few flavours:
     # - average over time: need O(1) extra slots
@@ -856,8 +859,6 @@ def _make_cal(g, config, name, l0_name, flags_name):
         'l0_name': l0_name,
         'servers': n_cal
     }
-    if flags_name is not None:
-        group_config['flags_name'] = flags_name
     group_config.update(parameters)
 
     # Virtual node which depends on the real cal nodes, so that other services
@@ -873,11 +874,23 @@ def _make_cal(g, config, name, l0_name, flags_name):
                })
 
     # Flags output
-    if flags_name is not None:
+    flags_streams_base = []
+    flags_multicasts = {}
+    for flags_name in flags_names:
+        flags_config = config['outputs'][flags_name]
+        flags_src_stream = flags_config['src_streams'][0]
+        cf = config['outputs'][flags_src_stream]['continuum_factor']
+        cf //= config['outputs'][l0_name]['continuum_factor']
+        flags_streams_base.append({
+            'name': flags_name,
+            'src_stream': flags_src_stream,
+            'continuum_factor': cf,
+            'rate_ratio': FLAGS_RATE_RATIO
+        })
+
         flags_multicast = LogicalMulticast('multicast.' + flags_name, n_cal)
+        flags_multicasts[flags_name] = flags_multicast
         g.add_node(flags_multicast)
-        g.add_edge(cal_group, flags_multicast, port='spead', depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
         g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
 
     for i in range(1, n_cal + 1):
@@ -888,8 +901,9 @@ def _make_cal(g, config, name, l0_name, flags_name):
         cal.mem = buffer_size * (1 + extra) / 1024**2 + 512
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+        # Note: these scale the fixed overheads too, so is not strictly accurate.
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
-        cal.interfaces[0].bandwidth_out = info.flag_bandwidth / n_cal
+        cal.interfaces[0].bandwidth_out = info.flag_bandwidth * FLAGS_RATE_RATIO / n_cal
         cal.ports = ['port', 'dask_diagnostics']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
@@ -900,17 +914,39 @@ def _make_cal(g, config, name, l0_name, flags_name):
         }]
         cal.transitions = CAPTURE_TRANSITIONS
         cal.deconfigure_wait = False
-        g.add_node(cal, config=lambda task, resolver, server_id=i: {
-            'l0_interface': task.interfaces['sdp_10g'].name,
-            'flags_interface': task.interfaces['sdp_10g'].name,
-            'server_id': server_id,
-            'dask_diagnostics': ('', task.ports['dask_diagnostics'])
-        })
+
+        def make_cal_config(task, resolver, server_id=i):
+            cal_config = {
+                'l0_interface': task.interfaces['sdp_10g'].name,
+                'server_id': server_id,
+                'dask_diagnostics': ('', task.ports['dask_diagnostics']),
+                'flags_streams': copy.deepcopy(flags_streams_base)
+            }
+            for flags_stream in cal_config['flags_streams']:
+                flags_stream['interface'] = task.interfaces['sdp_10g'].name
+                flags_stream['endpoints'] = task.flags_endpoints[flags_stream['name']]
+            return cal_config
+
+        g.add_node(cal, config=make_cal_config)
         # Connect to cal_group. See comments in _make_ingest for explanation.
         g.add_edge(cal_group, cal, depends_ready=True, depends_init=True)
         g.add_edge(cal, cal_group, depends_resources=True)
         g.add_edge(cal, src_multicast,
                    depends_resolve=True, depends_ready=True, depends_init=True)
+
+        for flags_name, flags_multicast in flags_multicasts.items():
+            # A sneaky hack to capture the endpoint information for the flag
+            # streams. This is used as a config= function, but instead of
+            # returning config we just stash information in the task object
+            # which is retrieved by make_cal_config.
+            def add_flags_endpoint(task, resolver, endpoint, name=flags_name):
+                if not hasattr(task, 'flags_endpoints'):
+                    task.flags_endpoints = {}
+                task.flags_endpoints[name] = endpoint
+                return {}
+
+            g.add_edge(cal, flags_multicast, port='spead', depends_resolve=True,
+                       config=add_flags_endpoint)
 
     return cal_group
 
@@ -993,7 +1029,7 @@ def _make_flag_writer(g, config, name, l0_name):
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
+    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth * FLAGS_RATE_RATIO
     flag_writer.volumes = [OBJ_DATA_VOL]
     flag_writer.deconfigure_wait = False
 
@@ -1240,18 +1276,18 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.cal', []):
         src_name = config['outputs'][name]['src_streams'][0]
-        # Check for a corresponding flags output
-        flags_name = None
+        # Check for a corresponding flags outputs
+        flags_names = []
         for name2 in outputs.get('sdp.flags', []):
             if config['outputs'][name2]['calibration'][0] == name:
-                flags_name = name2
-                break
-        if _make_cal(g, config, name, src_name, flags_name):
-            if flags_name is not None and config['outputs'][flags_name]['archive']:
-                # Pass l0 name to flag writer to allow calc of bandwidths and sizes
-                _make_flag_writer(g, config, flags_name, src_name)
-                archived_streams.append(flags_name)
-
+                flags_names.append(name2)
+        if _make_cal(g, config, name, src_name, flags_names):
+            for flags_name in flags_names:
+                if config['outputs'][flags_name]['archive']:
+                    # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+                    flags_l0_name = config['outputs'][flags_name]['src_streams'][0]
+                    _make_flag_writer(g, config, flags_name, flags_l0_name)
+                    archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):

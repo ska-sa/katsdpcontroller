@@ -5,6 +5,7 @@ import itertools
 import json
 import urllib
 import copy
+from distutils.version import StrictVersion
 
 import jsonschema
 
@@ -88,6 +89,7 @@ def validate(config):
     if error is not None:
         raise error
 
+    version = StrictVersion(config['version'])
     # All stream sources must match known names, and have the right type
     src_valid_types = {
         'cbf.tied_array_channelised_voltage': ['cbf.antenna_channelised_voltage'],
@@ -194,12 +196,32 @@ def validate(config):
                 elif config['outputs'][calibration]['type'] != 'sdp.cal':
                     raise ValueError('calibration ({}) has wrong type {}'
                                      .format(calibration, config['outputs'][calibration]['type']))
-                if calibration in has_flags:
-                    raise ValueError('calibration ({}) already has a flags output'
-                                     .format(calibration))
-                if output['src_streams'] != config['outputs'][calibration]['src_streams']:
-                    raise ValueError('calibration ({}) has different src_streams'
-                                     .format(calibration))
+                if version < '2.2':
+                    if calibration in has_flags:
+                        raise ValueError('calibration ({}) already has a flags output'
+                                         .format(calibration))
+                    if output['src_streams'] != config['outputs'][calibration]['src_streams']:
+                        raise ValueError('calibration ({}) has different src_streams'
+                                         .format(calibration))
+                else:
+                    src_stream = output['src_streams'][0]
+                    src_stream_config = copy.copy(config['outputs'][src_stream])
+                    cal_config = config['outputs'][calibration]
+                    cal_src_stream = cal_config['src_streams'][0]
+                    cal_src_stream_config = copy.copy(config['outputs'][cal_src_stream])
+                    src_cf = src_stream_config['continuum_factor']
+                    cal_src_cf = cal_src_stream_config['continuum_factor']
+                    if src_cf % cal_src_cf != 0:
+                        raise ValueError('src_stream {} has bad continuum_factor relative to {}'
+                                         .format(src_stream, cal_src_stream))
+                    # Now delete attributes which aren't required to match to check that
+                    # they match on the rest.
+                    for attr in ['continuum_factor', 'archive']:
+                        src_stream_config.pop(attr, None)
+                        cal_src_stream_config.pop(attr, None)
+                    if src_stream_config != cal_src_stream_config:
+                        raise ValueError('src_stream {} does not match {}'
+                                         .format(src_stream, cal_src_stream))
                 has_flags.add(calibration)
 
         except ValueError as error:

@@ -246,7 +246,8 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("streams do not come from the same channeliser", str(cm.exception))
 
-    def test_multiple_flags_per_cal(self):
+    def test_v2_1_multiple_flags_per_cal(self):
+        self.config["version"] = "2.1"
         self.config["outputs"]["flags2"] = {
             "type": "sdp.flags",
             "src_streams": ["l0"],
@@ -269,7 +270,24 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("has wrong type", str(cm.exception))
 
-    def test_calibration_wrong_src_streams(self):
+    def test_flags_mismatched_src_streams(self):
+        self.config["outputs"]["another_l0"] = copy.copy(self.config["outputs"]["l0"])
+        self.config["outputs"]["another_l0"]["output_int_time"] = 5.0
+        self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("does not match", str(cm.exception))
+
+    def test_flags_bad_continuum_factor(self):
+        self.config["outputs"]["another_l0"] = copy.copy(self.config["outputs"]["l0"])
+        self.config["outputs"]["l0"]["continuum_factor"] = 2
+        self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("bad continuum_factor", str(cm.exception))
+
+    def test_v2_1_flags_wrong_src_streams(self):
+        self.config["version"] = "2.1"
         self.config["outputs"]["another_l0"] = self.config["outputs"]["l0"]
         self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
         with assert_raises(ValueError) as cm:
