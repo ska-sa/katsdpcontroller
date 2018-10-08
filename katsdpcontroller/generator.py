@@ -924,7 +924,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
             }
             for flags_stream in cal_config['flags_streams']:
                 flags_stream['interface'] = task.interfaces['sdp_10g'].name
-                flags_stream['endpoints'] = task.flags_endpoints[flags_stream['name']]
+                flags_stream['endpoints'] = str(task.flags_endpoints[flags_stream['name']])
             return cal_config
 
         g.add_node(cal, config=make_cal_config)
