@@ -375,7 +375,7 @@ def _make_telstate(g, config):
     telstate.image = 'katsdptelstate'
     telstate.ports = ['telstate']
     # Run it in /mnt/mesos/sandbox so that the dump.rdb ends up there.
-    telstate.container.docker.setdefault('parameters', []).append(
+    telstate.taskinfo.container.docker.setdefault('parameters', []).append(
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     telstate.physical_factory = TelstateTask
@@ -532,7 +532,7 @@ def _make_cbf_simulator(g, config, name):
             # The verbs send interface seems to create a large number of
             # file handles per stream, easily exceeding the default of
             # 1024.
-            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+            sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
@@ -1138,7 +1138,7 @@ def _make_beamformer_ptuse(g, config, name):
     # If the kernel is < 3.16, the default values are very low. Set
     # the values to the default from more recent Linux versions
     # (https://github.com/torvalds/linux/commit/060028bac94bf60a65415d1d55a359c3a17d5c31)
-    bf_ingest.container.docker.parameters = [
+    bf_ingest.taskinfo.container.docker.parameters = [
         {'key': 'sysctl', 'value': 'kernel.shmmax=18446744073692774399'},
         {'key': 'sysctl', 'value': 'kernel.shmall=18446744073692774399'}
     ]
