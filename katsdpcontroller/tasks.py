@@ -477,15 +477,15 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
         self.command = ['/sbin/poweroff']
 
         # See https://groups.google.com/forum/#!topic/coreos-dev/AXCs_2_J6Mc
-        self.container.volumes = []
+        self.taskinfo.container.volumes = []
         for path in ['/var/run/dbus', '/run/systemd']:
             volume = Dict()
             volume.mode = 'RW'
             volume.container_path = path
             volume.host_path = path
-            self.container.volumes.append(volume)
-        self.container.docker.parameters = []
-        self.container.docker.parameters.append({'key': 'user', 'value': 'root'})
+            self.taskinfo.container.volumes.append(volume)
+        self.taskinfo.container.docker.setdefault('parameters', [])
+        self.taskinfo.container.docker.parameters.append({'key': 'user', 'value': 'root'})
 
     def valid_agent(self, agent):
         if not super().valid_agent(agent):
