@@ -5,6 +5,7 @@ import itertools
 import json
 import urllib
 import copy
+from distutils.version import StrictVersion
 
 import jsonschema
 
@@ -88,6 +89,7 @@ def validate(config):
     if error is not None:
         raise error
 
+    version = StrictVersion(config['version'])
     # All stream sources must match known names, and have the right type
     src_valid_types = {
         'cbf.tied_array_channelised_voltage': ['cbf.antenna_channelised_voltage'],
@@ -99,7 +101,8 @@ def validate(config):
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
         'sdp.cal': ['sdp.l0', 'sdp.vis'],
-        'sdp.flags': ['sdp.vis']
+        'sdp.flags': ['sdp.vis'],
+        'sdp.continuum_image': ['sdp.flags']
     }
     for name, stream in itertools.chain(config['inputs'].items(),
                                         config['outputs'].items()):
@@ -193,12 +196,32 @@ def validate(config):
                 elif config['outputs'][calibration]['type'] != 'sdp.cal':
                     raise ValueError('calibration ({}) has wrong type {}'
                                      .format(calibration, config['outputs'][calibration]['type']))
-                if calibration in has_flags:
-                    raise ValueError('calibration ({}) already has a flags output'
-                                     .format(calibration))
-                if output['src_streams'] != config['outputs'][calibration]['src_streams']:
-                    raise ValueError('calibration ({}) has different src_streams'
-                                     .format(calibration))
+                if version < '2.2':
+                    if calibration in has_flags:
+                        raise ValueError('calibration ({}) already has a flags output'
+                                         .format(calibration))
+                    if output['src_streams'] != config['outputs'][calibration]['src_streams']:
+                        raise ValueError('calibration ({}) has different src_streams'
+                                         .format(calibration))
+                else:
+                    src_stream = output['src_streams'][0]
+                    src_stream_config = copy.copy(config['outputs'][src_stream])
+                    cal_config = config['outputs'][calibration]
+                    cal_src_stream = cal_config['src_streams'][0]
+                    cal_src_stream_config = copy.copy(config['outputs'][cal_src_stream])
+                    src_cf = src_stream_config['continuum_factor']
+                    cal_src_cf = cal_src_stream_config['continuum_factor']
+                    if src_cf % cal_src_cf != 0:
+                        raise ValueError('src_stream {} has bad continuum_factor relative to {}'
+                                         .format(src_stream, cal_src_stream))
+                    # Now delete attributes which aren't required to match to check that
+                    # they match on the rest.
+                    for attr in ['continuum_factor', 'archive']:
+                        src_stream_config.pop(attr, None)
+                        cal_src_stream_config.pop(attr, None)
+                    if src_stream_config != cal_src_stream_config:
+                        raise ValueError('src_stream {} does not match {}'
+                                         .format(src_stream, cal_src_stream))
                 has_flags.add(calibration)
 
         except ValueError as error:
@@ -258,10 +281,10 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
-    # Update to 2.1
-    if config['version'] == '2.0':
-        # 2.1 is fully backwards-compatible
-        config['version'] = '2.1'
+    # Update to 2.2
+    if config['version'] in ['2.0', '2.1']:
+        # 2.2 is fully backwards-compatible to 2.0
+        config['version'] = '2.2'
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
@@ -284,6 +307,9 @@ def normalise(config):
         if output['type'] == 'sdp.cal':
             output.setdefault('parameters', {})
             output.setdefault('models', {})
+        if output['type'] == 'sdp.continuum_image':
+            output.setdefault('uvblavg_parameters', {})
+            output.setdefault('mfimage_parameters', {})
 
     config['config'].setdefault('develop', False)
     config['config'].setdefault('service_overrides', {})
