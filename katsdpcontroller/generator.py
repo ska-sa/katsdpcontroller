@@ -627,7 +627,7 @@ def _make_timeplot_beamformer(g, config, name):
         g, name=name, description=name,
         cpus=0.5, timeplot_buffer_mb=128,
         bandwidth=_beamformer_timeplot_bandwidth(info),
-        extra_config={'max_custom_signals': 1})
+        extra_config={'max_custom_signals': 2})
 
     return beamformer, timeplot
 
