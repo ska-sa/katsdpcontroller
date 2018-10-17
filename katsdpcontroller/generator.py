@@ -1115,8 +1115,9 @@ def _make_flag_writer(g, config, name, l0_name):
     # Flag writer doesn't do any rechunking yet
     obj_size = info.flag_size / n_substreams
 
-    # Trial allocation
-    flag_writer.cpus = 1.0
+    # Don't yet have a good idea of real CPU usage. This formula is
+    # copied from the vis writer.
+    flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
     flag_writer.mem = _writer_mem_mb(info.flag_size, obj_size, n_substreams, workers)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
