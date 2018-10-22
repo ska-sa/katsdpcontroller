@@ -243,6 +243,8 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
+        logger.info('Logical graph nodes:\n'
+                    + '\n'.join(repr(node) for node in self.logical_graph))
         self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
