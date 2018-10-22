@@ -37,7 +37,7 @@ setup(
         'katsdptelstate',
         'katsdpservices',
         'kazoo',
-        'prometheus_client',
+        'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
         'prometheus_async'
     ],
     tests_require=tests_require,
