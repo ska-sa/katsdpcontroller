@@ -85,6 +85,10 @@ class KatcpTransition(object):
                           for arg in self.args]
         return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
+    def __repr__(self):
+        args = ['{!r}'.format(arg) for arg in (self.name,) + self.args]
+        return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
+
 
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
