@@ -1064,10 +1064,11 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
     return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
 
 
-def _make_vis_writer(g, config, name, s3_name, local):
+def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     info = L0Info(config, name)
 
-    vis_writer = SDPLogicalTask('vis_writer.' + name)
+    output_name = prefix + '.' + name if prefix is not None else name
+    vis_writer = SDPLogicalTask('vis_writer.' + output_name)
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
@@ -1090,6 +1091,11 @@ def _make_vis_writer(g, config, name, s3_name, local):
         vis_writer.volumes = [OBJ_DATA_VOL]
     else:
         vis_writer.interfaces[0].backwidth_out = info.net_bandwidth
+        # Creds are passed on the command-line so that they are redacted from telstate.
+        vis_writer.command.extend([
+            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
+        ])
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
     def make_vis_writer_config(task, resolver):
@@ -1102,6 +1108,8 @@ def _make_vis_writer(g, config, name, s3_name, local):
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        if prefix is not None:
+            conf['new_name'] = output_name
         return conf
 
     g.add_node(vis_writer, config=make_vis_writer_config)
@@ -1111,10 +1119,11 @@ def _make_vis_writer(g, config, name, s3_name, local):
     return vis_writer
 
 
-def _make_flag_writer(g, config, name, l0_name, s3_name, local):
+def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     info = L0Info(config, l0_name)
 
-    flag_writer = SDPLogicalTask('flag_writer.' + name)
+    output_name = prefix + '.' + name if prefix is not None else name
+    flag_writer = SDPLogicalTask('flag_writer.' + output_name)
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
@@ -1134,6 +1143,11 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local):
         flag_writer.volumes = [OBJ_DATA_VOL]
     else:
         flag_writer.interfaces[0].bandwidth_out = flag_writer.interfaces[0].bandwidth_in
+        # Creds are passed on the command-line so that they are redacted from telstate.
+        flag_writer.command.extend([
+            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
+        ])
     flag_writer.deconfigure_wait = False
 
     # Capture init / done are used to track progress of completing flags
@@ -1157,6 +1171,9 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local):
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        if prefix is not None:
+            conf['new_name'] = output_name
+            conf['rename_src'] = {l0_name: prefix + '.' + l0_name}
         return conf
 
     g.add_node(flag_writer, config=make_flag_writer_config)
@@ -1429,6 +1446,7 @@ def build_logical_graph(config):
             _make_vis_writer(g, config, name, 'archive', local=True)
             archived_streams.append(name)
 
+    have_cal = set()
     for name in outputs.get('sdp.cal', []):
         src_name = config['outputs'][name]['src_streams'][0]
         # Check for a corresponding flags outputs
@@ -1437,6 +1455,7 @@ def build_logical_graph(config):
             if config['outputs'][name2]['calibration'][0] == name:
                 flags_names.append(name2)
         if _make_cal(g, config, name, src_name, flags_names):
+            have_cal.add(name)
             for flags_name in flags_names:
                 if config['outputs'][flags_name]['archive']:
                     # Pass l0 name to flag writer to allow calc of bandwidths and sizes
@@ -1455,7 +1474,16 @@ def build_logical_graph(config):
     #         _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
-        raise NotImplementedError('Continuum imaging is not yet implemented')
+        orig_flags_name = config['outputs'][name]['src_streams'][0]
+        orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
+        cal = config['outputs'][orig_flags_name]['calibration'][0]
+        if cal not in have_cal:
+            continue      # If fewer than 4 antennas for example
+        logger.warning('%s: will write data but processing is not yet implemented', name)
+        _make_vis_writer(g, config, orig_l0_name,
+                         s3_name='continuum', local=False, prefix=name)
+        _make_flag_writer(g, config, orig_flags_name, orig_l0_name,
+                          s3_name='continuum', local=False, prefix=name)
 
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
