@@ -54,6 +54,8 @@ DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
+#: Target size of objects in the object store
+WRITER_OBJECT_SIZE = 10e6    # 10 MB
 
 logger = logging.getLogger(__name__)
 
@@ -1062,7 +1064,7 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
     return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
 
 
-def _make_vis_writer(g, config, name):
+def _make_vis_writer(g, config, name, s3_name, local):
     info = L0Info(config, name)
 
     vis_writer = SDPLogicalTask('vis_writer.' + name)
@@ -1073,36 +1075,43 @@ def _make_vis_writer(g, config, name):
     # writing) and scale from there.
     vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
-    obj_size = 10e6
     workers = 50
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = _writer_mem_mb(info.size, obj_size, n_substreams, workers)
+    vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams, workers)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
-    vis_writer.volumes = [OBJ_DATA_VOL]
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
+    if local:
+        vis_writer.volumes = [OBJ_DATA_VOL]
+    else:
+        vis_writer.interfaces[0].backwidth_out = info.net_bandwidth
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
-    g.add_node(vis_writer, config=lambda task, resolver: {
-        'l0_name': name,
-        'l0_interface': task.interfaces['sdp_10g'].name,
-        'obj_size_mb': _mb(obj_size),
-        'workers': workers,
-        'npy_path': OBJ_DATA_VOL.container_path,
-        's3_endpoint_url': resolver.s3_config['archive']['url']
-    })
+    def make_vis_writer_config(task, resolver):
+        conf = {
+            'l0_name': name,
+            'l0_interface': task.interfaces['sdp_10g'].name,
+            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'workers': workers,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+        }
+        if local:
+            conf['npy_path'] = OBJ_DATA_VOL.container_path
+        return conf
+
+    g.add_node(vis_writer, config=make_vis_writer_config)
     g.add_edge(vis_writer, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
     return vis_writer
 
 
-def _make_flag_writer(g, config, name, l0_name):
+def _make_flag_writer(g, config, name, l0_name, s3_name, local):
     info = L0Info(config, l0_name)
 
     flag_writer = SDPLogicalTask('flag_writer.' + name)
@@ -1112,18 +1121,19 @@ def _make_flag_writer(g, config, name, l0_name):
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 50
-    # Flag writer doesn't do any rechunking yet
-    obj_size = info.flag_size / n_substreams
 
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
     flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
-    flag_writer.mem = _writer_mem_mb(info.flag_size, obj_size, n_substreams, workers)
+    flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams, workers)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth * FLAGS_RATE_RATIO
-    flag_writer.volumes = [OBJ_DATA_VOL]
+    if local:
+        flag_writer.volumes = [OBJ_DATA_VOL]
+    else:
+        flag_writer.interfaces[0].bandwidth_out = flag_writer.interfaces[0].bandwidth_in
     flag_writer.deconfigure_wait = False
 
     # Capture init / done are used to track progress of completing flags
@@ -1137,13 +1147,19 @@ def _make_flag_writer(g, config, name, l0_name):
         ]
     }
 
-    g.add_node(flag_writer, config=lambda task, resolver: {
-        'flags_name': name,
-        'flags_interface': task.interfaces['sdp_10g'].name,
-        'npy_path': OBJ_DATA_VOL.container_path,
-        'workers': workers
-    })
+    def make_flag_writer_config(task, resolver):
+        conf = {
+            'flags_name': name,
+            'flags_interface': task.interfaces['sdp_10g'].name,
+            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'workers': workers,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+        }
+        if local:
+            conf['npy_path'] = OBJ_DATA_VOL.container_path
+        return conf
 
+    g.add_node(flag_writer, config=make_flag_writer_config)
     g.add_edge(flag_writer, flags_src, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
@@ -1410,7 +1426,7 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.vis', []):
         if config['outputs'][name]['archive']:
-            _make_vis_writer(g, config, name)
+            _make_vis_writer(g, config, name, 'archive', local=True)
             archived_streams.append(name)
 
     for name in outputs.get('sdp.cal', []):
@@ -1425,7 +1441,7 @@ def build_logical_graph(config):
                 if config['outputs'][flags_name]['archive']:
                     # Pass l0 name to flag writer to allow calc of bandwidths and sizes
                     flags_l0_name = config['outputs'][flags_name]['src_streams'][0]
-                    _make_flag_writer(g, config, flags_name, flags_l0_name)
+                    _make_flag_writer(g, config, flags_name, flags_l0_name, 'archive', local=True)
                     archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
