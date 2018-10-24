@@ -117,12 +117,14 @@ class ProductState(scheduler.OrderedEnum):
     - IDLE -> CAPTURING (via capture-init)
     - CAPTURING -> IDLE (via capture-done)
     - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
+    - IDLE/CAPTURING/DECONFIGURING -> ERROR (via an internal error)
     """
     CONFIGURING = 0
     IDLE = 1
     CAPTURING = 2
     DECONFIGURING = 3
     DEAD = 4
+    ERROR = 5
 
 
 class MulticastIPResources:
@@ -308,7 +310,11 @@ class SDPSubarrayProductBase:
         pass
 
     async def capture_init_impl(self, capture_block):
-        """Extension point to start a capture block."""
+        """Extension point to start a capture block.
+
+        If it raises an exception, the capture block is assumed to not have
+        been started, and the subarray product goes into state ERROR.
+        """
         pass
 
     async def capture_done_impl(self, capture_block):
@@ -318,8 +324,12 @@ class SDPSubarrayProductBase:
         controller request to return. The caller takes care of calling
         :meth:`postprocess_impl`.
 
-        It needs to be safe to run from DECONFIGURING state, because it may be
-        run as part of forced deconfigure.
+        It needs to be safe to run from DECONFIGURING and ERROR states, because
+        it may be run as part of forced deconfigure.
+
+        If it raises an exception, the capture block is assumed to be dead,
+        and the subarray product goes into state ERROR unless this occurred as
+        part of deconfiguring.
         """
         pass
 
@@ -328,11 +338,25 @@ class SDPSubarrayProductBase:
 
         Subclasses should override this if a capture block is not finished when
         :meth:`_capture_done` returns.
+
+        Note that a failure here does **not** put the subarray product into
+        ERROR state, as it is assumed that this does not interfere with
+        subsequent operation.
+        """
+        pass
+
+    def capture_block_dead_impl(self, capture_block):
+        """Clean up after a capture block is no longer active.
+
+        This should only be overridden to clean up the state machine, not to
+        do processing. It is called both for the normal lifecycle, but also
+        when there is a failure e.g. if capture_init_impl or capture_done_impl
+        raised an exception.
         """
         pass
 
     async def _configure(self, ctx):
-        """Asynchronous task that does he configuration."""
+        """Asynchronous task that does the configuration."""
         await self.configure_impl(ctx)
         self.state = ProductState.IDLE
 
@@ -369,7 +393,7 @@ class SDPSubarrayProductBase:
 
         # Allow all the postprocessing tasks to finish up
         # Note: this needs to be done carefully, because self.capture_blocks
-        # can change during the yield.
+        # can change during the await.
         while self.capture_blocks:
             name, capture_block = next(iter(self.capture_blocks.items()))
             logging.info('Waiting for capture block %s to terminate', name)
@@ -391,6 +415,7 @@ class SDPSubarrayProductBase:
         # Setting the state will trigger _update_capture_block_sensor, which
         # will update the sensor with the value removed
         capture_block.state = CaptureBlockState.DEAD
+        self.capture_block_dead_impl(capture_block)
 
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
@@ -404,7 +429,11 @@ class SDPSubarrayProductBase:
         self._update_capture_block_sensor()
         try:
             await self.capture_init_impl(capture_block)
+        except asyncio.CancelledError:
+            self._capture_block_dead(capture_block)
+            raise
         except Exception:
+            self.state = ProductState.ERROR
             self._capture_block_dead(capture_block)
             raise
         assert self.current_capture_block is None
@@ -425,7 +454,15 @@ class SDPSubarrayProductBase:
         """
         capture_block = self.current_capture_block
         assert capture_block is not None
-        await self.capture_done_impl(capture_block)
+        try:
+            await self.capture_done_impl(capture_block)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.state = ProductState.ERROR
+            self.current_capture_block = None
+            self._capture_block_dead(capture_block)
+            raise
         assert self.state == ProductState.CAPTURING
         assert self.current_capture_block is capture_block
         self.state = ProductState.IDLE
@@ -499,7 +536,7 @@ class SDPSubarrayProductBase:
                 self.logger.warning('Subarray product %s is busy with an operation, '
                                     'but deconfiguring anyway', self.subarray_product_id)
 
-        if self.state != ProductState.IDLE:
+        if self.state not in (ProductState.IDLE, ProductState.ERROR):
             if not force:
                 raise FailReply('Subarray product is not idle and thus cannot be deconfigured. '
                                 'Please issue capture_done first.')
@@ -670,12 +707,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                         'Cannot issue %s to %s because there is no katcp connection',
                         reqs[0], node.name)
                 else:
-                    # TODO: should handle katcp exceptions or failed replies
-                    try:
-                        for req in reqs:
-                            await node.issue_req(req.name, req.args, timeout=req.timeout)
-                    except FailReply:
-                        pass   # Callee logs a warning
+                    for req in reqs:
+                        await node.issue_req(req.name, req.args, timeout=req.timeout)
             if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
                 observer = node.capture_block_state_observer
                 if observer is not None:
@@ -712,7 +745,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             deps_graph = deps_graph.reverse(copy=False)
 
         futures = {}     # Keyed by node
-        # We grab the ioloop of the first task we create.
+        # We grab the event loop of the first task we create.
         loop = None
         # Lexicographical tie-breaking isn't strictly required, but it makes
         # behaviour predictable.
@@ -765,6 +798,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     resources_timeout=7*86400, attempts=3)
                 batch.append(coro)
         await asyncio.gather(*batch, loop=self.loop)
+
+    def capture_block_dead_impl(self, capture_block):
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTaskBase):
+                node.remove_capture_block(capture_block)
 
     async def _launch_telstate(self):
         """Make sure the telstate node is launched"""
