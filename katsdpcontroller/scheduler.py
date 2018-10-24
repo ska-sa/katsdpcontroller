@@ -775,7 +775,7 @@ class VolumeRequest:
     def __repr__(self):
         return '<{} {} {}{}>'.format(
             self.__class__.__name__, self.name, self.mode,
-            'affinity=True' if self.affinity else '')
+            ' affinity=True' if self.affinity else '')
 
 
 class GPUResources:
