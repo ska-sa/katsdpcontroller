@@ -1,17 +1,17 @@
 {
     "continuum": {
         "write": {
-            "access_key": "dummy",
-            "secret_key": "dummy"
+            "access_key": "minioaccesskey",
+            "secret_key": "miniosecretkey"
         },
-        "url": "http://s3.invalid/"
+        "url": "http://localhost:9000/"
     },
     "spectral": {
         "write": {
-            "access_key": "dummy",
-            "secret_key": "dummy"
+            "access_key": "minioaccesskey",
+            "secret_key": "miniosecretkey"
         },
-        "url": "http://s3.invalid/"
+        "url": "http://localhost:9000/"
     },
     "archive": {
         "write": {
