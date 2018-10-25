@@ -3,7 +3,7 @@
 import sys
 try:
     import katsdpcontroller.generator
-except ImportError as e:
+except ImportError:
     print("Failed to import katsdpcontroller.generator. Please install katsdpcontroller first.",
           file=sys.stderr)
     sys.exit(1)

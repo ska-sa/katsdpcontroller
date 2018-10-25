@@ -898,7 +898,6 @@ class TestSDPController(BaseTestSDPController):
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         self.fail_requests.add('capture-done')
         reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT4)
-        capture_block_id = reply[0]
         with self.assertRaises(FailReply):
             await self.client.request("capture-done", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
