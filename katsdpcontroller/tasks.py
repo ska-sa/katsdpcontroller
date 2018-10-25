@@ -134,11 +134,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
            track it locally.
         """
         self.sensors[sensor.name] = sensor
-        if self.sdp_controller:
-            self.sdp_controller.sensors.add(sensor)
-        else:
-            self.logger.warning("Attempted to add sensor %s to node %s, but the node has "
-                                "no SDP controller available.", sensor.name, self.name)
+        self.sdp_controller.sensors.add(sensor)
 
     def _remove_sensors(self):
         """Removes all attached sensors. It does *not* send an
@@ -236,6 +232,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         super().set_state(state)
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
+            self._capture_blocks.clear()
+            self._capture_blocks_empty.set()
+            if not self.death_expected:
+                product = self.sdp_controller.subarray_products.get(self.subarray_product_id)
+                if product:
+                    product.unexpected_death(self)
 
     def clone(self):
         return self.logical_node.physical_factory(

@@ -276,6 +276,8 @@ class SDPSubarrayProductBase:
 
     @state.setter
     def state(self, value):
+        if self._state == ProductState.ERROR and value != ProductState.DEAD:
+            return      # Never leave error state other than by dying
         self._state = value
         self.state_sensor.value = value
 
@@ -429,6 +431,8 @@ class SDPSubarrayProductBase:
         self._update_capture_block_sensor()
         try:
             await self.capture_init_impl(capture_block)
+            if self.state == ProductState.ERROR:
+                raise FailReply('Subarray product went into ERROR while starting capture')
         except asyncio.CancelledError:
             self._capture_block_dead(capture_block)
             raise
@@ -456,6 +460,8 @@ class SDPSubarrayProductBase:
         assert capture_block is not None
         try:
             await self.capture_done_impl(capture_block)
+            if self.state == ProductState.ERROR:
+                raise FailReply('Subarray product went into ERROR while stopping capture')
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -848,6 +854,21 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                                     node.name, node.state.name)
                 return False
         return True
+
+    def unexpected_death(self, task):
+        self.logger.warning('Task %s died unexpectedly', task.name)
+        # If we died while capturing, abandon the current capture block
+        # so that we don't try to wait for it when deconfiguring.
+        if self.current_capture_block is not None:
+            capture_block = self.current_capture_block
+            self.current_capture_block = None
+            self._capture_block_dead(capture_block)
+        # We don't go to error state from CONFIGURING because we check all
+        # nodes at the end of configuration and will fail the configure
+        # there; and from DECONFIGURING we don't want to go to ERROR because
+        # that may prevent deconfiguring.
+        if self.state in (ProductState.IDLE, ProductState.CAPTURING):
+            self.state = ProductState.ERROR
 
     async def _shutdown(self, force):
         try:
