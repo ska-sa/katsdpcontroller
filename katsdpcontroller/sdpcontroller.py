@@ -116,7 +116,7 @@ class ProductState(scheduler.OrderedEnum):
     - CONFIGURING -> IDLE (via product-configure)
     - IDLE -> CAPTURING (via capture-init)
     - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
+    - CONFIGURING/IDLE/CAPTURING/ERROR -> DECONFIGURING -> DEAD (via product-deconfigure)
     - IDLE/CAPTURING/DECONFIGURING -> ERROR (via an internal error)
     """
     CONFIGURING = 0

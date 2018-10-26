@@ -889,8 +889,15 @@ class TestSDPController(BaseTestSDPController):
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(ProductState.ERROR, sa.state)
         self.assertEqual({}, sa.capture_blocks)
-        # check that the subarray can be safely deconfigured
+        # check that the subarray can be safely deconfigured, and that it
+        # goes via DECONFIGURING state. Rather that trying to directly
+        # observe the internal state during deconfigure (e.g. with
+        # DelayedManager), we'll just observe the sensor
+        state_observer = mock.Mock()
+        self.server.sensors[SUBARRAY_PRODUCT4 + '.state'].attach(state_observer)
         await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        # call 0, arguments, argument 1
+        self.assertEqual(state_observer.mock_calls[0][1][1].value, ProductState.DECONFIGURING)
         self.assertEqual(ProductState.DEAD, sa.state)
 
     async def test_capture_done_failed_req(self):
