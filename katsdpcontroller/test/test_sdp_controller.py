@@ -890,7 +890,7 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(ProductState.ERROR, sa.state)
         self.assertEqual({}, sa.capture_blocks)
         # check that the subarray can be safely deconfigured, and that it
-        # goes via DECONFIGURING state. Rather that trying to directly
+        # goes via DECONFIGURING state. Rather than trying to directly
         # observe the internal state during deconfigure (e.g. with
         # DelayedManager), we'll just observe the sensor
         state_observer = mock.Mock()
