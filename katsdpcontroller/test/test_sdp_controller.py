@@ -196,7 +196,7 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
         (b'cal.1.capture-block-state', b'', b'string'),
         (b'state', b'', b'discrete',
-         b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead'),
+         b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error'),
         (b'capture-block-state', b'', b'string')
     ))
 
@@ -900,16 +900,40 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(grouped_calls, expected_calls)
 
     async def test_capture_init_failed_req(self):
-        """Capture-init bumbles on even if a child request fails.
-
-        TODO: that's probably not really the behaviour we want.
-        """
+        """Capture-init fails on some task"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         self.fail_requests.add('capture-init')
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+        with self.assertRaises(FailReply):
+            await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
+        # check that the subarray can be safely deconfigured, and that it
+        # goes via DECONFIGURING state. Rather than trying to directly
+        # observe the internal state during deconfigure (e.g. with
+        # DelayedManager), we'll just observe the sensor
+        state_observer = mock.Mock()
+        self.server.sensors[SUBARRAY_PRODUCT4 + '.state'].attach(state_observer)
+        await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        # call 0, arguments, argument 1
+        self.assertEqual(state_observer.mock_calls[0][1][1].value, ProductState.DECONFIGURING)
+        self.assertEqual(ProductState.DEAD, sa.state)
+
+    async def test_capture_done_failed_req(self):
+        """Capture-done fails on some task"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        self.fail_requests.add('capture-done')
+        reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+        with self.assertRaises(FailReply):
+            await self.client.request("capture-done", SUBARRAY_PRODUCT4)
+        # check that the subarray is in an appropriate state
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
+        # check that the subarray can be safely deconfigured
+        await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        self.assertEqual(ProductState.DEAD, sa.state)
 
     async def _test_busy(self, command, *args):
         """Test that a command fails if issued while ?capture-init or
