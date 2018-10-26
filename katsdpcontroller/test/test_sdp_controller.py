@@ -49,7 +49,7 @@ STREAMS = '''{
 }'''
 
 CONFIG = '''{
-    "version": "1.1",
+    "version": "2.2",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -101,29 +101,33 @@ CONFIG = '''{
     },
     "outputs": {
         "sdp_l0": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 16
+            "continuum_factor": 16,
+            "archive": true
         },
         "sdp_l0_spectral_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 1.9,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 2.1,
             "continuum_factor": 16,
-            "output_channels": [117, 3472]
+            "output_channels": [117, 3472],
+            "archive": true
         },
         "sdp_beamformer": {
             "type": "sdp.beamformer",
@@ -154,6 +158,22 @@ CONFIG = '''{
             "type": "sdp.cal",
             "src_streams": ["sdp_l0"],
             "buffer_time": 1800.0
+        },
+        "sdp_l1_flags": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "sdp_l1_flags_continuum": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0_continuum"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "continuum_image": {
+            "type": "sdp.continuum_image",
+            "src_streams": ["sdp_l1_flags_continuum"]
         }
     },
     "config": {}
@@ -903,8 +923,15 @@ class TestSDPController(BaseTestSDPController):
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(ProductState.ERROR, sa.state)
         self.assertEqual({}, sa.capture_blocks)
-        # check that the subarray can be safely deconfigured
+        # check that the subarray can be safely deconfigured, and that it
+        # goes via DECONFIGURING state. Rather than trying to directly
+        # observe the internal state during deconfigure (e.g. with
+        # DelayedManager), we'll just observe the sensor
+        state_observer = mock.Mock()
+        self.server.sensors[SUBARRAY_PRODUCT4 + '.state'].attach(state_observer)
         await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        # call 0, arguments, argument 1
+        self.assertEqual(state_observer.mock_calls[0][1][1].value, ProductState.DECONFIGURING)
         self.assertEqual(ProductState.DEAD, sa.state)
 
     async def test_capture_done_failed_req(self):

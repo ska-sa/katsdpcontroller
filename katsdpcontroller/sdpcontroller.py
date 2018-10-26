@@ -116,7 +116,7 @@ class ProductState(scheduler.OrderedEnum):
     - CONFIGURING -> IDLE (via product-configure)
     - IDLE -> CAPTURING (via capture-init)
     - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING -> DECONFIGURING -> DEAD (via product-deconfigure)
+    - CONFIGURING/IDLE/CAPTURING/ERROR -> DECONFIGURING -> DEAD (via product-deconfigure)
     - IDLE/CAPTURING/DECONFIGURING -> ERROR (via an internal error)
     """
     CONFIGURING = 0
@@ -954,7 +954,7 @@ class DeviceStatus(enum.Enum):
 
 
 class SDPControllerServer(DeviceServer):
-    VERSION = "sdpcontroller-3.0"
+    VERSION = "sdpcontroller-3.1"
     BUILD_STATE = "sdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host, port, sched, loop, safe_multicast_cidr, batch_role,
