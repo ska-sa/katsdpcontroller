@@ -49,7 +49,7 @@ STREAMS = '''{
 }'''
 
 CONFIG = '''{
-    "version": "1.1",
+    "version": "2.2",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -101,29 +101,33 @@ CONFIG = '''{
     },
     "outputs": {
         "sdp_l0": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 16
+            "continuum_factor": 16,
+            "archive": true
         },
         "sdp_l0_spectral_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 1.9,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 2.1,
             "continuum_factor": 16,
-            "output_channels": [117, 3472]
+            "output_channels": [117, 3472],
+            "archive": true
         },
         "sdp_beamformer": {
             "type": "sdp.beamformer",
@@ -154,6 +158,22 @@ CONFIG = '''{
             "type": "sdp.cal",
             "src_streams": ["sdp_l0"],
             "buffer_time": 1800.0
+        },
+        "sdp_l1_flags": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "sdp_l1_flags_continuum": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0_continuum"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "continuum_image": {
+            "type": "sdp.continuum_image",
+            "src_streams": ["sdp_l1_flags_continuum"]
         }
     },
     "config": {}
