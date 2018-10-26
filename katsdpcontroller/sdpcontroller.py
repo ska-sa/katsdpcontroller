@@ -276,8 +276,9 @@ class SDPSubarrayProductBase:
 
     @state.setter
     def state(self, value):
-        if self._state == ProductState.ERROR and value != ProductState.DEAD:
-            return      # Never leave error state other than by dying
+        if (self._state == ProductState.ERROR
+                and value not in (ProductState.DECONFIGURING, ProductState.DEAD)):
+            return      # Never leave error state other than by deconfiguring
         self._state = value
         self.state_sensor.value = value
 
