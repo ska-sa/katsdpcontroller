@@ -185,7 +185,8 @@ EXPECTED_SENSOR_LIST = (
     (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
     (b'fmeca.FD0001', b'', b'boolean'),
     (b'time-synchronised', b'', b'boolean'),
-    (b'gui-urls', b'', b'string')
+    (b'gui-urls', b'', b'string'),
+    (b'products', b'', b'string')
 )
 
 EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
@@ -278,6 +279,11 @@ class BaseTestSDPController(asynctest.TestCase):
             actual[inform.arguments[0]] = tuple(inform.arguments[2:])
         self.assertEqual(expected, actual)
 
+    async def assert_sensor_value(self, name, value):
+        encoded = aiokatcp.encode(value)
+        reply, informs = await self.client.request("sensor-value", name)
+        self.assertEqual(informs[0].arguments[4], encoded)
+
     def create_patch(self, *args, **kwargs):
         patcher = mock.patch(*args, **kwargs)
         mock_obj = patcher.start()
@@ -309,6 +315,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
     async def test_interface_sensors(self):
         await self.assert_sensors(EXPECTED_SENSOR_LIST)
+        await self.assert_sensor_value('products', '[]')
         interface_changed_msg = Message.inform('interface-changed', b'sensor-list')
         # Constructor checks that message ID is valid and ANY isn't, so
         # have to hack it in after constructor.
@@ -317,11 +324,13 @@ class TestSDPControllerInterface(BaseTestSDPController):
             await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
             unhandled_inform.assert_called_once_with(self.client, interface_changed_msg)
         await self.assert_sensors(EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST_1)
+        await self.assert_sensor_value('products', json.dumps([SUBARRAY_PRODUCT1]))
         # Deconfigure and check that the array sensors are gone
         with mock.patch.object(aiokatcp.Client, 'unhandled_inform', spec=True) as unhandled_inform:
             await self.client.request("product-deconfigure", SUBARRAY_PRODUCT1)
             unhandled_inform.assert_called_with(self.client, interface_changed_msg)
         await self.assert_sensors(EXPECTED_SENSOR_LIST)
+        await self.assert_sensor_value('products', '[]')
 
     async def test_capture_done(self):
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT2)

@@ -941,20 +941,6 @@ class SDPControllerServer(DeviceServer):
                  image_resolver_factory=None,
                  s3_config_file=None,
                  gui_urls=None, graph_dir=None):
-        # setup sensors
-        self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
-        self._api_version_sensor = Sensor(str, "api-version", "SDP Controller API version.")
-        self._device_status_sensor = Sensor(DeviceStatus, "device-status",
-                                            "Devices status of the SDP Master Controller")
-        self._gui_urls_sensor = Sensor(str, "gui-urls", "Links to associated GUIs")
-        # example FMECA sensor. In this case something to keep track of issues
-        # arising from launching to many processes.
-        # TODO: Add more sensors exposing resource usage and currently executing graphs
-        self._fmeca_sensors = {}
-        self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
-        self._ntp_sensor = Sensor(bool, "time-synchronised",
-                                  "SDP Controller container (and host) is synchronised to NTP")
-
         self.interface_mode = interface_mode
         if self.interface_mode:
             logger.warning("Note: Running master controller in interface mode. "
@@ -981,24 +967,35 @@ class SDPControllerServer(DeviceServer):
 
         super().__init__(host, port)
 
-        self._build_state_sensor.set_value(self.BUILD_STATE)
-        self.sensors.add(self._build_state_sensor)
-        self._api_version_sensor.set_value(self.VERSION)
-        self.sensors.add(self._api_version_sensor)
-        self._device_status_sensor.set_value('ok')
-        self.sensors.add(self._device_status_sensor)
-        self._gui_urls_sensor.set_value(json.dumps(self.gui_urls))
-        self.sensors.add(self._gui_urls_sensor)
-
-        self._ntp_sensor.set_value('0')
+        # setup sensors
+        self.sensors.add(Sensor(str, "build-state", "SDP Controller build state.",
+                                default=self.BUILD_STATE, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "api-version", "SDP Controller API version.",
+                                default=self.VERSION, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(DeviceStatus, "device-status",
+                                "Devices status of the SDP Master Controller",
+                                default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
+                                default=json.dumps(self.gui_urls),
+                                initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(bool, "time-synchronised",
+                                "SDP Controller container (and host) is synchronised to NTP",
+                                default=False, initial_status=Sensor.Status.UNKNOWN))
+        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
+                                default="[]", initial_status=Sensor.Status.NOMINAL))
         # TODO disabled since aiokatcp doesn't support callback sensors. It was
         # broken anyway.
         # self._ntp_sensor.set_read_callback(self._check_ntp_status)
-        self.sensors.add(self._ntp_sensor)
+
+        # example FMECA sensor. In this case something to keep track of issues
+        # arising from launching too many processes.
+        # TODO: Add more sensors exposing resource usage and currently executing graphs
+        self._fmeca_sensors = {}
+        self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
 
         # until we know any better, failure modes are all inactive
         for s in self._fmeca_sensors.values():
-            s.set_value(0)
+            s.value = False
             self.sensors.add(s)
 
     @staticmethod
@@ -1009,6 +1006,9 @@ class SDPControllerServer(DeviceServer):
                     Sensor.Status.NOMINAL, time.time())
         except OSError:
             return ('0', Sensor.Status.NOMINAL, time.time())
+
+    def _update_products_sensor(self):
+        self.sensors['products'].value = json.dumps(sorted(self.subarray_products))
 
     async def deregister_product(self, product, force=False):
         """Deregister a subarray product and remove it form the list of products.
@@ -1074,6 +1074,7 @@ class SDPControllerServer(DeviceServer):
                 del self.subarray_products[product.subarray_product_id]
                 self.sensors.discard(product.state_sensor)
                 self.sensors.discard(product.capture_block_sensor)
+                self._update_products_sensor()
                 self.mass_inform('interface-changed', 'sensor-list')
                 product_logger.info("Deconfigured subarray product %s",
                                     product.subarray_product_id)
@@ -1155,6 +1156,7 @@ class SDPControllerServer(DeviceServer):
         self.subarray_products[subarray_product_id] = product
         self.sensors.add(product.state_sensor)
         self.sensors.add(product.capture_block_sensor)
+        self._update_products_sensor()
         product.dead_callbacks.append(remove_product)
         try:
             await product.configure(ctx)
