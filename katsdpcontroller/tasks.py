@@ -122,12 +122,14 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
         self._capture_blocks = set()
-        # Event set to true whenever _capture_block is empty
+        # Event set to true whenever _capture_blocks is empty
         self._capture_blocks_empty = asyncio.Event(loop=loop)
         self._capture_blocks_empty.set()
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
+        # Whether we should abort the capture block if the task fails
+        self.death_critical = True
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and

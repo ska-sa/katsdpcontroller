@@ -40,7 +40,7 @@ logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 _capture_block_names = set()      #: all capture block names used
 
 
-def log_task_exceptions(task, msg):
+def log_task_exceptions(task, logger, msg):
     """Add a done callback to a task that logs any exception it raised.
 
     Parameters
@@ -245,8 +245,6 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
-        logger.info('Logical graph nodes:\n'
-                    + '\n'.join(repr(node) for node in self.logical_graph))
         self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
@@ -269,6 +267,8 @@ class SDPSubarrayProductBase:
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=subarray_product_id))
         self.logger.info("Created: %r", self)
+        self.logger.info('Logical graph nodes:\n'
+                         + '\n'.join(repr(node) for node in self.logical_graph))
 
     @property
     def state(self):
@@ -446,7 +446,7 @@ class SDPSubarrayProductBase:
         self.current_capture_block = capture_block
         capture_block.state = CaptureBlockState.CAPTURING
 
-    async def _capture_done(self):
+    async def _capture_done(self, error_expected=False):
         """The asynchronous task that handles ?capture-done. See
         :meth:`capture_done_impl` for additional details.
 
@@ -461,7 +461,7 @@ class SDPSubarrayProductBase:
         assert capture_block is not None
         try:
             await self.capture_done_impl(capture_block)
-            if self.state == ProductState.ERROR:
+            if self.state == ProductState.ERROR and not error_expected:
                 raise FailReply('Subarray product went into ERROR while stopping capture')
         except asyncio.CancelledError:
             raise
@@ -470,15 +470,17 @@ class SDPSubarrayProductBase:
             self.current_capture_block = None
             self._capture_block_dead(capture_block)
             raise
-        assert self.state == ProductState.CAPTURING
         assert self.current_capture_block is capture_block
-        self.state = ProductState.IDLE
+        if self.state == ProductState.CAPTURING:
+            self.state = ProductState.IDLE
+        else:
+            assert error_expected
         self.current_capture_block = None
         capture_block.state = CaptureBlockState.POSTPROCESSING
         capture_block.postprocess_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
-            capture_block.postprocess_task,
+            capture_block.postprocess_task, self.logger,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
                                                            capture_block.name))
         capture_block.postprocess_task.add_done_callback(
@@ -523,7 +525,7 @@ class SDPSubarrayProductBase:
         assert self.state == ProductState.CONFIGURING, \
             "configure should be the first thing to happen"
         task = asyncio.ensure_future(self._configure(ctx), loop=self.loop)
-        log_task_exceptions(task, "Configuring subarray product {} failed".format(
+        log_task_exceptions(task, self.logger, "Configuring subarray product {} failed".format(
             self.subarray_product_id))
         self._async_task = task
         try:
@@ -554,7 +556,8 @@ class SDPSubarrayProductBase:
 
         ready = asyncio.Event(loop=self.loop)
         task = asyncio.ensure_future(self._deconfigure(force, ready), loop=self.loop)
-        log_task_exceptions(task, "Deconfiguring {} failed".format(self.subarray_product_id))
+        log_task_exceptions(task, self.logger,
+                            "Deconfiguring {} failed".format(self.subarray_product_id))
         # Make sure that ready gets unblocked even if task throws.
         task.add_done_callback(lambda future: ready.set())
         task.add_done_callback(self._clear_async_task)
@@ -858,12 +861,34 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def unexpected_death(self, task):
         self.logger.warning('Task %s died unexpectedly', task.name)
-        # If we died while capturing, abandon the current capture block
-        # so that we don't try to wait for it when deconfiguring.
-        if self.current_capture_block is not None:
-            capture_block = self.current_capture_block
-            self.current_capture_block = None
-            self._capture_block_dead(capture_block)
+        if not task.death_critical:
+            return
+
+        # Try to wind up the current capture block so that we don't lose any
+        # data already captured.  However, if we're in the middle of another
+        # async operation we just let that run, because that operation is either
+        # a deconfigure or it will notice the ERROR state when it finishes and
+        # fail.
+        #
+        # Some of this code is copy-pasted from capture_done. Unfortunately
+        # it's not straightforward to reuse the code because we have to do the
+        # initial steps (particularly replacement of _async_task) synchronously
+        # after checking async_busy, rather than creating a new task to run
+        # capture_done.
+        if self.state == ProductState.CAPTURING and not self.async_busy:
+            capture_block_id = self.current_capture_block.name
+            self.logger.info('Attempting to terminate capture block %s', capture_block_id)
+            task = asyncio.ensure_future(self._capture_done(error_expected=True), loop=self.loop)
+            self._async_task = task
+            log_task_exceptions(task, self.logger,
+                                "Failed to terminate capture block {}".format(capture_block_id))
+            def cleanup(task):
+                self._clear_async_task(task)
+                self.logger.info('Finished capture block %s on subarray product %s',
+                                 capture_block_id, self.subarray_product_id)
+
+            task.add_done_callback(cleanup)
+
         # We don't go to error state from CONFIGURING because we check all
         # nodes at the end of configuration and will fail the configure
         # there; and from DECONFIGURING we don't want to go to ERROR because
