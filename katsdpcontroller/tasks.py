@@ -128,6 +128,11 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
+        self._state_sensor = Sensor(scheduler.TaskState, self.name + '.state',
+                                    "State of the state machine", "",
+                                    default=self.state,
+                                    initial_status=Sensor.Status.NOMINAL)
+        self._add_sensor(self._state_sensor)
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -227,13 +232,13 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
-        version_sensor = Sensor(str, self.name + '.version', "Image of executing container.", "")
-        version_sensor.set_value(self.taskinfo.container.docker.image)
-        self._add_sensor(version_sensor)
+        self._add_sensor(Sensor(str, self.name + '.version', "Image of executing container.", "",
+                                default=self.taskinfo.container.docker.image,
+                                initial_status=Sensor.Status.NOMINAL))
 
     def set_state(self, state):
-        # TODO: extend this to set a sensor indicating the task state
         super().set_state(state)
+        self._state_sensor.value = state
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
 
