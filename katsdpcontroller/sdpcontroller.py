@@ -882,6 +882,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             self._async_task = task
             log_task_exceptions(task, self.logger,
                                 "Failed to terminate capture block {}".format(capture_block_id))
+
             def cleanup(task):
                 self._clear_async_task(task)
                 self.logger.info('Finished capture block %s on subarray product %s',
