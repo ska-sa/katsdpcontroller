@@ -2853,7 +2853,7 @@ class Scheduler(pymesos.Scheduler):
             raise CycleError('cycle between depends_resolve dependencies')
 
         for node in remaining:
-            node.state = TaskState.STARTING
+            node.set_state(TaskState.STARTING)
         if resources_timeout is not None:
             deadline = self._loop.time() + resources_timeout
         else:

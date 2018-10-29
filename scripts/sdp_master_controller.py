@@ -75,6 +75,18 @@ async def run(loop, sched, server, http_handler):
     await server.join()
 
 
+def init_dashboard(controller, opts):
+    from bokeh.server.server import Server
+    from bokeh.application.application import Application
+    from katsdpcontroller.dashboard import Dashboard
+
+    dashboard = Dashboard(controller)
+    app = Application()
+    app.add(dashboard)
+    server = Server(app, port=opts.dashboard_port)
+    server.start()
+
+
 if __name__ == "__main__":
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
@@ -92,6 +104,10 @@ if __name__ == "__main__":
                         help='port that slaves communicate with (default=%(default)s)')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port (default=auto)')
+    parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
+                        help='port for the Bokeh backend for the GUI (default=%(default)s')
+    parser.add_argument('--dashboard-url', type=str, metavar='URL',
+                        help='URL at which users can reach gui-port (default=auto)')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
@@ -199,6 +215,7 @@ if __name__ == "__main__":
         safe_multicast_cidr=opts.safe_multicast_cidr,
         gui_urls=gui_urls,
         graph_dir=opts.write_graphs)
+    init_dashboard(server, opts)
 
     logger.info("Starting SDP...")
 

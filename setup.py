@@ -20,7 +20,7 @@ setup(
         ],
     setup_requires=['katversion'],
     install_requires=[
-        'pymesos>=0.3.6',   # 0.3.6 implements reviveOffers with roles
+        'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
         'addict!=2.0.*',
         'aiohttp~=2.0',
         'aiomonitor',
@@ -38,7 +38,9 @@ setup(
         'katsdpservices',
         'kazoo',
         'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
-        'prometheus_async'
+        'prometheus_async',
+        'bokeh',
+        'tornado>=5,<6'      # bokeh uses tornado, and tornado>=5 integrates with asyncio
     ],
     tests_require=tests_require,
     extras_require={
