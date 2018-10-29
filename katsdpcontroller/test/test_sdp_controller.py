@@ -1018,6 +1018,21 @@ class TestSDPController(BaseTestSDPController):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-done", SUBARRAY_PRODUCT1)
 
+    async def test_process_dies_while_capturing(self):
+        await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
+        reply, _ = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
+        cbid = reply[0].decode()
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
+        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self._ingest_died(sa)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({cbid: mock.ANY}, sa.capture_blocks)
+        # In the background it will terminate the capture block
+        await asynctest.exhaust_callbacks(self.loop)
+        self.assertEqual({}, sa.capture_blocks)
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_called_with('write-meta', cbid, False)
+
     async def test_capture_done_process_dies(self):
         """Capture-done fails if a child dies half-way through."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
