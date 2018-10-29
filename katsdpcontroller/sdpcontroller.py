@@ -877,7 +877,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # capture_done.
         if self.state == ProductState.CAPTURING and not self.async_busy:
             capture_block_id = self.current_capture_block.name
-            self.logger.info('Attempting to terminate capture block %s', capture_block_id)
+            self.logger.warning('Attempting to terminate capture block %s', capture_block_id)
             task = asyncio.ensure_future(self._capture_done(error_expected=True), loop=self.loop)
             self._async_task = task
             log_task_exceptions(task, self.logger,
