@@ -17,6 +17,23 @@ def lock_document(func):
     return wrapper
 
 
+def update_tabs(tabs, panels):
+    """Modify the set of panels in a Tabs widget.
+
+    This works around the problem that inserting or removing a panel to the
+    left of the active one will cause the active panel to be changed.
+    """
+    try:
+        old_panel = tabs.tabs[tabs.active]
+    except IndexError:
+        old_panel = None    # e.g. if tabs was previously empty
+    tabs.tabs = panels
+    try:
+        tabs.active = tabs.tabs.index(old_panel)
+    except ValueError:
+        pass  # The active panel was removed
+
+
 class SensorWatcher:
     """Base utility class for reacting to sensor changes
 
@@ -110,16 +127,8 @@ class Session(SensorWatcher):
                 self._products[name].close()
                 del self._products[name]
 
-        try:
-            old_panel = self._product_tabs.tabs[self._product_tabs.active]
-        except IndexError:
-            old_panel = None    # e.g. if tabs was previously empty
-        self._product_tabs.tabs = [product.panel
-                                   for name, product in sorted(self._products.items())]
-        try:
-            self._product_tabs.active = self._product_tabs.tabs.index(old_panel)
-        except ValueError:
-            pass  # The currently active subarray product was removed
+        update_tabs(self._product_tabs,
+                    [product.panel for name, product in sorted(self._products.items())])
 
 
 class Dashboard(Handler):
