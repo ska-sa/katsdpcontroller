@@ -2,11 +2,14 @@
 
 import functools
 
+import networkx
+
 from bokeh.application.handlers.handler import Handler
 from bokeh.models import ColumnDataSource
 from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn
 from bokeh.layouts import widgetbox
 
+from . import scheduler
 from .tasks import SDPPhysicalTaskBase
 
 
@@ -67,8 +70,10 @@ class SubarrayProduct(SensorWatcher):
         self._task_indices = {}
         self._tasks = []
         data = {'name': [], 'state': [], 'mesos-state': [], 'host': []}
-        # TODO: sort by dependencies
-        for task in product.physical_graph:
+
+        order_graph = scheduler.subgraph(product.physical_graph, scheduler.DEPENDS_READY)
+        for task in networkx.lexicographical_topological_sort(
+                order_graph.reverse(), key=lambda node: node.name):
             if isinstance(task, SDPPhysicalTaskBase):
                 self._task_indices[task.name] = len(self._tasks)
                 self._tasks.append(task)
