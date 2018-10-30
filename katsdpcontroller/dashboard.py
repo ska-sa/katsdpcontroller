@@ -1,12 +1,13 @@
 """Bokeh-based dashboard"""
 
 import functools
+import json
 
 import networkx
 
 from bokeh.application.handlers.handler import Handler
 from bokeh.models import ColumnDataSource
-from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn
+from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn, PreText
 from bokeh.layouts import widgetbox
 
 from . import scheduler
@@ -60,45 +61,30 @@ class SensorWatcher:
             sensor.detach(callback)
 
 
-class SubarrayProduct(SensorWatcher):
-    """A single subarray-product within :class:`Session`"""
-    def __init__(self, session, product):
+class Task(SensorWatcher):
+    """Monitor a single task within a :class:`SubarrayProduct`"""
+    def __init__(self, session, task, data_source):
         super().__init__()
         self.session = session
-        self.product = product
+        self.task = task
+        self._data_source = data_source
+        self._index = len(data_source.data['name'])
+        data_source.stream({key: [value] for key, value in self._fields().items()})
+        for suffix in ['state', 'mesos-state']:
+            sensor_name = task.name + '.' + suffix
+            self.attach_sensor(session.sdp_controller.sensors[sensor_name], self._changed)
 
-        self._task_indices = {}
-        self._tasks = []
-        data = {'name': [], 'state': [], 'mesos-state': [], 'host': []}
+    @property
+    def session_context(self):
+        return self.session.session_context
 
-        order_graph = scheduler.subgraph(product.physical_graph, scheduler.DEPENDS_READY)
-        for task in networkx.lexicographical_topological_sort(
-                order_graph.reverse(), key=lambda node: node.name):
-            if isinstance(task, SDPPhysicalTaskBase):
-                self._task_indices[task.name] = len(self._tasks)
-                self._tasks.append(task)
-                for key, value in self._task_fields(task).items():
-                    data[key].append(value)
-                for suffix in ['state', 'mesos-state']:
-                    state_name = task.name + '.' + suffix
-                    self.attach_sensor(session.sdp_controller.sensors[state_name],
-                                       self._task_changed)
-        self._task_cds = ColumnDataSource(data)
-        columns = [
-            TableColumn(field='name', title='Name'),
-            TableColumn(field='state', title='State'),
-            TableColumn(field='mesos-state', title='Mesos State'),
-            TableColumn(field='host', title='Host')
-        ]
-        task_table = DataTable(
-            source=self._task_cds,
-            columns=columns,
-            index_position=None)
+    @lock_document
+    def _changed(self, doc, sensor, reading):
+        self._data_source.patch({key: [(self._index, value)]
+                                 for (key, value) in self._fields().items()})
 
-        self.panel = Panel(child=task_table, title=product.subarray_product_id)
-
-    @staticmethod
-    def _task_fields(task):
+    def _fields(self):
+        task = self.task
         return {
             'name': task.logical_node.name,
             'state': task.state.name,
@@ -106,17 +92,44 @@ class SubarrayProduct(SensorWatcher):
             'host': task.agent.host if task.agent else '-'
         }
 
-    @property
-    def session_context(self):
-        return self.session.session_context
 
-    @lock_document
-    def _task_changed(self, doc, sensor, reading):
-        last_dot = sensor.name.rfind('.')
-        name = sensor.name[:last_dot]
-        idx = self._task_indices[name]
-        fields = self._task_fields(self._tasks[idx])
-        self._task_cds.patch({key: [(idx, value)] for (key, value) in fields.items()})
+class SubarrayProduct:
+    """A single subarray-product within :class:`Session`"""
+    def __init__(self, session, product):
+        self.session = session
+        self.product = product
+
+        tabs = Tabs(tabs=[self._make_tasks(), self._make_config()])
+        self.panel = Panel(child=tabs, title=product.subarray_product_id)
+
+    def _make_tasks(self):
+        self._tasks = []
+        data_source = ColumnDataSource({'name': [], 'state': [], 'mesos-state': [], 'host': []})
+        order_graph = scheduler.subgraph(self.product.physical_graph, scheduler.DEPENDS_READY)
+        for task in networkx.lexicographical_topological_sort(
+                order_graph.reverse(), key=lambda node: node.name):
+            if isinstance(task, SDPPhysicalTaskBase):
+                self._tasks.append(Task(self.session, task, data_source))
+        columns = [
+            TableColumn(field='name', title='Name'),
+            TableColumn(field='state', title='State'),
+            TableColumn(field='mesos-state', title='Mesos State'),
+            TableColumn(field='host', title='Host')
+        ]
+        task_table = DataTable(
+            source=data_source,
+            columns=columns,
+            index_position=None)
+        return Panel(child=task_table, title='Tasks')
+
+    def _make_config(self):
+        config = json.dumps(self.product.config, indent=2, sort_keys=True)
+        pre = widgetbox(PreText(text=config, width=1000))
+        return Panel(child=pre, title='Config')
+
+    def close(self):
+        for task in self._tasks:
+            task.close()
 
 
 class Session(SensorWatcher):
@@ -151,6 +164,11 @@ class Session(SensorWatcher):
 
         update_tabs(self._product_tabs,
                     [product.panel for name, product in sorted(self._products.items())])
+
+    def close(self):
+        for product in self._products.values():
+            product.close()
+        super().close()
 
 
 class Dashboard(Handler):
