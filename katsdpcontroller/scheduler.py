@@ -1842,7 +1842,7 @@ class PhysicalTask(PhysicalNode):
     allocation : :class:`ResourceAllocation`
         Resources allocated to this task.
     status : :class:`mesos_pb2.TaskStatus`
-        Last Mesos status allocated to this task. This should agree with with
+        Last Mesos status allocated to this task. This should agree with
         :attr:`state`, but if we receive notifications out-of-order from Mesos
         then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
         is guaranteed to be in sync.
