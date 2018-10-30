@@ -215,7 +215,8 @@ if __name__ == "__main__":
         safe_multicast_cidr=opts.safe_multicast_cidr,
         gui_urls=gui_urls,
         graph_dir=opts.write_graphs)
-    init_dashboard(server, opts)
+    if not opts.interface_mode and opts.dashboard_port != 0:
+        init_dashboard(server, opts)
 
     logger.info("Starting SDP...")
 
