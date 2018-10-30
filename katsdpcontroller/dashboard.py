@@ -7,6 +7,8 @@ from bokeh.models import ColumnDataSource
 from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn
 from bokeh.layouts import widgetbox
 
+from .tasks import SDPPhysicalTaskBase
+
 
 def lock_document(func):
     @functools.wraps(func)
@@ -63,20 +65,25 @@ class SubarrayProduct(SensorWatcher):
         self.product = product
 
         self._task_indices = {}
-        data = {'name': [], 'state': []}
+        self._tasks = []
+        data = {'name': [], 'state': [], 'mesos-state': [], 'host': []}
         # TODO: sort by dependencies
         for task in product.physical_graph:
-            state_name = task.name + '.state'
-            if state_name in session.sdp_controller.sensors:
-                self._task_indices[task.name] = len(data['name'])
-                data['name'].append(task.name)
-                data['state'].append(task.state.name)
-                self.attach_sensor(session.sdp_controller.sensors[state_name],
-                                   self._task_state_changed)
+            if isinstance(task, SDPPhysicalTaskBase):
+                self._task_indices[task.name] = len(self._tasks)
+                self._tasks.append(task)
+                for key, value in self._task_fields(task).items():
+                    data[key].append(value)
+                for suffix in ['state', 'mesos-state']:
+                    state_name = task.name + '.' + suffix
+                    self.attach_sensor(session.sdp_controller.sensors[state_name],
+                                       self._task_changed)
         self._task_cds = ColumnDataSource(data)
         columns = [
             TableColumn(field='name', title='Name'),
-            TableColumn(field='state', title='State')
+            TableColumn(field='state', title='State'),
+            TableColumn(field='mesos-state', title='Mesos State'),
+            TableColumn(field='host', title='Host')
         ]
         task_table = DataTable(
             source=self._task_cds,
@@ -85,16 +92,26 @@ class SubarrayProduct(SensorWatcher):
 
         self.panel = Panel(child=task_table, title=product.subarray_product_id)
 
+    @staticmethod
+    def _task_fields(task):
+        return {
+            'name': task.logical_node.name,
+            'state': task.state.name,
+            'mesos-state': task.status.state if task.status else '-',
+            'host': task.agent.host if task.agent else '-'
+        }
+
     @property
     def session_context(self):
         return self.session.session_context
 
     @lock_document
-    def _task_state_changed(self, doc, sensor, reading):
-        assert sensor.name.endswith('.state')
-        name = sensor.name[:-6]
+    def _task_changed(self, doc, sensor, reading):
+        last_dot = sensor.name.rfind('.')
+        name = sensor.name[:last_dot]
         idx = self._task_indices[name]
-        self._task_cds.patch({'state': [(idx, reading.value.name)]})
+        fields = self._task_fields(self._tasks[idx])
+        self._task_cds.patch({key: [(idx, value)] for (key, value) in fields.items()})
 
 
 class Session(SensorWatcher):

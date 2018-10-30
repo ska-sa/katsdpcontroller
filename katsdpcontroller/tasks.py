@@ -107,6 +107,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
+        # Turn .status into a property that updates a sensor
+        self._status = None
         super().__init__(logical_task, loop)
         self.logger = logging.LoggerAdapter(
             logger, dict(subarray_product_id=subarray_product_id, child_task=self.name))
@@ -133,6 +135,19 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
                                     default=self.state,
                                     initial_status=Sensor.Status.NOMINAL)
         self._add_sensor(self._state_sensor)
+        self._mesos_state_sensor = Sensor(
+            str, self.name + '.mesos-state', 'Mesos-reported task state', '')
+        self._add_sensor(self._mesos_state_sensor)
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+        if value is not None:
+            self._mesos_state_sensor.value = value.state
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
