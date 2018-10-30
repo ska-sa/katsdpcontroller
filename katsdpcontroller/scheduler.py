@@ -2200,7 +2200,7 @@ def subgraph(graph, edge_filter, nodes=None):
     An edge is added to the returned graph only if the filter passes. If
     `nodes` is specified, an edge must also have both endpoints in that set.
 
-    Attribute data is not tranferred to the new graph.
+    Attribute data is not transferred to the new graph.
 
     Parameters
     ----------
