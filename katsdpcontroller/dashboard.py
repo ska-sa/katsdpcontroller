@@ -110,8 +110,16 @@ class Session(SensorWatcher):
                 self._products[name].close()
                 del self._products[name]
 
+        try:
+            old_panel = self._product_tabs.tabs[self._product_tabs.active]
+        except IndexError:
+            old_panel = None    # e.g. if tabs was previously empty
         self._product_tabs.tabs = [product.panel
                                    for name, product in sorted(self._products.items())]
+        try:
+            self._product_tabs.active = self._product_tabs.tabs.index(old_panel)
+        except ValueError:
+            pass  # The currently active subarray product was removed
 
 
 class Dashboard(Handler):
