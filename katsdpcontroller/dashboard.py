@@ -8,8 +8,8 @@ import networkx
 
 from bokeh.application.handlers.handler import Handler
 from bokeh.models import ColumnDataSource
-from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn, PreText
-from bokeh.layouts import widgetbox
+from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn, PreText, Paragraph
+from bokeh.layouts import widgetbox, column
 
 from . import scheduler
 from .tasks import SDPPhysicalTaskBase
@@ -100,9 +100,30 @@ class SubarrayProduct:
     def __init__(self, session, product):
         self.session = session
         self.product = product
+        self.name = product.subarray_product_id
 
-        tabs = Tabs(tabs=[self._make_tasks(), self._make_config()])
-        self.panel = Panel(child=tabs, title=product.subarray_product_id)
+        state = self._make_state()
+        tabs = widgetbox(Tabs(tabs=[self._make_tasks(),
+                                    self._make_config(),
+                                    self._make_capture_blocks()]))
+        self.panel = Panel(child=column(state, tabs), title=self.name)
+
+    def _get_sensor(self, name):
+        full_name = self.name + '.' + name
+        return self.session.sdp_controller.sensors[full_name]
+
+    @property
+    def session_context(self):
+        return self.session.session_context
+
+    def _make_state(self):
+        self._state_widget = Paragraph()
+        self.session.attach_sensor(self._get_sensor('state'), self._state_changed, call_now=True)
+        return widgetbox(self._state_widget)
+
+    @lock_document
+    def _state_changed(self, doc, sensor, reading):
+        self._state_widget.text = reading.value.name
 
     def _make_tasks(self):
         self._tasks = []
@@ -118,15 +139,37 @@ class SubarrayProduct:
             TableColumn(field='mesos-state', title='Mesos State'),
             TableColumn(field='host', title='Host')
         ]
-        task_table = DataTable(
+        table = DataTable(
             source=data_source,
             columns=columns,
             index_position=None)
-        return Panel(child=task_table, title='Tasks')
+        return Panel(child=table, title='Tasks')
+
+    def _make_capture_blocks(self):
+        self._cb_data_source = ColumnDataSource({'name': [], 'state': []})
+        columns = [
+            TableColumn(field='name', title='ID'),
+            TableColumn(field='state', title='State')
+        ]
+        table = DataTable(
+            source=self._cb_data_source,
+            columns=columns,
+            index_position=None)
+        self.session.attach_sensor(self._get_sensor('capture-block-state'),
+                                   self._capture_blocks_changed, call_now=True)
+        return Panel(child=table, title='Capture blocks')
+
+    @lock_document
+    def _capture_blocks_changed(self, doc, sensor, reading):
+        data = {'name': [], 'state': []}
+        for name, capture_block in sorted(self.product.capture_blocks.items()):
+            data['name'].append(name)
+            data['state'].append(capture_block.state.name)
+        self._cb_data_source.data = data
 
     def _make_config(self):
         config = json.dumps(self.product.config, indent=2, sort_keys=True)
-        pre = widgetbox(PreText(text=config, width=1000))
+        pre = widgetbox(PreText(text=config, width=1000, style={'font-size': 'small'}))
         return Panel(child=pre, title='Config')
 
 
