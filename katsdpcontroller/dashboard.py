@@ -2,6 +2,7 @@
 
 import functools
 import json
+import weakref
 
 import networkx
 
@@ -47,21 +48,22 @@ class SensorWatcher:
     when :meth:`close` is called.
     """
     def __init__(self):
-        self._attachments = []
+        self._attachments = weakref.WeakKeyDictionary()
 
     def attach_sensor(self, sensor, callback, *, call_now=False):
         sensor.attach(callback)
-        self._attachments.append((sensor, callback))
+        self._attachments.setdefault(sensor, []).append(callback)
         if call_now:
             callback(sensor, sensor.reading)
 
     def close(self):
-        while self._attachments:
-            sensor, callback = self._attachments.pop()
-            sensor.detach(callback)
+        for sensor, callback in list(self._attachments.items()):
+            for callback in callbacks:
+                sensor.detach(callback)
+        self._attachments.clear()
 
 
-class Task(SensorWatcher):
+class Task:
     """Monitor a single task within a :class:`SubarrayProduct`"""
     def __init__(self, session, task, data_source):
         super().__init__()
@@ -72,7 +74,7 @@ class Task(SensorWatcher):
         data_source.stream({key: [value] for key, value in self._fields().items()})
         for suffix in ['state', 'mesos-state']:
             sensor_name = task.name + '.' + suffix
-            self.attach_sensor(session.sdp_controller.sensors[sensor_name], self._changed)
+            session.attach_sensor(session.sdp_controller.sensors[sensor_name], self._changed)
 
     @property
     def session_context(self):
@@ -127,10 +129,6 @@ class SubarrayProduct:
         pre = widgetbox(PreText(text=config, width=1000))
         return Panel(child=pre, title='Config')
 
-    def close(self):
-        for task in self._tasks:
-            task.close()
-
 
 class Session(SensorWatcher):
     """Wrapper around single bokeh session.
@@ -159,16 +157,10 @@ class Session(SensorWatcher):
                 self._products[name] = SubarrayProduct(self, products[name])
         for name in list(self._products):
             if name not in products:
-                self._products[name].close()
                 del self._products[name]
 
         update_tabs(self._product_tabs,
                     [product.panel for name, product in sorted(self._products.items())])
-
-    def close(self):
-        for product in self._products.values():
-            product.close()
-        super().close()
 
 
 class Dashboard(Handler):
