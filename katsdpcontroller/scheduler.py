@@ -1668,6 +1668,9 @@ class PhysicalNode:
     dead_event : :class:`asyncio.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
+    death_expected : bool
+        The task has been requested to exit, and so if it dies it is normal
+        rather than a failure.
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
@@ -1689,6 +1692,7 @@ class PhysicalNode:
         self.dead_event = asyncio.Event(loop=loop)
         self.loop = loop
         self.depends_ready = []
+        self.death_expected = False
         self._ready_waiter = None
 
     async def resolve(self, resolver, graph, loop):
@@ -1786,7 +1790,7 @@ class PhysicalNode:
         kwargs : dict
             Extra arguments passed to :meth:`.Scheduler.kill`.
         """
-        pass
+        self.death_expected = True
 
     def clone(self):
         """Create a duplicate of the task, ready to be run.
