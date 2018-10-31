@@ -106,8 +106,6 @@ if __name__ == "__main__":
                         help='URL at which slaves connect to the HTTP port (default=auto)')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Bokeh backend for the GUI (default=%(default)s')
-    parser.add_argument('--dashboard-url', type=str, metavar='URL',
-                        help='URL at which users can reach gui-port (default=auto)')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
