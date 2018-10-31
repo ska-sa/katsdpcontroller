@@ -57,7 +57,7 @@ class SensorWatcher:
             callback(sensor, sensor.reading)
 
     def close(self):
-        for sensor, callback in list(self._attachments.items()):
+        for sensor, callbacks in list(self._attachments.items()):
             for callback in callbacks:
                 sensor.detach(callback)
         self._attachments.clear()
