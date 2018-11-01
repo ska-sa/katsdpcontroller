@@ -580,7 +580,7 @@ def _make_timeplot(g, name, description,
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
-    timeplot.death_critical = False
+    timeplot.critical = False
 
     g.add_node(timeplot, config=lambda task, resolver: dict({
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
@@ -623,7 +623,7 @@ def _make_timeplot_beamformer(g, config, name):
     develop = is_develop(config)
     beamformer = _make_beamformer_engineering_pol(
         g, info, 'bf_ingest_timeplot.{}'.format(name), name, True, False, 0, develop)
-    beamformer.death_critical = False
+    beamformer.critical = False
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
     # could potentially be reduced further.

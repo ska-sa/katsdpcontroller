@@ -129,7 +129,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
         # Whether we should abort the capture block if the task fails
-        self.death_critical = True
+        self.critical = True
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and

@@ -866,7 +866,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def unexpected_death(self, task):
         self.logger.warning('Task %s died unexpectedly', task.name)
-        if not task.death_critical:
+        if not task.critical:
             return
 
         # Try to wind up the current capture block so that we don't lose any
