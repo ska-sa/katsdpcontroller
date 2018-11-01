@@ -204,6 +204,10 @@ class CaptureBlock:
                 self.state_change_callback()
 
 
+def _error_on_error(state):
+    return Sensor.Status.ERROR if state == ProductState.ERROR else Sensor.Status.NOMINAL
+
+
 class SDPSubarrayProductBase:
     """SDP Subarray Product Base
 
@@ -263,7 +267,8 @@ class SDPSubarrayProductBase:
             default="{}", initial_status=Sensor.Status.NOMINAL)
         self.state_sensor = Sensor(
             ProductState, subarray_product_id + ".state",
-            "State of the subarray product state machine")
+            "State of the subarray product state machine",
+            status_func=_error_on_error)
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=subarray_product_id))
         self.logger.info("Created: %r", self)
