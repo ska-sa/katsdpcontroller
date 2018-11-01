@@ -866,9 +866,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def unexpected_death(self, task):
         self.logger.warning('Task %s died unexpectedly', task.name)
-        if not task.critical:
-            return
+        if task.critical:
+            self._go_to_error()
 
+    def bad_device_status(self, task):
+        self.logger.warning('Task %s has failed (device-status)', task.name)
+        if task.critical:
+            self._go_to_error()
+
+    def _go_to_error(self):
+        """Switch to :const:`ProductState.ERROR` due to an external event.
+
+        This is used when a failure in some task is detected asynchronously, but
+        not when a katcp transition fails.
+        """
         # Try to wind up the current capture block so that we don't lose any
         # data already captured.  However, if we're in the middle of another
         # async operation we just let that run, because that operation is either

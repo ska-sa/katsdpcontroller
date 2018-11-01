@@ -348,6 +348,26 @@ class CaptureBlockStateObserver:
         self._waiters = []
 
 
+class DeviceStatusObserver:
+    """Watches a device-status sensor from a child, and reports when it is in error."""
+
+    def __init__(self, sensor, task, loop):
+        self.sensor = sensor
+        self.task = task
+        sensor.attach(self)
+        # Arrange to observe the initial value
+        loop.call_soon(self, sensor, sensor.reading)
+
+    def __call__(self, sensor, reading):
+        if reading.status == Sensor.Status.ERROR:
+            product = self.task.sdp_controller.subarray_products.get(self.task.subarray_product_id)
+            if product:
+                product.bad_device_status(self.task)
+
+    def close(self):
+        self.sensor.detach(self)
+
+
 class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     """Augments the base :class:`~scheduler.PhysicalTask` to handle katcp and
     telstate.
@@ -363,6 +383,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
+        self.device_status_observer = None
         self.katsdpservices_logging = True
 
     def get_transition(self, state):
@@ -387,6 +408,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         if self.capture_block_state_observer is not None:
             self.capture_block_state_observer.close()
             self.capture_block_state_observer = None
+        if self.device_status_observer is not None:
+            self.device_status_observer.close()
+            self.device_status_observer = None
         if need_inform:
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
@@ -411,6 +435,10 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, loop=self.loop, logger=self.logger)
+                    sensor = self.sdp_controller.sensors.get(prefix + 'device-status')
+                    if sensor is not None:
+                        self.device_status_observer = DeviceStatusObserver(
+                            sensor, self, loop=self.loop)
                     return
                 except RuntimeError:
                     self.katcp_connection.close()
