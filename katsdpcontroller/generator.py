@@ -45,7 +45,7 @@ _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
 #: Maximum number of custom signals requested by (correlator) timeplot
-TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
+TIMEPLOT_MAX_CUSTOM_SIGNALS = 256
 #: Speed at which flags are transmitted, relative to real time
 FLAGS_RATE_RATIO = 8.0
 #: Volume serviced by katsdptransfer to transfer results to the archive
