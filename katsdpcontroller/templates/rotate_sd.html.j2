@@ -8,7 +8,7 @@
     </body>
     <script>
      var url_id = 0;
-     var arrays = [];
+     var array_streams = [];
      var urls = {};
      var rotater = null;
      var ws = null;
@@ -23,19 +23,19 @@
 
      var rotate_frame = document.getElementById('rotate_frame');
      var no_content = "No arrays containing signal displays currently active.";
-   
+
      function set_content(content) {
       rotate_frame.src = 'data:text/html,' + encodeURIComponent("<div style='color: #aaaaaa;'>" + content + "</div>");
-     } 
+     }
 
      function rotate()
      {
-      if (arrays.length == 0) { set_content(no_content); return; }
-      if (arrays.length == 1 && rotate_frame.src.startsWith(urls[arrays[0]])) { return; }
+      if (array_streams.length == 0) { set_content(no_content); return; }
+      if (array_streams.length == 1 && rotate_frame.src.startsWith(urls[array_streams[0]])) { return; }
        // don't rotate if we have only one to display and are currently showing it
        // or none to dispay
 
-      url = urls[arrays[url_id]];
+      url = urls[array_streams[url_id]];
 
       conn = new XMLHttpRequest();
       conn.timeout = 1000;
@@ -50,7 +50,7 @@
         // check to see if this URL is available yet, and if not let the user
         // know that we will retry.
        }
-       url_id = (url_id + 1) % arrays.length;
+       url_id = (url_id + 1) % array_streams.length;
        rotater = setInterval(rotate, {{args.rotate_interval}});
       }
       clearInterval(rotater);
@@ -82,9 +82,9 @@
        // have had issues checking host before the onload event
       console.log("Attempting WS connection to " + ws_url);
       ws = new WebSocket(ws_url);
-      
-      ws.onopen = function(msg) { 
-       console.log("Websocket connected. Requesting active servers..."); 
+
+      ws.onopen = function(msg) {
+       console.log("Websocket connected. Requesting active servers...");
        ws.send('servers');
        retry_count = 0;
       }
@@ -100,7 +100,7 @@
        set_content("Failed to establish WebSocket connection to " + ws_url + ". Retrying in 5s...");
        restart_ws();
       }
- 
+
       ws.onmessage = function(msg) {
        url_id = 0;
        retry_count = 0;
@@ -109,13 +109,13 @@
        rotater = null;
        try {
         urls = JSON.parse(msg.data);
-        arrays = Object.keys(urls);    
+        array_streams = Object.keys(urls);
         rotater = setInterval(rotate, {{args.rotate_interval}});
          // waiting the interval gives time for the time_plot endpoint to startup
        } catch (err) {
         console.log("Failed to parse WS message: " + msg.data);
        }
-       if (arrays.length == 0) { set_content(no_content); }
+       if (array_streams.length == 0) { set_content(no_content); }
       }
      } // end of ws_connect
 

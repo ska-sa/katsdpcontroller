@@ -49,7 +49,7 @@ STREAMS = '''{
 }'''
 
 CONFIG = '''{
-    "version": "1.1",
+    "version": "2.2",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -101,29 +101,33 @@ CONFIG = '''{
     },
     "outputs": {
         "sdp_l0": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 4.0,
-            "continuum_factor": 16
+            "continuum_factor": 16,
+            "archive": true
         },
         "sdp_l0_spectral_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 1.9,
-            "continuum_factor": 1
+            "continuum_factor": 1,
+            "archive": true
         },
         "sdp_l0_continuum_only": {
-            "type": "sdp.l0",
+            "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
             "output_int_time": 2.1,
             "continuum_factor": 16,
-            "output_channels": [117, 3472]
+            "output_channels": [117, 3472],
+            "archive": true
         },
         "sdp_beamformer": {
             "type": "sdp.beamformer",
@@ -154,6 +158,22 @@ CONFIG = '''{
             "type": "sdp.cal",
             "src_streams": ["sdp_l0"],
             "buffer_time": 1800.0
+        },
+        "sdp_l1_flags": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "sdp_l1_flags_continuum": {
+            "type": "sdp.flags",
+            "src_streams": ["sdp_l0_continuum"],
+            "calibration": ["cal"],
+            "archive": true
+        },
+        "continuum_image": {
+            "type": "sdp.continuum_image",
+            "src_streams": ["sdp_l1_flags_continuum"]
         }
     },
     "config": {}
@@ -176,7 +196,7 @@ EXPECTED_INTERFACE_SENSOR_LIST_1 = tuple(
         (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
         (b'cal.1.capture-block-state', b'', b'string'),
         (b'state', b'', b'discrete',
-         b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead'),
+         b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error'),
         (b'capture-block-state', b'', b'string')
     ))
 
@@ -408,16 +428,31 @@ class TestSDPController(BaseTestSDPController):
     """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
     mocking of the scheduler.
     """
+    def _request_slow(self, name, *args, cancelled=False):
+        """Asynchronous context manager that runs its block with a request in progress.
+
+        The request must operate by issuing requests to the tasks, as this is
+        used to block it from completing.
+        """
+        sensor_proxy_client = self.sensor_proxy_client_class.return_value
+        return DelayedManager(
+            self.client.request(name, *args),
+            sensor_proxy_client.request,
+            ([], []),
+            cancelled, loop=self.loop)
+
     def _capture_init_slow(self, subarray_product, cancelled=False):
         """Asynchronous context manager that runs its block with a capture-init
         in progress. The subarray product must already be configured.
         """
-        sensor_proxy_client = self.sensor_proxy_client_class.return_value
-        return DelayedManager(
-            self.client.request('capture-init', subarray_product),
-            sensor_proxy_client.request,
-            ([], []),
-            cancelled, loop=self.loop)
+        return self._request_slow('capture-init', subarray_product, cancelled=cancelled)
+
+    def _capture_done_slow(self, subarray_product, cancelled=False):
+        """Asynchronous context manager that runs its block with a capture-done
+        in progress. The subarray product must already be configured and
+        capturing.
+        """
+        return self._request_slow('capture-done', subarray_product, cancelled=cancelled)
 
     def _product_configure_slow(self, subarray_product, cancelled=False):
         """Asynchronous context manager that runs its block with a
@@ -882,16 +917,38 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(grouped_calls, expected_calls)
 
     async def test_capture_init_failed_req(self):
-        """Capture-init bumbles on even if a child request fails.
-
-        TODO: that's probably not really the behaviour we want.
-        """
+        """Capture-init fails on some task"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         self.fail_requests.add('capture-init')
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+        await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
-        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
+        # check that the subarray can be safely deconfigured, and that it
+        # goes via DECONFIGURING state. Rather than trying to directly
+        # observe the internal state during deconfigure (e.g. with
+        # DelayedManager), we'll just observe the sensor
+        state_observer = mock.Mock()
+        self.server.sensors[SUBARRAY_PRODUCT4 + '.state'].attach(state_observer)
+        await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        # call 0, arguments, argument 1
+        self.assertEqual(state_observer.mock_calls[0][1][1].value, ProductState.DECONFIGURING)
+        self.assertEqual(ProductState.DEAD, sa.state)
+
+    async def test_capture_done_failed_req(self):
+        """Capture-done fails on some task"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        self.fail_requests.add('capture-done')
+        reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+        await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT4)
+        # check that the subarray is in an appropriate state
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
+        # check that the subarray can be safely deconfigured
+        await self.client.request('product-deconfigure', SUBARRAY_PRODUCT4)
+        self.assertEqual(ProductState.DEAD, sa.state)
 
     async def _test_busy(self, command, *args):
         """Test that a command fails if issued while ?capture-init or
@@ -906,23 +963,37 @@ class TestSDPController(BaseTestSDPController):
         """Capture-init fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-init", SUBARRAY_PRODUCT1)
 
-    async def test_capture_init_dead_process(self):
-        """Capture-init bumbles on even if a child process is dead.
-
-        TODO: that's probably not really the behaviour we want.
-        """
-        await self.client.request("product-configure", SUBARRAY_PRODUCT4, CONFIG)
-        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
-        for node in sa.physical_graph:
+    def _ingest_died(self, subarray_product):
+        """Mark an ingest process as having died"""
+        for node in subarray_product.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
                 node.status = Dict(state='TASK_FAILED')
                 break
         else:
             raise ValueError('Could not find ingest node')
-        await self.client.request("capture-init", SUBARRAY_PRODUCT4)
+
+    async def test_capture_init_dead_process(self):
+        """Capture-init fails if a child process is dead."""
+        await self.client.request("product-configure", SUBARRAY_PRODUCT4, CONFIG)
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
+        self._ingest_died(sa)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        await self.assert_request_fails("capture-init", SUBARRAY_PRODUCT4)
         # check that the subarray is in an appropriate state
-        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
+
+    async def test_capture_init_process_dies(self):
+        """Capture-init fails if a child dies half-way through."""
+        await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
+        with self.assertRaises(FailReply):
+            async with self._capture_init_slow(SUBARRAY_PRODUCT1):
+                self._ingest_died(sa)
+        # check that the subarray is in an appropriate state
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
 
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -948,6 +1019,36 @@ class TestSDPController(BaseTestSDPController):
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-done", SUBARRAY_PRODUCT1)
+
+    async def test_process_dies_while_capturing(self):
+        await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
+        reply, _ = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
+        cbid = reply[0].decode()
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
+        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self._ingest_died(sa)
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({cbid: mock.ANY}, sa.capture_blocks)
+        # In the background it will terminate the capture block
+        await asynctest.exhaust_callbacks(self.loop)
+        self.assertEqual({}, sa.capture_blocks)
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_called_with('write-meta', cbid, False)
+
+    async def test_capture_done_process_dies(self):
+        """Capture-done fails if a child dies half-way through."""
+        await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
+        reply, _ = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
+        cbid = reply[0].decode()
+        sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
+        self.assertEqual(ProductState.CAPTURING, sa.state)
+        self.assertEqual({cbid: mock.ANY}, sa.capture_blocks)
+        with self.assertRaises(FailReply):
+            async with self._capture_done_slow(SUBARRAY_PRODUCT1):
+                self._ingest_died(sa)
+        # check that the subarray is in an appropriate state
+        self.assertEqual(ProductState.ERROR, sa.state)
+        self.assertEqual({}, sa.capture_blocks)
 
     async def test_deconfigure_on_exit(self):
         """Calling deconfigure_on_exit will force-deconfigure existing

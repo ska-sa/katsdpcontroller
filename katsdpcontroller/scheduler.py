@@ -168,6 +168,7 @@ import ipaddress
 import decimal
 from decimal import Decimal
 import time
+import io
 
 import pkg_resources
 import docker
@@ -625,26 +626,38 @@ class ResourceRequestDescriptor:
         instance.requests[self._name].value = value
 
 
-def resource_requests(resources):
-    """Class decorator that adds resource requests to a class.
+class ResourceRequestsContainerMeta(type):
+    """Metaclass powering :class:`ResourceRequestsContainer`"""
+    def __new__(cls, name, bases, namespace, **kwargs):
+        result = super().__new__(cls, name, bases, namespace)
+        for resource_name in result.RESOURCE_REQUESTS:
+            setattr(result, resource_name, ResourceRequestDescriptor(resource_name))
+        return result
+
+
+class ResourceRequestsContainer(metaclass=ResourceRequestsContainerMeta):
+    """Container for a collection of resource requests.
 
     It
-    - Adds a :attr:`requests` member dictionary holding the request objects
-    - Adds descriptors to allow each request value to be accessed as an
+    - has a :attr:`requests` member dictionary holding the request objects
+    - has descriptors to allow each request value to be accessed as an
       attribute of the object.
+    - provides utilities for formatting the request to be human readable.
+
+    Subclasses must provide a RESOURCE_REQUESTS class member dictionary listing
+    the supported requests.
     """
-    @decorator
-    def init_decorator(func, *args, **kwargs):
-        func(*args, **kwargs)
-        args[0].requests = {name: cls.empty_request() for name, cls in resources.items()}
+    RESOURCE_REQUESTS = {}
 
-    def cls_decorator(cls):
-        cls.__init__ = init_decorator(cls.__init__)
-        for name in resources:
-            setattr(cls, name, ResourceRequestDescriptor(name))
-        return cls
+    def __init__(self):
+        self.requests = {name: cls.empty_request() for name, cls in self.RESOURCE_REQUESTS.items()}
 
-    return cls_decorator
+    def format_requests(self):
+        return ''.join(' {}={}'.format(name, request.amount)
+                       for name, request in self.requests.items() if request.amount)
+
+    def __repr__(self):
+        return '<{}{}>'.format(self.__class__.__name__, self.format_requests())
 
 
 GLOBAL_RESOURCES = {'cpus': ScalarResource, 'mem': ScalarResource, 'disk': ScalarResource,
@@ -653,8 +666,7 @@ GPU_RESOURCES = {'compute': ScalarResource, 'mem': ScalarResource}
 INTERFACE_RESOURCES = {'bandwidth_in': ScalarResource, 'bandwidth_out': ScalarResource}
 
 
-@resource_requests(GPU_RESOURCES)
-class GPURequest:
+class GPURequest(ResourceRequestsContainer):
     """Request for resources on a single GPU. These resources are not isolated,
     so the request functions purely to ensure that the scheduler does not try
     to over-allocate a GPU.
@@ -671,7 +683,10 @@ class GPURequest:
     name : str, optional
         If specified, the name of the GPU must match this.
     """
+    RESOURCE_REQUESTS = GPU_RESOURCES
+
     def __init__(self):
+        super().__init__()
         self.affinity = False
         self.name = None
 
@@ -680,9 +695,15 @@ class GPURequest:
             return False
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
+    def __repr__(self):
+        return '<{} {}{}{}>'.format(
+            self.__class__.__name__,
+            self.name if self.name is not None else '*',
+            self.format_requests(),
+            ' affinity=True' if self.affinity else '')
 
-@resource_requests(INTERFACE_RESOURCES)
-class InterfaceRequest:
+
+class InterfaceRequest(ResourceRequestsContainer):
     """Request for resources on a network interface. At the moment only
     a logical network name can be specified, but this may be augmented in
     future to allocate bandwidth.
@@ -702,7 +723,10 @@ class InterfaceRequest:
     bandwidth_out : float or Decimal
         Egress bandwidth, in bps
     """
+    RESOURCE_REQUESTS = INTERFACE_RESOURCES
+
     def __init__(self, network, infiniband=False, affinity=False):
+        super().__init__()
         self.network = network
         self.infiniband = infiniband
         self.affinity = affinity
@@ -713,6 +737,13 @@ class InterfaceRequest:
         if self.infiniband and not interface.infiniband_devices:
             return False
         return self.network == interface.network
+
+    def __repr__(self):
+        return '<{} {}{}{}{}>'.format(
+            self.__class__.__name__,
+            self.network, self.format_requests(),
+            ' infiniband=True' if self.infiniband else '',
+            ' affinity=True' if self.affinity else '')
 
 
 class VolumeRequest:
@@ -740,6 +771,11 @@ class VolumeRequest:
         if self.affinity and numa_node is not None and volume.numa_node != numa_node:
             return False
         return volume.name == self.name
+
+    def __repr__(self):
+        return '<{} {} {}{}>'.format(
+            self.__class__.__name__, self.name, self.mode,
+            ' affinity=True' if self.affinity else '')
 
 
 class GPUResources:
@@ -1157,6 +1193,9 @@ class LogicalNode:
         self.wait_ports = None
         self.physical_factory = PhysicalNode
 
+    def __repr__(self):
+        return '<{} {!r}>'.format(self.__class__.__name__, self.name)
+
 
 class LogicalExternal(LogicalNode):
     """An external service. It is assumed to be running as soon as it starts.
@@ -1170,8 +1209,7 @@ class LogicalExternal(LogicalNode):
         self.wait_ports = []
 
 
-@resource_requests(GLOBAL_RESOURCES)
-class LogicalTask(LogicalNode):
+class LogicalTask(LogicalNode, ResourceRequestsContainer):
     """A node in a logical graph that indicates how to run a task
     and what resources it requires, but does not correspond to any specific
     running task.
@@ -1211,10 +1249,11 @@ class LogicalTask(LogicalNode):
         as a non-root user.
     image : str
         Base name of the Docker image (without registry or tag).
-    container : :class:`addict.Dict`
-        Modify this to override properties of the container. The `image` and
-        field is set by the :class:`ImageResolver`, overriding anything set
-        here.
+    taskinfo : :class:`addict.Dict`
+        A template for the final taskinfo message passed to Mesos. It will be
+        copied into the physical task before being populated with computed
+        fields. This is primarily intended to allow setting fields that are not
+        otherwise configurable. Use with care.
     command : list of str
         Command to run inside the image. Each element is passed through
         :meth:`str.format` to generate a command for the physical node. The
@@ -1230,8 +1269,11 @@ class LogicalTask(LogicalNode):
         downloaded to the sandbox directory and executed, with the original
         command being passed to it.
     """
+    RESOURCE_REQUESTS = GLOBAL_RESOURCES
+
     def __init__(self, name):
-        super().__init__(name)
+        LogicalNode.__init__(self, name)
+        ResourceRequestsContainer.__init__(self)
         self.max_run_time = None
         self.gpus = []
         self.interfaces = []
@@ -1240,8 +1282,9 @@ class LogicalTask(LogicalNode):
         self.image = None
         self.command = []
         self.wrapper = None
-        self.container = Dict()
-        self.container.type = 'DOCKER'
+        self.taskinfo = Dict()
+        self.taskinfo.container.type = 'DOCKER'
+        self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
     def valid_agent(self, agent):
@@ -1250,6 +1293,18 @@ class LogicalTask(LogicalNode):
         requiring a special type of hardware."""
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
         return True
+
+    def __repr__(self):
+        s = io.StringIO()
+        s.write('<{} {!r}{}'.format(self.__class__.__name__, self.name, self.format_requests()))
+        if self.gpus:
+            s.write(' gpus={}'.format(self.gpus))
+        if self.interfaces:
+            s.write(' interfaces={}'.format(self.interfaces))
+        if self.volumes:
+            s.write(' volumes={}'.format(self.volumes))
+        s.write('>')
+        return s.getvalue()
 
 
 class AgentGPU(GPUResources):
@@ -1613,6 +1668,9 @@ class PhysicalNode:
     dead_event : :class:`asyncio.Event`
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
+    death_expected : bool
+        The task has been requested to exit, and so if it dies it is normal
+        rather than a failure.
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
@@ -1634,6 +1692,7 @@ class PhysicalNode:
         self.dead_event = asyncio.Event(loop=loop)
         self.loop = loop
         self.depends_ready = []
+        self.death_expected = False
         self._ready_waiter = None
 
     async def resolve(self, resolver, graph, loop):
@@ -1731,7 +1790,7 @@ class PhysicalNode:
         kwargs : dict
             Extra arguments passed to :meth:`.Scheduler.kill`.
         """
-        pass
+        self.death_expected = True
 
     def clone(self):
         """Create a duplicate of the task, ready to be run.
@@ -1871,7 +1930,7 @@ class PhysicalTask(PhysicalNode):
 
         docker_devices = set()
         docker_parameters = []
-        taskinfo = Dict()
+        taskinfo = copy.deepcopy(self.logical_node.taskinfo)
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
@@ -1900,8 +1959,6 @@ class PhysicalTask(PhysicalNode):
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
-        taskinfo.command.shell = False
-        taskinfo.container = copy.deepcopy(self.logical_node.container)
         image_path = await resolver.image_resolver(self.logical_node.image, loop)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id

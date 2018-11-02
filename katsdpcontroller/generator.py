@@ -44,14 +44,18 @@ IMAGES = frozenset([
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
-#: Maximum number of custom signals requested by timeplot
+#: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 128
+#: Speed at which flags are transmitted, relative to real time
+FLAGS_RATE_RATIO = 8.0
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Like DATA_VOL, but for high speed data to be transferred to an object store
 OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
+#: Target size of objects in the object store
+WRITER_OBJECT_SIZE = 10e6    # 10 MB
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +193,12 @@ class CBFStreamInfo:
     def n_samples_between_spectra(self):
         return self.antenna_channelised_voltage['n_samples_between_spectra']
 
+    @property
+    def n_endpoints(self):
+        url = self.raw['url']
+        parts = urllib.parse.urlsplit(url)
+        return len(endpoint_list_parser(None)(parts.hostname))
+
 
 class VisInfo:
     """Mixin for info classes to compute visibility info from baselines and channels."""
@@ -302,6 +312,51 @@ class L0Info(VisInfo):
         return _bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
 
+class BeamformerInfo:
+    """Query properties of an SDP beamformer stream.
+
+    Each stream corresponds to a single-pol beam. It supports both the
+    ``sdp.beamformer_engineering`` and ``sdp.beamformer`` stream types.
+    """
+    def __init__(self, config, name, src_name):
+        self.raw = config['outputs'][name]
+        if src_name not in self.raw['src_streams']:
+            raise KeyError('{} not a source of {}'.format(src_name, name))
+        self.src_info = TiedArrayChannelisedVoltageInfo(config, src_name)
+        requested_channels = tuple(self.raw.get('output_channels', (0, self.src_info.n_channels)))
+        # Round to fit the endpoints, as required by bf_ingest.
+        channels_per_endpoint = self.src_info.n_channels // self.src_info.n_endpoints
+        self.output_channels = (_round_down(requested_channels[0], channels_per_endpoint),
+                                _round_up(requested_channels[1], channels_per_endpoint))
+        if self.output_channels != requested_channels:
+            logger.info('Rounding output channels for %s from %s to %s',
+                        name, requested_channels, self.output_channels)
+
+    @property
+    def n_channels(self):
+        return self.output_channels[1] - self.output_channels[0]
+
+    @property
+    def size(self):
+        """Size of single frame in bytes"""
+        return self.src_info.size * self.n_channels // self.src_info.n_channels
+
+    @property
+    def int_time(self):
+        """Interval between heaps, in seconds"""
+        return self.src_info.int_time
+
+    @property
+    def n_substreams(self):
+        return self.n_channels // self.src_info.n_channels_per_substream
+
+    @property
+    def net_bandwidth(self, ratio=1.05, overhead=128):
+        """Network bandwidth in bits per second"""
+        heap_size = self.size / self.n_substreams
+        return _bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
+
+
 def find_node(g, name):
     for node in g:
         if node.name == name:
@@ -324,7 +379,7 @@ def _make_telstate(g, config):
     telstate.image = 'katsdptelstate'
     telstate.ports = ['telstate']
     # Run it in /mnt/mesos/sandbox so that the dump.rdb ends up there.
-    telstate.container.docker.setdefault('parameters', []).append(
+    telstate.taskinfo.container.docker.setdefault('parameters', []).append(
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     telstate.physical_factory = TelstateTask
@@ -349,7 +404,7 @@ def _make_cam2telstate(g, config, name):
 
 
 def _make_meta_writer(g, config):
-    def make_config(task, resolver):
+    def make_meta_writer_config(task, resolver):
         s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['url'])
         return {
             's3_host': s3_url.hostname,
@@ -386,7 +441,7 @@ def _make_meta_writer(g, config):
         ]
     }
 
-    g.add_node(meta_writer, config=make_config)
+    g.add_node(meta_writer, config=make_meta_writer_config)
     return meta_writer
 
 
@@ -404,7 +459,7 @@ def _make_cbf_simulator(g, config, name):
         info = TiedArrayChannelisedVoltageInfo(config, name)
     ibv = not is_develop(config)
 
-    def make_config(task, resolver):
+    def make_cbf_simulator_config(task, resolver):
         substreams = info.n_channels // info.n_channels_per_substream
         conf = {
             'cbf_channels': info.n_channels,
@@ -437,7 +492,7 @@ def _make_cbf_simulator(g, config, name):
         return conf
 
     sim_group = LogicalGroup('sim.' + name)
-    g.add_node(sim_group, config=make_config)
+    g.add_node(sim_group, config=make_cbf_simulator_config)
     multicast = find_node(g, 'multicast.' + name)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -481,7 +536,7 @@ def _make_cbf_simulator(g, config, name):
             # The verbs send interface seems to create a large number of
             # file handles per stream, easily exceeding the default of
             # 1024.
-            sim.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+            sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
@@ -502,46 +557,36 @@ def _make_cbf_simulator(g, config, name):
     return sim_group
 
 
-def _make_timeplot(g, config, spectral_name):
-    spectral_info = L0Info(config, spectral_name)
-    n_ingest = n_ingest_nodes(config, spectral_name)
-    multicast = find_node(g, 'multicast.timeplot.' + spectral_name)
-
-    timeplot = SDPLogicalTask('timeplot.' + spectral_name)
+def _make_timeplot(g, name, description,
+                   cpus, timeplot_buffer_mb, bandwidth, extra_config):
+    """Common backend code for creating a single timeplot server."""
+    multicast = find_node(g, 'multicast.timeplot.' + name)
+    timeplot = SDPLogicalTask('timeplot.' + name)
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
-    # Exact requirement not known (also depends on number of users). Give it
-    # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
-    timeplot.cpus = 2 * min(1.0, spectral_info.n_vis / _N16_32)
-    # Give timeplot enough memory for 256 time samples, but capped at 16GB.
-    # This formula is based on data.py in katsdpdisp.
-    percentiles = 5 * 8
-    timeplot_slot = spectral_info.n_channels * (spectral_info.n_baselines + percentiles) * 8
-    timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
-    timeplot_buffer_mb = timeplot_buffer / 1024**2
+    timeplot.cpus = cpus
     # timeplot_buffer covers only the visibilities, but there are also flags
     # and various auxiliary buffers. Add 20% to give some headroom, and also
     # add a fixed amount since in very small arrays the 20% might not cover
     # the fixed-sized overheads.
     timeplot.mem = timeplot_buffer_mb * 1.2 + 256
     timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    timeplot.interfaces[0].bandwidth_in = _timeplot_bandwidth(spectral_info, n_ingest) * n_ingest
+    timeplot.interfaces[0].bandwidth_in = bandwidth
     timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
-        'description': 'Signal displays for {0.subarray_product_id}',
+        'description': 'Signal displays for {0.subarray_product_id} %s' % (description,),
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
+    timeplot.death_critical = False
 
-    g.add_node(timeplot, config=lambda task, resolver: {
+    g.add_node(timeplot, config=lambda task, resolver: dict({
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
-        'l0_name': spectral_name,
         'spead_interface': task.interfaces['sdp_10g'].name,
-        'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
-    })
+    }, **extra_config))
     g.add_edge(timeplot, multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {
@@ -551,7 +596,47 @@ def _make_timeplot(g, config, spectral_name):
     return timeplot
 
 
-def _timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
+def _make_timeplot_correlator(g, config, spectral_name):
+    spectral_info = L0Info(config, spectral_name)
+    n_ingest = n_ingest_nodes(config, spectral_name)
+
+    # Exact requirement not known (also depends on number of users). Give it
+    # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
+    cpus = 2 * min(1.0, spectral_info.n_vis / _N16_32)
+    # Give timeplot enough memory for 256 time samples, but capped at 16GB.
+    # This formula is based on data.py in katsdpdisp.
+    percentiles = 5 * 8
+    timeplot_slot = spectral_info.n_channels * (spectral_info.n_baselines + percentiles) * 8
+    timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
+
+    return _make_timeplot(
+        g, name=spectral_name, description=spectral_name,
+        cpus=cpus, timeplot_buffer_mb=timeplot_buffer / 1024**2,
+        bandwidth=_correlator_timeplot_bandwidth(spectral_info, n_ingest) * n_ingest,
+        extra_config={'l0_name': spectral_name,
+                      'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS})
+
+
+def _make_timeplot_beamformer(g, config, name):
+    """Make timeplot server for the beamformer, plus a beamformer capture to feed it."""
+    info = TiedArrayChannelisedVoltageInfo(config, name)
+    develop = is_develop(config)
+    beamformer = _make_beamformer_engineering_pol(
+        g, info, 'bf_ingest_timeplot.{}'.format(name), name, True, False, 0, develop)
+    beamformer.death_critical = False
+
+    # It's a low-demand setup (only one signal). The CPU and memory numbers
+    # could potentially be reduced further.
+    timeplot = _make_timeplot(
+        g, name=name, description=name,
+        cpus=0.5, timeplot_buffer_mb=128,
+        bandwidth=_beamformer_timeplot_bandwidth(info),
+        extra_config={'max_custom_signals': 2})
+
+    return beamformer, timeplot
+
+
+def _correlator_timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
     """Approximate size of the data sent from one ingest process to timeplot, per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
     n_perc_signals = 5 * 8
@@ -570,7 +655,7 @@ def _timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
     return ans
 
 
-def _timeplot_continuum_factor(spectral_info, n_ingest):
+def _correlator_timeplot_continuum_factor(spectral_info, n_ingest):
     factor = 1
     # Aim for about 256 signal display coarse channels
     while (spectral_info.n_channels % (factor * n_ingest * 2) == 0
@@ -579,14 +664,28 @@ def _timeplot_continuum_factor(spectral_info, n_ingest):
     return factor
 
 
-def _timeplot_bandwidth(spectral_info, n_ingest):
-    """Bandwidth for the timeplot stream from a single ingest"""
-    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
-    sd_frame_size = _timeplot_frame_size(
+def _correlator_timeplot_bandwidth(spectral_info, n_ingest):
+    """Bandwidth for the correlator timeplot stream from a single ingest"""
+    sd_continuum_factor = _correlator_timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_frame_size = _correlator_timeplot_frame_size(
         spectral_info, spectral_info.n_channels // sd_continuum_factor, n_ingest)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     return _bandwidth(sd_frame_size, spectral_info.int_time, ratio=1.2, overhead=4096)
+
+
+def _beamformer_timeplot_bandwidth(info):
+    """Bandwidth for the beamformer timeplot stream.
+
+    Parameters
+    ----------
+    info : :class:`TiedArrayChannelisedVoltageInfo`
+        Info about the single-pol beam.
+    """
+    # XXX The beamformer signal displays are still in development, but the
+    # rates are tiny. Until the protocol is finalised we'll just hardcode a
+    # number.
+    return 1e6    # 1 MB/s
 
 
 def n_ingest_nodes(config, name):
@@ -668,8 +767,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     # services can declare dependencies on ingest rather than individual nodes.
     ingest_group = LogicalGroup('ingest.' + name)
 
-    sd_continuum_factor = _timeplot_continuum_factor(spectral_info, n_ingest)
-    sd_spead_rate = _timeplot_bandwidth(spectral_info, n_ingest)
+    sd_continuum_factor = _correlator_timeplot_continuum_factor(spectral_info, n_ingest)
+    sd_spead_rate = _correlator_timeplot_bandwidth(spectral_info, n_ingest)
     output_channels_str = '{}:{}'.format(*spectral_info.output_channels)
     group_config = {
         'continuum_factor': continuum_info.raw['continuum_factor'] if continuum_name else 1,
@@ -754,7 +853,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             net_bandwidth += continuum_info.net_bandwidth
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
 
-        def make_config(task, resolver, server_id=i):
+        def make_ingest_config(task, resolver, server_id=i):
             conf = {
                 'cbf_interface': task.interfaces['cbf'].name,
                 'server_id': server_id
@@ -765,7 +864,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
             if continuum_name:
                 conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
             return conf
-        g.add_node(ingest, config=make_config)
+        g.add_node(ingest, config=make_ingest_config)
         # Connect to ingest_group. We need a ready dependency of the group on
         # the node, so that other nodes depending on the group indirectly wait
         # for all nodes; the resource dependency is to prevent the nodes being
@@ -778,7 +877,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     return ingest_group
 
 
-def _make_cal(g, config, name, l0_name, flags_name):
+def _make_cal(g, config, name, l0_name, flags_names):
     info = L0Info(config, l0_name)
     if info.n_antennas < 4:
         # Only possible to calibrate with at least 4 antennas
@@ -820,10 +919,11 @@ def _make_cal(g, config, name, l0_name, flags_name):
     # Main memory consumer is buffers for
     # - visibilities (complex64)
     # - flags (uint8)
+    # - excision flags (single bit each)
     # - weights (float32)
     # There are also timestamps, but they're insignificant compared to the rest.
     slots = int(math.ceil(buffer_time / info.int_time))
-    slot_size = info.n_vis * 13 / n_cal
+    slot_size = info.n_vis * 13.125 / n_cal
     buffer_size = slots * slot_size
     # Processing operations come in a few flavours:
     # - average over time: need O(1) extra slots
@@ -855,8 +955,6 @@ def _make_cal(g, config, name, l0_name, flags_name):
         'l0_name': l0_name,
         'servers': n_cal
     }
-    if flags_name is not None:
-        group_config['flags_name'] = flags_name
     group_config.update(parameters)
 
     # Virtual node which depends on the real cal nodes, so that other services
@@ -872,11 +970,23 @@ def _make_cal(g, config, name, l0_name, flags_name):
                })
 
     # Flags output
-    if flags_name is not None:
+    flags_streams_base = []
+    flags_multicasts = {}
+    for flags_name in flags_names:
+        flags_config = config['outputs'][flags_name]
+        flags_src_stream = flags_config['src_streams'][0]
+        cf = config['outputs'][flags_src_stream]['continuum_factor']
+        cf //= config['outputs'][l0_name]['continuum_factor']
+        flags_streams_base.append({
+            'name': flags_name,
+            'src_stream': flags_src_stream,
+            'continuum_factor': cf,
+            'rate_ratio': FLAGS_RATE_RATIO
+        })
+
         flags_multicast = LogicalMulticast('multicast.' + flags_name, n_cal)
+        flags_multicasts[flags_name] = flags_multicast
         g.add_node(flags_multicast)
-        g.add_edge(cal_group, flags_multicast, port='spead', depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
         g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
 
     for i in range(1, n_cal + 1):
@@ -887,8 +997,9 @@ def _make_cal(g, config, name, l0_name, flags_name):
         cal.mem = buffer_size * (1 + extra) / 1024**2 + 512
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
+        # Note: these scale the fixed overheads too, so is not strictly accurate.
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
-        cal.interfaces[0].bandwidth_out = info.flag_bandwidth / n_cal
+        cal.interfaces[0].bandwidth_out = info.flag_bandwidth * FLAGS_RATE_RATIO / n_cal
         cal.ports = ['port', 'dask_diagnostics']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
@@ -899,17 +1010,39 @@ def _make_cal(g, config, name, l0_name, flags_name):
         }]
         cal.transitions = CAPTURE_TRANSITIONS
         cal.deconfigure_wait = False
-        g.add_node(cal, config=lambda task, resolver, server_id=i: {
-            'l0_interface': task.interfaces['sdp_10g'].name,
-            'flags_interface': task.interfaces['sdp_10g'].name,
-            'server_id': server_id,
-            'dask_diagnostics': ('', task.ports['dask_diagnostics'])
-        })
+
+        def make_cal_config(task, resolver, server_id=i):
+            cal_config = {
+                'l0_interface': task.interfaces['sdp_10g'].name,
+                'server_id': server_id,
+                'dask_diagnostics': ('', task.ports['dask_diagnostics']),
+                'flags_streams': copy.deepcopy(flags_streams_base)
+            }
+            for flags_stream in cal_config['flags_streams']:
+                flags_stream['interface'] = task.interfaces['sdp_10g'].name
+                flags_stream['endpoints'] = str(task.flags_endpoints[flags_stream['name']])
+            return cal_config
+
+        g.add_node(cal, config=make_cal_config)
         # Connect to cal_group. See comments in _make_ingest for explanation.
         g.add_edge(cal_group, cal, depends_ready=True, depends_init=True)
         g.add_edge(cal, cal_group, depends_resources=True)
         g.add_edge(cal, src_multicast,
                    depends_resolve=True, depends_ready=True, depends_init=True)
+
+        for flags_name, flags_multicast in flags_multicasts.items():
+            # A sneaky hack to capture the endpoint information for the flag
+            # streams. This is used as a config= function, but instead of
+            # returning config we just stash information in the task object
+            # which is retrieved by make_cal_config.
+            def add_flags_endpoint(task, resolver, endpoint, name=flags_name):
+                if not hasattr(task, 'flags_endpoints'):
+                    task.flags_endpoints = {}
+                task.flags_endpoints[name] = endpoint
+                return {}
+
+            g.add_edge(cal, flags_multicast, port='spead', depends_resolve=True,
+                       config=add_flags_endpoint)
 
     return cal_group
 
@@ -933,10 +1066,11 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
     return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
 
 
-def _make_vis_writer(g, config, name):
+def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     info = L0Info(config, name)
 
-    vis_writer = SDPLogicalTask('vis_writer.' + name)
+    output_name = prefix + '.' + name if prefix is not None else name
+    vis_writer = SDPLogicalTask('vis_writer.' + output_name)
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
@@ -944,56 +1078,78 @@ def _make_vis_writer(g, config, name):
     # writing) and scale from there.
     vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
 
-    obj_size = 10e6
     workers = 50
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = _writer_mem_mb(info.size, obj_size, n_substreams, workers)
+    vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams, workers)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
-    vis_writer.volumes = [OBJ_DATA_VOL]
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
+    if local:
+        vis_writer.volumes = [OBJ_DATA_VOL]
+    else:
+        vis_writer.interfaces[0].backwidth_out = info.net_bandwidth
+        # Creds are passed on the command-line so that they are redacted from telstate.
+        vis_writer.command.extend([
+            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
+        ])
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
-    g.add_node(vis_writer, config=lambda task, resolver: {
-        'l0_name': name,
-        'l0_interface': task.interfaces['sdp_10g'].name,
-        'obj_size_mb': _mb(obj_size),
-        'workers': workers,
-        'npy_path': OBJ_DATA_VOL.container_path,
-        's3_endpoint_url': resolver.s3_config['archive']['url']
-    })
+    def make_vis_writer_config(task, resolver):
+        conf = {
+            'l0_name': name,
+            'l0_interface': task.interfaces['sdp_10g'].name,
+            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'workers': workers,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+        }
+        if local:
+            conf['npy_path'] = OBJ_DATA_VOL.container_path
+        if prefix is not None:
+            conf['new_name'] = output_name
+        return conf
+
+    g.add_node(vis_writer, config=make_vis_writer_config)
     g.add_edge(vis_writer, src_multicast, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
     return vis_writer
 
 
-def _make_flag_writer(g, config, name, l0_name):
+def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     info = L0Info(config, l0_name)
 
-    flag_writer = SDPLogicalTask('flag_writer.' + name)
+    output_name = prefix + '.' + name if prefix is not None else name
+    flag_writer = SDPLogicalTask('flag_writer.' + output_name)
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 50
-    # Flag writer doesn't do any rechunking yet
-    obj_size = info.flag_size / n_substreams
 
-    # Trial allocation
-    flag_writer.cpus = 1.0
-    flag_writer.mem = _writer_mem_mb(info.flag_size, obj_size, n_substreams, workers)
+    # Don't yet have a good idea of real CPU usage. This formula is
+    # copied from the vis writer.
+    flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
+    flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams, workers)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth
-    flag_writer.volumes = [OBJ_DATA_VOL]
+    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth * FLAGS_RATE_RATIO
+    if local:
+        flag_writer.volumes = [OBJ_DATA_VOL]
+    else:
+        flag_writer.interfaces[0].bandwidth_out = flag_writer.interfaces[0].bandwidth_in
+        # Creds are passed on the command-line so that they are redacted from telstate.
+        flag_writer.command.extend([
+            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
+        ])
     flag_writer.deconfigure_wait = False
 
     # Capture init / done are used to track progress of completing flags
@@ -1007,13 +1163,22 @@ def _make_flag_writer(g, config, name, l0_name):
         ]
     }
 
-    g.add_node(flag_writer, config=lambda task, resolver: {
-        'flags_name': name,
-        'flags_interface': task.interfaces['sdp_10g'].name,
-        'npy_path': OBJ_DATA_VOL.container_path,
-        'workers': workers
-    })
+    def make_flag_writer_config(task, resolver):
+        conf = {
+            'flags_name': name,
+            'flags_interface': task.interfaces['sdp_10g'].name,
+            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'workers': workers,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+        }
+        if local:
+            conf['npy_path'] = OBJ_DATA_VOL.container_path
+        if prefix is not None:
+            conf['new_name'] = output_name
+            conf['rename_src'] = {l0_name: prefix + '.' + l0_name}
+        return conf
 
+    g.add_node(flag_writer, config=make_flag_writer_config)
     g.add_edge(flag_writer, flags_src, port='spead',
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
@@ -1023,7 +1188,7 @@ def _make_flag_writer(g, config, name, l0_name):
 def _make_beamformer_ptuse(g, config, name):
     output = config['outputs'][name]
     srcs = output['src_streams']
-    info = [TiedArrayChannelisedVoltageInfo(config, src) for src in srcs]
+    info = [BeamformerInfo(config, name, src) for src in srcs]
 
     bf_ingest = SDPLogicalTask('bf_ingest.' + name)
     bf_ingest.image = 'beamform'
@@ -1046,7 +1211,7 @@ def _make_beamformer_ptuse(g, config, name):
     # If the kernel is < 3.16, the default values are very low. Set
     # the values to the default from more recent Linux versions
     # (https://github.com/torvalds/linux/commit/060028bac94bf60a65415d1d55a359c3a17d5c31)
-    bf_ingest.container.docker.parameters = [
+    bf_ingest.taskinfo.container.docker.parameters = [
         {'key': 'sysctl', 'value': 'kernel.shmmax=18446744073692774399'},
         {'key': 'sysctl', 'value': 'kernel.shmall=18446744073692774399'}
     ]
@@ -1068,67 +1233,113 @@ def _make_beamformer_ptuse(g, config, name):
     return bf_ingest
 
 
+def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram, idx, develop):
+    """Generate node for a single polarisation of beamformer engineering output.
+
+    This handles two cases: either it is a capture to file, associated with a
+    particular output in the config dict; or it is for the purpose of
+    computing the signal display statistics, in which case it is associated with
+    an input but no specific output.
+
+    Parameters
+    ----------
+    info : :class:`TiedArrayChannelisedVoltageInfo` or :class:`BeamformerInfo`
+        Info about the stream.
+    node_name : str
+        Name to use for the logical node
+    src_name : str
+        Name of the tied-array-channelised-voltage stream
+    timeplot : bool
+        Whether this node is for computing signal display statistics
+    ram : bool
+        Whether this node is for writing to ramdisk (ignored if `timeplot` is true)
+    idx : int
+        Number of this source within the output (ignored if `timeplot` is true)
+    develop : bool
+        Whether this is a develop-mode config
+    """
+    src_multicast = find_node(g, 'multicast.' + src_name)
+
+    bf_ingest = SDPLogicalTask(node_name)
+    bf_ingest.image = 'katsdpbfingest'
+    bf_ingest.command = ['schedrr', 'bf_ingest.py']
+    bf_ingest.cpus = 2
+    bf_ingest.cores = ['disk', 'network']
+    bf_ingest.capabilities.append('SYS_NICE')
+    if timeplot or not ram:
+        # bf_ingest accumulates 128 frames in the ring buffer. It's not a
+        # lot of memory, so to be on the safe side we double everything.
+        # Values are int8*2.  Allow 512MB for various buffers.
+        bf_ingest.mem = 256 * info.size / 1024**2 + 512
+    else:
+        # When writing to tmpfs, the file is accounted as memory to our
+        # process, so we need more memory allocation than there is
+        # space in the ramdisk. This is only used for lab testing, so
+        # we just hardcode a number.
+        bf_ingest.ram = 220 * 1024
+    bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=not develop)]
+    bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth
+    if timeplot:
+        bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
+        bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(info)
+    else:
+        volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
+        bf_ingest.volumes = [
+            scheduler.VolumeRequest(volume_name.format(idx), '/data', 'RW', affinity=ram)]
+    bf_ingest.ports = ['port']
+    bf_ingest.transitions = CAPTURE_TRANSITIONS
+
+    def make_beamformer_engineering_pol_config(task, resolver):
+        config = {
+            'affinity': [task.cores['disk'], task.cores['network']],
+            'interface': task.interfaces['cbf'].name,
+            'ibv': not develop,
+            'stream_name': src_name,
+        }
+        if timeplot:
+            config.update({
+                'stats_interface': task.interfaces['sdp_10g'].name,
+                'stats_int_time': 1.0
+            })
+        else:
+            config.update({
+                'file_base': '/data',
+                'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
+                'channels': '{}:{}'.format(*info.output_channels)
+            })
+        return config
+
+    g.add_node(bf_ingest, config=make_beamformer_engineering_pol_config)
+    g.add_edge(bf_ingest, src_multicast, port='spead',
+               depends_resolve=True, depends_init=True, depends_ready=True,
+               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+    if timeplot:
+        stats_multicast = LogicalMulticast('multicast.timeplot.{}'.format(src_name), 1)
+        g.add_edge(bf_ingest, stats_multicast, port='spead',
+                   depends_resolve=True,
+                   config=lambda task, resolver, endpoint: {'stats': str(endpoint)})
+        g.add_edge(stats_multicast, bf_ingest, depends_init=True, depends_ready=True)
+    return bf_ingest
+
+
 def _make_beamformer_engineering(g, config, name):
+    """Generate nodes for beamformer engineering output.
+
+    If `timeplot` is true, it generates services that only send data to
+    timeplot servers, without capturing the data. In this case `name` may
+    refer to an ``sdp.beamformer`` rather than an
+    ``sdp.beamformer_engineering`` stream.
+    """
     output = config['outputs'][name]
     srcs = output['src_streams']
-    ram = output['store'] == 'ram'
+    ram = output.get('store') == 'ram'
+    develop = is_develop(config)
 
     nodes = []
     for i, src in enumerate(srcs):
-        info = TiedArrayChannelisedVoltageInfo(config, src)
-        requested_channels = output['output_channels']
-        # Round to fit the endpoints, as required by bf_ingest.
-        src_multicast = find_node(g, 'multicast.' + src)
-        n_endpoints = len(endpoint_list_parser(None)(src_multicast.endpoint.host))
-        channels_per_endpoint = info.n_channels // n_endpoints
-        output_channels = [_round_down(requested_channels[0], channels_per_endpoint),
-                           _round_up(requested_channels[1], channels_per_endpoint)]
-        if output_channels != requested_channels:
-            logger.info('Rounding output channels for %s from %s to %s',
-                        name, requested_channels, output_channels)
-
-        fraction = (output_channels[1] - output_channels[0]) / info.n_channels
-
-        bf_ingest = SDPLogicalTask('bf_ingest.{}.{}'.format(name, i + 1))
-        bf_ingest.image = 'katsdpbfingest'
-        bf_ingest.command = ['schedrr', 'bf_ingest.py']
-        bf_ingest.cpus = 2
-        bf_ingest.cores = ['disk', 'network']
-        bf_ingest.capabilities.append('SYS_NICE')
-        if not ram:
-            # bf_ingest accumulates 128 frames in the ring buffer. It's not a
-            # lot of memory, so to be on the safe side we double everything.
-            # Values are int8*2.  Allow 512MB for various buffers.
-            bf_ingest.mem = 256 * info.size * fraction / 1024**2 + 512
-        else:
-            # When writing to tmpfs, the file is accounted as memory to our
-            # process, so we need more memory allocation than there is
-            # space in the ramdisk. This is only used for lab testing, so
-            # we just hardcode a number.
-            bf_ingest.ram = 220 * 1024
-        bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
-        bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth * fraction
-        volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
-        bf_ingest.volumes = [
-            scheduler.VolumeRequest(volume_name.format(i), '/data', 'RW', affinity=ram)]
-        bf_ingest.ports = ['port']
-        bf_ingest.transitions = CAPTURE_TRANSITIONS
-        g.add_node(
-            bf_ingest,
-            config=lambda task, resolver, src=src, output_channels=output_channels: {
-                'file_base': '/data',
-                'affinity': [task.cores['disk'], task.cores['network']],
-                'interface': task.interfaces['cbf'].name,
-                'ibv': True,
-                'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-                'stream_name': src,
-                'channels': '{}:{}'.format(*output_channels)
-            }
-        )
-        g.add_edge(bf_ingest, src_multicast, port='spead',
-                   depends_resolve=True, depends_init=True, depends_ready=True,
-                   config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
-        nodes.append(bf_ingest)
+        info = BeamformerInfo(config, name, src)
+        nodes.append(_make_beamformer_engineering_pol(
+            g, info, 'bf_ingest.{}.{}'.format(name, i + 1), src, False, ram, i, develop))
     return nodes
 
 
@@ -1211,7 +1422,7 @@ def build_logical_graph(config):
                     if match:
                         _adjust_ingest_output_channels(config, [name, name2])
                         _make_ingest(g, config, name, name2)
-                        _make_timeplot(g, config, name)
+                        _make_timeplot_correlator(g, config, name)
                         l0_done.add(name)
                         l0_done.add(name2)
                         break
@@ -1227,7 +1438,7 @@ def build_logical_graph(config):
         _adjust_ingest_output_channels(config, [name])
         if is_spectral:
             _make_ingest(g, config, name, None)
-            _make_timeplot(g, config, name)
+            _make_timeplot_correlator(g, config, name)
         else:
             _make_ingest(g, config, None, name)
     if l0_continuum_only and l0_spectral_only:
@@ -1236,34 +1447,58 @@ def build_logical_graph(config):
 
     for name in outputs.get('sdp.vis', []):
         if config['outputs'][name]['archive']:
-            _make_vis_writer(g, config, name)
+            _make_vis_writer(g, config, name, 'archive', local=True)
             archived_streams.append(name)
 
+    have_cal = set()
     for name in outputs.get('sdp.cal', []):
         src_name = config['outputs'][name]['src_streams'][0]
-        # Check for a corresponding flags output
-        flags_name = None
+        # Check for a corresponding flags outputs
+        flags_names = []
         for name2 in outputs.get('sdp.flags', []):
             if config['outputs'][name2]['calibration'][0] == name:
-                flags_name = name2
-                break
-        if _make_cal(g, config, name, src_name, flags_name):
-            if flags_name is not None and config['outputs'][flags_name]['archive']:
-                # Pass l0 name to flag writer to allow calc of bandwidths and sizes
-                _make_flag_writer(g, config, flags_name, src_name)
-                archived_streams.append(flags_name)
+                flags_names.append(name2)
+        if _make_cal(g, config, name, src_name, flags_names):
+            have_cal.add(name)
+            for flags_name in flags_names:
+                if config['outputs'][flags_name]['archive']:
+                    # Pass l0 name to flag writer to allow calc of bandwidths and sizes
+                    flags_l0_name = config['outputs'][flags_name]['src_streams'][0]
+                    _make_flag_writer(g, config, flags_name, flags_l0_name, 'archive', local=True)
+                    archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
         _make_beamformer_engineering(g, config, name)
+
+    # Collect all tied-array-channelised-voltage streams and make signal displays for them
+    # XXX Temporarily disabled due to MKAIV-1331.
+    # for name in inputs.get('cbf.tied_array_channelised_voltage', []):
+    #     if name in inputs_used:
+    #         _make_timeplot_beamformer(g, config, name)
+
+    for name in outputs.get('sdp.continuum_image', []):
+        orig_flags_name = config['outputs'][name]['src_streams'][0]
+        orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
+        cal = config['outputs'][orig_flags_name]['calibration'][0]
+        if cal not in have_cal:
+            continue      # If fewer than 4 antennas for example
+        logger.warning('%s: will write data but processing is not yet implemented', name)
+        _make_vis_writer(g, config, orig_l0_name,
+                         s3_name='continuum', local=False, prefix=name)
+        _make_flag_writer(g, config, orig_flags_name, orig_l0_name,
+                          s3_name='continuum', local=False, prefix=name)
 
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
     telstate_extra = 0
     for _node, data in g.nodes(True):
         telstate_extra += data.get('telstate_extra', 0)
+    seen = set()
     for node in g:
         if isinstance(node, SDPLogicalTask):
+            assert node.name not in seen, "{} appears twice in graph".format(node.name)
+            seen.add(node.name)
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Connect every task to telstate
             if node is not telstate:

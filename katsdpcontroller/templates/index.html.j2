@@ -7,8 +7,8 @@
         <h1>Available signal displays</h1>
 {% if servers %}
         <ul>
-{% for name in servers.keys() %}
-            <li><a href="/{{name|e}}">{{name|e}}</a></li>
+{% for (array, stream) in servers.keys() %}
+    <li>{{array|e}} <a href="/{{array|e}}/{{stream|e}}/">{{stream|e}}</a></li>
 {% endfor %}
         </ul>
 {% else %}

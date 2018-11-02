@@ -85,6 +85,10 @@ class KatcpTransition(object):
                           for arg in self.args]
         return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
+    def __repr__(self):
+        args = ['{!r}'.format(arg) for arg in (self.name,) + self.args]
+        return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
+
 
 class SDPLogicalTask(scheduler.LogicalTask):
     def __init__(self, *args, **kwargs):
@@ -118,23 +122,21 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
         self._capture_blocks = set()
-        # Event set to true whenever _capture_block is empty
+        # Event set to true whenever _capture_blocks is empty
         self._capture_blocks_empty = asyncio.Event(loop=loop)
         self._capture_blocks_empty.set()
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
+        # Whether we should abort the capture block if the task fails
+        self.death_critical = True
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
            track it locally.
         """
         self.sensors[sensor.name] = sensor
-        if self.sdp_controller:
-            self.sdp_controller.sensors.add(sensor)
-        else:
-            self.logger.warning("Attempted to add sensor %s to node %s, but the node has "
-                                "no SDP controller available.", sensor.name, self.name)
+        self.sdp_controller.sensors.add(sensor)
 
     def _remove_sensors(self):
         """Removes all attached sensors. It does *not* send an
@@ -232,6 +234,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         super().set_state(state)
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
+            self._capture_blocks.clear()
+            self._capture_blocks_empty.set()
+            if not self.death_expected:
+                product = self.sdp_controller.subarray_products.get(self.subarray_product_id)
+                if product:
+                    product.unexpected_death(self)
 
     def clone(self):
         return self.logical_node.physical_factory(
@@ -477,15 +485,15 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
         self.command = ['/sbin/poweroff']
 
         # See https://groups.google.com/forum/#!topic/coreos-dev/AXCs_2_J6Mc
-        self.container.volumes = []
+        self.taskinfo.container.volumes = []
         for path in ['/var/run/dbus', '/run/systemd']:
             volume = Dict()
             volume.mode = 'RW'
             volume.container_path = path
             volume.host_path = path
-            self.container.volumes.append(volume)
-        self.container.docker.parameters = []
-        self.container.docker.parameters.append({'key': 'user', 'value': 'root'})
+            self.taskinfo.container.volumes.append(volume)
+        self.taskinfo.container.docker.setdefault('parameters', [])
+        self.taskinfo.container.docker.parameters.append({'key': 'user', 'value': 'root'})
 
     def valid_agent(self, agent):
         if not super().valid_agent(agent):
