@@ -106,16 +106,16 @@ class SDPLogicalTask(scheduler.LogicalTask):
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product, capture_block_id):
         super().__init__(logical_task, loop)
-        self.logger = logging.LoggerAdapter(
-            logger, dict(subarray_product_id=subarray_product_id, child_task=self.name))
-        if capture_block_id is None:
-            self.name = '.'.join([subarray_product_id, logical_task.name])
-        else:
-            self.name = '.'.join([subarray_product_id, capture_block_id, logical_task.name])
         self.sdp_controller = sdp_controller
-        self.subarray_product_id = subarray_product_id
+        self.subarray_product = subarray_product
+        self.logger = logging.LoggerAdapter(
+            logger, dict(subarray_product_id=self.subarray_product_id, child_task=self.name))
+        if capture_block_id is None:
+            self.name = '.'.join([self.subarray_product_id, logical_task.name])
+        else:
+            self.name = '.'.join([self.subarray_product_id, capture_block_id, logical_task.name])
         # list of exposed KATCP sensors
         self.sensors = {}
         # Capture block names for CBs that haven't terminated on this node yet.
@@ -129,7 +129,11 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
         # Whether we should abort the capture block if the task fails
-        self.death_critical = True
+        self.critical = True
+
+    @property
+    def subarray_product_id(self):
+        return self.subarray_product.subarray_product_id
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -237,13 +241,11 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._capture_blocks.clear()
             self._capture_blocks_empty.set()
             if not self.death_expected:
-                product = self.sdp_controller.subarray_products.get(self.subarray_product_id)
-                if product:
-                    product.unexpected_death(self)
+                self.subarray_product.unexpected_death(self)
 
     def clone(self):
         return self.logical_node.physical_factory(
-            self.logical_node, self.loop, self.sdp_controller, self.subarray_product_id)
+            self.logical_node, self.loop, self.sdp_controller, self.subarray_product)
 
     def add_capture_block(self, capture_block):
         self._capture_blocks.add(capture_block.name)
@@ -348,6 +350,24 @@ class CaptureBlockStateObserver:
         self._waiters = []
 
 
+class DeviceStatusObserver:
+    """Watches a device-status sensor from a child, and reports when it is in error."""
+
+    def __init__(self, sensor, task, loop):
+        self.sensor = sensor
+        self.task = task
+        sensor.attach(self)
+        # Arrange to observe the initial value
+        loop.call_soon(self, sensor, sensor.reading)
+
+    def __call__(self, sensor, reading):
+        if reading.status == Sensor.Status.ERROR:
+            self.task.subarray_product.bad_device_status(self.task)
+
+    def close(self):
+        self.sensor.detach(self)
+
+
 class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     """Augments the base :class:`~scheduler.PhysicalTask` to handle katcp and
     telstate.
@@ -359,10 +379,11 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
     For example:
       sdp.array_1.ingest.1.input_rate
     """
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product_id, capture_block_id):
-        super().__init__(logical_task, loop, sdp_controller, subarray_product_id, capture_block_id)
+    def __init__(self, logical_task, loop, sdp_controller, subarray_product, capture_block_id):
+        super().__init__(logical_task, loop, sdp_controller, subarray_product, capture_block_id)
         self.katcp_connection = None
         self.capture_block_state_observer = None
+        self.device_status_observer = None
         self.katsdpservices_logging = True
 
     def get_transition(self, state):
@@ -387,6 +408,9 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
         if self.capture_block_state_observer is not None:
             self.capture_block_state_observer.close()
             self.capture_block_state_observer = None
+        if self.device_status_observer is not None:
+            self.device_status_observer.close()
+            self.device_status_observer = None
         if need_inform:
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
@@ -411,6 +435,10 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, loop=self.loop, logger=self.logger)
+                    sensor = self.sdp_controller.sensors.get(prefix + 'device-status')
+                    if sensor is not None:
+                        self.device_status_observer = DeviceStatusObserver(
+                            sensor, self, loop=self.loop)
                     return
                 except RuntimeError:
                     self.katcp_connection.close()

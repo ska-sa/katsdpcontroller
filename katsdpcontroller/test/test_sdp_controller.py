@@ -21,7 +21,7 @@ import open_file_mock
 import katsdptelstate
 
 from katsdpcontroller.sdpcontroller import (
-    SDPControllerServer, SDPCommonResources, SDPResources, ProductState,
+    SDPControllerServer, SDPCommonResources, SDPResources, ProductState, DeviceStatus,
     _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
@@ -548,6 +548,10 @@ class TestSDPController(BaseTestSDPController):
                 bytes, product + '.cal.1.capture-block-state',
                 'Dummy implementation of sensor', default=b'{}',
                 initial_status=Sensor.Status.NOMINAL))
+            self.server.sensors.add(Sensor(
+                DeviceStatus, product + '.ingest.sdp_l0.1.device-status',
+                'Dummy implementation of sensor',
+                initial_status=Sensor.Status.NOMINAL))
         master_and_slaves_future = asyncio.Future(loop=self.loop)
         master_and_slaves_future.set_result(
             ('10.0.0.1', ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']))
@@ -971,6 +975,12 @@ class TestSDPController(BaseTestSDPController):
         else:
             raise ValueError('Could not find ingest node')
 
+    def _ingest_bad_device_status(self, subarray_product):
+        """Mark an ingest process as having bad status"""
+        sensor_name = subarray_product.subarray_product_id + '.ingest.sdp_l0.1.device-status'
+        sensor = self.server.sensors[sensor_name]
+        sensor.set_value(DeviceStatus.FAIL, Sensor.Status.ERROR)
+
     async def test_capture_init_dead_process(self):
         """Capture-init fails if a child process is dead."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT4, CONFIG)
@@ -1018,13 +1028,13 @@ class TestSDPController(BaseTestSDPController):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-done", SUBARRAY_PRODUCT1)
 
-    async def test_process_dies_while_capturing(self):
+    async def _test_failure_while_capturing(self, failfunc):
         await self.client.request("product-configure", SUBARRAY_PRODUCT1, CONFIG)
         reply, _ = await self.client.request("capture-init", SUBARRAY_PRODUCT1)
         cbid = reply[0].decode()
         sa = self.server.subarray_products[SUBARRAY_PRODUCT1]
         self.assertEqual(ProductState.CAPTURING, sa.state)
-        self._ingest_died(sa)
+        failfunc(sa)
         self.assertEqual(ProductState.ERROR, sa.state)
         self.assertEqual({cbid: mock.ANY}, sa.capture_blocks)
         # In the background it will terminate the capture block
@@ -1032,6 +1042,12 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual({}, sa.capture_blocks)
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_called_with('write-meta', cbid, False)
+
+    async def test_process_dies_while_capturing(self):
+        await self._test_failure_while_capturing(self._ingest_died)
+
+    async def test_bad_device_status_while_capturing(self):
+        await self._test_failure_while_capturing(self._ingest_bad_device_status)
 
     async def test_capture_done_process_dies(self):
         """Capture-done fails if a child dies half-way through."""
