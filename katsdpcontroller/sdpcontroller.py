@@ -687,7 +687,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if isinstance(logical_node, tasks.SDPLogicalTask):
             return logical_node.physical_factory(
                 logical_node, self.loop,
-                self.sdp_controller, self.subarray_product_id, capture_block_id)
+                self.sdp_controller, self, capture_block_id)
         return logical_node.physical_factory(logical_node, self.loop)
 
     def _instantiate_physical_graph(self, logical_graph, capture_block_id=None):
