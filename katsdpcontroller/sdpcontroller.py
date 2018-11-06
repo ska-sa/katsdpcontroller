@@ -866,12 +866,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def unexpected_death(self, task):
         self.logger.warning('Task %s died unexpectedly', task.name)
-        if task.critical:
+        if task.logical_node.critical:
             self._go_to_error()
 
     def bad_device_status(self, task):
         self.logger.warning('Task %s has failed (device-status)', task.name)
-        if task.critical:
+        if task.logical_node.critical:
             self._go_to_error()
 
     def _go_to_error(self):

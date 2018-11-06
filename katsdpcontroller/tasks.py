@@ -102,6 +102,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.deconfigure_wait = True
         # Whether to wait until all capture blocks are completely dead before killing
         self.wait_capture_blocks_dead = False
+        # Whether we should abort the capture block if the task fails
+        self.critical = True
 
 
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
@@ -128,8 +130,6 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
-        # Whether we should abort the capture block if the task fails
-        self.critical = True
 
     @property
     def subarray_product_id(self):
