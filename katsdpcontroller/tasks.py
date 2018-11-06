@@ -118,7 +118,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.name = '.'.join([self.subarray_product_id, logical_task.name])
         else:
             self.name = '.'.join([self.subarray_product_id, capture_block_id, logical_task.name])
-        # list of exposed KATCP sensors
+        # dict of exposed KATCP sensors. This excludes the state sensors, which
+        # are present even when the process is not running.
         self.sensors = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
@@ -133,18 +134,20 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # Whether we should abort the capture block if the task fails
         self.critical = True
 
-    @property
-    def subarray_product_id(self):
-        return self.subarray_product.subarray_product_id
-
         self._state_sensor = Sensor(scheduler.TaskState, self.name + '.state',
                                     "State of the state machine", "",
                                     default=self.state,
                                     initial_status=Sensor.Status.NOMINAL)
-        self._add_sensor(self._state_sensor)
         self._mesos_state_sensor = Sensor(
             str, self.name + '.mesos-state', 'Mesos-reported task state', '')
-        self._add_sensor(self._mesos_state_sensor)
+        # Note: these sensors are added to the subarray product and not self
+        # so that they don't get removed when the task dies.
+        self.subarray_product.add_sensor(self._state_sensor)
+        self.subarray_product.add_sensor(self._mesos_state_sensor)
+
+    @property
+    def subarray_product_id(self):
+        return self.subarray_product.subarray_product_id
 
     @property
     def status(self):

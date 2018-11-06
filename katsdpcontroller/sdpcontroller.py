@@ -261,15 +261,19 @@ class SDPSubarrayProductBase:
         # around the event loop. Each callback takes self as the argument.
         self.dead_callbacks = [lambda product: product.dead_event.set()]
         self._state = None
-        self.capture_block_sensor = Sensor(
+        # Set of sensors to remove when the product is removed
+        self.sensors = set()
+        self._capture_block_sensor = Sensor(
             str, subarray_product_id + ".capture-block-state",
             "JSON dictionary of capture block states for active capture blocks",
             default="{}", initial_status=Sensor.Status.NOMINAL)
-        self.state_sensor = Sensor(
+        self._state_sensor = Sensor(
             ProductState, subarray_product_id + ".state",
             "State of the subarray product state machine",
             status_func=_error_on_error)
         self.state = ProductState.CONFIGURING   # This sets the sensor
+        self.add_sensor(self._capture_block_sensor)
+        self.add_sensor(self._state_sensor)
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=subarray_product_id))
         self.logger.info("Created: %r", self)
         self.logger.info('Logical graph nodes:\n'
@@ -285,7 +289,22 @@ class SDPSubarrayProductBase:
                 and value not in (ProductState.DECONFIGURING, ProductState.DEAD)):
             return      # Never leave error state other than by deconfiguring
         self._state = value
-        self.state_sensor.value = value
+        self._state_sensor.value = value
+
+    def add_sensor(self, sensor):
+        """Add the supplied sensor to the top-level device and track it locally."""
+        self.sensors.add(sensor)
+        self.sdp_controller.sensors.add(sensor)
+
+    def remove_sensors(self):
+        """Remove all sensors added via :meth:`add_sensor`.
+
+        It does *not* send an ``interface-changed`` inform; that is left to the
+        caller.
+        """
+        for sensor in self.sensors:
+            self.sdp_controller.sensors.discard(sensor)
+        self.sensors.clear()
 
     @property
     def async_busy(self):
@@ -428,7 +447,7 @@ class SDPSubarrayProductBase:
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
                  for name, capture_block in self.capture_blocks.items()}
-        self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
+        self._capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     async def _capture_init(self, capture_block):
         self.capture_blocks[capture_block.name] = capture_block
@@ -1136,8 +1155,7 @@ class SDPControllerServer(DeviceServer):
             # Protect against potential race conditions
             if self.subarray_products.get(product.subarray_product_id) is product:
                 del self.subarray_products[product.subarray_product_id]
-                self.sensors.discard(product.state_sensor)
-                self.sensors.discard(product.capture_block_sensor)
+                product.remove_sensors()
                 self._update_products_sensor()
                 self.mass_inform('interface-changed', 'sensor-list')
                 product_logger.info("Deconfigured subarray product %s",
@@ -1218,8 +1236,6 @@ class SDPControllerServer(DeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
-        self.sensors.add(product.state_sensor)
-        self.sensors.add(product.capture_block_sensor)
         self._update_products_sensor()
         product.dead_callbacks.append(remove_product)
         try:
