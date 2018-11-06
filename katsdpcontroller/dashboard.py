@@ -44,7 +44,7 @@ def update_tabs(tabs, panels):
 class SensorWatcher:
     """Base utility class for reacting to sensor changes
 
-    It records the sensors it is attached to, and detached from them
+    It records the sensors it is attached to, and detaches from them
     when :meth:`close` is called.
     """
     def __init__(self):
