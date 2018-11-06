@@ -34,6 +34,7 @@ IMAGES = frozenset([
     'katsdpbfingest',
     'katsdpcal',
     'katsdpcam2telstate',
+    'katsdpcontim',
     'katsdpdisp',
     'katsdpingest_titanx',
     'katsdpdatawriter',
@@ -1482,7 +1483,6 @@ def build_logical_graph(config):
         cal = config['outputs'][orig_flags_name]['calibration'][0]
         if cal not in have_cal:
             continue      # If fewer than 4 antennas for example
-        logger.warning('%s: will write data but processing is not yet implemented', name)
         _make_vis_writer(g, config, orig_l0_name,
                          s3_name='continuum', local=False, prefix=name)
         _make_flag_writer(g, config, orig_flags_name, orig_l0_name,
@@ -1528,14 +1528,60 @@ def build_logical_graph(config):
     return g
 
 
+def _make_continuum_imager(g, config, name):
+    output = config['outputs'][name]
+    l1_flags_name = output['src_streams'][0]
+    l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
+    l0_info = L0Info(config, l0_name)
+    if l0_info.n_antennas < 4:
+        # Won't be any calibration solutions
+        return None
+
+    data_url = 'redis://{endpoints[telstate_telstate]}/?capture_block_id={capture_block_id}'
+    data_url += '&stream_name={}.{}'.format(name, urllib.parse.quote_plus(l0_name))
+    cpus = 24 if not is_develop(config) else 2
+
+    imager = SDPLogicalTask('continuum_image.' + name)
+    imager.cpus = cpus
+    # These resources are very rough estimates
+    imager.mem = 50000 if not is_develop(config) else 8000
+    imager.disk = _mb(1000 * l0_info.size + 1000)
+    imager.max_run_time = 86400     # 24 hours
+    imager.image = 'katsdpcontim'
+    # XXX 'env' is temporary to work around a bug in run-and-cleanup
+    # (https://github.com/ska-sa/katsdpdockerbase/pull/21)
+    imager.command = [
+        'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', 'env', '--',
+        'continuum_pipeline.py',
+        '--telstate', '{endpoints[telstate_telstate]}',
+        '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
+        '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
+        '--select', 'scans="track"; corrprods="cross"',
+        '--mfimage', 'nThreads={}'.format(cpus),
+        '-w', '/mnt/mesos/sandbox', data_url
+    ]
+    g.add_node(imager)
+    return imager
+
+
 def build_postprocess_logical_graph(config):
-    # This is just a stub implementation, until we have some postprocessing
-    # tasks to run.
     g = networkx.MultiDiGraph()
     telstate = scheduler.LogicalExternal('telstate')
     g.add_node(telstate)
 
+    for name, output in config['outputs'].items():
+        if output['type'] == 'sdp.continuum_image':
+            _make_continuum_imager(g, config, name)
+
+    seen = set()
     for node in g:
         if isinstance(node, SDPLogicalTask):
+            # TODO: most of this code is shared by _build_logical_graph
+            assert node.name not in seen, "{} appears twice in graph".format(node.name)
+            seen.add(node.name)
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
+            # Connect every task to telstate
+            g.add_edge(node, telstate, port='telstate',
+                       depends_ready=True, depends_kill=True)
+
     return g

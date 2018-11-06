@@ -19,13 +19,19 @@
                 "url": { "type": "string", "format": "uri" }
             },
             "required": ["write", "url"]
+        },
+        "rwstore": {
+            "allOf": [
+                { "$ref": "#/definitions/store" },
+                { "required": ["read"] }
+            ]
         }
     },
     "type": "object",
     "additionalProperties": false,
     "properties": {
-        "continuum": {"$ref": "#/definitions/store"},
-        "spectral": {"$ref": "#/definitions/store"},
+        "continuum": {"$ref": "#/definitions/rwstore"},
+        "spectral": {"$ref": "#/definitions/rwstore"},
         "archive": {"$ref": "#/definitions/store"}
     },
     "required": ["continuum", "spectral", "archive"]

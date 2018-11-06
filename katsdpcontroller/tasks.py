@@ -110,6 +110,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         super().__init__(logical_task, loop)
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
+        self.capture_block_id = capture_block_id   # Only useful for batch tasks
         self.logger = logging.LoggerAdapter(
             logger, dict(subarray_product_id=self.subarray_product_id, child_task=self.name))
         if capture_block_id is None:
@@ -130,6 +131,12 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         self.katsdpservices_logging = False
         # Whether we should abort the capture block if the task fails
         self.critical = True
+
+    def subst_args(self, resolver):
+        args = super().subst_args(resolver)
+        if self.capture_block_id is not None:
+            args['capture_block_id'] = self.capture_block_id
+        return args
 
     @property
     def subarray_product_id(self):
@@ -245,7 +252,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
 
     def clone(self):
         return self.logical_node.physical_factory(
-            self.logical_node, self.loop, self.sdp_controller, self.subarray_product)
+            self.logical_node, self.loop, self.sdp_controller, self.subarray_product,
+            self.capture_block_id)
 
     def add_capture_block(self, capture_block):
         self._capture_blocks.add(capture_block.name)

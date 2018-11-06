@@ -1669,8 +1669,8 @@ class PhysicalNode:
         An event that becomes set once the task reaches
         :class:`~TaskState.DEAD`.
     death_expected : bool
-        The task has been requested to exit, and so if it dies it is normal
-        rather than a failure.
+        The task has been requested to exit or is a batch task, and so if it
+        dies it is normal rather than a failure.
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
@@ -2897,6 +2897,9 @@ class Scheduler(pymesos.Scheduler):
             if node.status is not None and node.status.state != 'TASK_FINISHED':
                 raise TaskError(node)
 
+        for node in nodes:
+            # Batch tasks die on their own
+            node.death_expected = True
         await self.launch(graph, resolver, nodes, queue=queue, resources_timeout=resources_timeout)
         futures = []
         for node in nodes:
