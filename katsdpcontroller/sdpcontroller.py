@@ -687,7 +687,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if isinstance(logical_node, tasks.SDPLogicalTask):
             return logical_node.physical_factory(
                 logical_node, self.loop,
-                self.sdp_controller, self.subarray_product_id, capture_block_id)
+                self.sdp_controller, self, capture_block_id)
         return logical_node.physical_factory(logical_node, self.loop)
 
     def _instantiate_physical_graph(self, logical_graph, capture_block_id=None):
@@ -866,9 +866,20 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def unexpected_death(self, task):
         self.logger.warning('Task %s died unexpectedly', task.name)
-        if not task.death_critical:
-            return
+        if task.critical:
+            self._go_to_error()
 
+    def bad_device_status(self, task):
+        self.logger.warning('Task %s has failed (device-status)', task.name)
+        if task.critical:
+            self._go_to_error()
+
+    def _go_to_error(self):
+        """Switch to :const:`ProductState.ERROR` due to an external event.
+
+        This is used when a failure in some task is detected asynchronously, but
+        not when a katcp transition fails.
+        """
         # Try to wind up the current capture block so that we don't lose any
         # data already captured.  However, if we're in the middle of another
         # async operation we just let that run, because that operation is either

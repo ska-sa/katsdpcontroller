@@ -580,7 +580,7 @@ def _make_timeplot(g, name, description,
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
-    timeplot.death_critical = False
+    timeplot.critical = False
 
     g.add_node(timeplot, config=lambda task, resolver: dict({
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
@@ -623,7 +623,7 @@ def _make_timeplot_beamformer(g, config, name):
     develop = is_develop(config)
     beamformer = _make_beamformer_engineering_pol(
         g, info, 'bf_ingest_timeplot.{}'.format(name), name, True, False, 0, develop)
-    beamformer.death_critical = False
+    beamformer.critical = False
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
     # could potentially be reduced further.
@@ -1070,6 +1070,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     info = L0Info(config, name)
 
     output_name = prefix + '.' + name if prefix is not None else name
+    g.graph['archived_streams'].append(output_name)
     vis_writer = SDPLogicalTask('vis_writer.' + output_name)
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
@@ -1125,6 +1126,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     info = L0Info(config, l0_name)
 
     output_name = prefix + '.' + name if prefix is not None else name
+    g.graph['archived_streams'].append(output_name)
     flag_writer = SDPLogicalTask('flag_writer.' + output_name)
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
@@ -1350,10 +1352,11 @@ def build_logical_graph(config):
     # Copy the config, because we make some changes to it as we go
     config = copy.deepcopy(config)
 
-    archived_streams = []   # Streams with connected vis_writers
-    g = networkx.MultiDiGraph(config=lambda resolver: {
-        'sdp_archived_streams': archived_streams
-    })
+    archived_streams = []   # Streams with connected vis_writers/flag_writers
+    g = networkx.MultiDiGraph(
+        archived_streams=archived_streams,  # For access as g.graph['archived_streams']
+        config=lambda resolver: {'sdp_archived_streams': archived_streams}
+    )
 
     # telstate node
     telstate = _make_telstate(g, config)
@@ -1446,7 +1449,6 @@ def build_logical_graph(config):
     for name in outputs.get('sdp.vis', []):
         if config['outputs'][name]['archive']:
             _make_vis_writer(g, config, name, 'archive', local=True)
-            archived_streams.append(name)
 
     have_cal = set()
     for name in outputs.get('sdp.cal', []):
@@ -1463,7 +1465,6 @@ def build_logical_graph(config):
                     # Pass l0 name to flag writer to allow calc of bandwidths and sizes
                     flags_l0_name = config['outputs'][flags_name]['src_streams'][0]
                     _make_flag_writer(g, config, flags_name, flags_l0_name, 'archive', local=True)
-                    archived_streams.append(flags_name)
     for name in outputs.get('sdp.beamformer', []):
         _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
