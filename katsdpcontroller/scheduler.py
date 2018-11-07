@@ -2374,15 +2374,16 @@ class Scheduler(pymesos.Scheduler):
     def _node_sort_key(cls, physical_node):
         """Sort key for nodes when launching.
 
-        Sort nodes. Those requiring core affinity are put first,
-        since they tend to be the trickiest to pack. Then order by
-        CPUs, GPUs, memory. Finally sort by name so that results
-        are more reproducible.
+        Sort nodes. Pinned nodes come first, since they don't have any choice
+        about placement. Those requiring core affinity are put next, since they
+        tend to be the trickiest to pack. Then order by CPUs, GPUs, memory.
+        Finally sort by name so that results are more reproducible.
         """
         node = physical_node.logical_node
         if isinstance(node, LogicalTask):
-            return (len(node.cores), node.cpus, len(node.gpus), node.mem, node.name)
-        return (0, 0, 0, 0, node.name)
+            return (node.host is not None, len(node.cores), node.cpus,
+                    len(node.gpus), node.mem, node.name)
+        return (False, 0, 0, 0, 0, node.name)
 
     def _update_roles(self, new_roles):
         revive_roles = new_roles - self._roles_needed
