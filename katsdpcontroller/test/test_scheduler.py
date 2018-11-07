@@ -1414,6 +1414,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
+        assert_equal(TaskState.STARTED, self.nodes[0].state)
         assert_equal(expected_taskinfo0.resources, self.nodes[0].taskinfo.resources)
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
@@ -1421,7 +1422,6 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal({'port': 30000}, self.nodes[0].ports)
         assert_equal({}, self.nodes[0].cores)
         assert_is_none(self.nodes[0].status)
-        assert_equal(TaskState.STARTED, self.nodes[0].state)
 
         assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
         assert_equal('agentid1', self.nodes[1].agent_id)
