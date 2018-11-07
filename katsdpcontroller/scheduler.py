@@ -1846,7 +1846,7 @@ class PhysicalTask(PhysicalNode):
     allocation : :class:`ResourceAllocation`
         Resources allocated to this task.
     status : :class:`mesos_pb2.TaskStatus`
-        Last Mesos status allocated to this task. This should agree with with
+        Last Mesos status allocated to this task. This should agree with
         :attr:`state`, but if we receive notifications out-of-order from Mesos
         then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
         is guaranteed to be in sync.
@@ -2204,7 +2204,7 @@ def subgraph(graph, edge_filter, nodes=None):
     An edge is added to the returned graph only if the filter passes. If
     `nodes` is specified, an edge must also have both endpoints in that set.
 
-    Attribute data is not tranferred to the new graph.
+    Attribute data is not transferred to the new graph.
 
     Parameters
     ----------
@@ -2857,7 +2857,7 @@ class Scheduler(pymesos.Scheduler):
             raise CycleError('cycle between depends_resolve dependencies')
 
         for node in remaining:
-            node.state = TaskState.STARTING
+            node.set_state(TaskState.STARTING)
         if resources_timeout is not None:
             deadline = self._loop.time() + resources_timeout
         else:

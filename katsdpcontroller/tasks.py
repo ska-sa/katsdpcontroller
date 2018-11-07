@@ -109,6 +109,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     """Adds some additional utilities to the parent class for SDP nodes."""
     def __init__(self, logical_task, loop, sdp_controller, subarray_product, capture_block_id):
+        # Turn .status into a property that updates a sensor
+        self._status = None
         super().__init__(logical_task, loop)
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
@@ -118,7 +120,8 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.name = '.'.join([self.subarray_product_id, logical_task.name])
         else:
             self.name = '.'.join([self.subarray_product_id, capture_block_id, logical_task.name])
-        # list of exposed KATCP sensors
+        # dict of exposed KATCP sensors. This excludes the state sensors, which
+        # are present even when the process is not running.
         self.sensors = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
@@ -131,9 +134,30 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = False
 
+        self._state_sensor = Sensor(scheduler.TaskState, self.name + '.state',
+                                    "State of the state machine", "",
+                                    default=self.state,
+                                    initial_status=Sensor.Status.NOMINAL)
+        self._mesos_state_sensor = Sensor(
+            str, self.name + '.mesos-state', 'Mesos-reported task state', '')
+        # Note: these sensors are added to the subarray product and not self
+        # so that they don't get removed when the task dies.
+        self.subarray_product.add_sensor(self._state_sensor)
+        self.subarray_product.add_sensor(self._mesos_state_sensor)
+
     @property
     def subarray_product_id(self):
         return self.subarray_product.subarray_product_id
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+        if value is not None:
+            self._mesos_state_sensor.value = value.state
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -229,13 +253,13 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Add some useful sensors
-        version_sensor = Sensor(str, self.name + '.version', "Image of executing container.", "")
-        version_sensor.set_value(self.taskinfo.container.docker.image)
-        self._add_sensor(version_sensor)
+        self._add_sensor(Sensor(str, self.name + '.version', "Image of executing container.", "",
+                                default=self.taskinfo.container.docker.image,
+                                initial_status=Sensor.Status.NOMINAL))
 
     def set_state(self, state):
-        # TODO: extend this to set a sensor indicating the task state
         super().set_state(state)
+        self._state_sensor.value = state
         if self.state == scheduler.TaskState.DEAD:
             self._disconnect()
             self._capture_blocks.clear()

@@ -261,15 +261,19 @@ class SDPSubarrayProductBase:
         # around the event loop. Each callback takes self as the argument.
         self.dead_callbacks = [lambda product: product.dead_event.set()]
         self._state = None
-        self.capture_block_sensor = Sensor(
+        # Set of sensors to remove when the product is removed
+        self.sensors = set()
+        self._capture_block_sensor = Sensor(
             str, subarray_product_id + ".capture-block-state",
             "JSON dictionary of capture block states for active capture blocks",
             default="{}", initial_status=Sensor.Status.NOMINAL)
-        self.state_sensor = Sensor(
+        self._state_sensor = Sensor(
             ProductState, subarray_product_id + ".state",
             "State of the subarray product state machine",
             status_func=_error_on_error)
         self.state = ProductState.CONFIGURING   # This sets the sensor
+        self.add_sensor(self._capture_block_sensor)
+        self.add_sensor(self._state_sensor)
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=subarray_product_id))
         self.logger.info("Created: %r", self)
         self.logger.info('Logical graph nodes:\n'
@@ -285,7 +289,22 @@ class SDPSubarrayProductBase:
                 and value not in (ProductState.DECONFIGURING, ProductState.DEAD)):
             return      # Never leave error state other than by deconfiguring
         self._state = value
-        self.state_sensor.value = value
+        self._state_sensor.value = value
+
+    def add_sensor(self, sensor):
+        """Add the supplied sensor to the top-level device and track it locally."""
+        self.sensors.add(sensor)
+        self.sdp_controller.sensors.add(sensor)
+
+    def remove_sensors(self):
+        """Remove all sensors added via :meth:`add_sensor`.
+
+        It does *not* send an ``interface-changed`` inform; that is left to the
+        caller.
+        """
+        for sensor in self.sensors:
+            self.sdp_controller.sensors.discard(sensor)
+        self.sensors.clear()
 
     @property
     def async_busy(self):
@@ -428,7 +447,7 @@ class SDPSubarrayProductBase:
     def _update_capture_block_sensor(self):
         value = {name: capture_block.state.name.lower()
                  for name, capture_block in self.capture_blocks.items()}
-        self.capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
+        self._capture_block_sensor.set_value(json.dumps(value, sort_keys=True))
 
     async def _capture_init(self, capture_block):
         self.capture_blocks[capture_block.name] = capture_block
@@ -1005,20 +1024,6 @@ class SDPControllerServer(DeviceServer):
                  image_resolver_factory=None,
                  s3_config_file=None,
                  gui_urls=None, graph_dir=None):
-        # setup sensors
-        self._build_state_sensor = Sensor(str, "build-state", "SDP Controller build state.")
-        self._api_version_sensor = Sensor(str, "api-version", "SDP Controller API version.")
-        self._device_status_sensor = Sensor(DeviceStatus, "device-status",
-                                            "Devices status of the SDP Master Controller")
-        self._gui_urls_sensor = Sensor(str, "gui-urls", "Links to associated GUIs")
-        # example FMECA sensor. In this case something to keep track of issues
-        # arising from launching to many processes.
-        # TODO: Add more sensors exposing resource usage and currently executing graphs
-        self._fmeca_sensors = {}
-        self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
-        self._ntp_sensor = Sensor(bool, "time-synchronised",
-                                  "SDP Controller container (and host) is synchronised to NTP")
-
         self.interface_mode = interface_mode
         if self.interface_mode:
             logger.warning("Note: Running master controller in interface mode. "
@@ -1045,24 +1050,35 @@ class SDPControllerServer(DeviceServer):
 
         super().__init__(host, port)
 
-        self._build_state_sensor.set_value(self.BUILD_STATE)
-        self.sensors.add(self._build_state_sensor)
-        self._api_version_sensor.set_value(self.VERSION)
-        self.sensors.add(self._api_version_sensor)
-        self._device_status_sensor.set_value('ok')
-        self.sensors.add(self._device_status_sensor)
-        self._gui_urls_sensor.set_value(json.dumps(self.gui_urls))
-        self.sensors.add(self._gui_urls_sensor)
-
-        self._ntp_sensor.set_value('0')
+        # setup sensors
+        self.sensors.add(Sensor(str, "build-state", "SDP Controller build state.",
+                                default=self.BUILD_STATE, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "api-version", "SDP Controller API version.",
+                                default=self.VERSION, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(DeviceStatus, "device-status",
+                                "Devices status of the SDP Master Controller",
+                                default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
+                                default=json.dumps(self.gui_urls),
+                                initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(bool, "time-synchronised",
+                                "SDP Controller container (and host) is synchronised to NTP",
+                                default=False, initial_status=Sensor.Status.UNKNOWN))
+        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
+                                default="[]", initial_status=Sensor.Status.NOMINAL))
         # TODO disabled since aiokatcp doesn't support callback sensors. It was
         # broken anyway.
         # self._ntp_sensor.set_read_callback(self._check_ntp_status)
-        self.sensors.add(self._ntp_sensor)
+
+        # example FMECA sensor. In this case something to keep track of issues
+        # arising from launching too many processes.
+        # TODO: Add more sensors exposing resource usage and currently executing graphs
+        self._fmeca_sensors = {}
+        self._fmeca_sensors['FD0001'] = Sensor(bool, "fmeca.FD0001", "Sub-process limits")
 
         # until we know any better, failure modes are all inactive
         for s in self._fmeca_sensors.values():
-            s.set_value(0)
+            s.value = False
             self.sensors.add(s)
 
     @staticmethod
@@ -1073,6 +1089,9 @@ class SDPControllerServer(DeviceServer):
                     Sensor.Status.NOMINAL, time.time())
         except OSError:
             return ('0', Sensor.Status.NOMINAL, time.time())
+
+    def _update_products_sensor(self):
+        self.sensors['products'].value = json.dumps(sorted(self.subarray_products))
 
     async def deregister_product(self, product, force=False):
         """Deregister a subarray product and remove it form the list of products.
@@ -1136,8 +1155,8 @@ class SDPControllerServer(DeviceServer):
             # Protect against potential race conditions
             if self.subarray_products.get(product.subarray_product_id) is product:
                 del self.subarray_products[product.subarray_product_id]
-                self.sensors.discard(product.state_sensor)
-                self.sensors.discard(product.capture_block_sensor)
+                product.remove_sensors()
+                self._update_products_sensor()
                 self.mass_inform('interface-changed', 'sensor-list')
                 product_logger.info("Deconfigured subarray product %s",
                                     product.subarray_product_id)
@@ -1217,8 +1236,7 @@ class SDPControllerServer(DeviceServer):
         # a second configuration with the same name, and to allow a forced
         # deconfigure to cancel the configure.
         self.subarray_products[subarray_product_id] = product
-        self.sensors.add(product.state_sensor)
-        self.sensors.add(product.capture_block_sensor)
+        self._update_products_sensor()
         product.dead_callbacks.append(remove_product)
         try:
             await product.configure(ctx)
