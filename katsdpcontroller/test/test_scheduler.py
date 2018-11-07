@@ -1636,6 +1636,27 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Once we abort, we should no longer be interested in offers
         assert_equal([mock.call.suppressOffers({'default'})], self.driver.mock_calls)
 
+    async def test_launch_force_host(self):
+        """Like test_launch_serial, but tests forcing a logical task to a node."""
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.host = 'agenthost0'
+        self._make_physical()
+        await self.test_launch_serial()
+
+    async def test_launch_bad_host(self):
+        """Force a host which doesn't have sufficient resources"""
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.host = 'agenthost1'
+        self._make_physical()
+        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, offers)
+        await self.advance(30)
+        with assert_raises(scheduler.InsufficientResourcesError):
+            await launch
+
     async def test_launch_resolve_raises(self):
         async def resolve_raise(resolver, graph, loop):
             raise ValueError('Testing')
