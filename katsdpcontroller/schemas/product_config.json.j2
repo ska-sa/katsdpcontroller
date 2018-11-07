@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2"]
+            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3"]
         }
     }
 }
@@ -459,6 +459,9 @@
                         "additionalProperties": false,
                         "properties": {
                             "config": { "type": "object" },
+{% if version >= "2.3" %}
+                            "host": { "type": "string" },
+{% endif %}
                             "taskinfo": { "type": "object" }
                         }
                     }

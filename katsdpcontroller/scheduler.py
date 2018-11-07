@@ -1243,6 +1243,9 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         List of :class:`InterfaceRequest` objects, one per interface requested
     gpus : list
         List of :class:`GPURequest` objects, one per GPU needed
+    host : str
+        Hostname of agent where the task must be run. If ``None`` (the default)
+        it is unconstrained.
     capabilities : list
         List of Linux capability names to add e.g. `SYS_NICE`. Note that this
         doesn't guarantee that the process can use the capability, if it runs
@@ -1278,6 +1281,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.gpus = []
         self.interfaces = []
         self.volumes = []
+        self.host = None
         self.capabilities = []
         self.image = None
         self.command = []
@@ -1292,7 +1296,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         this task. Subclasses may override this to enforce constraints e.g.,
         requiring a special type of hardware."""
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
-        return True
+        return self.host is None or agent.host == self.host
 
     def __repr__(self):
         s = io.StringIO()
@@ -1303,6 +1307,8 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
             s.write(' interfaces={}'.format(self.interfaces))
         if self.volumes:
             s.write(' volumes={}'.format(self.volumes))
+        if self.host:
+            s.write(' host={!r}'.format(self.host))
         s.write('>')
         return s.getvalue()
 
