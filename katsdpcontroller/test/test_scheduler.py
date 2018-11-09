@@ -1414,6 +1414,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
+        assert_equal(TaskState.STARTED, self.nodes[0].state)
         assert_equal(expected_taskinfo0.resources, self.nodes[0].taskinfo.resources)
         assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
         assert_equal('agenthost0', self.nodes[0].host)
@@ -1421,7 +1422,6 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal({'port': 30000}, self.nodes[0].ports)
         assert_equal({}, self.nodes[0].cores)
         assert_is_none(self.nodes[0].status)
-        assert_equal(TaskState.STARTED, self.nodes[0].state)
 
         assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
         assert_equal('agentid1', self.nodes[1].agent_id)
@@ -1635,6 +1635,27 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
         # Once we abort, we should no longer be interested in offers
         assert_equal([mock.call.suppressOffers({'default'})], self.driver.mock_calls)
+
+    async def test_launch_force_host(self):
+        """Like test_launch_serial, but tests forcing a logical task to a node."""
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.host = 'agenthost0'
+        self._make_physical()
+        await self.test_launch_serial()
+
+    async def test_launch_bad_host(self):
+        """Force a host which doesn't have sufficient resources"""
+        for node in self.logical_graph.nodes():
+            if node.name == 'node0':
+                node.host = 'agenthost1'
+        self._make_physical()
+        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, offers)
+        await self.advance(30)
+        with assert_raises(scheduler.InsufficientResourcesError):
+            await launch
 
     async def test_launch_resolve_raises(self):
         async def resolve_raise(resolver, graph, loop):

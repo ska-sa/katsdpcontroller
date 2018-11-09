@@ -1525,6 +1525,10 @@ def build_logical_graph(config):
             for request in node.interfaces:
                 request.bandwidth_in = round(request.bandwidth_in)
                 request.bandwidth_out = round(request.bandwidth_out)
+            # Apply host overrides
+            force_host = config['config']['service_overrides'].get(node.name, {}).get('host')
+            if force_host is not None:
+                node.host = force_host
     return g
 
 
