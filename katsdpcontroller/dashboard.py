@@ -186,7 +186,7 @@ class Session(SensorWatcher):
         self.session_context = session_context
         self._products = {}
         self._product_tabs = Tabs()
-        self._no_products = Paragraph(text='There are no subarray products at this time')
+        self._no_products = Paragraph(text='There are no subarray products currently configured')
         self._root = widgetbox(self._no_products)
         self.attach_sensor(self.sdp_controller.sensors['products'],
                            self._products_changed, call_now=True)
