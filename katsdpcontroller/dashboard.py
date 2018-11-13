@@ -186,11 +186,13 @@ class Session(SensorWatcher):
         self.session_context = session_context
         self._products = {}
         self._product_tabs = Tabs()
+        self._no_products = Paragraph(text='There are no subarray products currently configured')
+        self._root = widgetbox(self._no_products)
         self.attach_sensor(self.sdp_controller.sensors['products'],
                            self._products_changed, call_now=True)
 
     def modify_document(self, doc):
-        doc.add_root(widgetbox(self._product_tabs))
+        doc.add_root(self._root)
 
     @lock_document
     def _products_changed(self, doc, sensor, reading):
@@ -204,6 +206,10 @@ class Session(SensorWatcher):
 
         update_tabs(self._product_tabs,
                     [product.panel for name, product in sorted(self._products.items())])
+        if self._products:
+            self._root.children = [self._product_tabs]
+        else:
+            self._root.children = [self._no_products]
 
 
 class Dashboard(Handler):
