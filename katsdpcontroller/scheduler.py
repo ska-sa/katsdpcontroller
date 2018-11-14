@@ -2337,9 +2337,6 @@ class Scheduler(pymesos.Scheduler):
             self.http_handler, sock=sock)
         if not self.http_port:
             self.http_port = sock.getsockname()[1]
-        if self.http_url is None:
-            netloc = '{}:{}'.format(socket.getfqdn(), self.http_port)
-            self.http_url = urllib.parse.urlunsplit(('http', netloc, '/', '', ''))
         logger.info('Internal HTTP server at %s', self.http_url)
 
     def add_queue(self, queue):
