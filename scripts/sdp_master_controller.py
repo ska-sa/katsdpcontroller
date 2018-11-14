@@ -83,7 +83,8 @@ def init_dashboard(controller, opts):
     dashboard = Dashboard(controller)
     app = Application()
     app.add(dashboard)
-    server = Server(app, port=opts.dashboard_port)
+    allow_websocket_origin = opts.dashboard_allow_websocket_origin or None
+    server = Server(app, port=opts.dashboard_port, allow_websocket_origin=allow_websocket_origin)
     server.start()
 
 
@@ -106,6 +107,8 @@ if __name__ == "__main__":
                         help='URL at which slaves connect to the HTTP port (default=auto)')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Bokeh backend for the GUI (default=%(default)s')
+    parser.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',
+                        help='origin where browsers will access the dashboard (can be repeated)')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
