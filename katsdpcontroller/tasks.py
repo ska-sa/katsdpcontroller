@@ -300,7 +300,9 @@ class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
-        config = {}
+        # Not every task will take a --external-hostname option, but the
+        # katsdpservices argument parser doesn't mind unused arguments.
+        config = {'external_hostname': self.host}
         for name, value in self.ports.items():
             config[name] = value
         for _src, trg, attr in graph.out_edges(self, data=True):

@@ -1851,6 +1851,8 @@ class PhysicalTask(PhysicalNode):
         Task info for Mesos to run the task
     allocation : :class:`ResourceAllocation`
         Resources allocated to this task.
+    host : str
+        Host running the task
     status : :class:`mesos_pb2.TaskStatus`
         Last Mesos status allocated to this task. This should agree with
         :attr:`state`, but if we receive notifications out-of-order from Mesos
