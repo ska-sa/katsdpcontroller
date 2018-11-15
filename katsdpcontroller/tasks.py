@@ -302,7 +302,9 @@ class SDPConfigMixin:
         await super().resolve(resolver, graph, loop)
         # Not every task will take a --external-hostname option, but the
         # katsdpservices argument parser doesn't mind unused arguments.
-        config = {'external_hostname': self.host}
+        config = {}
+        if self.host is not None:   # Can happen if this isn't a PhysicalTask
+            config['external_hostname'] = self.host
         for name, value in self.ports.items():
             config[name] = value
         for _src, trg, attr in graph.out_edges(self, data=True):
