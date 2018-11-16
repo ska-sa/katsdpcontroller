@@ -1087,7 +1087,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
     vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams, workers)
-    vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port', 'dashboard_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
@@ -1101,6 +1101,12 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
             '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
         ])
     vis_writer.transitions = CAPTURE_TRANSITIONS
+    vis_writer.gui_urls = [{
+        'title': 'vis_writer diagnostics',
+        'description': 'Diagnostics for {0.name}',
+        'href': 'http://{0.host}:{0.ports[dashboard_port]}/',
+        'category': 'Plot'
+    }]
 
     def make_vis_writer_config(task, resolver):
         conf = {
@@ -1140,7 +1146,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     # copied from the vis writer.
     flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
     flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams, workers)
-    flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port', 'dashboard_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth * FLAGS_RATE_RATIO
@@ -1154,6 +1160,12 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
             '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
         ])
     flag_writer.deconfigure_wait = False
+    flag_writer.gui_urls = [{
+        'title': 'flag_writer diagnostics',
+        'description': 'Diagnostics for {0.name}',
+        'href': 'http://{0.host}:{0.ports[dashboard_port]}/',
+        'category': 'Plot'
+    }]
 
     # Capture init / done are used to track progress of completing flags
     # for a specified capture block id - the writer itself is free running

@@ -692,11 +692,13 @@ class TestSDPController(BaseTestSDPController):
         # is covered: base_params, per node, per edge
         ts.add.assert_any_call('subarray_product_id', SUBARRAY_PRODUCT4, immutable=True)
         ts.add.assert_any_call('config.vis_writer.sdp_l0', {
+            'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
             'obj_size_mb': mock.ANY,
             'port': 20000,
             'aiomonitor_port': 20001,
             'aioconsole_port': 20002,
+            'dashboard_port': 20003,
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
