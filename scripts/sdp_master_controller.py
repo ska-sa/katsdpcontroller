@@ -120,7 +120,8 @@ if __name__ == "__main__":
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Bokeh backend for the GUI [%(default)s]')
     parser.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',
-                        help='origin where browsers will access the dashboard (can be repeated)')
+                        help='origin where browsers will access the dashboard (can be repeated) '
+                             '[localhost, --external-hostname]')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
