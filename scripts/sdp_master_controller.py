@@ -12,6 +12,8 @@ import signal
 import argparse
 import logging
 import asyncio
+import socket
+import urllib.parse
 
 import addict
 import prometheus_async
@@ -83,7 +85,16 @@ def init_dashboard(controller, opts):
     dashboard = Dashboard(controller)
     app = Application()
     app.add(dashboard)
-    server = Server(app, port=opts.dashboard_port)
+    if not opts.dashboard_allow_websocket_origin:
+        allow_websocket_origin = [
+            'localhost:{}'.format(opts.dashboard_port),
+            '{}:{}'.format(opts.external_hostname, opts.dashboard_port)
+        ]
+        # If external_hostname is localhost, avoid having a duplicate
+        allow_websocket_origin = list(set(allow_websocket_origin))
+    else:
+        allow_websocket_origin = opts.dashboard_allow_websocket_origin
+    server = Server(app, port=opts.dashboard_port, allow_websocket_origin=allow_websocket_origin)
     server.start()
 
 
@@ -94,32 +105,36 @@ if __name__ == "__main__":
     usage = "%(prog)s [options] master"
     parser = argparse.ArgumentParser(usage=usage)
     parser.add_argument('-a', '--host', default="", metavar='HOST',
-                        help='attach to server HOST (default=localhost)')
+                        help='attach to server HOST [localhost]')
     parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
-                        help='katcp listen port (default=%(default)s)')
+                        help='katcp listen port [%(default)s]')
     parser.add_argument('-l', '--loglevel',
                         default="info", metavar='LOGLEVEL',
-                        help='set the Python logging level (default=%(default)s)')
+                        help='set the Python logging level [%(default)s]')
+    parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
+                        help='Name by which others connect to this machine [%(default)s]')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
-                        help='port that slaves communicate with (default=%(default)s)')
+                        help='port that slaves communicate with [%(default)s]')
     parser.add_argument('--http-url', type=str, metavar='URL',
-                        help='URL at which slaves connect to the HTTP port (default=auto)')
+                        help='URL at which slaves connect to the HTTP port')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
-                        help='port for the Bokeh backend for the GUI (default=%(default)s')
+                        help='port for the Bokeh backend for the GUI [%(default)s]')
+    parser.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',
+                        help='origin where browsers will access the dashboard (can be repeated)')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
     parser.add_argument('-i', '--interface-mode', default=False,
                         action='store_true',
                         help='run the controller in interface only mode for testing '
-                             'integration and ICD compliance. (default: %(default)s)')
+                             'integration and ICD compliance. [%(default)s]')
     parser.add_argument('--registry', dest='private_registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                         help='registry from which to pull images (use empty string to disable) '
-                             '(default: %(default)s)')
+                             '[%(default)s]')
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
-                        help='Override an image name lookup (default: none)')
+                        help='Override an image name lookup [none]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
@@ -129,25 +144,25 @@ if __name__ == "__main__":
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR',
                         help='Block of multicast addresses from which to draw internal allocation. '
-                             'Needs to be at least /16. (default: %(default)s)')
+                             'Needs to be at least /16. [%(default)s]')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
                         help='File containing JSON describing related GUIs, '
-                             'or directory with .json files (default: none)')
+                             'or directory with .json files [none]')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--write-graphs', metavar='DIR',
                         help='Write visualisations of the processing graph to directory')
     parser.add_argument('--realtime-role', default='realtime',
-                        help='Mesos role for realtime capture tasks (default: %(default)s)')
+                        help='Mesos role for realtime capture tasks [%(default)s]')
     parser.add_argument('--batch-role', default='batch',
-                        help='Mesos role for batch processing tasks (default: %(default)s)')
+                        help='Mesos role for batch processing tasks [%(default)s]')
     parser.add_argument('--principal', default='katsdpcontroller',
-                        help='Mesos principal for the principal (default: %(default)s')
+                        help='Mesos principal for the principal [%(default)s]')
     parser.add_argument('--user', default='root',
-                        help='User to run as on the Mesos agents (default: %(default)s')
+                        help='User to run as on the Mesos agents [%(default)s]')
     parser.add_argument('-v', '--verbose', dest='verbose', default=False,
                         action='store_true',
-                        help='print verbose output (default: %(default)s)')
+                        help='print verbose output [%(default)s')
     parser.add_argument('master',
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
@@ -157,6 +172,10 @@ if __name__ == "__main__":
         logging.root.setLevel(opts.loglevel.upper())
     logger = logging.getLogger('sdpcontroller')
     logger.info("Starting SDP Controller...")
+    if opts.http_url is None:
+        opts.http_url = 'http://{}:{}/'.format(urllib.parse.quote(opts.external_hostname),
+                                               opts.http_port)
+        logger.info('Setting --http-url to %s', opts.http_url)
 
     image_resolver_factory = scheduler.ImageResolverFactory(
         private_registry=opts.private_registry or None,
