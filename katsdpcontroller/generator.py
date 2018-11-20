@@ -1484,9 +1484,10 @@ def build_logical_graph(config):
         _make_beamformer_engineering(g, config, name)
 
     # Collect all tied-array-channelised-voltage streams and make signal displays for them
-    for name in inputs.get('cbf.tied_array_channelised_voltage', []):
-        if name in inputs_used:
-            _make_timeplot_beamformer(g, config, name)
+    # XXX Temporarily disabled due to MKAIV-1331.
+    # for name in inputs.get('cbf.tied_array_channelised_voltage', []):
+    #     if name in inputs_used:
+    #         _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
         orig_flags_name = config['outputs'][name]['src_streams'][0]
