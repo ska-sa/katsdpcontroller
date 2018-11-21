@@ -704,6 +704,7 @@ class TestSDPController(BaseTestSDPController):
             'l0_name': 'sdp_l0',
             's3_endpoint_url': 'http://archive.s3.invalid/',
             'workers': mock.ANY,
+            'direct_write': True,
             'override_test': 'value'
         }, immutable=True)
         # Test that the output channel rounding was done correctly

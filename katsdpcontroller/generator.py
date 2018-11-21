@@ -1114,7 +1114,8 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
             'l0_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
             'workers': workers,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            'direct_write': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
@@ -1184,7 +1185,8 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
             'flags_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
             'workers': workers,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            'direct_write': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
