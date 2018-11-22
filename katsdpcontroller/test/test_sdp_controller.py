@@ -698,7 +698,6 @@ class TestSDPController(BaseTestSDPController):
             'port': 20000,
             'aiomonitor_port': 20001,
             'aioconsole_port': 20002,
-            'dashboard_port': 20003,
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
