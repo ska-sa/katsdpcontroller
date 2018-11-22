@@ -1552,10 +1552,8 @@ def _make_continuum_imager(g, config, name):
     imager.disk = _mb(1000 * l0_info.size + 1000)
     imager.max_run_time = 86400     # 24 hours
     imager.image = 'katsdpcontim'
-    # XXX 'env' is temporary to work around a bug in run-and-cleanup
-    # (https://github.com/ska-sa/katsdpdockerbase/pull/21)
     imager.command = [
-        'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', 'env', '--',
+        'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
         'continuum_pipeline.py',
         '--telstate', '{endpoints[telstate_telstate]}',
         '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
