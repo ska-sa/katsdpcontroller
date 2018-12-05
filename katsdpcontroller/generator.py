@@ -1078,8 +1078,8 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
     # antennas, 32K channels requires two CPUs (one for capture, one for
-    # writing) and scale from there.
-    vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
+    # writing) and scale from there, while capping at 3.
+    vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
     workers = 50
     # Buffer enough dumps for 45 seconds
@@ -1146,7 +1146,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
 
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
-    flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
+    flag_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
     flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams,
                                      workers, buffer_dumps)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
