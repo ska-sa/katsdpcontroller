@@ -1081,7 +1081,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     # writing) and scale from there, while capping at 3.
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
-    workers = 50
+    workers = 4
     # Buffer enough dumps for 45 seconds
     buffer_dumps = int(math.ceil(45.0 / info.int_time))
     src_multicast = find_node(g, 'multicast.' + name)
@@ -1140,7 +1140,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
 
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
-    workers = 50
+    workers = 4
     # Buffer enough data for 45 seconds of real time.
     buffer_dumps = int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO))
 
