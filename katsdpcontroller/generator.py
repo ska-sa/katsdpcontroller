@@ -1048,15 +1048,16 @@ def _make_cal(g, config, name, l0_name, flags_names):
     return cal_group
 
 
-def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
+def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps):
     """Compute memory requirement (in MB) for vis_writer or flag_writer"""
     # Estimate the size of the memory pool. An extra item is added because
     # the value is copied when added to the rechunker, although this does
     # not actually come from the memory pool.
     heap_size = dump_size / n_substreams
-    memory_pool = (3 + 10 * n_substreams) * heap_size
+    memory_pool = (3 + 4 * n_substreams) * heap_size
     # Estimate the size of the in-flight objects for the workers.
-    worker_mem = (workers + 1) * obj_size
+    # TODO: this doesn't account for any time accumulation
+    write_queue = buffer_dumps * dump_size
 
     # Socket buffer allocated per endpoint, but it is bounded at 256MB by the
     # OS config.
@@ -1064,7 +1065,7 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers):
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    return 2 * _mb(memory_pool + worker_mem + socket_buffers) + 256
+    return 2 * _mb(memory_pool + write_queue + socket_buffers) + 256
 
 
 def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
@@ -1077,16 +1078,19 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
     # antennas, 32K channels requires two CPUs (one for capture, one for
-    # writing) and scale from there.
-    vis_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
+    # writing) and scale from there, while capping at 3.
+    vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
-    workers = 50
+    workers = 4
+    # Buffer enough dumps for 45 seconds
+    buffer_dumps = int(math.ceil(45.0 / info.int_time))
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams, workers)
+    vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams,
+                                    workers, buffer_dumps)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1108,7 +1112,9 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
             'l0_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
             'workers': workers,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+            'buffer_dumps': buffer_dumps,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            'direct_write': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
@@ -1134,12 +1140,17 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
 
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
-    workers = 50
+    workers = 4
+    # Buffer enough data for 45 seconds of real time. We've seen the disk
+    # system throw a fit and hang for 30 seconds at a time, and this should
+    # allow us to ride that out.
+    buffer_dumps = int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO))
 
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
-    flag_writer.cpus = min(2, 2 * info.n_vis / _N32_32)
-    flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams, workers)
+    flag_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
+    flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams,
+                                     workers, buffer_dumps)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1172,7 +1183,9 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
             'flags_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
             'workers': workers,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url']
+            'buffer_dumps': buffer_dumps,
+            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            'direct_write': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
