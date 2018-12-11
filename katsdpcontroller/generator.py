@@ -1304,7 +1304,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
     def make_beamformer_engineering_pol_config(task, resolver):
-        # Temporary until CBF provide a packet size sensor
+        # Temporary until CBF provide a packet size sensor (CBFTASKS-748)
         # Size refers to SPEAD packet, so includes payload plus ~64 bytes of headers
         if info.src_info.n_channels == 1024 and info.src_info.n_channels_per_substream == 4:
             max_packet = 1100
