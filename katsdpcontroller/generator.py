@@ -1141,7 +1141,9 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 4
-    # Buffer enough data for 45 seconds of real time.
+    # Buffer enough data for 45 seconds of real time. We've seen the disk
+    # system throw a fit and hang for 30 seconds at a time, and this should
+    # allow us to ride that out.
     buffer_dumps = int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO))
 
     # Don't yet have a good idea of real CPU usage. This formula is
