@@ -1273,6 +1273,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         Whether this is a develop-mode config
     """
     src_multicast = find_node(g, 'multicast.' + src_name)
+    if isinstance(info, BeamformerInfo):
+        src_info = info.src_info
+    else:
+        src_info = info
 
     bf_ingest = SDPLogicalTask(node_name)
     bf_ingest.image = 'katsdpbfingest'
@@ -1292,7 +1296,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         # we just hardcode a number.
         bf_ingest.ram = 220 * 1024
     bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=not develop)]
-    bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth
+    # XXX Even when there is enough bandwidth, sharing a node with correlator
+    # ingest seems to cause lots of dropped packets for both. Just force the
+    # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
+    bf_ingest.interfaces[0].bandwidth_in = max(info.net_bandwidth, 20e9)
     if timeplot:
         bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
         bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(info)
@@ -1306,10 +1313,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     def make_beamformer_engineering_pol_config(task, resolver):
         # Temporary until CBF provide a packet size sensor (CBFTASKS-748)
         # Size refers to SPEAD packet, so includes payload plus ~64 bytes of headers
-        if info.src_info.n_channels == 1024 and info.src_info.n_channels_per_substream == 4:
+        if src_info.n_channels == 1024 and src_info.n_channels_per_substream == 4:
             max_packet = 1100
         else:
-            max_packet = 2200
+            max_packet = 4200
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
@@ -1493,10 +1500,9 @@ def build_logical_graph(config):
         _make_beamformer_engineering(g, config, name)
 
     # Collect all tied-array-channelised-voltage streams and make signal displays for them
-    # XXX Temporarily disabled due to MKAIV-1331.
-    # for name in inputs.get('cbf.tied_array_channelised_voltage', []):
-    #     if name in inputs_used:
-    #         _make_timeplot_beamformer(g, config, name)
+    for name in inputs.get('cbf.tied_array_channelised_voltage', []):
+        if name in inputs_used:
+            _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
         orig_flags_name = config['outputs'][name]['src_streams'][0]
