@@ -1296,7 +1296,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         # we just hardcode a number.
         bf_ingest.ram = 220 * 1024
     bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=not develop)]
-    bf_ingest.interfaces[0].bandwidth_in = info.net_bandwidth
+    # XXX Even when there is enough bandwidth, sharing a node with correlator
+    # ingest seems to cause lots of dropped packets for both. Just force the
+    # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
+    bf_ingest.interfaces[0].bandwidth_in = max(info.net_bandwidth, 20e9)
     if timeplot:
         bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
         bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(info)
