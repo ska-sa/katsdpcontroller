@@ -1273,6 +1273,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         Whether this is a develop-mode config
     """
     src_multicast = find_node(g, 'multicast.' + src_name)
+    if isinstance(info, BeamformerInfo):
+        src_info = info.src_info
+    else:
+        src_info = info
 
     bf_ingest = SDPLogicalTask(node_name)
     bf_ingest.image = 'katsdpbfingest'
@@ -1306,7 +1310,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     def make_beamformer_engineering_pol_config(task, resolver):
         # Temporary until CBF provide a packet size sensor (CBFTASKS-748)
         # Size refers to SPEAD packet, so includes payload plus ~64 bytes of headers
-        if info.src_info.n_channels == 1024 and info.src_info.n_channels_per_substream == 4:
+        if src_info.n_channels == 1024 and src_info.n_channels_per_substream == 4:
             max_packet = 1100
         else:
             max_packet = 2200
