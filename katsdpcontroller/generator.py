@@ -1314,7 +1314,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         # Temporary until CBF provide a packet size sensor (CBFTASKS-748)
         # Size refers to SPEAD packet, so includes payload plus ~64 bytes of headers
         if src_info.n_channels == 1024 and src_info.n_channels_per_substream == 4:
-            max_packet = 1100
+            max_packet = 2200
         else:
             max_packet = 4200
         config = {
