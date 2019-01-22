@@ -1273,10 +1273,6 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         Whether this is a develop-mode config
     """
     src_multicast = find_node(g, 'multicast.' + src_name)
-    if isinstance(info, BeamformerInfo):
-        src_info = info.src_info
-    else:
-        src_info = info
 
     bf_ingest = SDPLogicalTask(node_name)
     bf_ingest.image = 'katsdpbfingest'
