@@ -193,6 +193,7 @@ class Session(SensorWatcher):
 
     def modify_document(self, doc):
         doc.add_root(self._root)
+        doc.title = 'SDP master controller'
 
     @lock_document
     def _products_changed(self, doc, sensor, reading):
