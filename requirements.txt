@@ -15,6 +15,7 @@ docker==3.4.1
 fakeredis                  # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
+humanfriendly==4.17
 idna                       # via requests
 idna-ssl                   # via aiohttp
 ipaddress                  # via katsdptelstate
