@@ -320,6 +320,7 @@ class SDPConfigMixin:
             logger.warning('Overriding config for %s', self.name)
             config = product_config.override(config, overrides)
         logger.debug('Config for %s: %s', self.name, config)
+        self.task_config = config
         if config:
             resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
 

@@ -1,0 +1,100 @@
+<h3>Command</h3>
+{% if task.taskinfo.command is defined %}
+<pre>
+{{task.taskinfo.command.value}} {{task.taskinfo.command.arguments | join(' ')}}
+</pre>
+{% else %}
+<p>N/A</p>
+{% endif %}
+
+<h3>Environment</h3>
+{% if task.taskinfo.command is defined %}
+<pre>
+{% for item in task.taskinfo.command.environment.variables %}
+{{item.name}} = {{item.value}}
+{% endfor %}
+</pre>
+{% else %}
+<p>N/A</p>
+{% endif %}
+
+<h3>Telstate config</h3>
+{% if task.task_config is defined %}
+<pre>
+{{task.task_config | tojson(indent=2)}}
+</pre>
+{% else %}
+<p>N/A</p>
+{% endif %}
+
+<h3>Allocated resources</h3>
+{% if task.allocation %}
+<pre>
+{# Global resources #}
+{% for resource in task.allocation.resources.values() %}
+{% if resource %}
+{{resource}}
+{% endif %}
+{% endfor %}
+{# Interface resources #}
+{% for interface in task.allocation.interfaces %}
+{% for resource in interface.resources.values() %}
+{% if resource %}
+{{resource}} <b>[{{task.agent.interfaces[interface.index].name}}, {{task.agent.interfaces[interface.index].network}}]</b>
+{% endif %}
+{% endfor %}
+{% endfor %}
+{# GPU resources #}
+{% for gpu in task.allocation.gpus %}
+{% for resource in gpu.resources.values() %}
+{% if resource %}
+{{resource}} <b>[{{task.agent.gpus[gpu.index].name}}]</b>
+{% endif %}
+{% endfor %}
+{% endfor %}
+</pre>
+{% else %}
+N/A
+{% endif %}
+
+<h3>Port mappings</h3>
+<table>
+  <thead><tr><th>Name</th><th>Port</th></tr></thead>
+  <tbody>
+{% for name, value in task.ports.items() %}
+    <tr><td>{{name}}</td><td>{{value}}</td></tr>
+{% endfor %}
+  </tbody>
+</table>
+
+<h3>Misc</h3>
+<table>
+  <tbody>
+    <tr>
+      <td>Start time</td>
+{% if task.start_time is not none %}
+      <td>{{task.start_time | timestamp_utc}} ({{(now - task.start_time) | timespan}} ago)</td>
+{% else %}
+      <td>N/A</td>
+{% endif %}
+    </tr>
+    <tr>
+      <td>Critical</td>
+      <td>{{task.logical_node.critical | default('N/A')}}</td>
+    </tr>
+    <tr>
+      <td>Maximum run time</td>
+      <td>{{task.logical_node.max_run_time | timespan | default('N/A', true)}}</td>
+    </tr>
+  </tbody>
+</table>
+</p>
+
+<h3>Raw task info</h3>
+{% if task.taskinfo is defined %}
+<pre>
+{{task.taskinfo | tojson(indent=2)}}
+</pre>
+{% else %}
+<p>N/A</p>
+{% endif %}

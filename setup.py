@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from setuptools import setup, find_packages
 
-# Package dependencies are handled externally via requirements.txt to please Docker and Travis
-
 tests_require = ['nose', 'aioresponses', 'asynctest', 'open-mock-file']
 
 setup(
@@ -27,6 +25,7 @@ setup(
         'async_timeout',
         'decorator',
         'docker',
+        'humanfriendly',
         'jinja2',
         'jsonschema',
         'rfc3987',           # Used by jsonschema to validate URLs

@@ -478,6 +478,9 @@ class Resource:
         """
         raise NotImplementedError    # pragma: nocover
 
+    def _value_str(self, resource):
+        raise NotImplementedError    # pragma: nocover
+
     def _allocate(self, resource, amount, **kwargs):
         """Take a piece of a resource.
 
@@ -486,6 +489,15 @@ class Resource:
         ``self._available(resource, **kwargs)``.
         """
         raise NotImplementedError    # pragma: nocover
+
+    def __str__(self):
+        parts = []
+        for part in self.parts:
+            key = self.name
+            if part.get('role', '*') != '*':
+                key += '(' + part['role'] + ')'
+            parts.append(key + ':' + self._value_str(part))
+        return '; '.join(parts)
 
     @classmethod
     def empty_request(cls):
@@ -520,6 +532,9 @@ class ScalarResource(Resource):
             resource.scalar.value -= amount
         return out
 
+    def _value_str(self, resource):
+        return str(resource.scalar.value)
+
     def allocate(self, amount):
         return super().allocate(_as_decimal(amount))
 
@@ -548,6 +563,9 @@ class RangeResource(Resource):
             elif minimum <= r.end:
                 total += r.end - max(r.begin, minimum) + 1
         return total
+
+    def _value_str(self, resource):
+        return '[' + ','.join('{}-{}'.format(r.begin, r.end) for r in resource.ranges.range) + ']'
 
     def _allocate(self, resource, amount, *, minimum=None):
         out = copy.deepcopy(resource)
@@ -1874,6 +1892,7 @@ class PhysicalTask(PhysicalNode):
         self.taskinfo = None
         self.allocation = None
         self.status = None
+        self.start_time = None
         for name, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
                 setattr(self, name, {})
@@ -2071,6 +2090,11 @@ class PhysicalTask(PhysicalNode):
         args['host'] = self.host
         args['resolver'] = resolver
         return args
+
+    def set_status(self, status):
+        self.status = status
+        if status.state == 'TASK_RUNNING':
+            self.start_time = status.timestamp
 
     def kill(self, driver, **kwargs):
         # TODO: according to the Mesos docs, killing a task is not reliable,
@@ -2496,7 +2520,7 @@ class Scheduler(pymesos.Scheduler):
                     task.set_state(TaskState.RUNNING)
                     # The task itself is responsible for advancing to
                     # READY
-            task.status = status
+            task.set_status(status)
         self._driver.acknowledgeStatusUpdate(status)
 
     @classmethod

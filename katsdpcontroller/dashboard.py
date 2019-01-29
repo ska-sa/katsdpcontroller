@@ -3,16 +3,38 @@
 import functools
 import json
 import weakref
+import time
+from datetime import datetime
 
 import networkx
+import jinja2
+import humanfriendly
 
 from bokeh.application.handlers.handler import Handler
 from bokeh.models import ColumnDataSource
-from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn, PreText, Paragraph
+from bokeh.models.widgets import Tabs, Panel, DataTable, TableColumn, Div, PreText, Paragraph
 from bokeh.layouts import widgetbox, column
 
 from . import scheduler
 from .tasks import SDPPhysicalTaskBase
+
+
+def timestamp_utc(timestamp):
+    t = datetime.utcfromtimestamp(timestamp)
+    return t.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def timespan(delta):
+    if delta is not None:
+        return humanfriendly.format_timespan(delta)
+    else:
+        return delta
+
+
+JINJA_ENV = jinja2.Environment(loader=jinja2.PackageLoader('katsdpcontroller'),
+                               autoescape=True, trim_blocks=True)
+JINJA_ENV.filters['timestamp_utc'] = timestamp_utc
+JINJA_ENV.filters['timespan'] = timespan
 
 
 def lock_document(func):
@@ -94,6 +116,13 @@ class Task:
             'host': task.agent.host if task.agent else '-'
         }
 
+    def show_details(self, details):
+        # TODO: once the template has stabilised, load it at startup.
+        # For now it's very convenient to be able to edit it without
+        # restarting the master controller.
+        template = JINJA_ENV.get_template('task_details.html.j2')
+        details.text = template.render(task=self.task, now=time.time())
+
 
 class SubarrayProduct:
     """A single subarray-product within :class:`Session`"""
@@ -125,25 +154,34 @@ class SubarrayProduct:
     def _state_changed(self, doc, sensor, reading):
         self._state_widget.text = reading.value.name
 
+    def _task_selected(self, attr, old, new):
+        if len(new) == 1 and 0 <= new[0] < len(self._tasks):
+            self._tasks[new[0]].show_details(self._task_details)
+        else:
+            self._task_details.text = ''
+
     def _make_tasks(self):
         self._tasks = []
+        self._task_details = Div(text='', width=1000)
         data_source = ColumnDataSource({'name': [], 'state': [], 'mesos-state': [], 'host': []})
+        data_source.selected.on_change('indices', self._task_selected)
         order_graph = scheduler.subgraph(self.product.physical_graph, scheduler.DEPENDS_READY)
         for task in networkx.lexicographical_topological_sort(
                 order_graph.reverse(), key=lambda node: node.name):
             if isinstance(task, SDPPhysicalTaskBase):
                 self._tasks.append(Task(self.session, task, data_source))
         columns = [
-            TableColumn(field='name', title='Name'),
-            TableColumn(field='state', title='State'),
-            TableColumn(field='mesos-state', title='Mesos State'),
-            TableColumn(field='host', title='Host')
+            TableColumn(field='name', title='Name', width=400),
+            TableColumn(field='state', title='State', width=100),
+            TableColumn(field='mesos-state', title='Mesos State', width=150),
+            TableColumn(field='host', title='Host', width=200)
         ]
         table = DataTable(
             source=data_source,
-            columns=columns,
+            columns=columns, width=1000, height=600,
             index_position=None)
-        return Panel(child=table, title='Tasks')
+        table.sizing_mode = 'stretch_both'
+        return Panel(child=column(table, self._task_details), title='Tasks')
 
     def _make_capture_blocks(self):
         self._cb_data_source = ColumnDataSource({'name': [], 'state': []})
@@ -193,6 +231,7 @@ class Session(SensorWatcher):
 
     def modify_document(self, doc):
         doc.add_root(self._root)
+        doc.title = 'SDP master controller'
 
     @lock_document
     def _products_changed(self, doc, sensor, reading):

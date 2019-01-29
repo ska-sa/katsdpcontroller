@@ -6,7 +6,7 @@ aiokatcp
 aiomonitor
 async-timeout
 attrs==18.1.0              # via prometheus_async
-bokeh==1.0.0
+bokeh==1.0.4
 certifi                    # via requests
 chardet                    # via aiohttp, requests
 decorator
@@ -15,6 +15,7 @@ docker==3.4.1
 fakeredis                  # via katsdptelstate
 hiredis
 http-parser==0.8.3         # via pymesos
+humanfriendly==4.17
 idna                       # via requests
 idna-ssl                   # via aiohttp
 ipaddress                  # via katsdptelstate
