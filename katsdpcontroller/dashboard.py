@@ -7,6 +7,7 @@ import weakref
 import time
 import functools
 import threading
+import logging
 from datetime import datetime
 
 import networkx
@@ -54,6 +55,7 @@ class Dashboard:
     def __init__(self, sdp_controller):
         self._sdp_controller = sdp_controller
         self._app = self._make_app()
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
     def _use_event_loop(self, func, *args, **kwargs):
         @functools.wraps(func)
