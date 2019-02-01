@@ -10,7 +10,7 @@ setup(
     author="Simon Ratcliffe",
     maintainer="Bruce Merry",
     packages=find_packages(),
-    package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*']},
+    package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*', 'assets/*']},
     include_package_data=True,
     scripts=[
         "scripts/sdp_master_controller.py",
