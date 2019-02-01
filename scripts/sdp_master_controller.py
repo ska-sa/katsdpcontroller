@@ -78,24 +78,10 @@ async def run(loop, sched, server, http_handler):
 
 
 def init_dashboard(controller, opts):
-    from bokeh.server.server import Server
-    from bokeh.application.application import Application
     from katsdpcontroller.dashboard import Dashboard
 
     dashboard = Dashboard(controller)
-    app = Application()
-    app.add(dashboard)
-    if not opts.dashboard_allow_websocket_origin:
-        allow_websocket_origin = [
-            'localhost:{}'.format(opts.dashboard_port),
-            '{}:{}'.format(opts.external_hostname, opts.dashboard_port)
-        ]
-        # If external_hostname is localhost, avoid having a duplicate
-        allow_websocket_origin = list(set(allow_websocket_origin))
-    else:
-        allow_websocket_origin = opts.dashboard_allow_websocket_origin
-    server = Server(app, port=opts.dashboard_port, allow_websocket_origin=allow_websocket_origin)
-    server.start()
+    dashboard.start()
 
 
 if __name__ == "__main__":
