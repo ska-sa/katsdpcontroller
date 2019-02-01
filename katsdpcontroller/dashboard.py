@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import json
 import time
 import threading
 import logging
@@ -75,14 +76,27 @@ class Dashboard:
                    id='no-subarray-products'),
             dcc.Tabs(id='subarray-product-tabs'),
             html.Div(id='subarray-product-content', children=[
-                dash_table.DataTable(
-                    id='task-table',
-                    columns=[{'name': 'Name', 'id': 'name'},
-                             {'name': 'State', 'id': 'state'},
-                             {'name': 'Mesos State', 'id': 'mesos-state'},
-                             {'name': 'Host', 'id': 'host'}],
-                    sorting=True),
-                html.Div(id='task-details')
+                html.P(html.Strong(id='subarray-product-state')),
+                dcc.Tabs(id='subarray-product-subtabs', children=[
+                    dcc.Tab(label='Tasks', children=html.Div([
+                        dash_table.DataTable(
+                            id='task-table',
+                            columns=[{'name': 'Name', 'id': 'name'},
+                                     {'name': 'State', 'id': 'state'},
+                                     {'name': 'Mesos State', 'id': 'mesos-state'},
+                                     {'name': 'Host', 'id': 'host'}],
+                            sorting=True),
+                        html.Div(id='task-details')
+                    ])),
+                    dcc.Tab(label='Config', children=html.Pre(id='subarray-product-config')),
+                    dcc.Tab(label='Capture blocks', children=html.Div([
+                        dash_table.DataTable(
+                            id='capture-block-table',
+                            columns=[{'name': 'ID', 'id': 'name'},
+                                     {'name': 'State', 'id': 'state'}],
+                            sorting=True)
+                    ]))
+                ])
             ])
         ])
 
@@ -113,6 +127,17 @@ class Dashboard:
         async def make_tabs(n_intervals):
             return [dcc.Tab(label=product, value=product)
                     for product in sorted(sdp_controller.subarray_products.keys())]
+
+        @app.callback(Output('subarray-product-state', 'children'),
+                      [Input('subarray-product-tabs', 'value'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_subarray_product_state(product_name, n_intervals):
+            product = sdp_controller.subarray_products.get(product_name)
+            if product is None:
+                return ''
+            else:
+                return product.state.name
 
         @app.callback(Output('task-table', 'data'),
                       [Input('subarray-product-tabs', 'value'),
@@ -153,6 +178,29 @@ class Dashboard:
             template = JINJA_ENV.get_template('task_details.html.j2')
             value = template.render(task=task, now=time.time())
             return DangerouslySetInnerHTML(value)
+
+        @app.callback(Output('subarray-product-config', 'children'),
+                      [Input('subarray-product-tabs', 'value'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_subarray_product_config(product_name, n_intervals):
+            product = sdp_controller.subarray_products.get(product_name)
+            if product is None:
+                return ''
+            else:
+                return json.dumps(product.config, indent=2, sort_keys=True)
+                return []
+
+        @app.callback(Output('capture-block-table', 'data'),
+                      [Input('subarray-product-tabs', 'value'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_capture_block_table(product_name, n_intervals):
+            product = sdp_controller.subarray_products.get(product_name)
+            if product is None:
+                return []
+            return [{'name': name, 'state': capture_block.state.name}
+                    for name, capture_block in sorted(product.capture_blocks.items())]
 
         return app
 
