@@ -85,6 +85,7 @@ class Dashboard:
                                      {'name': 'State', 'id': 'state'},
                                      {'name': 'Mesos State', 'id': 'mesos-state'},
                                      {'name': 'Host', 'id': 'host'}],
+                            style_cell={'textAlign': 'left'},
                             sorting=True),
                         html.Div(id='task-details')
                     ])),
@@ -94,6 +95,7 @@ class Dashboard:
                             id='capture-block-table',
                             columns=[{'name': 'ID', 'id': 'name'},
                                      {'name': 'State', 'id': 'state'}],
+                            style_cell={'textAlign': 'left'},
                             sorting=True)
                     ]))
                 ])
