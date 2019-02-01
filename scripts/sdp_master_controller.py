@@ -81,7 +81,7 @@ def init_dashboard(controller, opts):
     from katsdpcontroller.dashboard import Dashboard
 
     dashboard = Dashboard(controller)
-    dashboard.start()
+    dashboard.start(opts.dashboard_port)
 
 
 if __name__ == "__main__":
@@ -104,10 +104,7 @@ if __name__ == "__main__":
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
-                        help='port for the Bokeh backend for the GUI [%(default)s]')
-    parser.add_argument('--dashboard-allow-websocket-origin', action='append', metavar='ORIGIN',
-                        help='origin where browsers will access the dashboard (can be repeated) '
-                             '[localhost, --external-hostname]')
+                        help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')

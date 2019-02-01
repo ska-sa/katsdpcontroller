@@ -1,4 +1,4 @@
-"""Bokeh-based dashboard"""
+"""Dash-based dashboard"""
 
 import asyncio
 import functools
@@ -158,7 +158,7 @@ class Dashboard:
 
         return app
 
-    def start(self):
-        thread = threading.Thread(target=self._app.run_server)
+    def start(self, port):
+        thread = threading.Thread(target=self._app.run_server, args=[port])
         thread.daemon = True
         thread.start()
