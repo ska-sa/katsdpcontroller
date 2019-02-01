@@ -2,10 +2,7 @@
 
 import asyncio
 import functools
-import json
-import weakref
 import time
-import functools
 import threading
 import logging
 from datetime import datetime
@@ -127,10 +124,11 @@ class Dashboard:
                 return {}
             tasks = _get_tasks(product)
             data = [
-                {'name': task.logical_node.name,
-                 'state': task.state.name,
-                 'mesos-state': task.status.state if task.status else '-',
-                 'host': task.agent.host if task.agent else '-'
+                {
+                    'name': task.logical_node.name,
+                    'state': task.state.name,
+                    'mesos-state': task.status.state if task.status else '-',
+                    'host': task.agent.host if task.agent else '-'
                 } for task in tasks
             ]
             return data
