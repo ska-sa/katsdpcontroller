@@ -49,6 +49,32 @@ def _get_tasks(product):
     return tasks
 
 
+def _get_batch_tasks(product):
+    tasks = []
+    for name, capture_block in sorted(product.capture_blocks.items()):
+        graph = capture_block.postprocess_physical_graph
+        if graph is not None:
+            for task in graph.nodes:
+                if isinstance(task, SDPPhysicalTaskBase):
+                    tasks.append((name, task))
+    return tasks
+
+
+def _make_task_details(tasks, active_cell):
+    if active_cell is None:
+        return []
+    row = active_cell[0]
+    if not 0 <= row < len(tasks):
+        return []
+    task = tasks[row]
+    # TODO: once the template has stabilised, load it at startup.
+    # For now it's very convenient to be able to edit it without
+    # restarting the master controller.
+    template = JINJA_ENV.get_template('task_details.html.j2')
+    value = template.render(task=task, now=time.time())
+    return DangerouslySetInnerHTML(value)
+
+
 class Dashboard:
     def __init__(self, sdp_controller):
         self._sdp_controller = sdp_controller
@@ -97,6 +123,19 @@ class Dashboard:
                                      {'name': 'State', 'id': 'state'}],
                             style_cell={'textAlign': 'left'},
                             sorting=True)
+                    ])),
+                    dcc.Tab(label='Batch jobs', children=html.Div([
+                        dash_table.DataTable(
+                            id='batch-table',
+                            columns=[{'name': 'Name', 'id': 'name'},
+                                     {'name': 'Capture Block', 'id': 'capture_block_id'},
+                                     {'name': 'State', 'id': 'state'},
+                                     {'name': 'Mesos State', 'id': 'mesos-state'},
+                                     {'name': 'Host', 'id': 'host'},
+                                     {'name': 'Runtime', 'id': 'runtime'}],
+                            style_cell={'textAlign': 'left'},
+                            sorting=True),
+                        html.Div(id='batch-details')
                     ]))
                 ])
             ])
@@ -167,19 +206,9 @@ class Dashboard:
         @use_event_loop
         async def make_task_details(product_name, active_cell, n_intervals):
             product = sdp_controller.subarray_products.get(product_name)
-            if product is None or active_cell is None:
+            if product is None:
                 return []
-            tasks = _get_tasks(product)
-            row = active_cell[0]
-            if not 0 <= row < len(tasks):
-                return []
-            task = tasks[row]
-            # TODO: once the template has stabilised, load it at startup.
-            # For now it's very convenient to be able to edit it without
-            # restarting the master controller.
-            template = JINJA_ENV.get_template('task_details.html.j2')
-            value = template.render(task=task, now=time.time())
-            return DangerouslySetInnerHTML(value)
+            return _make_task_details(_get_tasks(product), active_cell)
 
         @app.callback(Output('subarray-product-config', 'children'),
                       [Input('subarray-product-tabs', 'value'),
@@ -203,6 +232,42 @@ class Dashboard:
                 return []
             return [{'name': name, 'state': capture_block.state.name}
                     for name, capture_block in sorted(product.capture_blocks.items())]
+
+        @app.callback(Output('batch-table', 'data'),
+                      [Input('subarray-product-tabs', 'value'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_batch_table(product_name, n_intervals):
+            product = sdp_controller.subarray_products.get(product_name)
+            if product is None:
+                return []
+            tasks = _get_batch_tasks(product)
+            now = time.time()
+            data = [
+                {
+                    'capture_block_id': capture_block_id,
+                    'name': task.logical_node.name,
+                    'state': task.state.name,
+                    'mesos-state': task.status.state if task.status else '-',
+                    'host': task.agent.host if task.agent else '-',
+                    'runtime':
+                        humanfriendly.format_timespan(now - task.start_time)
+                        if task.start_time is not None else '-'
+                } for (capture_block_id, task) in tasks
+            ]
+            return data
+
+        @app.callback(Output('batch-details', 'children'),
+                      [Input('subarray-product-tabs', 'value'),
+                       Input('batch-table', 'active_cell'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_batch_details(product_name, active_cell, n_intervals):
+            product = sdp_controller.subarray_products.get(product_name)
+            if product is None:
+                return []
+            tasks = [task for (capture_block_id, task) in _get_batch_tasks(product)]
+            return _make_task_details(tasks, active_cell)
 
         return app
 
