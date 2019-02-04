@@ -1273,10 +1273,6 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         Whether this is a develop-mode config
     """
     src_multicast = find_node(g, 'multicast.' + src_name)
-    if isinstance(info, BeamformerInfo):
-        src_info = info.src_info
-    else:
-        src_info = info
 
     bf_ingest = SDPLogicalTask(node_name)
     bf_ingest.image = 'katsdpbfingest'
@@ -1285,10 +1281,9 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     bf_ingest.cores = ['disk', 'network']
     bf_ingest.capabilities.append('SYS_NICE')
     if timeplot or not ram:
-        # bf_ingest accumulates 512 frames in the ring buffer. It's not a
-        # lot of memory, so to be on the safe side we double everything.
-        # Values are int8*2.  Allow 512MB for various buffers.
-        bf_ingest.mem = 1024 * _mb(info.size) + 512
+        # Actual usage is about 600MB, more-or-less independent of the
+        # parameters.
+        bf_ingest.mem = 1024
     else:
         # When writing to tmpfs, the file is accounted as memory to our
         # process, so we need more memory allocation than there is
@@ -1311,19 +1306,11 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
     def make_beamformer_engineering_pol_config(task, resolver):
-        # Temporary until CBF provide a packet size sensor (CBFTASKS-748)
-        # Size refers to SPEAD packet, so includes payload plus ~64 bytes of headers
-        if src_info.n_channels == 1024 and src_info.n_channels_per_substream == 4:
-            max_packet = 2200
-        else:
-            max_packet = 4200
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
             'ibv': not develop,
-            'stream_name': src_name,
-            'max_packet': max_packet,
-            'buffer_size': max_packet * 32767   # Maximum we can use on ConnectX-5
+            'stream_name': src_name
         }
         if timeplot:
             config.update({
