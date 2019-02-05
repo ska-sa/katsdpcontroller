@@ -177,12 +177,18 @@ import jsonschema
 from decorator import decorator
 from addict import Dict
 import pymesos
+import prometheus_client
 
 import aiohttp.web
 
 from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
+
+
+TASKS_IN_STATE = prometheus_client.Gauge(
+    'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
+    ['queue', 'state'])
 
 
 #: Mesos task states that indicate that the task is dead
@@ -1876,6 +1882,8 @@ class PhysicalTask(PhysicalNode):
         :attr:`state`, but if we receive notifications out-of-order from Mesos
         then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
         is guaranteed to be in sync.
+    start_time : float
+        Timestamp at which status became TASK_RUNNING
     ports : dict
         Maps port names given in the logical task to port numbers.
     cores : dict
@@ -1884,6 +1892,8 @@ class PhysicalTask(PhysicalNode):
         Information about the agent on which this task is running.
     agent_id : str
         Slave ID of the agent on which this task is running
+    queue : :class:`LaunchQueue`
+        The queue on which this task was (most recently) launched
     """
     def __init__(self, logical_task, loop):
         super().__init__(logical_task, loop)
@@ -1893,6 +1903,7 @@ class PhysicalTask(PhysicalNode):
         self.allocation = None
         self.status = None
         self.start_time = None
+        self._queue = None
         for name, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
                 setattr(self, name, {})
@@ -2091,6 +2102,15 @@ class PhysicalTask(PhysicalNode):
         args['resolver'] = resolver
         return args
 
+    def set_state(self, state):
+        if self._queue is not None:
+            self._queue.state_gauges[self.state].dec()
+        try:
+            super().set_state(state)
+        finally:
+            if self._queue is not None:
+                self._queue.state_gauges[self.state].inc()
+
     def set_status(self, status):
         self.status = status
         if status.state == 'TASK_RUNNING':
@@ -2102,6 +2122,26 @@ class PhysicalTask(PhysicalNode):
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
         super().kill(driver, **kwargs)
+
+    @property
+    def queue(self):
+        return self._queue
+
+    @queue.setter
+    def queue(self, queue):
+        if self._queue is not None:
+            self._queue.state_gauges[self.state].dec()
+        self._queue = queue
+        if self._queue is not None:
+            self._queue.state_gauges[self.state].inc()
+
+    def __del__(self):
+        # Avoid racking up counts if a launch is cancelled. However, once
+        # a task gets going (and presumably eventually gets to DEAD), leave
+        # it so that we can see how many tasks ran in total.
+        # The hasattr check is in case we somehow fail early in __init__.
+        if hasattr(self, '_queue') and self._queue is not None and self.state >= TaskState.STARTED:
+            self._queue.state_gauges[self.state].dec()
 
 
 def instantiate(logical_graph, loop):
@@ -2179,6 +2219,9 @@ class LaunchQueue:
         self.name = name
         self.priority = priority
         self._groups = deque()
+        self.state_gauges = {
+            state: TASKS_IN_STATE.labels(name, state.name) for state in TaskState
+        }
 
     def _clear_cancelled(self):
         while self._groups and self._groups[0].future.cancelled():
@@ -2198,6 +2241,9 @@ class LaunchQueue:
 
     def add(self, group):
         self._groups.append(group)
+        for node in group.nodes:
+            if isinstance(node, PhysicalTask):
+                node.queue = self
 
     def __iter__(self):
         return (group for group in self._groups if not group.future.cancelled())
