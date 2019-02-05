@@ -177,8 +177,7 @@ class Dashboard:
             product = sdp_controller.subarray_products.get(product_name)
             if product is None:
                 return ''
-            else:
-                return product.state.name
+            return product.state.name
 
         @app.callback(Output('task-table', 'data'),
                       [Input('subarray-product-tabs', 'value'),
@@ -218,9 +217,7 @@ class Dashboard:
             product = sdp_controller.subarray_products.get(product_name)
             if product is None:
                 return ''
-            else:
-                return json.dumps(product.config, indent=2, sort_keys=True)
-                return []
+            return json.dumps(product.config, indent=2, sort_keys=True)
 
         @app.callback(Output('capture-block-table', 'data'),
                       [Input('subarray-product-tabs', 'value'),
