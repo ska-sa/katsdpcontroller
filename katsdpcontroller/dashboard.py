@@ -92,9 +92,9 @@ class Dashboard:
     def _make_app(self):
         sdp_controller = self._sdp_controller
         use_event_loop = self._use_event_loop
-        app = dash.Dash(
-            __name__,
-            external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+        app = dash.Dash(__name__)
+        app.css.config.serve_locally = True
+        app.scripts.config.serve_locally = True
         app.title = 'SDP Master Controller'
         app.layout = html.Div([
             dcc.Interval(id='interval', interval=1000),    # 1s updates
