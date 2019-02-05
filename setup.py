@@ -10,7 +10,7 @@ setup(
     author="Simon Ratcliffe",
     maintainer="Bruce Merry",
     packages=find_packages(),
-    package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*']},
+    package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*', 'assets/*']},
     include_package_data=True,
     scripts=[
         "scripts/sdp_master_controller.py",
@@ -38,8 +38,11 @@ setup(
         'kazoo',
         'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
         'prometheus_async',
-        'bokeh',
-        'tornado>=5,<6'      # bokeh uses tornado, and tornado>=5 integrates with asyncio
+        'dash',
+        'dash-core-components',
+        'dash-html-components',
+        'dash-table',
+        'dash-dangerously-set-inner-html'
     ],
     tests_require=tests_require,
     extras_require={

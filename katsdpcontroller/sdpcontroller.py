@@ -187,6 +187,7 @@ class CaptureBlock:
         self.name = name
         self._state = CaptureBlockState.INITIALISING
         self.postprocess_task = None
+        self.postprocess_physical_graph = None
         self.dead_event = asyncio.Event(loop=loop)
         self.state_change_callback = None
 
@@ -820,6 +821,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         physical_graph = self._instantiate_physical_graph(self.postprocess_logical_graph,
                                                           capture_block.name)
+        capture_block.postprocess_physical_graph = physical_graph
         nodes = {node.logical_node.name: node for node in physical_graph}
         telstate_node = nodes['telstate']
         telstate_node.host = self.telstate_node.host

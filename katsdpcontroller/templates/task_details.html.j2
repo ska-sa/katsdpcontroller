@@ -1,3 +1,12 @@
+{% if task.gui_urls %}
+<h3>Links</h3>
+<ul>
+{% for url in task.gui_urls %}
+  <li><a href="{{url.href}}" title="{{url.description}}">{{url.title}}</a></li>
+{% endfor %}
+</ul>
+{% endif %}
+
 <h3>Command</h3>
 {% if task.taskinfo.command is defined %}
 <pre>

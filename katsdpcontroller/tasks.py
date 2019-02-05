@@ -121,6 +121,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self.name = '.'.join([self.subarray_product_id, logical_task.name])
         else:
             self.name = '.'.join([self.subarray_product_id, capture_block_id, logical_task.name])
+        self.gui_urls = []
         # dict of exposed KATCP sensors. This excludes the state sensors, which
         # are present even when the process is not running.
         self.sensors = {}
@@ -203,7 +204,7 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
 
-        gui_urls = []
+        self.gui_urls = gui_urls = []
         for entry in self.logical_node.gui_urls:
             gui_urls.append({})
             for key, value in entry.items():
