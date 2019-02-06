@@ -1048,7 +1048,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
     return cal_group
 
 
-def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps):
+def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps, max_accum_dumps):
     """Compute memory requirement (in MB) for vis_writer or flag_writer"""
     # Estimate the size of the memory pool. An extra item is added because
     # the value is copied when added to the rechunker, although this does
@@ -1056,8 +1056,8 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps):
     heap_size = dump_size / n_substreams
     memory_pool = (3 + 4 * n_substreams) * heap_size
     # Estimate the size of the in-flight objects for the workers.
-    # TODO: this doesn't account for any time accumulation
     write_queue = buffer_dumps * dump_size
+    accum_buffers = max_accum_dumps * dump_size if max_accum_dumps > 1 else 0
 
     # Socket buffer allocated per endpoint, but it is bounded at 256MB by the
     # OS config.
@@ -1065,7 +1065,20 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps):
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    return 2 * _mb(memory_pool + write_queue + socket_buffers) + 256
+    return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 256
+
+
+def _writer_max_accum_dumps(info):
+    """Compute value of --obj-max-dumps for data writers"""
+    # Allow time accumulation up to 10 minutes (to bound data loss) or 16GB (to
+    # bound memory usage).
+    limit = min(600.0 / info.int_time, 16 * 1024**3 / info.size)
+    # katsdpdatawriter only uses powers of two. While it would be legal to
+    # pass a non-power-of-two as the max, we would be wasting memory.
+    max_accum_dumps = 1
+    while max_accum_dumps * 2 <= limit:
+        max_accum_dumps *= 2
+    return max_accum_dumps
 
 
 def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
@@ -1082,15 +1095,18 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
     workers = 4
-    # Buffer enough dumps for 45 seconds
+    # Buffer enough data for 45 seconds. We've seen the disk system throw a fit
+    # and hang for 30 seconds at a time, and this should allow us to ride that
+    # out.
     buffer_dumps = int(math.ceil(45.0 / info.int_time))
+    max_accum_dumps = _writer_max_accum_dumps(info)
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
     vis_writer.mem = _writer_mem_mb(info.size, WRITER_OBJECT_SIZE, n_substreams,
-                                    workers, buffer_dumps)
+                                    workers, buffer_dumps, max_accum_dumps)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1111,6 +1127,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
             'l0_name': name,
             'l0_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['url'],
@@ -1145,12 +1162,13 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     # system throw a fit and hang for 30 seconds at a time, and this should
     # allow us to ride that out.
     buffer_dumps = int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO))
+    max_accum_dumps = _writer_max_accum_dumps(info)
 
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
     flag_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
     flag_writer.mem = _writer_mem_mb(info.flag_size, WRITER_OBJECT_SIZE, n_substreams,
-                                     workers, buffer_dumps)
+                                     workers, buffer_dumps, max_accum_dumps)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1182,6 +1200,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
             'flags_name': name,
             'flags_interface': task.interfaces['sdp_10g'].name,
             'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['url'],
