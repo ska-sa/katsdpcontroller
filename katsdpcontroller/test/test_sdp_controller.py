@@ -704,6 +704,7 @@ class TestSDPController(BaseTestSDPController):
             's3_endpoint_url': 'http://archive.s3.invalid/',
             'workers': mock.ANY,
             'buffer_dumps': mock.ANY,
+            'obj_max_dumps': mock.ANY,
             'direct_write': True,
             'override_test': 'value'
         }, immutable=True)
