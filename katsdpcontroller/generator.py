@@ -1068,15 +1068,20 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps, max
     return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 256
 
 
-def _writer_max_accum_dumps(info):
+def _writer_max_accum_dumps(config, name):
     """Compute value of --obj-max-dumps for data writers"""
-    # Allow time accumulation up to 10 minutes (to bound data loss) or 16GB (to
+    info = L0Info(config, name)
+    # Allow time accumulation up to 5 minutes (to bound data loss) or 4GB (to
     # bound memory usage).
-    limit = min(600.0 / info.int_time, 16 * 1024**3 / info.size)
+    limit = min(300.0 / info.int_time, 4 * 1024**3 / info.size)
+    # Compute how many are needed to allow weights/flags to achieve the target
+    # object size. The scaling by n_ingest_nodes is because this is also the
+    # number of substreams, and katsdpdatawriter doesn't weld substreams.
+    needed = WRITER_OBJECT_SIZE / info.flag_size * n_ingest_nodes(config, name)
     # katsdpdatawriter only uses powers of two. While it would be legal to
     # pass a non-power-of-two as the max, we would be wasting memory.
     max_accum_dumps = 1
-    while max_accum_dumps * 2 <= limit:
+    while max_accum_dumps * 2 <= min(needed, limit):
         max_accum_dumps *= 2
     return max_accum_dumps
 
@@ -1095,11 +1100,11 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
     workers = 4
+    max_accum_dumps = _writer_max_accum_dumps(config, name)
     # Buffer enough data for 45 seconds. We've seen the disk system throw a fit
     # and hang for 30 seconds at a time, and this should allow us to ride that
     # out.
-    buffer_dumps = int(math.ceil(45.0 / info.int_time))
-    max_accum_dumps = _writer_max_accum_dumps(info)
+    buffer_dumps = max(max_accum_dumps, int(math.ceil(45.0 / info.int_time)))
     src_multicast = find_node(g, 'multicast.' + name)
     n_substreams = src_multicast.n_addresses
 
@@ -1126,7 +1131,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
         conf = {
             'l0_name': name,
             'l0_interface': task.interfaces['sdp_10g'].name,
-            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'obj_size_mb': WRITER_OBJECT_SIZE / 1e6,
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
@@ -1158,11 +1163,11 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 4
+    max_accum_dumps = _writer_max_accum_dumps(config, l0_name)
     # Buffer enough data for 45 seconds of real time. We've seen the disk
     # system throw a fit and hang for 30 seconds at a time, and this should
     # allow us to ride that out.
-    buffer_dumps = int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO))
-    max_accum_dumps = _writer_max_accum_dumps(info)
+    buffer_dumps = max(max_accum_dumps, int(math.ceil(45.0 / info.int_time * FLAGS_RATE_RATIO)))
 
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
@@ -1199,7 +1204,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
         conf = {
             'flags_name': name,
             'flags_interface': task.interfaces['sdp_10g'].name,
-            'obj_size_mb': _mb(WRITER_OBJECT_SIZE),
+            'obj_size_mb': WRITER_OBJECT_SIZE / 1e6,
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
