@@ -56,7 +56,7 @@ OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 #: Target size of objects in the object store
-WRITER_OBJECT_SIZE = 10e6    # 10 MB
+WRITER_OBJECT_SIZE = 20e6    # 20 MB
 
 logger = logging.getLogger(__name__)
 
