@@ -812,7 +812,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             # We want to wait for all the futures to complete, even if one of
             # them fails early (to give the others time to do cleanup). But
             # then we want to raise the first exception.
-            results = await asyncio.gather(*futures.values(), return_exceptions=True, loop=loop)
+            results = await asyncio.gather(*futures.values(), loop=loop, return_exceptions=True)
             for result in results:
                 if isinstance(result, Exception):
                     raise result
