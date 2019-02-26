@@ -735,7 +735,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     async def _exec_node_transition(self, node, reqs, deps, state, capture_block):
         try:
             if deps:
-                await asyncio.gather(*deps, loop=node.loop)
+                # If we're starting a capture and a dependency fails, there is
+                # no point trying to continue. On the shutdown path, we should
+                # continue anyway to try to close everything off as neatly as
+                # possible.
+                await asyncio.gather(*deps, loop=node.loop,
+                                     return_exceptions=(state != CaptureBlockState.CAPTURING))
             if reqs:
                 if node.katcp_connection is None:
                     self.logger.warning(
@@ -804,7 +809,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             loop = node.loop
             futures[node] = task
         if futures:
-            await asyncio.gather(*futures.values(), loop=loop)
+            # We want to wait for all the futures to complete, even if one of
+            # them fails early (to give the others time to do cleanup). But
+            # then we want to raise the first exception.
+            results = await asyncio.gather(*futures.values(), loop=loop, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
 
     async def capture_init_impl(self, capture_block):
         self.telstate.add('sdp_capture_block_id', capture_block.name)

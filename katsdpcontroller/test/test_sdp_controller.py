@@ -957,6 +957,9 @@ class TestSDPController(BaseTestSDPController):
         self.fail_requests.add('capture-done')
         reply, informs = await self.client.request("capture-init", SUBARRAY_PRODUCT4)
         await self.assert_request_fails("capture-done", SUBARRAY_PRODUCT4)
+        # check that the subsequent transitions still run
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_called_with('write-meta', '123456789', True)
         # check that the subarray is in an appropriate state
         sa = self.server.subarray_products[SUBARRAY_PRODUCT4]
         self.assertEqual(ProductState.ERROR, sa.state)
