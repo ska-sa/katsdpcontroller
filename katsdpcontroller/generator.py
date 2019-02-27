@@ -29,7 +29,6 @@ CAPTURE_TRANSITIONS = {
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
-    'beamform',
     'katcbfsim',
     'katsdpbfingest',
     'katsdpcal',
@@ -1225,52 +1224,6 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
     return flag_writer
 
 
-def _make_beamformer_ptuse(g, config, name):
-    output = config['outputs'][name]
-    srcs = output['src_streams']
-    info = [BeamformerInfo(config, name, src) for src in srcs]
-
-    bf_ingest = SDPLogicalTask('bf_ingest.' + name)
-    bf_ingest.image = 'beamform'
-    bf_ingest.command = ['ptuse_ingest.py']
-    bf_ingest.ports = ['port']
-    bf_ingest.gpus = [scheduler.GPURequest()]
-    # TODO: revisit once coherent dedispersion is in use, when multiple
-    # GPUs may be needed.
-    bf_ingest.gpus[0].compute = 1.0
-    bf_ingest.gpus[0].mem = 7 * 1024  # Overkill for now, but may be needed for dedispersion
-    bf_ingest.cpus = 4
-    bf_ingest.cores = ['capture0', 'capture1', 'processing', 'python']
-    # 32GB of psrdada buffers, regardless of channels
-    # 4GB to handle general process stuff
-    bf_ingest.mem = 36 * 1024
-    bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True, affinity=True)]
-    bf_ingest.interfaces[0].bandwidth_in = sum(x.net_bandwidth for x in info)
-    bf_ingest.volumes = [scheduler.VolumeRequest('data', '/data', 'RW')]
-    # If the kernel is < 3.16, the default values are very low. Set
-    # the values to the default from more recent Linux versions
-    # (https://github.com/torvalds/linux/commit/060028bac94bf60a65415d1d55a359c3a17d5c31)
-    bf_ingest.taskinfo.container.docker.parameters = [
-        {'key': 'sysctl', 'value': 'kernel.shmmax=18446744073692774399'},
-        {'key': 'sysctl', 'value': 'kernel.shmall=18446744073692774399'}
-    ]
-    bf_ingest.transitions = CAPTURE_TRANSITIONS
-    g.add_node(bf_ingest, config=lambda task, resolver: {
-        'cbf_channels': info[0].n_channels,
-        'affinity': [task.cores['capture0'],
-                     task.cores['capture1'],
-                     task.cores['processing'],
-                     task.cores['python']],
-        'interface': task.interfaces['cbf'].name
-    })
-    for src, pol in zip(srcs, 'xy'):
-        g.add_edge(bf_ingest, find_node(g, 'multicast.' + src), port='spead',
-                   depends_resolve=True, depends_init=True, depends_ready=True,
-                   config=lambda task, resolver, endpoint, pol=pol: {
-                       'cbf_spead{}'.format(pol): str(endpoint)})
-    return bf_ingest
-
-
 def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram, idx, develop):
     """Generate node for a single polarisation of beamformer engineering output.
 
@@ -1505,8 +1458,6 @@ def build_logical_graph(config):
                     # Pass l0 name to flag writer to allow calc of bandwidths and sizes
                     flags_l0_name = config['outputs'][flags_name]['src_streams'][0]
                     _make_flag_writer(g, config, flags_name, flags_l0_name, 'archive', local=True)
-    for name in outputs.get('sdp.beamformer', []):
-        _make_beamformer_ptuse(g, config, name)
     for name in outputs.get('sdp.beamformer_engineering', []):
         _make_beamformer_engineering(g, config, name)
 
