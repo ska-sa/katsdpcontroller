@@ -233,9 +233,9 @@ async def main():
                 cfg.flush()
                 if haproxy is None:
                     haproxy = await asyncio.create_subprocess_exec(
-                        '/usr/sbin/haproxy', '-p', pidfile.name, '-f', cfg.name)
+                        '/usr/sbin/haproxy', '-W', '-p', pidfile.name, '-f', cfg.name)
                 else:
-                    haproxy.send_signal(signal.SIGHUP)
+                    haproxy.send_signal(signal.SIGUSR2)
                 server_dict = {pretty(array_stream): "http://{}".format(server)
                                for array_stream, server in servers.items()}
                 for _ws in app['websockets']:
