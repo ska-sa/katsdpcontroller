@@ -269,6 +269,7 @@ class Dashboard:
         return app
 
     def start(self, port):
-        thread = threading.Thread(target=self._app.run_server, args=[port])
+        thread = threading.Thread(target=self._app.run_server,
+                                  kwargs={'port': port, 'host': '0.0.0.0'})
         thread.daemon = True
         thread.start()
