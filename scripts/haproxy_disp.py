@@ -233,7 +233,7 @@ async def main():
                 cfg.flush()
                 if haproxy is None:
                     haproxy = await asyncio.create_subprocess_exec(
-                        '/usr/sbin/haproxy-systemd-wrapper', '-p', pidfile.name, '-f', cfg.name)
+                        '/usr/sbin/haproxy', '-p', pidfile.name, '-f', cfg.name)
                 else:
                     haproxy.send_signal(signal.SIGHUP)
                 server_dict = {pretty(array_stream): "http://{}".format(server)
