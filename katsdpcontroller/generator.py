@@ -566,10 +566,11 @@ def _make_timeplot(g, name, description,
     timeplot.command = ['time_plot.py']
     timeplot.cpus = cpus
     # timeplot_buffer covers only the visibilities, but there are also flags
-    # and various auxiliary buffers. Add 20% to give some headroom, and also
+    # and various auxiliary buffers. Add 50% to give some headroom, and also
     # add a fixed amount since in very small arrays the 20% might not cover
-    # the fixed-sized overheads.
-    timeplot.mem = timeplot_buffer_mb * 1.2 + 256
+    # the fixed-sized overheads (previously this was 20% but that seems to be
+    # insufficient).
+    timeplot.mem = timeplot_buffer_mb * 1.5 + 256
     timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     timeplot.interfaces[0].bandwidth_in = bandwidth
     timeplot.ports = ['html_port']
