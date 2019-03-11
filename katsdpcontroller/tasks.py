@@ -290,6 +290,15 @@ class SDPPhysicalTaskBase(scheduler.PhysicalTask):
             self._capture_blocks_empty.set()
 
     async def graceful_kill(self, driver, **kwargs):
+        try:
+            if self.logical_node.wait_capture_blocks_dead:
+                capture_blocks = kwargs.get('capture_blocks', {})
+                # Explicitly copy the values because it will mutate
+                for capture_block in list(capture_blocks.values()):
+                    await capture_block.dead_event.wait()
+        except Exception:
+            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
+
         self.logger.info('Waiting for capture blocks on %s', self.name)
         await self._capture_blocks_empty.wait()
         self.logger.info('All capture blocks for %s completed', self.name)
@@ -510,17 +519,6 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskBase):
             msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
             self.logger.warning('%s', msg)
             raise FailReply(msg) from error
-
-    async def graceful_kill(self, driver, **kwargs):
-        try:
-            if self.logical_node.wait_capture_blocks_dead:
-                capture_blocks = kwargs.get('capture_blocks', {})
-                # Explicitly copy the values because it will mutate
-                for capture_block in list(capture_blocks.values()):
-                    await capture_block.dead_event.wait()
-        except Exception:
-            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
-        await super().graceful_kill(driver, **kwargs)
 
 
 class LogicalGroup(scheduler.LogicalExternal):
