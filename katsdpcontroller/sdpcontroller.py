@@ -845,11 +845,17 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         batch = []
         for node in physical_graph:
             if isinstance(node, scheduler.PhysicalTask):
-                coro = self.sched.batch_run(
-                    physical_graph, self.resolver, [node], queue=self.batch_queue,
-                    resources_timeout=7*86400, attempts=3)
-                batch.append(coro)
-        await asyncio.gather(*batch, loop=self.loop)
+                async def run(node):
+                    try:
+                        await self.sched.batch_run(
+                            physical_graph, self.resolver, [node], queue=self.batch_queue,
+                            resources_timeout=7*86400, attempts=3)
+                    except Exception:
+                        logger.exception('Batch task %s failed', node.name)
+                        # TODO: increment a counter somewhere
+
+                batch.append(run(node))
+        await asyncio.wait(batch, loop=self.loop)
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:
