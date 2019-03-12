@@ -487,14 +487,19 @@ class TestSDPController(BaseTestSDPController):
         # Future that is already resolved with no return value
         done_future = asyncio.Future()
         done_future.set_result(None)
-        # Mock TelescopeState, but preserve SEPARATOR in the mock
-        separator = katsdptelstate.TelescopeState.SEPARATOR
         self.create_patch('time.time', return_value=123456789.5)
         mock_getaddrinfo = self.create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
         # Workaround for Python bug that makes it think mocks are coroutines
         mock_getaddrinfo._is_coroutine = False
-        self.telstate_class = self.create_patch('katsdptelstate.TelescopeState', autospec=True)
-        self.telstate_class.SEPARATOR = separator
+        # Mock TelescopeState's constructor to create an in-memory telstate
+        orig_telstate_init = katsdptelstate.TelescopeState.__init__
+        self.telstate = None
+
+        def _telstate_init(obj, *args, **kwargs):
+            self.telstate = obj
+            orig_telstate_init(obj)
+        self.create_patch('katsdptelstate.TelescopeState.__init__', side_effect=_telstate_init,
+                          autospec=True)
         self.sensor_proxy_client_class = self.create_patch(
             'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
@@ -600,6 +605,7 @@ class TestSDPController(BaseTestSDPController):
                 if isinstance(node.logical_node, scheduler.LogicalTask):
                     node.allocation = mock.MagicMock()
                     node.allocation.agent.host = 'host.' + node.logical_node.name
+                    node.allocation.agent.agent_id = 'agent-id.' + node.logical_node.name
                     node.allocation.agent.gpus[0].name = 'GeForce GTX TITAN X'
                     for request in node.logical_node.interfaces:
                         interface = mock.Mock()
@@ -665,6 +671,11 @@ class TestSDPController(BaseTestSDPController):
         reply, informs = await self.client.request(*self._configure_args(subarray_product))
         return reply[0]
 
+    def assert_immutable(self, key, value):
+        """Check the value of a telstate key and also that it is immutable"""
+        self.assertEqual(self.telstate[key], value)
+        self.assertTrue(self.telstate.is_immutable(key))
+
     async def test_product_configure_success(self):
         """A ?product-configure request must wait for the tasks to come up,
         then indicate success.
@@ -686,16 +697,14 @@ class TestSDPController(BaseTestSDPController):
             }''')
         name = await self._configure_subarray(SUBARRAY_PRODUCT4)
         self.assertEqual(SUBARRAY_PRODUCT4.encode('utf-8'), name)
-        self.telstate_class.assert_called_once_with('host.telstate:20000')
+        katsdptelstate.TelescopeState.__init__.assert_called_once_with(
+            mock.ANY, 'host.telstate:20000')
 
-        # Verify the telescope state
-        ts = self.telstate_class.return_value
-        # Print the list to assist in debugging if the assert fails
-        print(ts.add.call_args_list)
+        # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
         # is covered: base_params, per node, per edge
-        ts.add.assert_any_call('subarray_product_id', SUBARRAY_PRODUCT4, immutable=True)
-        ts.add.assert_any_call('config.vis_writer.sdp_l0', {
+        self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT4)
+        self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
             'obj_size_mb': mock.ANY,
@@ -711,9 +720,9 @@ class TestSDPController(BaseTestSDPController):
             'obj_max_dumps': mock.ANY,
             'direct_write': True,
             'override_test': 'value'
-        }, immutable=True)
+        })
         # Test that the output channel rounding was done correctly
-        ts.add.assert_any_call('config.ingest.sdp_l0_continuum_only', {
+        self.assert_immutable('config.ingest.sdp_l0_continuum_only', {
             'antenna_mask': mock.ANY,
             'cbf_spead': mock.ANY,
             'cbf_ibv': False,
@@ -729,7 +738,7 @@ class TestSDPController(BaseTestSDPController):
             'output_int_time': 1.996,
             'output_channels': '96:3488',
             'servers': 2
-        }, immutable=True)
+        })
 
         # Verify the state of the subarray
         self.assertEqual({}, self.server.override_dicts)
@@ -766,7 +775,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self):
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        self.telstate_class.side_effect = katsdptelstate.ConnectionError
+        katsdptelstate.TelescopeState.__init__.side_effect = katsdptelstate.ConnectionError
         await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
@@ -777,7 +786,8 @@ class TestSDPController(BaseTestSDPController):
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT4))
-        self.telstate_class.assert_called_once_with('host.telstate:20000')
+        katsdptelstate.TelescopeState.__init__.assert_called_once_with(
+            mock.ANY, 'host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must have cleaned up the subarray product internally
@@ -876,9 +886,7 @@ class TestSDPController(BaseTestSDPController):
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=False)
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         # Check that the override took effect
-        ts = self.telstate_class.return_value
-        print(ts.add.call_args_list)
-        ts.add.assert_any_call('config.sim.i0_baseline_correlation_products', {
+        self.assert_immutable('config.sim.i0_baseline_correlation_products', {
             'antenna_mask': ANTENNAS,
             'cbf_ibv': True,
             'cbf_channels': 4096,
@@ -890,12 +898,10 @@ class TestSDPController(BaseTestSDPController):
             'cbf_spead': '239.102.255.0+15:7148',
             'max_packet_size': mock.ANY,
             'servers': mock.ANY
-        }, immutable=True)
+        })
         # Check that the taskinfo override worked
-        ts.add.assert_any_call('sdp_task_details', mock.ANY, immutable=True)
-        for call in ts.add.call_args_list:
-            if call[0][0] == 'sdp_task_details':
-                task_details = call[0][1]
+        self.assert_immutable('sdp_task_details', mock.ANY)
+        task_details = self.telstate['sdp_task_details']
         self.assertTrue(
             task_details['sim.i0_baseline_correlation_products.1']['taskinfo']['command']['shell'])
 
