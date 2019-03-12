@@ -10,6 +10,8 @@ import networkx
 
 import addict
 
+import katdal
+import katdal.datasources
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
@@ -35,6 +37,7 @@ IMAGES = frozenset([
     'katsdpcam2telstate',
     'katsdpcontim',
     'katsdpdisp',
+    'katsdpimager',
     'katsdpingest_titanx',
     'katsdpdatawriter',
     'katsdpmetawriter',
@@ -1537,7 +1540,18 @@ def build_logical_graph(config):
     return g
 
 
-def _make_continuum_imager(g, config, name):
+def _imager_cpus(config):
+    return 24 if not is_develop(config) else 2
+
+
+def _stream_url(capture_block_id, stream_name):
+    url = 'redis://{endpoints[telstate_telstate]}/'
+    url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
+    url += '&stream_name={}'.format(urllib.parse.quote_plus(stream_name))
+    return url
+
+
+def _make_continuum_imager(g, config, capture_block_id, name):
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
@@ -1546,9 +1560,8 @@ def _make_continuum_imager(g, config, name):
         # Won't be any calibration solutions
         return None
 
-    data_url = 'redis://{endpoints[telstate_telstate]}/?capture_block_id={capture_block_id}'
-    data_url += '&stream_name={}.{}'.format(name, urllib.parse.quote_plus(l0_name))
-    cpus = 24 if not is_develop(config) else 2
+    data_url = _stream_url(capture_block_id, name + '.' + l0_name)
+    cpus = _imager_cpus(config)
 
     imager = SDPLogicalTask('continuum_image.' + name)
     imager.cpus = cpus
@@ -1577,14 +1590,73 @@ def _make_continuum_imager(g, config, name):
     return imager
 
 
-def build_postprocess_logical_graph(config):
+def _make_spectral_imager(g, config, capture_block_id, name, telstate):
+    # Trace back to find the visibility stream (required to open with katdal)
+    output = config['outputs'][name]
+    l1_flags_name = output['src_streams'][0]
+    l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
+    l0_info = L0Info(config, l0_name)
+    if l0_info.n_antennas < 4:
+        # Won't be any calibration solutions
+        return None
+    output_channels = output['output_channels']
+
+    # Identify all the targets
+    stream_name = name + '.' + l0_name
+    view, _, _ = katdal.datasources.view_l0_capture_stream(telstate, capture_block_id, stream_name)
+    datasource = katdal.datasources.TelstateDataSource(
+        view, capture_block_id, stream_name, chunk_store=None)
+    dataset = katdal.VisibilityDataV4(datasource)
+    for target in dataset.catalogue:
+        if 'target' not in target.tags:
+            continue
+        for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
+            first_channel = max(i, output_channels[0])
+            last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
+            if first_channel >= last_channel:
+                continue
+            imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
+                name, first_channel, last_channel, target.name))
+            imager.cpus = _imager_cpus(config)
+            # TODO: these resources are very rough estimates
+            imager.mem = 8192
+            imager.disk = 8192
+            imager.max_run_time = 3600     # 1 hour
+            imager.gpus = [scheduler.GPURequest()]
+            # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
+            # it can help improve parallelism). There is no memory enforcement, so
+            # don't bother reserving memory.
+            imager.gpus[0].compute = 1.0
+            imager.image = 'katsdpimager'
+            # TODO: add lots more options to the ICD
+            imager.command = [
+                'imager.py',
+                '-i', 'target={}'.format(target.description),
+                '-i', 'access-key={resolver.s3_config[continuum][read][access_key]}',
+                '-i', 'secret-key={resolver.s3_config[continuum][read][secret_key]}',
+                '--stokes', 'IQUV',
+                '--start-channel', str(first_channel),
+                '--stop-channel', str(last_channel),
+                '--major', '5',
+                '--weight-type', 'robust',
+                '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
+                '--no-tmp-file',
+                _stream_url(capture_block_id, stream_name),
+                '/mnt/mesos/sandbox/{}-%d.fits'.format(target.name)
+            ]
+            g.add_node(imager)
+
+
+def build_postprocess_logical_graph(config, capture_block_id, telstate):
     g = networkx.MultiDiGraph()
-    telstate = scheduler.LogicalExternal('telstate')
-    g.add_node(telstate)
+    telstate_node = scheduler.LogicalExternal('telstate')
+    g.add_node(telstate_node)
 
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.continuum_image':
-            _make_continuum_imager(g, config, name)
+            _make_continuum_imager(g, config, capture_block_id, name)
+        elif output['type'] == 'sdp.spectral_image':
+            _make_spectral_imager(g, config, capture_block_id, name, telstate)
 
     seen = set()
     for node in g:
@@ -1594,7 +1666,7 @@ def build_postprocess_logical_graph(config):
             seen.add(node.name)
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Connect every task to telstate
-            g.add_edge(node, telstate, port='telstate',
+            g.add_edge(node, telstate_node, port='telstate',
                        depends_ready=True, depends_kill=True)
 
     return g

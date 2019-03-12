@@ -250,7 +250,6 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
-        self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
         self.capture_blocks = {}              # live capture blocks, indexed by name
@@ -830,8 +829,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     async def postprocess_impl(self, capture_block):
         await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
-        physical_graph = self._instantiate_physical_graph(self.postprocess_logical_graph,
-                                                          capture_block.name)
+        logical_graph = generator.build_postprocess_logical_graph(
+            self.config, capture_block.name, self.telstate)
+        physical_graph = self._instantiate_physical_graph(
+            logical_graph, capture_block.name)
         capture_block.postprocess_physical_graph = physical_graph
         nodes = {node.logical_node.name: node for node in physical_graph}
         telstate_node = nodes['telstate']

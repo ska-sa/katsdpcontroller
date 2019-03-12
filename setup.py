@@ -33,6 +33,7 @@ setup(
         'pydotplus',
         'netifaces',
         'aiokatcp>=0.2',
+        'katdal',
         'katsdptelstate',
         'katsdpservices',
         'kazoo',
