@@ -423,7 +423,10 @@ def _make_meta_writer(g, config):
     ]
     meta_writer.cpus = 0.2
     # Only a base allocation: it also gets telstate_extra added
-    meta_writer.mem = 256
+    # meta_writer.mem = 256
+    # Temporary workaround for SR-1695, until the machines can have their
+    # kernels upgraded: give it the same memory as telescore state
+    meta_writer.mem = find_node(g, 'telstate').mem
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
