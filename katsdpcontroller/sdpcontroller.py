@@ -20,7 +20,7 @@ import networkx.drawing.nx_pydot
 import jsonschema
 import netifaces
 
-from prometheus_client import Histogram
+from prometheus_client import Histogram, Counter
 
 from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
@@ -36,6 +36,15 @@ BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
+POSTPROC_TASKS_STARTED = Counter(
+    'katsdpcontroller_postproc_tasks_started',
+    'Number of postprocessing tasks that have been scheduled')
+POSTPROC_TASKS_DONE = Counter(
+    'katsdpcontroller_postproc_tasks_done',
+    'Number of completed postprocessing tasks (including failed)')
+POSTPROC_TASKS_FAILED = Counter(
+    'katsdpcontroller_postproc_tasks_failed',
+    'Number of postprocessing tasks that failed (after all retries)')
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 _capture_block_names = set()      #: all capture block names used
 
@@ -853,10 +862,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                             resources_timeout=7*86400, attempts=3)
                     except Exception:
                         logger.exception('Batch task %s failed', node.name)
-                        # TODO: increment a counter somewhere
+                        POSTPROC_TASKS_FAILED.inc()
+                    finally:
+                        POSTPROC_TASKS_DONE.inc()
 
                 batch.append(run(node))
-        await asyncio.wait(batch, loop=self.loop)
+        POSTPROC_TASKS_STARTED.inc(len(batch))
+        await asyncio.gather(*batch, loop=self.loop)
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:

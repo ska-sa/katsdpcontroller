@@ -1601,6 +1601,14 @@ def _make_continuum_imager(g, config, capture_block_id, name):
     return imager
 
 
+def _get_targets(telstate, capture_block_id, stream_name):
+    view, _, _ = katdal.datasources.view_l0_capture_stream(telstate, capture_block_id, stream_name)
+    datasource = katdal.datasources.TelstateDataSource(
+        view, capture_block_id, stream_name, chunk_store=None)
+    dataset = katdal.VisibilityDataV4(datasource)
+    return dataset.catalogue
+
+
 def _make_spectral_imager(g, config, capture_block_id, name, telstate):
     # Trace back to find the visibility stream (required to open with katdal)
     output = config['outputs'][name]
@@ -1614,15 +1622,11 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
 
     # Identify all the targets
     stream_name = name + '.' + l0_name
-    view, _, _ = katdal.datasources.view_l0_capture_stream(telstate, capture_block_id, stream_name)
-    datasource = katdal.datasources.TelstateDataSource(
-        view, capture_block_id, stream_name, chunk_store=None)
-    dataset = katdal.VisibilityDataV4(datasource)
     # Target names could contain arbitrary characters, so they are first
     # normalised (which could cause collisions), and then if necessary a
     # unique suffix is added.
     target_names = set()
-    for target in dataset.catalogue:
+    for target in _get_targets(telstate, capture_block_id, stream_name):
         if 'target' not in target.tags:
             continue
         target_name = _normalise_target_name(target.name, target_names)
