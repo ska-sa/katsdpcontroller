@@ -1551,6 +1551,17 @@ def _stream_url(capture_block_id, stream_name):
     return url
 
 
+def _normalise_target_name(name, used):
+    name = re.sub(r'[^-A-Za-z0-9_]', '_', name)
+    if name not in used:
+        return name
+    else:
+        i = 1
+        while '{}_{}'.format(name, i) in used:
+            i += 1
+        return '{}_{}'.format(name, i)
+
+
 def _make_continuum_imager(g, config, capture_block_id, name):
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
@@ -1607,16 +1618,22 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
     datasource = katdal.datasources.TelstateDataSource(
         view, capture_block_id, stream_name, chunk_store=None)
     dataset = katdal.VisibilityDataV4(datasource)
+    # Target names could contain arbitrary characters, so they are first
+    # normalised (which could cause collisions), and then if necessary a
+    # unique suffix is added.
+    target_names = set()
     for target in dataset.catalogue:
         if 'target' not in target.tags:
             continue
+        target_name = _normalise_target_name(target.name, target_names)
+        target_names.add(target_name)
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
             if first_channel >= last_channel:
                 continue
             imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
-                name, first_channel, last_channel, target.name))
+                name, first_channel, last_channel, target_name))
             imager.cpus = _imager_cpus(config)
             # TODO: these resources are very rough estimates
             imager.mem = 8192
@@ -1642,7 +1659,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 '--no-tmp-file',
                 _stream_url(capture_block_id, stream_name),
-                '/mnt/mesos/sandbox/{}-%d.fits'.format(target.name)
+                '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
             g.add_node(imager)
 
