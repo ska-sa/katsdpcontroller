@@ -837,11 +837,16 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         telstate_node = nodes['telstate']
         telstate_node.host = self.telstate_node.host
         telstate_node.ports = dict(self.telstate_node.ports)
+        # This doesn't actually run anything, just marks the fake telstate node
+        # as READY. It could block for a while behind real tasks in the batch
+        # queue, but that doesn't matter because our real tasks will block too.
+        await self.sched.launch(physical_graph, self.resolver, [telstate_node],
+                                queue=self.batch_queue)
         batch = []
         for node in physical_graph:
             if isinstance(node, scheduler.PhysicalTask):
                 coro = self.sched.batch_run(
-                    physical_graph, self.resolver, [telstate_node, node], queue=self.batch_queue,
+                    physical_graph, self.resolver, [node], queue=self.batch_queue,
                     resources_timeout=7*86400, attempts=3)
                 batch.append(coro)
         await asyncio.gather(*batch, loop=self.loop)
