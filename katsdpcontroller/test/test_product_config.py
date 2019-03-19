@@ -342,7 +342,10 @@ class TestValidate:
         self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = True
         config = product_config.normalise(self.config_v1_0)
         expected = self.config
-        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {
+            "clock_ratio": 1.0,
+            "sources": []
+        }
         expected["inputs"]["i0_tied_array_channelised_voltage_0x"]["simulate"] = False
         expected["inputs"]["i0_tied_array_channelised_voltage_0y"]["simulate"] = False
         expected["outputs"]["l0"]["excise"] = True
@@ -366,7 +369,10 @@ class TestValidate:
         del self.config["outputs"]["continuum_image"]["mfimage_parameters"]
         del self.config["outputs"]["spectral_image"]["output_channels"]
 
-        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {
+            "clock_ratio": 1.0,
+            "sources": []
+        }
         expected["inputs"]["i0_tied_array_channelised_voltage_0x"]["simulate"] = False
         expected["inputs"]["i0_tied_array_channelised_voltage_0y"]["simulate"] = False
         expected["outputs"]["l0"]["excise"] = True

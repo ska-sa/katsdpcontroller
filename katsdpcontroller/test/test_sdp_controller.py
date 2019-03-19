@@ -773,7 +773,8 @@ class TestSDPController(BaseTestSDPController):
             'sd_int_time': 1.996,
             'output_int_time': 1.996,
             'output_channels': '96:3488',
-            'servers': 2
+            'servers': 2,
+            'clock_ratio': 1.0
         })
 
         # Verify the state of the subarray
@@ -930,6 +931,7 @@ class TestSDPController(BaseTestSDPController):
             'cbf_adc_sample_rate': 1712000000.0,
             'cbf_bandwidth': 856000000.0,
             'cbf_int_time': 0.499,
+            'cbf_sim_clock_ratio': 1.0,
             'cbf_sync_time': mock.ANY,
             'cbf_spead': '239.102.255.0+15:7148',
             'max_packet_size': mock.ANY,

@@ -475,10 +475,11 @@ def _make_cbf_simulator(g, config, name):
             'cbf_bandwidth': info.bandwidth,
             'cbf_substreams': substreams,
             'cbf_ibv': ibv,
-            'cbf_sync_time': time.time(),
+            'cbf_sync_time': settings.get('start_time', time.time()),
+            'cbf_sim_clock_ratio': settings['clock_ratio'],
             'servers': n_sim
         }
-        sources = settings.get('sources', [])
+        sources = settings['sources']
         if sources:
             conf['cbf_sim_sources'] = [{'description': description} for description in sources]
         if type_ == 'cbf.baseline_correlation_products':
@@ -549,7 +550,8 @@ def _make_cbf_simulator(g, config, name):
         sim.interfaces[0].bandwidth_out = info.net_bandwidth
         sim.transitions = {
             CaptureBlockState.CAPTURING: [
-                KatcpTransition('capture-start', name, '{time}', timeout=30)
+                KatcpTransition('capture-start', name, settings.get('start_time', '{time}'),
+                                timeout=30)
             ],
             CaptureBlockState.POSTPROCESSING: [
                 KatcpTransition('capture-stop', name, timeout=60)
@@ -798,6 +800,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         group_config.update(l0_spectral_name=spectral_name)
     if continuum_name:
         group_config.update(l0_continuum_name=continuum_name)
+    if src_info.raw['simulate']:
+        group_config.update(clock_ratio=src_info.raw['simulate']['clock_ratio'])
     g.add_node(ingest_group, config=lambda task, resolver: group_config)
 
     if spectral_name:
@@ -965,6 +969,8 @@ def _make_cal(g, config, name, l0_name, flags_names):
         'servers': n_cal
     }
     group_config.update(parameters)
+    if info.src_info.raw['simulate']:
+        group_config.update(clock_ratio=info.src_info.raw['simulate']['clock_ratio'])
 
     # Virtual node which depends on the real cal nodes, so that other services
     # can declare dependencies on cal rather than individual nodes.

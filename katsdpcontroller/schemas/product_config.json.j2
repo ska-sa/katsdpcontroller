@@ -66,6 +66,10 @@
                 {
                     "type": "object",
                     "properties": {
+{% if version >= "2.4" %}
+                        "clock_ratio": {"type": "number", "minimum": 0.0, "default": 1.0},
+                        "start_time": {"$ref": "#/definitions/positive_number"},
+{% endif %}
                         "sources": {
                             "type": "array",
                             "items": {"type": "string"}
@@ -74,7 +78,7 @@
                             "type": "array",
                             "items": {"type": "string"}
                         },
-                        "center_freq": {"type": "number"}
+                        "center_freq": {"$ref": "#/definitions/positive_number"}
                     },
                     "additionalProperties": false
                 }

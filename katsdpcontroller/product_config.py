@@ -339,6 +339,9 @@ def normalise(config):
                               'cbf.tied_array_channelised_voltage']:
             if stream.setdefault('simulate', False) is True:
                 stream['simulate'] = {}
+            if stream.get('simulate', False) is not False:
+                stream['simulate'].setdefault('clock_ratio', 1.0)
+                stream['simulate'].setdefault('sources', [])
 
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.vis':
