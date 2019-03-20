@@ -44,7 +44,7 @@ class TestValidate:
 
     def setup(self):
         self.config = {
-            "version": "2.3",
+            "version": "2.4",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -123,6 +123,18 @@ class TestValidate:
                     "src_streams": ["l0"],
                     "calibration": ["cal"],
                     "archive": True
+                },
+                "continuum_image": {
+                    "type": "sdp.continuum_image",
+                    "src_streams": ["sdp_l1_flags"],
+                    "uvblavg_parameters": {},
+                    "mfimage_parameters": {},
+                    "max_realtime": 10000.0
+                },
+                "spectral_image": {
+                    "type": "sdp.spectral_image",
+                    "src_streams": ["sdp_l1_flags", "continuum_image"],
+                    "output_channels": [100, 4000]
                 }
             },
             "config": {}
@@ -132,6 +144,8 @@ class TestValidate:
         self.config_v1_0["outputs"]["l0"]["type"] = "sdp.l0"
         del self.config_v1_0["outputs"]["cal"]
         del self.config_v1_0["outputs"]["sdp_l1_flags"]
+        del self.config_v1_0["outputs"]["continuum_image"]
+        del self.config_v1_0["outputs"]["spectral_image"]
         del self.config_v1_0["outputs"]["l0"]["archive"]
 
     def test_good(self):
@@ -254,6 +268,9 @@ class TestValidate:
             "calibration": ["cal"],
             "archive": True
         }
+        # Remove outputs not valid in 2.1
+        del self.config["outputs"]["continuum_image"]
+        del self.config["outputs"]["spectral_image"]
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("already has a flags output", str(cm.exception))
@@ -286,10 +303,24 @@ class TestValidate:
             product_config.validate(self.config)
         assert_in("bad continuum_factor", str(cm.exception))
 
+    def test_spectral_image_output_channels(self):
+        self.config["outputs"]["l0"]["continuum_factor"] = 2
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("Channel range 100:4000 is invalid", str(cm.exception))
+
+        del self.config["outputs"]["l0"]["output_channels"]
+        with assert_raises(ValueError) as cm:
+            product_config.validate(self.config)
+        assert_in("Channel range 100:4000 is invalid", str(cm.exception))
+
     def test_v2_1_flags_wrong_src_streams(self):
         self.config["version"] = "2.1"
         self.config["outputs"]["another_l0"] = self.config["outputs"]["l0"]
         self.config["outputs"]["sdp_l1_flags"]["src_streams"] = ["another_l0"]
+        # Remove outputs not valid in 2.1
+        del self.config["outputs"]["continuum_image"]
+        del self.config["outputs"]["spectral_image"]
         with assert_raises(ValueError) as cm:
             product_config.validate(self.config)
         assert_in("has different src_streams", str(cm.exception))
@@ -304,7 +335,7 @@ class TestValidate:
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config_v1_0)
 
-    def test_normalise(self):
+    def test_normalise_v1_0(self):
         # Adjust some things to get full test coverage
         del self.config_v1_0["outputs"]["l0"]["output_channels"]
         del self.config_v1_0["outputs"]["beamformer_engineering"]["output_channels"]
@@ -321,6 +352,38 @@ class TestValidate:
         expected["outputs"]["cal"]["models"] = {}
         expected["config"]["develop"] = False
         expected["config"]["service_overrides"] = {}
+        del expected["outputs"]["continuum_image"]
+        del expected["outputs"]["spectral_image"]
+        assert_equal(config, expected)
+
+    def test_normalise_latest(self):
+        # Adjust some things to get full test coverage
+        expected = copy.deepcopy(self.config)
+        self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = True
+        del self.config["outputs"]["l0"]["output_channels"]
+        del self.config["outputs"]["beamformer_engineering"]["output_channels"]
+        del self.config["outputs"]["continuum_image"]["uvblavg_parameters"]
+        del self.config["outputs"]["continuum_image"]["mfimage_parameters"]
+        del self.config["outputs"]["spectral_image"]["output_channels"]
+
+        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+        expected["inputs"]["i0_tied_array_channelised_voltage_0x"]["simulate"] = False
+        expected["inputs"]["i0_tied_array_channelised_voltage_0y"]["simulate"] = False
+        expected["outputs"]["l0"]["excise"] = True
+        expected["outputs"]["l0"]["output_channels"] = [0, 4096]
+        expected["outputs"]["beamformer_engineering"]["output_channels"] = [0, 4096]
+        expected["outputs"]["cal"]["parameters"] = {}
+        expected["outputs"]["cal"]["models"] = {}
+        expected["outputs"]["spectral_image"]["output_channels"] = [0, 4096]
+        expected["config"]["develop"] = False
+        expected["config"]["service_overrides"] = {}
+
+        config = product_config.normalise(self.config)
+        import json
+        with open('actual.json', 'w') as f:
+            json.dump(config, f, indent=2, sort_keys=True)
+        with open('expected.json', 'w') as f:
+            json.dump(expected, f, indent=2, sort_keys=True)
         assert_equal(config, expected)
 
     def test_normalise_name_conflict(self):

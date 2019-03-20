@@ -63,6 +63,43 @@ def _url_n_endpoints(url):
     return len(endpoint_list_parser(None)(url_parts.netloc))
 
 
+def _input_channels(config, output):
+    """Determine upper bound for `output_channels` of an output.
+
+    Parameters
+    ----------
+    config : dict
+        Product config
+    output : dict
+        Output entry within `config`, of a type that supports `output_channels`
+
+    Returns
+    -------
+    int
+        Maximum value for the upper bound in `output_channels`
+    """
+    if output['type'] in ['sdp.l0', 'sdp.vis', 'sdp.beamformer_engineering']:
+        limits = []
+        for src_name in output['src_streams']:
+            src = config['inputs'][src_name]
+            acv = config['inputs'][src['src_streams'][0]]
+            limits.append(acv['n_chans'])
+        return min(limits)
+    elif output['type'] == 'sdp.spectral_image':
+        flags_name = output['src_streams'][0]   # sdp.flags stream
+        vis_name = config['outputs'][flags_name]['src_streams'][0]  # sdp.vis stream
+        vis_config = config['outputs'][vis_name]
+        if 'output_channels' in vis_config:
+            c = vis_config['output_channels']
+            n_channels = c[1] - c[0]
+        else:
+            n_channels = _input_channels(config, vis_config)
+        return n_channels // vis_config['continuum_factor']
+    else:
+        raise NotImplementedError(
+            'Unhandled stream type {}'.format(output['type']))   # pragma: nocover
+
+
 def validate(config):
     """Validates a config dict.
 
@@ -102,22 +139,25 @@ def validate(config):
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
         'sdp.cal': ['sdp.l0', 'sdp.vis'],
         'sdp.flags': ['sdp.vis'],
-        'sdp.continuum_image': ['sdp.flags']
+        'sdp.continuum_image': ['sdp.flags'],
+        'sdp.spectral_image': ['sdp.flags', 'sdp.continuum_image']
     }
     for name, stream in itertools.chain(config['inputs'].items(),
                                         config['outputs'].items()):
         src_streams = stream.get('src_streams', [])
-        for src in src_streams:
+        for i, src in enumerate(src_streams):
             if src in config['inputs']:
                 src_config = config['inputs'][src]
             elif src in config['outputs']:
                 src_config = config['outputs'][src]
             else:
                 raise ValueError('Unknown source {} in {}'.format(src, name))
-            if stream['type'] in src_valid_types:
-                valid_types = src_valid_types[stream['type']]
-                if src_config['type'] not in valid_types:
-                    raise ValueError('Source {} has wrong type for {}'.format(src, name))
+            valid_types = src_valid_types[stream['type']]
+            # Special case: valid options depend on position
+            if stream['type'] == 'sdp.spectral_image':
+                valid_types = [valid_types[i]]
+            if src_config['type'] not in valid_types:
+                raise ValueError('Source {} has wrong type for {}'.format(src, name))
 
     # Can only have one cam.http stream
     cam_http = [name for (name, stream) in config['inputs'].items()
@@ -148,21 +188,28 @@ def validate(config):
             raise ValueError('{}: {}'.format(name, error)) from error
 
     has_flags = set()
-    for name, output in config['outputs'].items():
+    # Sort the outputs so that we validate upstream outputs before the downstream
+    # outputs that depend on them.
+    OUTPUT_TYPE_ORDER = [
+        'sdp.l0', 'sdp.vis', 'sdp.beamformer', 'sdp.beamformer_engineering',
+        'sdp.cal', 'sdp.flags', 'sdp.continuum_image', 'sdp.spectral_image'
+    ]
+    output_items = sorted(
+        config['outputs'].items(),
+        key=lambda item: OUTPUT_TYPE_ORDER.index(item[1]['type']))
+    for name, output in output_items:
         try:
             # Names of inputs and outputs must be disjoint
             if name in config['inputs']:
                 raise ValueError('cannot be both an input and an output')
 
             # Channel ranges must be non-empty and not overflow
-            if output['type'] in ['sdp.l0', 'sdp.vis', 'sdp.beamformer_engineering']:
-                if 'output_channels' in output:
-                    c = output['output_channels']
-                    for src_name in output['src_streams']:
-                        src = config['inputs'][src_name]
-                        acv = config['inputs'][src['src_streams'][0]]
-                        if not 0 <= c[0] < c[1] <= acv['n_chans']:
-                            raise ValueError('Channel range {}:{} is invalid'.format(c[0], c[1]))
+            if 'output_channels' in output:
+                c = output['output_channels']
+                limit = _input_channels(config, output)
+                if not 0 <= c[0] < c[1] <= limit:
+                    raise ValueError('Channel range {}:{} is invalid (valid range is {}:{})'
+                                     .format(c[0], c[1], 0, limit))
 
             # Beamformer pols must have same channeliser
             if output['type'] in ['sdp.beamformer', 'sdp.beamformer_engineering']:
@@ -281,10 +328,10 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
-    # Update to 2.3
-    if config['version'] in ['2.0', '2.1', '2.2']:
-        # 2.3 is fully backwards-compatible to 2.0
-        config['version'] = '2.3'
+    # Update to 2.4
+    if config['version'] in ['2.0', '2.1', '2.2', '2.3']:
+        # 2.4 is fully backwards-compatible to 2.0
+        config['version'] = '2.4'
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
@@ -297,19 +344,15 @@ def normalise(config):
         if output['type'] == 'sdp.vis':
             output.setdefault('excise', True)
         if output['type'] in ['sdp.vis', 'sdp.beamformer_engineering']:
-            if 'output_channels' not in output:
-                n_chans = None
-                src = config['inputs'][output['src_streams'][0]]
-                acv = config['inputs'][src['src_streams'][0]]
-                acv_chans = acv['n_chans']
-                n_chans = acv_chans
-                output['output_channels'] = [0, n_chans]
+            output.setdefault('output_channels', [0, _input_channels(config, output)])
         if output['type'] == 'sdp.cal':
             output.setdefault('parameters', {})
             output.setdefault('models', {})
         if output['type'] == 'sdp.continuum_image':
             output.setdefault('uvblavg_parameters', {})
             output.setdefault('mfimage_parameters', {})
+        if output['type'] == 'sdp.spectral_image':
+            output.setdefault('output_channels', [0, _input_channels(config, output)])
 
     config['config'].setdefault('develop', False)
     config['config'].setdefault('service_overrides', {})

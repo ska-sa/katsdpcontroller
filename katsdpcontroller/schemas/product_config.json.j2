@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3"]
+            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4"]
         }
     }
 }
@@ -239,6 +239,9 @@
 {% if version >= "2.2" %}
                                 "sdp.continuum_image",
 {% endif %}
+{% if version >= "2.4" %}
+                                "sdp.spectral_image",
+{% endif %}
                                 "sdp.beamformer",
                                 "sdp.beamformer_engineering"
                             ]
@@ -435,6 +438,33 @@
                                     "properties": {
                                         "type": {
                                             "not": {"enum": ["sdp.continuum_image"]}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+{% endif %}
+{% if version >= "2.4" %}
+                        ,
+                        {
+                            "oneOf": [
+                                {
+                                    "properties": {
+                                        "type": {"enum": ["sdp.spectral_image"]},
+                                        "src_streams": {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "maxItems": 2
+                                        },
+                                        "output_channels": {"$ref": "#/definitions/channel_range"}
+                                    },
+                                    "required": ["src_streams"],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "properties": {
+                                        "type": {
+                                            "not": {"enum": ["sdp.spectral_image"]}
                                         }
                                     }
                                 }
