@@ -6,6 +6,7 @@ services:
     image: netflixoss/exhibitor:1.5.2
     ports:
       - "127.0.0.1:2181:2181"
+
   mesos-master:
     network_mode: host
     image: mesosphere/mesos-master:1.5.0
@@ -16,6 +17,7 @@ services:
       MESOS_REGISTRY: in_memory
       MESOS_LOG_DIR: /var/log/mesos
       MESOS_WORK_DIR: /var/tmp/mesos
+
   mesos-slave:
     network_mode: host
     pid: host
@@ -41,6 +43,7 @@ services:
     entrypoint:
       - /usr/bin/mesos-init-wrapper
       - slave
+
   minio:
     network_mode: host
     image: minio/minio:RELEASE.2018-10-18T00-28-58Z
@@ -50,3 +53,33 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioaccesskey
       MINIO_SECRET_KEY: miniosecretkey
+
+  prometheus:
+    network_mode: host
+    image: prom/prometheus:v2.8.0
+    volumes:
+      - ./etc/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--web.listen-address=127.0.0.1:9090"
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+  grafana:
+    network_mode: host
+    image: grafana/grafana:6.0.2
+    depends_on:
+      - prometheus
+    environment:
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Editor"
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+    volumes:
+      - ./etc/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./etc/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  prometheus_data: {}
