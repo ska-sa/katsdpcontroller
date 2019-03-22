@@ -56,6 +56,8 @@ OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 #: Target size of objects in the object store
 WRITER_OBJECT_SIZE = 20e6    # 20 MB
+#: Maximum channels per chunk for spectral imager
+SPECTRAL_OBJECT_CHANNELS = 64
 
 logger = logging.getLogger(__name__)
 
@@ -1089,7 +1091,7 @@ def _writer_max_accum_dumps(config, name):
     return max_accum_dumps
 
 
-def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
+def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=None):
     info = L0Info(config, name)
 
     output_name = prefix + '.' + name if prefix is not None else name
@@ -1145,6 +1147,8 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
             conf['npy_path'] = OBJ_DATA_VOL.container_path
         if prefix is not None:
             conf['new_name'] = output_name
+        if max_channels is not None:
+            conf['obj_max_channels'] = max_channels
         return conf
 
     g.add_node(vis_writer, config=make_vis_writer_config)
@@ -1154,7 +1158,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None):
     return vis_writer
 
 
-def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
+def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max_channels=None):
     info = L0Info(config, l0_name)
 
     output_name = prefix + '.' + name if prefix is not None else name
@@ -1219,6 +1223,8 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
         if prefix is not None:
             conf['new_name'] = output_name
             conf['rename_src'] = {l0_name: prefix + '.' + l0_name}
+        if max_channels is not None:
+            conf['obj_max_channels'] = max_channels
         return conf
 
     g.add_node(flag_writer, config=make_flag_writer_config)
@@ -1226,6 +1232,18 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None):
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
     return flag_writer
+
+
+def _make_imager_writers(g, config, have_cal, s3_name, name, max_channels=None):
+    """Make vis and flag writers for an imager output"""
+    orig_flags_name = config['outputs'][name]['src_streams'][0]
+    orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
+    cal = config['outputs'][orig_flags_name]['calibration'][0]
+    if cal in have_cal:   # Will be false if fewer than 4 antennas for example
+        _make_vis_writer(g, config, orig_l0_name, s3_name=s3_name,
+                         local=False, prefix=name, max_channels=max_channels)
+        _make_flag_writer(g, config, orig_flags_name, orig_l0_name, s3_name=s3_name,
+                          local=False, prefix=name, max_channels=max_channels)
 
 
 def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram, idx, develop):
@@ -1471,15 +1489,9 @@ def build_logical_graph(config):
             _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
-        orig_flags_name = config['outputs'][name]['src_streams'][0]
-        orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
-        cal = config['outputs'][orig_flags_name]['calibration'][0]
-        if cal not in have_cal:
-            continue      # If fewer than 4 antennas for example
-        _make_vis_writer(g, config, orig_l0_name,
-                         s3_name='continuum', local=False, prefix=name)
-        _make_flag_writer(g, config, orig_flags_name, orig_l0_name,
-                          s3_name='continuum', local=False, prefix=name)
+        _make_imager_writers(g, config, have_cal, 'continuum', name)
+    for name in outputs.get('sdp.spectral_image', []):
+        _make_imager_writers(g, config, have_cal, 'spectral', name, SPECTRAL_OBJECT_CHANNELS)
 
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.

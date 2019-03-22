@@ -49,7 +49,7 @@ STREAMS = '''{
 }'''
 
 CONFIG = '''{
-    "version": "2.2",
+    "version": "2.4",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -174,6 +174,10 @@ CONFIG = '''{
         "continuum_image": {
             "type": "sdp.continuum_image",
             "src_streams": ["sdp_l1_flags_continuum"]
+        },
+        "spectral_image": {
+            "type": "sdp.spectral_image",
+            "src_streams": ["sdp_l1_flags"]
         }
     },
     "config": {}
