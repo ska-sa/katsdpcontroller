@@ -2404,6 +2404,7 @@ class Scheduler(pymesos.Scheduler):
         # by unit tests) they end up with different ports.
         # See https://stackoverflow.com/questions/45907833 for more details.
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('::', self.http_port))
         self.http_server = await self._loop.create_server(
             self.http_handler, sock=sock)
