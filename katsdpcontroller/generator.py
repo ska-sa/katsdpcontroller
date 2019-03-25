@@ -1569,6 +1569,7 @@ def _make_continuum_imager(g, config, name):
         '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
         '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
         '--select', 'scans="track"; corrprods="cross"',
+        '--output-id', name,
         '--mfimage', 'doGPU=False; nThreads={}'.format(cpus),
         '-w', '/mnt/mesos/sandbox', data_url
     ]
