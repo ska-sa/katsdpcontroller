@@ -758,7 +758,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 else:
                     self.logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:
-            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTaskBase):
+            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
                 node.remove_capture_block(capture_block)
 
     async def exec_transitions(self, state, reverse, capture_block):
@@ -820,7 +820,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     async def capture_init_impl(self, capture_block):
         self.telstate.add('sdp_capture_block_id', capture_block.name)
         for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTaskBase):
+            if isinstance(node, tasks.SDPPhysicalTask):
                 node.add_capture_block(capture_block)
         await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
 
@@ -853,7 +853,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTaskBase):
+            if isinstance(node, tasks.SDPPhysicalTask):
                 node.remove_capture_block(capture_block)
 
     async def _launch_telstate(self):

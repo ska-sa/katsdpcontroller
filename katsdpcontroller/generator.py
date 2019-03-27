@@ -14,7 +14,7 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.tasks import (
-    SDPLogicalTask, SDPPhysicalTask, SDPPhysicalTaskBase, LogicalGroup,
+    SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
     CaptureBlockState, KatcpTransition)
 
 
@@ -83,7 +83,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
             self.ports = {'spead': resolver.resources.get_port()}
 
 
-class TelstateTask(SDPPhysicalTaskBase):
+class TelstateTask(SDPPhysicalTask):
     async def resolve(self, resolver, graph, loop):
         await super().resolve(resolver, graph, loop)
         # Add a port mapping
@@ -385,6 +385,8 @@ def _make_telstate(g, config):
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     telstate.physical_factory = TelstateTask
+    telstate.katsdpservices_logging = False
+    telstate.katsdpservices_config = False
     telstate.deconfigure_wait = False
     telstate.wait_capture_blocks_dead = True
     g.add_node(telstate)
@@ -1574,6 +1576,7 @@ def _make_continuum_imager(g, config, name):
         '--mfimage', 'doGPU=False; nThreads={}'.format(cpus),
         '-w', '/mnt/mesos/sandbox', data_url
     ]
+    imager.katsdpservices_config = False
     g.add_node(imager)
     return imager
 
