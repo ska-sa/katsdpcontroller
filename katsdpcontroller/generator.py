@@ -1556,12 +1556,11 @@ def _make_continuum_imager(g, config, name):
     imager.mem = 50000 if not is_develop(config) else 8000
     imager.disk = _mb(1000 * l0_info.size + 1000)
     imager.max_run_time = 86400     # 24 hours
-    # GPU use disabled until it can be made to work
-    # imager.gpus = [scheduler.GPURequest()]
+    imager.gpus = [scheduler.GPURequest()]
     # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
     # it can help improve parallelism). There is no memory enforcement and I
     # have no idea how much would be needed, so don't bother reserving memory.
-    # imager.gpus[0].compute = 1.0
+    imager.gpus[0].compute = 1.0
     imager.image = 'katsdpcontim'
     imager.command = [
         'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
@@ -1571,7 +1570,7 @@ def _make_continuum_imager(g, config, name):
         '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
         '--select', 'scans="track"; corrprods="cross"',
         '--output-id', name,
-        '--mfimage', 'doGPU=False; nThreads={}'.format(cpus),
+        '--mfimage', 'nThreads={}'.format(cpus),
         '-w', '/mnt/mesos/sandbox', data_url
     ]
     g.add_node(imager)
