@@ -240,9 +240,9 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
     - Connects to the service's katcp port and mirrors katcp sensors. Such
       are exposed at the master controller level using the
       following syntax:
-        sdp_<subarray_product_id>.<node_type>.<node_index>.<sensor_name>
+        <subarray_product_id>.<name>.<sensor_name>
       For example:
-        sdp.array_1.ingest.1.input_rate
+        array_1.ingest.1.input_rate
     """
     def __init__(self, logical_task, loop, sdp_controller, subarray_product, capture_block_id):
         # Turn .status into a property that updates a sensor
