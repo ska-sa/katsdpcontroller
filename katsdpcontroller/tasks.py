@@ -22,6 +22,7 @@ from . import scheduler, sensor_proxy, product_config
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
 DEPENDS_INIT = 'depends_init'
+DEPENDS_FINISHED = 'depends_finished'      # for batch tasks
 PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Dictionary of sensors to be exposed via Prometheus.
 # Some of these will match multiple nodes, which is fine since they get labels

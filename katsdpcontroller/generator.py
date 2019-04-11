@@ -1679,6 +1679,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
                 '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
             g.add_node(imager)
+            if len(output['src_streams']) > 1:
+                continuum = find_node(g, 'continuum_image.' + output['src_streams'][1])
+                g.add_edge(imager, continuum, depends_finished=True)
     logger.info('Spectral imager targets for %s: %s', capture_block_id,
                 ', '.join(orig_target_names))
 
@@ -1691,7 +1694,9 @@ def build_postprocess_logical_graph(config, capture_block_id, telstate):
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.continuum_image':
             _make_continuum_imager(g, config, capture_block_id, name)
-        elif output['type'] == 'sdp.spectral_image':
+
+    for name, output in config['outputs'].items():
+        if output['type'] == 'sdp.spectral_image':
             _make_spectral_imager(g, config, capture_block_id, name, telstate)
 
     seen = set()
