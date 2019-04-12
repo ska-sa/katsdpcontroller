@@ -20,13 +20,13 @@ import networkx.drawing.nx_pydot
 import jsonschema
 import netifaces
 
-from prometheus_client import Histogram, Counter
+from prometheus_client import Histogram
 
 from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
 import katsdptelstate
 from . import scheduler, tasks, product_config, generator, schemas
-from .tasks import CaptureBlockState, DEPENDS_INIT, DEPENDS_FINISHED
+from .tasks import CaptureBlockState, DEPENDS_INIT
 
 
 faulthandler.register(signal.SIGUSR2, all_threads=True)
@@ -36,21 +36,6 @@ BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
-POSTPROC_TASKS_CREATED = Counter(
-    'katsdpcontroller_postproc_tasks_created',
-    'Number of postprocessing tasks that have been defined')
-POSTPROC_TASKS_STARTED = Counter(
-    'katsdpcontroller_postproc_tasks_started',
-    'Number of postprocessing tasks that have become ready to start')
-POSTPROC_TASKS_SKIPPED = Counter(
-    'katsdpcontroller_postproc_tasks_skipped',
-    'Number of postprocessing tasks that were skipped because a dependency failed')
-POSTPROC_TASKS_DONE = Counter(
-    'katsdpcontroller_postproc_tasks_done',
-    'Number of completed postprocessing tasks (including failed and skipped)')
-POSTPROC_TASKS_FAILED = Counter(
-    'katsdpcontroller_postproc_tasks_failed',
-    'Number of postprocessing tasks that failed (after all retries)')
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 _capture_block_names = set()      #: all capture block names used
 
@@ -858,46 +843,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # queue, but that doesn't matter because our real tasks will block too.
         await self.sched.launch(physical_graph, self.resolver, [telstate_node],
                                 queue=self.batch_queue)
-        batch = {}
-        order_graph = scheduler.subgraph(physical_graph, DEPENDS_FINISHED)
-        if not networkx.is_directed_acyclic_graph(order_graph):
-            raise scheduler.CycleError('cycle between depends_finished dependencies')
-        n_physical_tasks = 0
-        for node in physical_graph:
-            if isinstance(node, scheduler.PhysicalTask):
-                n_physical_tasks += 1
-
-            async def run(node):
-                """Runs a single task, returning True if it ran successfully."""
-
-                for dep in order_graph.successors(node):
-                    future = batch[dep]
-                    logger.info('%s waiting for %s', node.name, dep.name)
-                    if not (await future):
-                        logger.info('Skipping %s because %s failed', node.name, dep.name)
-                        if isinstance(node, scheduler.PhysicalTask):
-                            n_physical_tasks += 1
-                            POSTPROC_TASKS_SKIPPED.inc()
-                            POSTPROC_TASKS_DONE.inc()
-                        return False
-
-                    POSTPROC_TASKS_STARTED.inc()
-                    try:
-                        await self.sched.batch_run(
-                            physical_graph, self.resolver, [node], queue=self.batch_queue,
-                            resources_timeout=7*86400, attempts=3)
-                    except Exception:
-                        logger.exception('Batch task %s failed', node.name)
-                        POSTPROC_TASKS_FAILED.inc()
-                        return False
-                    finally:
-                        POSTPROC_TASKS_DONE.inc()
-                return True
-
-            batch[node] = self.loop.create_task(run(node))
-
-        POSTPROC_TASKS_CREATED.inc(n_physical_tasks)
-        await asyncio.gather(*batch.values(), loop=self.loop)
+        nodes = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
+        await self.sched.batch_run(physical_graph, self.resolver, nodes,
+                                   queue=self.batch_queue, resources_timeout=7*86400, attempts=3)
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:

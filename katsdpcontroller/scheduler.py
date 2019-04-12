@@ -189,7 +189,21 @@ from . import schemas
 TASKS_IN_STATE = prometheus_client.Gauge(
     'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
     ['queue', 'state'])
-
+BATCH_TASKS_CREATED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_created',
+    'Number of batch tasks that have been defined')
+BATCH_TASKS_STARTED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_started',
+    'Number of batch tasks that have become ready to start')
+BATCH_TASKS_SKIPPED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_skipped',
+    'Number of batch tasks that were skipped because a dependency failed')
+BATCH_TASKS_DONE = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_done',
+    'Number of completed batch tasks (including failed and skipped)')
+BATCH_TASKS_FAILED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_failed',
+    'Number of batch tasks that failed (after all retries)')
 
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
@@ -204,6 +218,7 @@ DEPENDS_READY = 'depends_ready'
 DEPENDS_RESOURCES = 'depends_resources'
 DEPENDS_RESOLVE = 'depends_resolve'
 DEPENDS_KILL = 'depends_kill'
+DEPENDS_FINISHED = 'depends_finished'      # for batch tasks
 DECIMAL_CONTEXT = decimal.Context(traps=[
     decimal.Overflow, decimal.InvalidOperation, decimal.DivisionByZero,  # defaults
     decimal.Inexact, decimal.FloatOperation])
@@ -1192,9 +1207,19 @@ class ImageError(RuntimeError):
 
 class TaskError(RuntimeError):
     """A batch job failed."""
-    def __init__(self, node):
-        super().__init__("Node {} failed with status {}".format(node.name, node.status.state))
+    def __init__(self, node, msg=None):
+        if msg is None:
+            msg = "Node {} failed with status {}".format(node.name, node.status.state)
+        super().__init__(msg)
         self.node = node
+
+
+class TaskSkipped(TaskError):
+    """A batch job was skipped because a dependency failed"""
+    def __init__(self, node, msg=None):
+        if msg is None:
+            msg = "Node {} was skipped because a dependency failed".format(node.name)
+        super().__init__(node, msg)
 
 
 class LogicalNode:
@@ -2995,9 +3020,9 @@ class Scheduler(pymesos.Scheduler):
             # In success case this will be immediate since it's all dead already
             await self.kill(graph, nodes)
 
-    async def batch_run(self, graph, resolver, nodes=None, *,
-                        queue=None, resources_timeout=None,
-                        attempts=1):
+    async def _batch_run_retry(self, graph, resolver, nodes=None, *,
+                               queue=None, resources_timeout=None,
+                               attempts=1):
         """Launch and run a batch graph (i.e., one that terminates on its own).
 
         Apart from the exceptions explicitly listed below, any exceptions
@@ -3052,6 +3077,110 @@ class Scheduler(pymesos.Scheduler):
                     nodes = new_nodes
             else:
                 break
+
+    async def batch_run(self, graph, resolver, nodes=None, *,
+                        queue=None, resources_timeout=None,
+                        attempts=1):
+        """Run a collection of batch tasks.
+
+        Each element of `nodes` may be either a single node or a sequence of
+        nodes to launch jointly. If not specified, it defaults to all the nodes
+        in the graph (launched separately).
+
+        Dependencies may be specified by using edges with a
+        ``depends_finished`` attribute. At present there is **no** checking
+        for cyclic dependencies (it is complicated because it interacts with
+        grouping and with the other types of dependencies), but in future it
+        may raise :exc:`CycleError`. If a dependent task group fails (after
+        all retries), the depending task is skipped.
+
+        .. note::
+            If retries are needed, then `graph` is modified in place with
+            replacement physical nodes (see :meth:`PhysicalNode.clone`).
+
+        Parameters
+        ----------
+        graph : :class:`networkx.MultiDiGraph`
+            Physical graph to launch
+        resolver : :class:`Resolver`
+            Resolver to allocate resources like task IDs
+        nodes : list, optional
+            See above
+        queue : :class:`LaunchQueue`
+            Queue from which to launch the nodes. If not specified, a default
+            queue is used.
+        resources_timeout : float
+            Time (seconds) to wait for sufficient resources to launch the nodes. If not
+            specified, defaults to the class value.
+        attempts : int
+            Number of times to try running the graph
+
+        Returns
+        -------
+        dict
+            Maps each node run (the original passed in, not any replacement
+            created by retries) to an exception, or to ``None`` if it ran
+            successfully. For tasks that were skipped, it will be
+            :exc:`TaskSkipped`.
+
+            Each group of tasks will share a single
+            exception, and so the error message may refer to a different
+            task.
+        """
+        if nodes is None:
+            nodes = list(graph.nodes())
+
+        order_graph = subgraph(graph, DEPENDS_FINISHED)
+        # After this point, we are careful not to touch the physical_graph
+        # again, because it gets mutated by retries. All node references
+        # refer to the original nodes.
+        futures = {}
+
+        async def run(node_set):
+            """Runs a single groups of task, returning True if it ran successfully."""
+
+            try:
+                for node in node_set:
+                    for dep in order_graph.successors(node):
+                        future = futures[dep]
+                        logger.info('%s waiting for %s', node.name, dep.name)
+                        try:
+                            await future
+                        except Exception:
+                            if len(node_set) == 1:
+                                desc = node.name
+                            else:
+                                desc = node.name + ' (and {} others)'.format(len(node_set) - 1)
+                            logger.info('Skipping %s because %s failed', desc, dep.name)
+                            BATCH_TASKS_SKIPPED.inc(len(node_set))
+                            raise TaskSkipped(node) from None
+
+                BATCH_TASKS_STARTED.inc(len(node_set))
+                try:
+                    await self._batch_run_retry(
+                        graph, resolver, node_set, queue=queue,
+                        resources_timeout=resources_timeout, attempts=attempts)
+                except Exception:
+                    logger.exception('Batch task %s failed', node.name)
+                    BATCH_TASKS_FAILED.inc()
+                    raise
+            finally:
+                BATCH_TASKS_DONE.inc(len(node_set))
+
+        n_nodes = 0
+        future_list = []
+        for node_set in nodes:
+            if isinstance(node_set, PhysicalNode):
+                node_set = [node_set]
+            n_nodes += len(node_set)
+            future = self._loop.create_task(run(node_set))
+            future_list.append(future)
+            for node in node_set:
+                futures[node] = future
+
+        BATCH_TASKS_CREATED.inc(n_nodes)
+        await asyncio.gather(*future_list, return_exceptions=True, loop=self._loop)
+        return {node: future.exception() for (node, future) in futures.items()}
 
     async def kill(self, graph, nodes=None, **kwargs):
         """Kill a graph or set of nodes from a graph. It is safe to kill nodes

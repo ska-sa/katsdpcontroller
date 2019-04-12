@@ -23,8 +23,7 @@ import katpoint
 
 from katsdpcontroller.sdpcontroller import (
     SDPControllerServer, SDPCommonResources, SDPResources, ProductState, DeviceStatus,
-    _capture_block_names, _redact_keys,
-    POSTPROC_TASKS_STARTED, POSTPROC_TASKS_DONE, POSTPROC_TASKS_FAILED)
+    _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
 
@@ -662,6 +661,9 @@ class TestSDPController(BaseTestSDPController):
         for node in nodes:
             node.set_state(scheduler.TaskState.READY)
             node.set_state(scheduler.TaskState.DEAD)
+        scheduler.BATCH_TASKS_CREATED.inc(len(nodes))
+        scheduler.BATCH_TASKS_STARTED.inc(len(nodes))
+        scheduler.BATCH_TASKS_DONE.inc(len(nodes))
 
     async def _kill(self, graph, nodes=None, **kwargs):
         """Mock implementation of Scheduler.kill."""
@@ -1069,9 +1071,10 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_capture_done(self):
         """Checks that capture-done succeeds and sets appropriate state"""
-        init_postproc_started = get_metric(POSTPROC_TASKS_STARTED)
-        init_postproc_done = get_metric(POSTPROC_TASKS_DONE)
-        init_postproc_failed = get_metric(POSTPROC_TASKS_FAILED)
+        init_batch_started = get_metric(scheduler.BATCH_TASKS_STARTED)
+        init_batch_done = get_metric(scheduler.BATCH_TASKS_DONE)
+        init_batch_failed = get_metric(scheduler.BATCH_TASKS_FAILED)
+        init_batch_skipped = get_metric(scheduler.BATCH_TASKS_SKIPPED)
 
         await self._configure_subarray(SUBARRAY_PRODUCT4)
         await self.client.request("capture-init", SUBARRAY_PRODUCT4)
@@ -1094,12 +1097,14 @@ class TestSDPController(BaseTestSDPController):
 
         # Check that postprocessing ran and didn't fail
         self.assertEqual(sa.capture_blocks, {})
-        started = get_metric(POSTPROC_TASKS_STARTED) - init_postproc_started
-        done = get_metric(POSTPROC_TASKS_DONE) - init_postproc_done
-        failed = get_metric(POSTPROC_TASKS_FAILED) - init_postproc_failed
+        started = get_metric(scheduler.BATCH_TASKS_STARTED) - init_batch_started
+        done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
+        failed = get_metric(scheduler.BATCH_TASKS_FAILED) - init_batch_failed
+        skipped = get_metric(scheduler.BATCH_TASKS_SKIPPED) - init_batch_skipped
         self.assertEqual(started, 7)    # One continuum, 3x2 spectral
         self.assertEqual(done, started)
         self.assertEqual(failed, 0)
+        self.assertEqual(skipped, 0)
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
