@@ -20,7 +20,7 @@ import networkx.drawing.nx_pydot
 import jsonschema
 import netifaces
 
-from prometheus_client import Histogram
+from prometheus_client import Histogram, Counter
 
 from aiokatcp import DeviceServer, Sensor, FailReply, Address
 import katsdpcontroller
@@ -36,6 +36,15 @@ BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
+POSTPROC_TASKS_STARTED = Counter(
+    'katsdpcontroller_postproc_tasks_started',
+    'Number of postprocessing tasks that have been scheduled')
+POSTPROC_TASKS_DONE = Counter(
+    'katsdpcontroller_postproc_tasks_done',
+    'Number of completed postprocessing tasks (including failed)')
+POSTPROC_TASKS_FAILED = Counter(
+    'katsdpcontroller_postproc_tasks_failed',
+    'Number of postprocessing tasks that failed (after all retries)')
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 _capture_block_names = set()      #: all capture block names used
 
@@ -250,7 +259,6 @@ class SDPSubarrayProductBase:
         self.loop = loop
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
-        self.postprocess_logical_graph = generator.build_postprocess_logical_graph(config)
         self.telstate_endpoint = ""
         self.telstate = None
         self.capture_blocks = {}              # live capture blocks, indexed by name
@@ -830,8 +838,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     async def postprocess_impl(self, capture_block):
         await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
-        physical_graph = self._instantiate_physical_graph(self.postprocess_logical_graph,
-                                                          capture_block.name)
+        logical_graph = generator.build_postprocess_logical_graph(
+            self.config, capture_block.name, self.telstate)
+        physical_graph = self._instantiate_physical_graph(
+            logical_graph, capture_block.name)
         capture_block.postprocess_physical_graph = physical_graph
         nodes = {node.logical_node.name: node for node in physical_graph}
         telstate_node = nodes['telstate']
@@ -845,10 +855,19 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         batch = []
         for node in physical_graph:
             if isinstance(node, scheduler.PhysicalTask):
-                coro = self.sched.batch_run(
-                    physical_graph, self.resolver, [node], queue=self.batch_queue,
-                    resources_timeout=7*86400, attempts=3)
-                batch.append(coro)
+                async def run(node):
+                    try:
+                        await self.sched.batch_run(
+                            physical_graph, self.resolver, [node], queue=self.batch_queue,
+                            resources_timeout=7*86400, attempts=3)
+                    except Exception:
+                        logger.exception('Batch task %s failed', node.name)
+                        POSTPROC_TASKS_FAILED.inc()
+                    finally:
+                        POSTPROC_TASKS_DONE.inc()
+
+                batch.append(run(node))
+        POSTPROC_TASKS_STARTED.inc(len(batch))
         await asyncio.gather(*batch, loop=self.loop)
 
     def capture_block_dead_impl(self, capture_block):

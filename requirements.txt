@@ -15,12 +15,16 @@ dash-html-components==0.13.5
 dash-table==3.2.0
 dash-dangerously-set-inner-html==0.0.2
 dash-renderer==0.17.0      # via dash
+dask                       # via katdal
 decorator
+defusedxml                 # via katdal
 docker-pycreds==0.3.0      # via docker
 docker==3.4.1
 fakeredis                  # via katsdptelstate
 flask==1.0.2               # via dash
 flask-compress==1.4.0      # via dash
+future                     # via katdal
+h5py                       # via katdal
 hiredis
 http-parser==0.8.3         # via pymesos
 humanfriendly==4.17
@@ -34,11 +38,13 @@ jsonschema==2.6.0
 jupyter-core==4.4.0        # via nbformat
 katversion
 kazoo==2.4.0
+llvmlite                   # via numba
 markupsafe                 # via jinja2
 monotonic==1.5             # via prometheus_async
 msgpack                    # via katsdptelstate
 multidict                  # via aiohttp, yarl
 nbformat==4.4.0            # via plotly
+numba                      # via katdal
 netifaces
 networkx==2.0
 numpy
@@ -47,6 +53,7 @@ plotly==3.5.0              # via plotly
 prometheus_async==18.1.0
 prometheus_client==0.2.0
 pydotplus==2.0.2
+pyephem                    # via katpoint
 pygelf                     # via katsdpservices
 pyparsing==2.2.0           # via pydotplus
 pymesos==0.3.6
@@ -57,6 +64,7 @@ retrying==1.3.3            # via plotly
 rfc3987==1.3.7
 six                        # via docker, plotly and others
 terminaltables             # via aiomonitor
+toolz                      # via katdal
 traitlets==4.3.2           # via nbformat
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
@@ -64,5 +72,7 @@ werkzeug==0.14.1           # via flask
 wrapt==1.10.11             # via prometheus_async
 yarl                       # via aiohttp
 
+git+ssh://git@github.com/ska-sa/katpoint#egg=katpoint
+git+ssh://git@github.com/ska-sa/katdal#egg=katdal
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices

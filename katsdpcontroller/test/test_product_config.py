@@ -379,11 +379,12 @@ class TestValidate:
         expected["config"]["service_overrides"] = {}
 
         config = product_config.normalise(self.config)
-        import json
-        with open('actual.json', 'w') as f:
-            json.dump(config, f, indent=2, sort_keys=True)
-        with open('expected.json', 'w') as f:
-            json.dump(expected, f, indent=2, sort_keys=True)
+        # Uncomment to debug differences
+        # import json
+        # with open('actual.json', 'w') as f:
+        #     json.dump(config, f, indent=2, sort_keys=True)
+        # with open('expected.json', 'w') as f:
+        #     json.dump(expected, f, indent=2, sort_keys=True)
         assert_equal(config, expected)
 
     def test_normalise_name_conflict(self):
