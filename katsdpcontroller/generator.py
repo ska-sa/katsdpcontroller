@@ -1626,11 +1626,13 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
     # normalised (which could cause collisions), and then if necessary a
     # unique suffix is added.
     target_names = set()
+    orig_target_names = []
     for target in _get_targets(telstate, capture_block_id, stream_name):
         if 'target' not in target.tags:
             continue
         target_name = _normalise_target_name(target.name, target_names)
         target_names.add(target_name)
+        orig_target_names.append(target.name)
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
@@ -1666,6 +1668,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
                 '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
             g.add_node(imager)
+    logger.info('Spectral imager targets for %s: %s', capture_block_id,
+                ', '.join(orig_target_names))
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
