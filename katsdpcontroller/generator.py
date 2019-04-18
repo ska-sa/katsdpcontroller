@@ -1492,6 +1492,7 @@ def build_logical_graph(config):
     for name in inputs.get('cbf.tied_array_channelised_voltage', []):
         if name in inputs_used:
             # NOTE: Temporary fix until CAM / CBF send us correct meta-data
+            # See MKAIV-1470 for more detail.
             pass  # _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
