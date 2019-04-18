@@ -1491,7 +1491,8 @@ def build_logical_graph(config):
     # Collect all tied-array-channelised-voltage streams and make signal displays for them
     for name in inputs.get('cbf.tied_array_channelised_voltage', []):
         if name in inputs_used:
-            _make_timeplot_beamformer(g, config, name)
+            # NOTE: Temporary fix until CAM / CBF send us correct meta-data
+            pass  # _make_timeplot_beamformer(g, config, name)
 
     for name in outputs.get('sdp.continuum_image', []):
         _make_imager_writers(g, config, have_cal, 'continuum', name)
