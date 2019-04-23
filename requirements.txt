@@ -4,7 +4,7 @@ aiohttp==3.5.4
 aiohttp-jinja2==1.1.0
 aiokatcp
 aiomonitor
-async-timeout
+async-timeout==3.0.1
 attrs==18.1.0              # via prometheus_async
 certifi                    # via requests
 chardet                    # via aiohttp, requests
@@ -66,6 +66,7 @@ six                        # via docker, plotly and others
 terminaltables             # via aiomonitor
 toolz                      # via katdal
 traitlets==4.3.2           # via nbformat
+typing-extensions==3.7.2   # via aiohttp
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 werkzeug==0.14.1           # via flask
