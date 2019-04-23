@@ -1,7 +1,7 @@
 addict==2.1.1
 aioconsole                 # via aiomonitor
-aiohttp
-aiohttp-jinja2==0.14.0
+aiohttp==3.5.4
+aiohttp-jinja2==1.1.0
 aiokatcp
 aiomonitor
 async-timeout

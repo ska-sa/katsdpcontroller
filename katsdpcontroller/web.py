@@ -2,7 +2,7 @@
 
 import logging
 
-import aiohttp.helpers
+import aiohttp.web_log
 
 
 class _ReplaceLevel(object):
@@ -18,7 +18,7 @@ class _ReplaceLevel(object):
         return getattr(self._logger, attr)
 
 
-class AccessLogger(aiohttp.helpers.AccessLogger):
+class AccessLogger(aiohttp.web_log.AccessLogger):
     """Access logger that with variable logging level.
 
     The request handler can assign to a ``log_level`` attribute of the
