@@ -14,7 +14,7 @@ from unittest import mock
 import aiokatcp
 from aiokatcp import Sensor, Address
 from aiokatcp.test.test_utils import timelimit
-from prometheus_client import Gauge, Counter, CollectorRegistry
+from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 import asynctest
 
@@ -38,6 +38,7 @@ class DummyServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(int, 'int-sensor', 'Integer sensor', 'frogs'))
         self.sensors.add(Sensor(float, 'float-sensor', 'Float sensor',
                                 default=3.0, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(float, 'histogram-sensor', 'Float sensor used for histogram'))
         self.sensors.add(Sensor(str, 'str-sensor', 'String sensor',
                                 default='hello', initial_status=Sensor.Status.ERROR))
         self.sensors.add(Sensor(bytes, 'bytes-sensor', 'Raw bytes sensor'))
@@ -66,9 +67,10 @@ class FutureObserver:
 
 @timelimit
 class TestSensorProxyClient(asynctest.TestCase):
-    def _make_prom_sensor(self, name, description, class_):
+    def _make_prom_sensor(self, name, description, class_, *args, **kwargs):
         return (
-            class_('test_' + name, description, ['label1'], registry=self.registry),
+            class_('test_' + name, description, ['label1'], *args,
+                   registry=self.registry, **kwargs),
             Gauge('test_' + name + '_status',
                   'Status of katcp sensor ' + name, ['label1'], registry=self.registry))
 
@@ -77,7 +79,9 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.registry = CollectorRegistry()
         prom_sensors = {
             'int_sensor': self._make_prom_sensor('int_sensor', 'A counter', Counter),
-            'float_sensor': self._make_prom_sensor('float_sensor', 'A gauge', Gauge)
+            'float_sensor': self._make_prom_sensor('float_sensor', 'A gauge', Gauge),
+            'histogram_sensor': self._make_prom_sensor('histogram_sensor', 'A histogram', Histogram,
+                                                       buckets=(1, 10))
         }
 
         def prom_factory(name, sensor):
@@ -163,9 +167,12 @@ class TestSensorProxyClient(asynctest.TestCase):
         await self.client.wait_synced()
         self._check_sensors()
 
-    def _check_prom(self, name, value, status=Sensor.Status.NOMINAL):
+    def _check_prom(self, name, value, status=Sensor.Status.NOMINAL, suffix='', extra_labels=None):
         labels = {'label1': 'labelvalue1'}
-        actual_value = self.registry.get_sample_value(name, labels)
+        value_labels = dict(labels)
+        if extra_labels is not None:
+            value_labels.update(extra_labels)
+        actual_value = self.registry.get_sample_value(name + suffix, value_labels)
         actual_status = self.registry.get_sample_value(name + '_status', labels)
         self.assertEqual(value, actual_value)
         self.assertEqual(status.value, actual_status)
@@ -177,6 +184,23 @@ class TestSensorProxyClient(asynctest.TestCase):
         # Gauge must not change.
         await self._set('float-sensor', 1.0, status=Sensor.Status.FAILURE)
         self._check_prom('test_float_sensor', 2.5, Sensor.Status.FAILURE)
+
+    async def test_histogram(self):
+        # Record some values, check the counts
+        await self._set('histogram-sensor', 4.0)
+        await self._set('histogram-sensor', 5.0)
+        await self._set('histogram-sensor', 0.5)
+        await self._set('histogram-sensor', 100.0, timestamp=12345)
+        self._check_prom('test_histogram_sensor', 1, suffix='_bucket', extra_labels={'le': '1.0'})
+        self._check_prom('test_histogram_sensor', 3, suffix='_bucket', extra_labels={'le': '10.0'})
+        self._check_prom('test_histogram_sensor', 4, suffix='_bucket', extra_labels={'le': '+Inf'})
+        # Set same value and timestamp (spurious update)
+        await self._set('histogram-sensor', 100.0, timestamp=12345)
+        self._check_prom('test_histogram_sensor', 4, suffix='_bucket', extra_labels={'le': '+Inf'})
+        # Set invalid value
+        await self._set('histogram-sensor', 6.0, status=Sensor.Status.FAILURE)
+        self._check_prom('test_histogram_sensor', 4, Sensor.Status.FAILURE,
+                         suffix='_bucket', extra_labels={'le': '+Inf'})
 
     async def test_counter(self):
         await self._set('int-sensor', 4)

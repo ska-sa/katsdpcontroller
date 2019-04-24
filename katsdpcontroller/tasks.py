@@ -12,7 +12,7 @@ import async_timeout
 
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
-from prometheus_client import Gauge, Counter
+from prometheus_client import Gauge, Counter, Histogram
 
 from katsdptelstate.endpoint import Endpoint
 
@@ -27,7 +27,7 @@ PROMETHEUS_LABELS = ('subarray_product_id', 'service')
 # Some of these will match multiple nodes, which is fine since they get labels
 # in Prometheus.
 PROMETHEUS_SENSORS = {}
-_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)\b', re.IGNORECASE)
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)', re.IGNORECASE)
 
 
 def _prometheus_factory(name, sensor):
@@ -35,15 +35,29 @@ def _prometheus_factory(name, sensor):
     if not match:
         return None, None
     type_ = match.group('type').lower()
+    args_ = match.group('args')
+    kwargs = {}
     if type_ == 'counter':
         class_ = Counter
+        if args_ is not None:
+            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
     elif type_ == 'gauge':
         class_ = Gauge
+        if args_ is not None:
+            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
+    elif type_ == 'histogram':
+        class_ = Histogram
+        if args_ is not None:
+            try:
+                buckets = [float(x.strip()) for x in args_.split(',')]
+                kwargs['buckets'] = buckets
+            except ValueError as exc:
+                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
     else:
         logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
         return None, None
     return (
-        class_('katsdpcontroller_' + name, sensor.description, PROMETHEUS_LABELS),
+        class_('katsdpcontroller_' + name, sensor.description, PROMETHEUS_LABELS, **kwargs),
         Gauge('katsdpcontroller_' + name + '_status',
               'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
     )
