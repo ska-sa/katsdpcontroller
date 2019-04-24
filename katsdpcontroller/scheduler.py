@@ -941,7 +941,7 @@ class ImageResolver:
                 ssl_context = ssl.create_default_context(cafile=cafile)
             else:
                 ssl_context = None
-            with aiohttp.ClientSession(loop=loop, **kwargs) as session:
+            async with aiohttp.ClientSession(loop=loop, **kwargs) as session:
                 try:
                     # Use a lowish timeout, so that we don't wedge the entire launch if
                     # there is a connection problem.
@@ -2334,6 +2334,8 @@ class Scheduler(pymesos.Scheduler):
     http_url : str, optional
         URL at which agent nodes can reach the HTTP server. If not specified,
         tries to deduce it from the host's FQDN.
+    runner_kwargs : dict, optional
+        Extra arguments to pass to construct the :class:`aiohttp.web.AppRunner`
 
     Attributes
     ----------
@@ -2344,15 +2346,13 @@ class Scheduler(pymesos.Scheduler):
         Web application used internally for scheduling. Prior to calling
         :meth:`start` it can be modified e.g. to add additional endpoints.
     http_port : int
-        Actual HTTP port used by :attr:`http_server` (after :meth:`start`)
-    http_handler : :class:`aiohttp.web.Server`
-        Web server connection handler (after :meth:`start`)
+        Actual HTTP port used for the HTTP server (after :meth:`start`)
     http_url : str
-        Actual URL to use for :attr:`http_server` (after :meth:`start`)
-    http_server : :class:`asyncio.Server`
-        Embedded HTTP server
+        Actual external URL to use for the HTTP server (after :meth:`start`)
+    http_runner : :class:`aiohttp.web.AppRunner`
+        Runner for the HTTP app
     """
-    def __init__(self, loop, default_role, http_port, http_url=None):
+    def __init__(self, loop, default_role, http_port, http_url=None, runner_kwargs=None):
         self._loop = loop
         self._driver = None
         self._offers = {}           #: offers keyed by role then agent ID then offer ID
@@ -2368,8 +2368,6 @@ class Scheduler(pymesos.Scheduler):
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
-        self.http_server = None
-        self.http_handler = None
         self.http_port = http_port
         self.http_url = http_url
         self._launcher_task = loop.create_task(self._launcher())
@@ -2381,35 +2379,32 @@ class Scheduler(pymesos.Scheduler):
         app.router.add_static('/static',
                               pkg_resources.resource_filename('katsdpcontroller', 'static'))
         self.app = app
+        if runner_kwargs is None:
+            runner_kwargs = {}
+        self.http_runner = aiohttp.web.AppRunner(app, **runner_kwargs)
 
-    async def start(self, handler=None):
+    async def start(self):
         """Start the internal HTTP server running. This must be called before any launches.
 
         This starts up the webapp, so any additions to it must be made first.
-
-        Parameters
-        ----------
-        handler : :class:`aiohttp.web_server.Server`, optional
-            HTTP server, overriding the default. It must be created with the
-            same event loop as self.
         """
-        if self.http_server:
+        if self.http_runner.sites:
             raise RuntimeError('Already started')
-        if handler is None:
-            self.http_handler = self.app.make_handler(loop=self._loop)
-        else:
-            self.http_handler = handler
-        # We want a single port serving both IPv4 and IPv6. By default asyncio
+        await self.http_runner.setup()
+        # We want a single port serving both IPv4 and IPv6. Using TCPSite
         # will create a separate socket for each, and if http_port is 0 (used
         # by unit tests) they end up with different ports.
         # See https://stackoverflow.com/questions/45907833 for more details.
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('::', self.http_port))
-        self.http_server = await self._loop.create_server(
-            self.http_handler, sock=sock)
+
+        site = aiohttp.web.SockSite(self.http_runner, sock)
+        await site.start()
         if not self.http_port:
-            self.http_port = sock.getsockname()[1]
+            self.http_port = self.http_runner.addresses[0][1]
+        if not self.http_url:
+            self.http_url = site.name
         logger.info('Internal HTTP server at %s', self.http_url)
 
     def add_queue(self, queue):
@@ -3115,10 +3110,7 @@ class Scheduler(pymesos.Scheduler):
         """
         # TODO: do we need to explicitly decline outstanding offers?
         self._closing = True    # Prevents concurrent launches
-        if self.http_server is not None:
-            self.http_server.close()
-            await self.http_handler.shutdown(1)
-            await self.http_server.wait_closed()
+        await self.http_runner.cleanup()
         # Find the graphs that are still running
         graphs = set()
         for (_task, graph) in self._active.values():
@@ -3176,7 +3168,7 @@ class Scheduler(pymesos.Scheduler):
         if master is None:
             raise ValueError('No master is set')
         url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
-        with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=timeout) as r:
                 r.raise_for_status()
                 data = await r.json()

@@ -68,9 +68,9 @@ def load_gui_urls_dir(dirname):
     return gui_urls
 
 
-async def run(loop, sched, server, http_handler):
+async def run(loop, sched, server):
     if sched is not None:
-        await sched.start(http_handler)
+        await sched.start()
     await server.start()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
@@ -197,11 +197,10 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     if opts.interface_mode:
         sched = None
-        http_handler = None
     else:
-        sched = scheduler.Scheduler(loop, opts.realtime_role, opts.http_port, opts.http_url)
+        sched = scheduler.Scheduler(loop, opts.realtime_role, opts.http_port, opts.http_url,
+                                    dict(access_log_class=web.AccessLogger))
         sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
-        http_handler = sched.app.make_handler(loop=loop, access_log_class=web.AccessLogger)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, opts.master, use_addict=True,
             implicit_acknowledgements=False)
@@ -223,7 +222,7 @@ if __name__ == "__main__":
 
     if opts.aiomonitor:
         with aiomonitor.start_monitor(loop=loop):
-            loop.run_until_complete(run(loop, sched, server, http_handler))
+            loop.run_until_complete(run(loop, sched, server))
     else:
-        loop.run_until_complete(run(loop, sched, server, http_handler))
+        loop.run_until_complete(run(loop, sched, server))
     loop.close()
