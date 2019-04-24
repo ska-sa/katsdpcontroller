@@ -69,7 +69,8 @@ class FutureObserver:
 class TestSensorProxyClient(asynctest.TestCase):
     def _make_prom_sensor(self, name, description, class_, *args, **kwargs):
         return (
-            class_('test_' + name, description, ['label1'], *args, registry=self.registry, **kwargs),
+            class_('test_' + name, description, ['label1'], *args,
+                   registry=self.registry, **kwargs),
             Gauge('test_' + name + '_status',
                   'Status of katcp sensor ' + name, ['label1'], registry=self.registry))
 
