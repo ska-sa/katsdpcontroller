@@ -51,7 +51,7 @@ def _prometheus_factory(name, sensor):
             try:
                 buckets = [float(x.strip()) for x in args_.split(',')]
                 kwargs['buckets'] = buckets
-            except Exception as exc:
+            except ValueError as exc:
                 logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
     else:
         logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
