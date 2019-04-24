@@ -2346,9 +2346,9 @@ class Scheduler(pymesos.Scheduler):
         Web application used internally for scheduling. Prior to calling
         :meth:`start` it can be modified e.g. to add additional endpoints.
     http_port : int
-        Actual HTTP port used by :attr:`http_site` (after :meth:`start`)
+        Actual HTTP port used for the HTTP server (after :meth:`start`)
     http_url : str
-        Actual URL to use for :attr:`http_site` (after :meth:`start`)
+        Actual external URL to use for the HTTP server (after :meth:`start`)
     http_runner : :class:`aiohttp.web.AppRunner`
         Runner for the HTTP app
     """
