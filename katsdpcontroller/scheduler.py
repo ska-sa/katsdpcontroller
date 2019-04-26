@@ -191,7 +191,7 @@ TASKS_IN_STATE = prometheus_client.Gauge(
     ['queue', 'state'])
 BATCH_TASKS_CREATED = prometheus_client.Counter(
     'katsdpcontroller_batch_tasks_created',
-    'Number of batch tasks that have been defined')
+    'Number of batch tasks that have been created')
 BATCH_TASKS_STARTED = prometheus_client.Counter(
     'katsdpcontroller_batch_tasks_started',
     'Number of batch tasks that have become ready to start')

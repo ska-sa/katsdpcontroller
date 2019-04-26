@@ -36,6 +36,7 @@ BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0))
+BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
 logger = logging.getLogger("katsdpcontroller.katsdpcontroller")
 _capture_block_names = set()      #: all capture block names used
 
@@ -845,7 +846,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                                 queue=self.batch_queue)
         nodes = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
         await self.sched.batch_run(physical_graph, self.resolver, nodes,
-                                   queue=self.batch_queue, resources_timeout=7*86400, attempts=3)
+                                   queue=self.batch_queue,
+                                   resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:
