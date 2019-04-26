@@ -28,9 +28,9 @@
 {% endif %}
 
 <h3>Telstate config</h3>
-{% if task.task_config is defined %}
+{% if task_config %}
 <pre>
-{{task.task_config | tojson(indent=2)}}
+{{task_config | tojson(indent=2)}}
 </pre>
 {% else %}
 <p>N/A</p>

@@ -60,10 +60,32 @@ def _get_batch_tasks(product):
     return tasks
 
 
-def _make_task_details(tasks, active_cell):
+def _get_task_config(product, task):
+    """Get the effective telstate config for a task.
+
+    This also looks for nodes whose name indicates that they are parents
+    (and hence whose telstate config will be picked up by
+    katsdpservices.argparse).
+    """
+    by_name = {t.logical_node.name: t for t in product.physical_graph}
+    conf = {}
+    name_parts = task.logical_node.name.split('.')
+    for i in range(1, len(name_parts) + 1):
+        name = '.'.join(name_parts[:i])
+        try:
+            sub_conf = by_name[name].task_config
+        except (KeyError, NameError):
+            pass
+        else:
+            conf.update(sub_conf)
+    return conf
+
+
+def _make_task_details(product, active_cell):
     if active_cell is None:
         return []
     row = active_cell[0]
+    tasks = _get_tasks(product)
     if not 0 <= row < len(tasks):
         return []
     task = tasks[row]
@@ -71,7 +93,7 @@ def _make_task_details(tasks, active_cell):
     # For now it's very convenient to be able to edit it without
     # restarting the master controller.
     template = JINJA_ENV.get_template('task_details.html.j2')
-    value = template.render(task=task, now=time.time())
+    value = template.render(task=task, task_config=_get_task_config(product, task), now=time.time())
     return DangerouslySetInnerHTML(value)
 
 
@@ -207,7 +229,7 @@ class Dashboard:
             product = sdp_controller.subarray_products.get(product_name)
             if product is None:
                 return []
-            return _make_task_details(_get_tasks(product), active_cell)
+            return _make_task_details(product, active_cell)
 
         @app.callback(Output('subarray-product-config', 'children'),
                       [Input('subarray-product-tabs', 'value'),
