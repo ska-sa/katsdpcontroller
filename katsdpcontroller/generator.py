@@ -1559,6 +1559,14 @@ def _stream_url(capture_block_id, stream_name):
     return url
 
 
+def _sky_model_url(capture_block_id, continuum_name, target):
+    url = 'redis://{endpoints[telstate_telstate]}/'
+    url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
+    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_name))
+    url += '&target={}'.format(urllib.parse.quote_plus(target.description))
+    return url
+
+
 def _normalise_target_name(name, used):
     name = re.sub(r'[^-A-Za-z0-9_]', '_', name)
     if name not in used:
@@ -1676,6 +1684,10 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
                 _stream_url(capture_block_id, stream_name),
                 '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
+            if len(output['src_streams']) > 1:
+                sky_model_url = _sky_model_url(capture_block_id, output['src_streams'][1], target)
+                imager.command += ['--subtract', sky_model_url]
+
             g.add_node(imager)
             if len(output['src_streams']) > 1:
                 continuum = find_node(g, 'continuum_image.' + output['src_streams'][1])
