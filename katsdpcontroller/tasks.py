@@ -3,7 +3,6 @@ import json
 import asyncio
 import socket
 import ipaddress
-import enum
 import os
 import re
 
