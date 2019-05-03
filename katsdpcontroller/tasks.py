@@ -63,12 +63,13 @@ def _prometheus_factory(name, sensor):
     )
 
 
-class CaptureBlockState(enum.Enum):
+class CaptureBlockState(scheduler.OrderedEnum):
     """State of a single capture block."""
-    INITIALISING = 0
-    CAPTURING = 1
-    POSTPROCESSING = 2
-    DEAD = 3
+    INITIALISING = 0         # Only occurs briefly on construction
+    CAPTURING = 1            # capture-init called, capture-done not yet called
+    BURNDOWN = 2             # capture-done returned, but real-time processing still happening
+    POSTPROCESSING = 3       # real-time processing complete, running batch processing
+    DEAD = 4                 # fully complete
 
 
 class KatcpTransition(object):
@@ -109,13 +110,11 @@ class SDPLogicalTask(scheduler.LogicalTask):
         super().__init__(*args, **kwargs)
         self.physical_factory = SDPPhysicalTask
         self.transitions = {}
+        # Capture block state at which the node no longer deals with the capture block
+        self.final_state = CaptureBlockState.BURNDOWN
         # List of dictionaries for a .gui-urls sensor. The fields are expanded
         # using str.format(self).
         self.gui_urls = []
-        # Whether to wait for it to die before returning from product-deconfigure
-        self.deconfigure_wait = True
-        # Whether to wait until all capture blocks are completely dead before killing
-        self.wait_capture_blocks_dead = False
         # Whether we should abort the capture block if the task fails
         self.critical = True
         # Whether to set config keys in telstate (only useful for processes that use katsdpservices)
@@ -521,7 +520,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
 
     async def graceful_kill(self, driver, **kwargs):
         try:
-            if self.logical_node.wait_capture_blocks_dead:
+            if self.logical_node.final_state == CaptureBlockState.DEAD:
                 capture_blocks = kwargs.get('capture_blocks', {})
                 # Explicitly copy the values because it will mutate
                 for capture_block in list(capture_blocks.values()):
