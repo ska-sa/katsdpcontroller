@@ -16,7 +16,8 @@
             "properties": {
                 "read": {"$ref": "#/definitions/key_pair"},
                 "write": {"$ref": "#/definitions/key_pair"},
-                "url": { "type": "string", "format": "uri" }
+                "url": { "type": "string", "format": "uri" },
+                "expiry_days": { "type": "integer", "minimumValue": 0 }
             },
             "required": ["write", "url"]
         },

@@ -537,7 +537,8 @@ class TestSDPController(BaseTestSDPController):
                         "access_key": "another-fake-key",
                         "secret_key": "s3cr3t"
                     },
-                    "url": "http://continuum.s3.invalid/"
+                    "url": "http://continuum.s3.invalid/",
+                    "expiry_days": 7
                 },
                 "spectral": {
                     "read": {
@@ -548,7 +549,8 @@ class TestSDPController(BaseTestSDPController):
                         "access_key": "another-fake-key",
                         "secret_key": "s3cr3t"
                     },
-                    "url": "http://spectral.s3.invalid/"
+                    "url": "http://spectral.s3.invalid/",
+                    "expiry_days": 7
                 },
                 "archive": {
                     "read": {
@@ -753,6 +755,7 @@ class TestSDPController(BaseTestSDPController):
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
             's3_endpoint_url': 'http://archive.s3.invalid/',
+            's3_expiry_days': None,
             'workers': mock.ANY,
             'buffer_dumps': mock.ANY,
             'obj_max_dumps': mock.ANY,
