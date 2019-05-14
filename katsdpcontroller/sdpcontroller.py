@@ -370,6 +370,9 @@ class SDPSubarrayProductBase:
         Note that a failure here does **not** put the subarray product into
         ERROR state, as it is assumed that this does not interfere with
         subsequent operation.
+
+        This function should move the capture block to POSTPROCESSING after
+        burndown of the real-time processing, but should not set it to DEAD.
         """
         pass
 
@@ -501,7 +504,7 @@ class SDPSubarrayProductBase:
         else:
             assert error_expected
         self.current_capture_block = None
-        capture_block.state = CaptureBlockState.POSTPROCESSING
+        capture_block.state = CaptureBlockState.BURNDOWN
         capture_block.postprocess_task = asyncio.ensure_future(
             self.postprocess_impl(capture_block), loop=self.loop)
         log_task_exceptions(
@@ -679,16 +682,19 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
                 if state is None:
                     states.pop(capture_block_id, None)
                 else:
-                    states[capture_block_id] = state
+                    states[capture_block_id] = state.name.lower()
                 sensor.set_value(json.dumps(states))
 
     async def capture_init_impl(self, capture_block):
-        self._update_capture_block_state(capture_block.name, 'CAPTURING')
+        self._update_capture_block_state(capture_block.name, CaptureBlockState.CAPTURING)
 
     async def capture_done_impl(self, capture_block):
-        self._update_capture_block_state(capture_block.name, 'PROCESSING')
+        self._update_capture_block_state(capture_block.name, CaptureBlockState.BURNDOWN)
 
     async def postprocess_impl(self, capture_block):
+        await asyncio.sleep(0.1, loop=self.loop)
+        self._update_capture_block_state(capture_block.name, CaptureBlockState.POSTPROCESSING)
+        capture_block.state = CaptureBlockState.POSTPROCESSING
         await asyncio.sleep(0.1, loop=self.loop)
         self._update_capture_block_state(capture_block.name, None)
 
@@ -749,7 +755,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 else:
                     for req in reqs:
                         await node.issue_req(req.name, req.args, timeout=req.timeout)
-            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
                 observer = node.capture_block_state_observer
                 if observer is not None:
                     self.logger.info('Waiting for %s on %s', capture_block.name, node.name)
@@ -758,7 +764,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 else:
                     self.logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:
-            if state == CaptureBlockState.DEAD and isinstance(node, tasks.SDPPhysicalTask):
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
                 node.remove_capture_block(capture_block)
 
     async def exec_transitions(self, state, reverse, capture_block):
@@ -825,29 +831,33 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block):
-        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
+        await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
     async def postprocess_impl(self, capture_block):
-        await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
+        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
+        capture_block.state = CaptureBlockState.POSTPROCESSING
 
-        logical_graph = generator.build_postprocess_logical_graph(
-            self.config, capture_block.name, self.telstate)
-        physical_graph = self._instantiate_physical_graph(
-            logical_graph, capture_block.name)
-        capture_block.postprocess_physical_graph = physical_graph
-        nodes = {node.logical_node.name: node for node in physical_graph}
-        telstate_node = nodes['telstate']
-        telstate_node.host = self.telstate_node.host
-        telstate_node.ports = dict(self.telstate_node.ports)
-        # This doesn't actually run anything, just marks the fake telstate node
-        # as READY. It could block for a while behind real tasks in the batch
-        # queue, but that doesn't matter because our real tasks will block too.
-        await self.sched.launch(physical_graph, self.resolver, [telstate_node],
-                                queue=self.batch_queue)
-        nodes = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
-        await self.sched.batch_run(physical_graph, self.resolver, nodes,
-                                   queue=self.batch_queue,
-                                   resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
+        try:
+            logical_graph = generator.build_postprocess_logical_graph(
+                self.config, capture_block.name, self.telstate)
+            physical_graph = self._instantiate_physical_graph(
+                logical_graph, capture_block.name)
+            capture_block.postprocess_physical_graph = physical_graph
+            nodes = {node.logical_node.name: node for node in physical_graph}
+            telstate_node = nodes['telstate']
+            telstate_node.host = self.telstate_node.host
+            telstate_node.ports = dict(self.telstate_node.ports)
+            # This doesn't actually run anything, just marks the fake telstate node
+            # as READY. It could block for a while behind real tasks in the batch
+            # queue, but that doesn't matter because our real tasks will block too.
+            await self.sched.launch(physical_graph, self.resolver, [telstate_node],
+                                    queue=self.batch_queue)
+            nodes = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
+            await self.sched.batch_run(physical_graph, self.resolver, nodes,
+                                       queue=self.batch_queue,
+                                       resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
+        finally:
+            await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
     def capture_block_dead_impl(self, capture_block):
         for node in self.physical_graph:
@@ -1006,7 +1016,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         else:
             def must_wait(node):
                 return (isinstance(node.logical_node, tasks.SDPLogicalTask)
-                        and node.logical_node.deconfigure_wait)
+                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
             # Start the shutdown in a separate task, so that we can monitor
             # for task shutdown.
             wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]

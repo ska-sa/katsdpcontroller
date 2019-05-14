@@ -25,7 +25,7 @@ CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
     ],
-    CaptureBlockState.POSTPROCESSING: [
+    CaptureBlockState.BURNDOWN: [
         KatcpTransition('capture-done', timeout=120)
     ]
 }
@@ -390,8 +390,7 @@ def _make_telstate(g, config):
     telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
-    telstate.deconfigure_wait = False
-    telstate.wait_capture_blocks_dead = True
+    telstate.final_state = CaptureBlockState.DEAD
     g.add_node(telstate)
     return telstate
 
@@ -437,19 +436,19 @@ def _make_meta_writer(g, config):
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    meta_writer.deconfigure_wait = False
     # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
     bandwidth = 1e9 if not is_develop(config) else 10e6
     meta_writer.interfaces[0].bandwidth_out = bandwidth
     meta_writer.transitions = {
-        CaptureBlockState.POSTPROCESSING: [
+        CaptureBlockState.BURNDOWN: [
             KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)    # Light dump
         ],
         CaptureBlockState.DEAD: [
             KatcpTransition('write-meta', '{capture_block_id}', False, timeout=300)   # Full dump
         ]
     }
+    meta_writer.final_state = CaptureBlockState.DEAD
 
     g.add_node(meta_writer, config=make_meta_writer_config)
     return meta_writer
@@ -555,7 +554,7 @@ def _make_cbf_simulator(g, config, name):
                 KatcpTransition('capture-start', name, settings.get('start_time', '{time}'),
                                 timeout=30)
             ],
-            CaptureBlockState.POSTPROCESSING: [
+            CaptureBlockState.BURNDOWN: [
                 KatcpTransition('capture-stop', name, timeout=60)
             ]
         }
@@ -1026,7 +1025,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
             'category': 'Plot'
         }]
         cal.transitions = CAPTURE_TRANSITIONS
-        cal.deconfigure_wait = False
+        cal.final_state = CaptureBlockState.POSTPROCESSING
 
         def make_cal_config(task, resolver, server_id=i):
             cal_config = {
@@ -1205,7 +1204,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
             '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
             '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
         ])
-    flag_writer.deconfigure_wait = False
+    flag_writer.final_state = CaptureBlockState.POSTPROCESSING
 
     # Capture init / done are used to track progress of completing flags
     # for a specified capture block id - the writer itself is free running
@@ -1213,7 +1212,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
         CaptureBlockState.CAPTURING: [
             KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
         ],
-        CaptureBlockState.DEAD: [
+        CaptureBlockState.POSTPROCESSING: [
             KatcpTransition('capture-done', '{capture_block_id}', timeout=60)
         ]
     }
