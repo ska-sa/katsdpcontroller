@@ -74,7 +74,7 @@ def _get_task_config(product, task):
         name = '.'.join(name_parts[:i])
         try:
             sub_conf = by_name[name].task_config
-        except (KeyError, NameError):
+        except (KeyError, AttributeError):
             pass
         else:
             conf.update(sub_conf)
