@@ -401,7 +401,8 @@ def _make_cam2telstate(g, config, name):
     cam2telstate.command = ['cam2telstate.py']
     cam2telstate.cpus = 0.75
     cam2telstate.mem = 256
-    cam2telstate.ports = ['port']
+    cam2telstate.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    cam2telstate.wait_ports = ['port']
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
         'url': url
