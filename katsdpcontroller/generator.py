@@ -1319,7 +1319,8 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [
             scheduler.VolumeRequest(volume_name.format(idx), '/data', 'RW', affinity=ram)]
-    bf_ingest.ports = ['port']
+    bf_ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
+    bf_ingest.wait_ports = ['port']
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
     def make_beamformer_engineering_pol_config(task, resolver):
@@ -1327,7 +1328,8 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
             'ibv': not develop,
-            'stream_name': src_name
+            'stream_name': src_name,
+            'aiomonitor': True
         }
         if timeplot:
             config.update({
