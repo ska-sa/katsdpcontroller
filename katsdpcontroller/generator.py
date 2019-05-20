@@ -405,7 +405,8 @@ def _make_cam2telstate(g, config, name):
     cam2telstate.wait_ports = ['port']
     url = config['inputs'][name]['url']
     g.add_node(cam2telstate, config=lambda task, resolver: {
-        'url': url
+        'url': url,
+        'aiomonitor': True
     })
     return cam2telstate
 
@@ -796,7 +797,8 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         'output_int_time': spectral_info.int_time,
         'sd_int_time': spectral_info.int_time,
         'output_channels': output_channels_str,
-        'sd_output_channels': output_channels_str
+        'sd_output_channels': output_channels_str,
+        'aiomonitor': True
     }
     if spectral_name:
         group_config.update(l0_spectral_name=spectral_name)
@@ -968,7 +970,8 @@ def _make_cal(g, config, name, l0_name, flags_names):
         'max_scans': max_scans,
         'workers': workers,
         'l0_name': l0_name,
-        'servers': n_cal
+        'servers': n_cal,
+        'aiomonitor': True
     }
     group_config.update(parameters)
     if info.src_info.raw['simulate']:
@@ -1017,7 +1020,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         # Note: these scale the fixed overheads too, so is not strictly accurate.
         cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
         cal.interfaces[0].bandwidth_out = info.flag_bandwidth * FLAGS_RATE_RATIO / n_cal
-        cal.ports = ['port', 'dask_diagnostics']
+        cal.ports = ['port', 'dask_diagnostics', 'aiomonitor_port', 'aioconsole_port']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
             'title': 'Cal diagnostics',
@@ -1153,7 +1156,8 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
-            'direct_write': True
+            'direct_write': True,
+            'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
@@ -1229,7 +1233,8 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
-            'direct_write': True
+            'direct_write': True,
+            'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
