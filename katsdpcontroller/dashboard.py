@@ -285,8 +285,7 @@ class Dashboard:
             product = sdp_controller.subarray_products.get(product_name)
             if product is None:
                 return []
-            tasks = [task for (capture_block_id, task) in _get_batch_tasks(product)]
-            return _make_task_details(tasks, active_cell)
+            return _make_task_details(product, active_cell)
 
         return app
 
