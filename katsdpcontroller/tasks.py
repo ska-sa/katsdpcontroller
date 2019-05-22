@@ -81,7 +81,7 @@ class KatcpTransition(object):
     *args : str
         Request arguments. String arguments are passed through
         :meth:`str.format`: see
-        :meth:`.SDPSubarrayProduct.exec_node_transitions` for the keys that can
+        :meth:`.SDPSubarrayProduct.exec_transitions` for the keys that can
         be substituted.
     timeout : float
         Maximum time to wait for the query to succeed.
