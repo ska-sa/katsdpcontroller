@@ -751,6 +751,7 @@ class TestSDPController(BaseTestSDPController):
             'port': 20000,
             'aiomonitor_port': 20001,
             'aioconsole_port': 20002,
+            'aiomonitor': True,
             'l0_spead': mock.ANY,
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
@@ -779,7 +780,8 @@ class TestSDPController(BaseTestSDPController):
             'output_int_time': 1.996,
             'output_channels': '96:3488',
             'servers': 2,
-            'clock_ratio': 1.0
+            'clock_ratio': 1.0,
+            'aiomonitor': True
         })
 
         # Verify the state of the subarray
