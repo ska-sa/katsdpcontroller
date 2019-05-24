@@ -1681,8 +1681,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
             imager.command = [
                 'imager.py',
                 '-i', 'target={}'.format(target.description),
-                '-i', 'access-key={resolver.s3_config[continuum][read][access_key]}',
-                '-i', 'secret-key={resolver.s3_config[continuum][read][secret_key]}',
+                '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
+                '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
                 '--stokes', 'IQUV',
                 '--start-channel', str(first_channel),
                 '--stop-channel', str(last_channel),
