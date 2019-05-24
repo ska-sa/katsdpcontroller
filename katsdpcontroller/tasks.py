@@ -464,6 +464,8 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             'task_id': self.taskinfo.task_id.value,
             'subarray_product_id': self.subarray_product_id
         }
+        if self.capture_block_id is not None:
+            labels['capture_block_id'] = self.capture_block_id
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
             {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
             for (key, value) in labels.items()])
