@@ -1635,7 +1635,8 @@ def _unique_targets(config, capture_block_id, name, telstate, cache):
         return {}
 
     targets = {}
-    for target in _get_targets(telstate, capture_block_id, l0_name):
+    l0_stream = name + '.' + l0_name
+    for target in _get_targets(telstate, capture_block_id, l0_stream):
         if 'target' not in target.tags:
             continue
         target_name = _normalise_target_name(target.name, targets)
@@ -1648,14 +1649,15 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
     l0_info = L0Info(config, l0_name)
-    data_url = _stream_url(capture_block_id, name + '.' + l0_name)
+    l0_stream = name + '.' + l0_name
+    data_url = _stream_url(capture_block_id, l0_stream)
     cpus = _imager_cpus(config)
     targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
 
     # katdal doesn't support selection by target description, and selection by
     # name can be ambiguous (if there are multiple targets with the same
     # name), so we select by index.
-    catalogue = _get_targets(telstate, capture_block_id, l0_name)
+    catalogue = _get_targets(telstate, capture_block_id, l0_stream)
 
     for target_name, target in targets.items():
         try:
