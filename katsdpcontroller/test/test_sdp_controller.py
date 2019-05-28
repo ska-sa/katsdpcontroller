@@ -1106,7 +1106,7 @@ class TestSDPController(BaseTestSDPController):
         done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
         failed = get_metric(scheduler.BATCH_TASKS_FAILED) - init_batch_failed
         skipped = get_metric(scheduler.BATCH_TASKS_SKIPPED) - init_batch_skipped
-        self.assertEqual(started, 7)    # One continuum, 3x2 spectral
+        self.assertEqual(started, 9)    # 3 continuum, 3x2 spectral
         self.assertEqual(done, started)
         self.assertEqual(failed, 0)
         self.assertEqual(skipped, 0)

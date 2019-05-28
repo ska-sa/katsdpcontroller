@@ -1587,46 +1587,6 @@ def _normalise_target_name(name, used):
         return '{}_{}'.format(name, i)
 
 
-def _make_continuum_imager(g, config, capture_block_id, name):
-    output = config['outputs'][name]
-    l1_flags_name = output['src_streams'][0]
-    l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
-    l0_info = L0Info(config, l0_name)
-    if l0_info.n_antennas < 4:
-        # Won't be any calibration solutions
-        return None
-
-    data_url = _stream_url(capture_block_id, name + '.' + l0_name)
-    cpus = _imager_cpus(config)
-
-    imager = SDPLogicalTask('continuum_image.' + name)
-    imager.cpus = cpus
-    # These resources are very rough estimates
-    imager.mem = 50000 if not is_develop(config) else 8000
-    imager.disk = _mb(1000 * l0_info.size + 1000)
-    imager.max_run_time = 86400     # 24 hours
-    imager.gpus = [scheduler.GPURequest()]
-    # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
-    # it can help improve parallelism). There is no memory enforcement and I
-    # have no idea how much would be needed, so don't bother reserving memory.
-    imager.gpus[0].compute = 1.0
-    imager.image = 'katsdpcontim'
-    imager.command = [
-        'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
-        'continuum_pipeline.py',
-        '--telstate', '{endpoints[telstate_telstate]}',
-        '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
-        '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
-        '--select', 'scans="track"; corrprods="cross"',
-        '--output-id', name,
-        '--mfimage', 'nThreads={}'.format(cpus),
-        '-w', '/mnt/mesos/sandbox', data_url
-    ]
-    imager.katsdpservices_config = False
-    g.add_node(imager)
-    return imager
-
-
 def _get_targets(telstate, capture_block_id, stream_name):
     view, _, _ = katdal.datasources.view_l0_capture_stream(telstate, capture_block_id, stream_name)
     datasource = katdal.datasources.TelstateDataSource(
@@ -1635,35 +1595,136 @@ def _get_targets(telstate, capture_block_id, stream_name):
     return dataset.catalogue
 
 
-def _make_spectral_imager(g, config, capture_block_id, name, telstate):
+def _unique_targets(config, capture_block_id, name, telstate, cache):
+    """Identify all the targets to image and assign names.
+
+    Each target is given a unique name containing only alphanumerics, dash (-)
+    and underscore (_), and hence suitable for filenames.
+
+    Parameter
+    ---------
+    config : dict
+        Configuration dictionary
+    capture_block_id : str
+        Capture block ID
+    name : str
+        Name of the ``sdp.continuum_image`` or ``sdp.spectral_image`` output
+    telstate : :class:`katsdptelstate.TelescopeState`
+        Root view of the telescope state
+    cache : dict
+        A cache for memoising the return value. It is keyed only by the
+        incoming ``cbf.baseline_correlation_products`` stream, so must not be
+        reused across capture blocks.
+
+    Returns
+    -------
+    targets : dict of str to :class:`katpoint.Target`
+        Each key is the unique normalised target name, and the value is the target.
+    """
+    output = config['outputs'][name]
+    l1_flags_name = output['src_streams'][0]
+    l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
+    # Get the cbf.baseline_correlation_products
+    cache_key = config['outputs'][l0_name]['src_streams'][0]
+    if cache_key in cache:
+        return cache[cache_key]
+
+    l0_info = L0Info(config, l0_name)
+    if l0_info.n_antennas < 4:
+        # Won't be any calibration solutions
+        return {}
+
+    targets = {}
+    l0_stream = name + '.' + l0_name
+    for target in _get_targets(telstate, capture_block_id, l0_stream):
+        if 'target' not in target.tags:
+            continue
+        target_name = _normalise_target_name(target.name, targets)
+        targets[target_name] = target
+    return targets
+
+
+def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_cache):
+    output = config['outputs'][name]
+    l1_flags_name = output['src_streams'][0]
+    l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
+    l0_info = L0Info(config, l0_name)
+    l0_stream = name + '.' + l0_name
+    data_url = _stream_url(capture_block_id, l0_stream)
+    cpus = _imager_cpus(config)
+    targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
+
+    # katdal doesn't support selection by target description, and selection by
+    # name can be ambiguous (if there are multiple targets with the same
+    # name), so we select by index.
+    catalogue = _get_targets(telstate, capture_block_id, l0_stream)
+
+    for target_name, target in targets.items():
+        try:
+            target_index = catalogue.targets.index(target)
+        except ValueError:
+            logger.warning('Target %s not found in catalogue for %s',
+                           target.name, name, extra=dict(capture_block_id=capture_block_id))
+            continue
+
+        imager = SDPLogicalTask('continuum_image.{}.{}'.format(name, target_name))
+        imager.cpus = cpus
+        # These resources are very rough estimates
+        imager.mem = 50000 if not is_develop(config) else 8000
+        imager.disk = _mb(1000 * l0_info.size + 1000)
+        imager.max_run_time = 86400     # 24 hours
+        imager.gpus = [scheduler.GPURequest()]
+        # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
+        # it can help improve parallelism). There is no memory enforcement and I
+        # have no idea how much would be needed, so don't bother reserving memory.
+        imager.gpus[0].compute = 1.0
+        imager.image = 'katsdpcontim'
+        imager.command = [
+            'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
+            'continuum_pipeline.py',
+            '--telstate', '{endpoints[telstate_telstate]}',
+            '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
+            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
+            '--select', 'scans="track"; corrprods="cross"; targets=[{}]'.format(target_index),
+            '--output-id', name + '.' + target_name,
+            '--mfimage', 'nThreads={}'.format(cpus),
+            '-w', '/mnt/mesos/sandbox', data_url
+        ]
+        imager.katsdpservices_config = False
+        g.add_node(imager)
+    logger.info('Continuum imager targets for %s: %s', capture_block_id,
+                ', '.join(target.name for target in targets.values()))
+
+
+def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_cache):
     # Trace back to find the visibility stream (required to open with katdal)
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
     l0_info = L0Info(config, l0_name)
-    if l0_info.n_antennas < 4:
-        # Won't be any calibration solutions
-        return None
     output_channels = output['output_channels']
+    data_url = _stream_url(capture_block_id, name + '.' + l0_name)
+    targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
 
-    # Identify all the targets
-    stream_name = name + '.' + l0_name
-    # Target names could contain arbitrary characters, so they are first
-    # normalised (which could cause collisions), and then if necessary a
-    # unique suffix is added.
-    target_names = set()
-    orig_target_names = []
-    for target in _get_targets(telstate, capture_block_id, stream_name):
-        if 'target' not in target.tags:
-            continue
-        target_name = _normalise_target_name(target.name, target_names)
-        target_names.add(target_name)
-        orig_target_names.append(target.name)
+    for target_name, target in targets.items():
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
             if first_channel >= last_channel:
                 continue
+
+            continuum_name = None
+            continuum = None
+            if len(output['src_streams']) > 1:
+                continuum_name = output['src_streams'][1] + '.' + target_name
+                try:
+                    continuum = find_node(g, 'continuum_image.' + continuum_name)
+                except KeyError:
+                    logger.warning('Skipping %s for %s because it was not found for %s',
+                                   target.name, name, continuum_name,
+                                   extra=dict(capture_block_id=capture_block_id))
+                    continue
+
             imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
                 name, first_channel, last_channel, target_name))
             imager.cpus = _imager_cpus(config)
@@ -1690,19 +1751,18 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate):
                 '--weight-type', 'robust',
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 '--no-tmp-file',
-                _stream_url(capture_block_id, stream_name),
+                data_url,
                 '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
-            if len(output['src_streams']) > 1:
-                sky_model_url = _sky_model_url(capture_block_id, output['src_streams'][1], target)
+            if continuum_name is not None:
+                sky_model_url = _sky_model_url(capture_block_id, continuum_name, target)
                 imager.command += ['--subtract', sky_model_url]
 
             g.add_node(imager)
-            if len(output['src_streams']) > 1:
-                continuum = find_node(g, 'continuum_image.' + output['src_streams'][1])
+            if continuum is not None:
                 g.add_edge(imager, continuum, depends_finished=True)
     logger.info('Spectral imager targets for %s: %s', capture_block_id,
-                ', '.join(orig_target_names))
+                ', '.join(target.name for target in targets.values()))
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
@@ -1710,13 +1770,18 @@ def build_postprocess_logical_graph(config, capture_block_id, telstate):
     telstate_node = scheduler.LogicalExternal('telstate')
     g.add_node(telstate_node)
 
-    for name, output in config['outputs'].items():
-        if output['type'] == 'sdp.continuum_image':
-            _make_continuum_imager(g, config, capture_block_id, name)
+    target_cache = {}
 
     for name, output in config['outputs'].items():
+        if output['type'] == 'sdp.continuum_image':
+            _make_continuum_imager(g, config, capture_block_id, name, telstate, target_cache)
+
+    # Note: this must only be run after all the sdp.continuum_image nodes have
+    # been created, because spectral imager nodes depend on continuum imager
+    # nodes.
+    for name, output in config['outputs'].items():
         if output['type'] == 'sdp.spectral_image':
-            _make_spectral_imager(g, config, capture_block_id, name, telstate)
+            _make_spectral_imager(g, config, capture_block_id, name, telstate, target_cache)
 
     seen = set()
     for node in g:
