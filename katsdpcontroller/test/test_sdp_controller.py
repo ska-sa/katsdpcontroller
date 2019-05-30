@@ -986,6 +986,26 @@ class TestSDPController(BaseTestSDPController):
         ]
         self.assertEqual(grouped_calls, expected_calls)
 
+    async def test_capture_init_bad_json(self):
+        """Check that capture-init fails if an override is illegal"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request("capture-init", SUBARRAY_PRODUCT4, 'not json')
+
+    async def test_capture_init_bad_override(self):
+        """Check that capture-init fails if an override makes the config illegal"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request("capture-init", SUBARRAY_PRODUCT4, '{"inputs": null}')
+
+    async def test_capture_init_bad_override_change(self):
+        """Check that capture-init fails if an override makes an invalid change"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request(
+                "capture-init", SUBARRAY_PRODUCT4,
+                '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}')
+
     async def test_capture_init_failed_req(self):
         """Capture-init fails on some task"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)

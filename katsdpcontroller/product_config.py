@@ -275,6 +275,60 @@ def validate(config):
             raise ValueError('{}: {}'.format(name, error)) from error
 
 
+def _recursive_diff(a, b, prefix=''):
+    """Provide human-readable explanation of the first difference found
+    between two dicts, recursing into sub-dicts.
+
+    The dicts must follow the JSON data model e.g. string keys, no cyclic
+    references.
+    """
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return '{} changed from {} to {}'.format(prefix, a, b)
+    removed = sorted(set(a) - set(b))
+    if removed:
+        return '{}{} removed'.format(prefix, removed[0])
+    added = sorted(set(b) - set(a))
+    if added:
+        return '{}{} added'.format(prefix, added[0])
+    for key in sorted(a.keys()):
+        if a[key] != b[key]:
+            desc = str(key) if not prefix else prefix + '.' + str(key)
+            return _recursive_diff(a[key], b[key], desc)
+    return None
+
+
+def validate_capture_block(product, capture_block):
+    """Check that a capture block config is valid for a subarray product.
+
+    Both parameters must have already been validated and normalised.
+
+    Parameters
+    ----------
+    product : dict
+        Subarray product config
+    capture_block : dict
+        Proposed capture block config
+
+    Raises
+    ------
+    ValueError
+        If `capture_block` is not valid.
+    """
+    product = copy.deepcopy(product)
+    # We mutate (the copy of) product towards capture_block for each valid change
+    # we find, then check that there are no more changes at the end.
+    for name, output in list(product['outputs'].items()):
+        if output['type'] in {'sdp.continuum_image', 'sdp.spectral_image'}:
+            if name not in capture_block['outputs']:
+                del product['outputs'][name]
+            elif all(capture_block['outputs'].get(key) == output.get(key)
+                     for key in ['type', 'src_streams', 'calibration']):
+                product['outputs'][name] = copy.deepcopy(capture_block['outputs'][name])
+
+    if product != capture_block:
+        raise ValueError(_recursive_diff(product, capture_block))
+
+
 def normalise(config):
     """Convert a config dictionary to a canonical form and return it.
 

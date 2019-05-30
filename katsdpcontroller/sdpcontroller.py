@@ -110,6 +110,20 @@ def _redact_keys(taskinfo, s3_config):
     return taskinfo
 
 
+def _load_json_dict(text):
+    """Loads from JSON and checks that the result is a dict.
+
+    Raises
+    ------
+    ValueError
+        if `text` is not valid JSON or is valid JSON but not a dict
+    """
+    ans = json.loads(text)
+    if not isinstance(ans, dict):
+        raise ValueError('not a dict')
+    return ans
+
+
 class ProductState(scheduler.OrderedEnum):
     """State of a subarray.
 
@@ -184,8 +198,9 @@ class CaptureBlock:
     """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
-    def __init__(self, name, loop):
+    def __init__(self, name, config, loop):
         self.name = name
+        self.config = config
         self._state = CaptureBlockState.INITIALISING
         self.postprocess_task = None
         self.postprocess_physical_graph = None
@@ -596,7 +611,7 @@ class SDPSubarrayProductBase:
         if task.done():
             await task
 
-    async def capture_init(self):
+    async def capture_init(self, config):
         self._fail_if_busy()
         if self.state != ProductState.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
@@ -611,7 +626,7 @@ class SDPSubarrayProductBase:
         _capture_block_names.add(capture_block_id)
         self.logger.info('Using capture block ID %s', capture_block_id)
 
-        capture_block = CaptureBlock(capture_block_id, self.loop)
+        capture_block = CaptureBlock(capture_block_id, config, self.loop)
         task = asyncio.ensure_future(self._capture_init(capture_block), loop=self.loop)
         self._async_task = task
         try:
@@ -839,7 +854,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         try:
             logical_graph = generator.build_postprocess_logical_graph(
-                self.config, capture_block.name, self.telstate)
+                capture_block.config, capture_block.name, self.telstate)
             physical_graph = self._instantiate_physical_graph(
                 logical_graph, capture_block.name)
             capture_block.postprocess_physical_graph = physical_graph
@@ -1313,9 +1328,7 @@ class SDPControllerServer(DeviceServer):
         product_logger.info("?set-config-override called on %s with %s",
                             subarray_product_id, override_dict_json)
         try:
-            odict = json.loads(override_dict_json)
-            if not isinstance(odict, dict):
-                raise ValueError
+            odict = _load_json_dict(override_dict_json)
             product_logger.info("Set override for subarray product %s to the following: %s",
                                 subarray_product_id, odict)
             self.override_dicts[subarray_product_id] = json.loads(override_dict_json)
@@ -1414,7 +1427,7 @@ class SDPControllerServer(DeviceServer):
         if not re.match(r'^[A-Za-z0-9_]+\*?$', subarray_product_id):
             raise FailReply('Subarray_product_id contains illegal characters')
         try:
-            config_dict = json.loads(config)
+            config_dict = _load_json_dict(config)
             product_config.validate(config_dict)
             config_dict = product_config.normalise(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
@@ -1472,7 +1485,8 @@ class SDPControllerServer(DeviceServer):
             raise FailReply("This product id has no current configuration.")
 
     @time_request
-    async def request_capture_init(self, ctx, subarray_product_id: str) -> str:
+    async def request_capture_init(self, ctx, subarray_product_id: str,
+                                   override_dict_json: str = '{}') -> str:
         """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data as
@@ -1492,6 +1506,8 @@ class SDPControllerServer(DeviceServer):
         subarray_product_id : string
             The ID of the subarray product to initialise. This must have
             already been configured via the product-configure command.
+        override_dict_json : string, optional
+            Configuration dictionary to merge with the subarray config.
 
         Returns
         -------
@@ -1503,7 +1519,33 @@ class SDPControllerServer(DeviceServer):
         if subarray_product_id not in self.subarray_products:
             raise FailReply('No existing subarray product configuration with this id found')
         sa = self.subarray_products[subarray_product_id]
-        cbid = await sa.capture_init()
+
+        try:
+            overrides = _load_json_dict(override_dict_json)
+        except ValueError as error:
+            retmsg = ('Override {} is not a valid JSON dict: {}'
+                      .format(override_dict_json, error))
+            sa.logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        config = product_config.override(sa.config, overrides)
+        # Re-validate, since the override may have broken it
+        try:
+            product_config.validate(config)
+        except (ValueError, jsonschema.ValidationError) as error:
+            retmsg = "Overrides make the config invalid: {}".format(error)
+            sa.logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        config = product_config.normalise(config)
+        try:
+            product_config.validate_capture_block(sa.config, config)
+        except ValueError as error:
+            retmsg = "Invalid config override: {}".format(error)
+            sa.logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        cbid = await sa.capture_init(config)
         return cbid
 
     @time_request
