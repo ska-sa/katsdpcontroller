@@ -32,7 +32,7 @@ setup(
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'aiokatcp>=0.2',
+        'aiokatcp>=0.2,<0.5',        # 0.5 is expected to change SensorSet constructor
         'katdal',
         'katsdptelstate',
         'katsdpservices',
