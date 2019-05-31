@@ -1568,10 +1568,10 @@ def _stream_url(capture_block_id, stream_name):
     return url
 
 
-def _sky_model_url(capture_block_id, continuum_name, target):
+def _sky_model_url(capture_block_id, continuum_telstate_name, target):
     url = 'redis://{endpoints[telstate_telstate]}/'
     url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
-    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_name))
+    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_telstate_name))
     url += '&target={}'.format(urllib.parse.quote_plus(target.description))
     return url
 
@@ -1688,14 +1688,20 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
             '--select', 'scans="track"; corrprods="cross"; targets=[{}]'.format(target_index),
             '--capture-block-id', capture_block_id,
             '--output-id', name,
-            '--telstate-id', name + '.' + target_name,
+            '--telstate-id', telstate.join(name, target_name),
             '--mfimage', 'nThreads={}'.format(cpus),
             '-w', '/mnt/mesos/sandbox', data_url
         ]
         imager.katsdpservices_config = False
         g.add_node(imager)
-    logger.info('Continuum imager targets for %s: %s', capture_block_id,
-                ', '.join(target.name for target in targets.values()))
+
+    if not targets:
+        logger.info('No continuum imager targets found for %s', capture_block_id)
+    else:
+        logger.info('Continuum imager targets for %s: %s', capture_block_id,
+                    ', '.join(target.name for target in targets.values()))
+    view = telstate.view(telstate.join(capture_block_id, name))
+    view['targets'] = {target.description: name for name, target in targets.items()}
 
 
 def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_cache):
@@ -1716,9 +1722,11 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 continue
 
             continuum_name = None
+            continuum_telstate_name = None
             continuum = None
             if len(output['src_streams']) > 1:
                 continuum_name = output['src_streams'][1] + '.' + target_name
+                continuum_telstate_name = telstate.join(output['src_streams'][1], target_name)
                 try:
                     continuum = find_node(g, 'continuum_image.' + continuum_name)
                 except KeyError:
@@ -1756,15 +1764,20 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 data_url,
                 '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
             ]
-            if continuum_name is not None:
-                sky_model_url = _sky_model_url(capture_block_id, continuum_name, target)
+            if continuum_telstate_name is not None:
+                sky_model_url = _sky_model_url(capture_block_id, continuum_telstate_name, target)
                 imager.command += ['--subtract', sky_model_url]
 
             g.add_node(imager)
             if continuum is not None:
                 g.add_edge(imager, continuum, depends_finished=True)
-    logger.info('Spectral imager targets for %s: %s', capture_block_id,
-                ', '.join(target.name for target in targets.values()))
+    if not targets:
+        logger.info('No spectral imager targets found for %s', capture_block_id)
+    else:
+        logger.info('Spectral imager targets for %s: %s', capture_block_id,
+                    ', '.join(target.name for target in targets.values()))
+    view = telstate.view(telstate.join(capture_block_id, name))
+    view['targets'] = {target.description: name for name, target in targets.items()}
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
