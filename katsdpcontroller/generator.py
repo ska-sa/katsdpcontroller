@@ -1686,7 +1686,9 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
             '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
             '--select', 'scans="track"; corrprods="cross"; targets=[{}]'.format(target_index),
-            '--output-id', name + '.' + target_name,
+            '--capture-block-id', capture_block_id,
+            '--output-id', name,
+            '--telstate-id', name + '.' + target_name,
             '--mfimage', 'nThreads={}'.format(cpus),
             '-w', '/mnt/mesos/sandbox', data_url
         ]
