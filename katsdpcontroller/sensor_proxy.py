@@ -127,8 +127,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
 
 
 class SensorProxyClient(aiokatcp.Client):
-    """Client that mirrors sensors into a device server,
-    and optionally into Prometheus gauges as well.
+    """Client that mirrors sensors into a device server and Prometheus gauges.
 
     Parameters
     ----------
