@@ -1644,6 +1644,14 @@ def _unique_targets(config, capture_block_id, name, telstate, cache):
     return targets
 
 
+def _render_continuum_parameters(parameters):
+    """Turn a dictionary into a sequence of Python assignment statements.
+
+    The keys must be valid Python identifiers.
+    """
+    return '; '.join('{}={!r}'.format(key, value) for key, value in parameters.items())
+
+
 def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_cache):
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
@@ -1679,6 +1687,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
         # have no idea how much would be needed, so don't bother reserving memory.
         imager.gpus[0].compute = 1.0
         imager.image = 'katsdpcontim'
+        mfimage_parameters = dict(nThreads=cpus, **output['mfimage_parameters'])
         imager.command = [
             'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
             'continuum_pipeline.py',
@@ -1689,9 +1698,13 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
-            '--mfimage', 'nThreads={}'.format(cpus),
+            '--mfimage', _render_continuum_parameters(mfimage_parameters),
             '-w', '/mnt/mesos/sandbox', data_url
         ]
+        if output['uvblavg_parameters']:
+            imager.command.extend([
+                '--uvblavg', _render_continuum_parameters(output['uvblavg_parameters'])
+            ])
         imager.katsdpservices_config = False
         g.add_node(imager)
 
