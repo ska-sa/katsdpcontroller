@@ -45,6 +45,12 @@
             "minimum": 0.0,
             "exclusiveMinimum": true
         },
+        "continuum_parameters": {
+            "type": "object",
+            "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_]*$": {"type": "object"}
+            }
+        },
         "singleton": {
             "type": "array",
             "minItems": 1,
@@ -428,8 +434,8 @@
                                     "properties": {
                                         "type": {"enum": ["sdp.continuum_image"]},
                                         "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "uvblavg_parameters": {"type": "object"},
-                                        "mfimage_parameters": {"type": "object"},
+                                        "uvblavg_parameters": {"$ref": "#/definitions/continuum_parameters"},
+                                        "mfimage_parameters": {"$ref": "#/definitions/continuum_parameters"},
                                         "max_realtime": {
                                             "type": "number",
                                             "minimum": 0
