@@ -91,7 +91,7 @@ class TestSensorProxyClient(asynctest.TestCase):
             return None, None
 
         self.mirror = mock.create_autospec(aiokatcp.DeviceServer, instance=True)
-        self.mirror.sensors = aiokatcp.SensorSet([])
+        self.mirror.sensors = aiokatcp.SensorSet()
         self.server = DummyServer('127.0.0.1', 0)
         await self.server.start()
         self.addCleanup(self.server.stop)
@@ -143,19 +143,22 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.server.sensors.add(Sensor(int, 'another', 'another sensor', '', 234))
         # Rather than having server send an interface-changed inform, we invoke
         # it directly on the client so that we don't need to worry about timing.
-        self.client.inform_interface_changed(b'sensor-list')
+        changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
+        self.client.handle_inform(changed)
         await self.client.wait_synced()
         self._check_sensors()
 
     async def test_remove_sensor(self):
         del self.server.sensors['int-sensor']
-        self.client.inform_interface_changed(b'sensor-list')
+        changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
+        self.client.handle_inform(changed)
         await self.client.wait_synced()
         self._check_sensors()
 
     async def test_replace_sensor(self):
         self.server.sensors.add(Sensor(bool, 'int-sensor', 'Replaced by bool'))
-        self.client.inform_interface_changed(b'sensor-list')
+        changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
+        self.client.handle_inform(changed)
         await self.client.wait_synced()
         self._check_sensors()
 
