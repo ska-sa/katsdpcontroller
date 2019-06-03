@@ -1,8 +1,6 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import logging
-import enum
-import asyncio
 
 import aiokatcp
 
