@@ -1064,6 +1064,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
             g.add_edge(cal, flags_multicast, port='spead', depends_resolve=True,
                        config=add_flags_endpoint)
 
+    g.graph['archived_streams'].append(name)
     return cal_group
 
 
