@@ -1131,6 +1131,21 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(failed, 0)
         self.assertEqual(skipped, 0)
 
+    async def test_capture_done_disable_batch(self):
+        """Checks that capture-init with override takes effect"""
+        init_batch_done = get_metric(scheduler.BATCH_TASKS_DONE)
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        await self.client.request(
+            "capture-init", SUBARRAY_PRODUCT4,
+            '{"outputs": {"spectral_image": null}}')
+        cal_sensor = self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.1.capture-block-state']
+        cal_sensor.value = b'{"123456789": "capturing"}'
+        await self.client.request("capture-done", SUBARRAY_PRODUCT4)
+        cal_sensor.value = b'{}'
+        await asynctest.exhaust_callbacks(self.loop)
+        done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
+        self.assertEqual(done, 3)    # 3 continuum, no spectral
+
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-done", SUBARRAY_PRODUCT1)
