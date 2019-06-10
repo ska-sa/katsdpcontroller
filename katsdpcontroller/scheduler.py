@@ -1315,6 +1315,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
         - `endpoints` : dictionary of remote endpoints. Keys are of the form
           :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
+        - `generation` : number of times task was cloned
         - `resolver` : resolver object
     wrapper : str
         URI for a wrapper around the command. If specified, it will be
@@ -1729,6 +1730,8 @@ class PhysicalNode:
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
+    generation : int
+        Number of times that :meth:`clone` was used to obtain this node.
     _ready_waiter : :class:`asyncio.Task`
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
@@ -1749,6 +1752,7 @@ class PhysicalNode:
         self.depends_ready = []
         self.death_expected = False
         self._ready_waiter = None
+        self.generation = 0
 
     async def resolve(self, resolver, graph, loop):
         """Make final preparations immediately before starting.
@@ -1853,7 +1857,9 @@ class PhysicalNode:
         The duplicate is in state :const:`TaskState.NOT_READY` and is
         unresolved.
         """
-        return self.logical_node.physical_factory(self.logical_node, self.loop)
+        clone = self.logical_node.physical_factory(self.logical_node, self.loop)
+        clone.generation = self.generation + 1
+        return clone
 
 
 class PhysicalExternal(PhysicalNode):
@@ -2125,6 +2131,7 @@ class PhysicalTask(PhysicalNode):
         args['endpoints'] = self.endpoints
         args['host'] = self.host
         args['resolver'] = resolver
+        args['generation'] = self.generation
         return args
 
     def set_state(self, state):
