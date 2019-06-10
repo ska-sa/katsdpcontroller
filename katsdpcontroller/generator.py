@@ -1387,10 +1387,15 @@ def build_logical_graph(config):
     # Copy the config, because we make some changes to it as we go
     config = copy.deepcopy(config)
 
-    archived_streams = []   # Streams with connected vis_writers/flag_writers
+    archived_streams = []
+    # Immutable keys to add to telstate on startup. There is no telstate yet
+    # on which to call telstate.join, so nested keys must be expressed as
+    # tuples which are joined later.
+    init_telstate = {'sdp_archived_streams': archived_streams}
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
-        config=lambda resolver: {'sdp_archived_streams': archived_streams}
+        init_telstate=init_telstate,        # ditto
+        config=lambda resolver: init_telstate
     )
 
     # telstate node
@@ -1512,6 +1517,13 @@ def build_logical_graph(config):
         _make_imager_writers(g, config, have_cal, 'continuum', name)
     for name in outputs.get('sdp.spectral_image', []):
         _make_imager_writers(g, config, have_cal, 'spectral', name, SPECTRAL_OBJECT_CHANNELS)
+    # Imagers are mostly handled in build_postprocess_logical_graph, but we create
+    # capture block-independent metadata here.
+    for type_ in ['sdp.continuum_image', 'sdp.spectral_image']:
+        for name in outputs.get(type_, []):
+            g.graph['archived_streams'].append(name)
+            g.graph['init_telstate'][(name, 'src_streams')] = config['outputs'][name]['src_streams']
+            g.graph['init_telstate'][(name, 'stream_type')] = type_
 
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.

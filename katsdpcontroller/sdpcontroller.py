@@ -877,10 +877,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # specific sensors are easier to mock.
         for name, stream in self.config['inputs'].items():
             if stream['type'].startswith('cbf.'):
-                prefix = name + katsdptelstate.TelescopeState.SEPARATOR
                 for suffix in ['src_streams', 'instrument_dev_name']:
                     if suffix in stream:
-                        base_params[prefix + suffix] = stream[suffix]
+                        base_params[(name, suffix)] = stream[suffix]
 
         self.logger.debug("Launching telstate. Base parameters %s", base_params)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
@@ -893,7 +892,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self.logger.debug("base params: %s", base_params)
         # set the configuration
         for k, v in base_params.items():
-            self.telstate.add(k, v, immutable=True)
+            key = self.telstate.join(*k) if isinstance(k, tuple) else k
+            self.telstate.add(key, v, immutable=True)
 
     def check_nodes(self):
         """Check that all requested nodes are actually running.
