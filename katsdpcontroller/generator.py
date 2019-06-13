@@ -1694,6 +1694,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
         imager.mem = 50000 if not is_develop(config) else 8000
         imager.disk = _mb(1000 * l0_info.size + 1000)
         imager.max_run_time = 86400     # 24 hours
+        imager.volumes = [DATA_VOL]
         imager.gpus = [scheduler.GPURequest()]
         # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
         # it can help improve parallelism). There is no memory enforcement and I
@@ -1711,6 +1712,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
+            '--outputdir', DATA_VOL.container_path,
             '--mfimage', _render_continuum_parameters(mfimage_parameters),
             '-w', '/mnt/mesos/sandbox', data_url
         ]

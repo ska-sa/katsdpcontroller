@@ -506,9 +506,11 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 self.subarray_product.unexpected_death(self)
 
     def clone(self):
-        return self.logical_node.physical_factory(
+        clone = self.logical_node.physical_factory(
             self.logical_node, self.loop, self.sdp_controller, self.subarray_product,
             self.capture_block_id)
+        clone.generation = self.generation + 1
+        return clone
 
     def add_capture_block(self, capture_block):
         self._capture_blocks.add(capture_block.name)
