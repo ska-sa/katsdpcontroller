@@ -893,7 +893,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # set the configuration
         for k, v in base_params.items():
             key = self.telstate.join(*k) if isinstance(k, tuple) else k
-            self.telstate.add(key, v, immutable=True)
+            self.telstate[key] = v
 
     def check_nodes(self):
         """Check that all requested nodes are actually running.

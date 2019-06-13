@@ -158,7 +158,7 @@ class SDPConfigMixin:
         logger.debug('Config for %s: %s', self.name, config)
         self.task_config = config
         if config:
-            resolver.telstate.add('config.' + self.logical_node.name, config, immutable=True)
+            resolver.telstate['config.' + self.logical_node.name] = config
 
 
 class CaptureBlockStateObserver:
