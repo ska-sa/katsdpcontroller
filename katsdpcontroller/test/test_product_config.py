@@ -8,11 +8,30 @@ from nose.tools import assert_equal, assert_in, assert_raises
 from .. import product_config
 
 
-def merge_dicts(*dicts):
-    out = {}
-    for d in dicts:
-        out.update(d)
-    return out
+class TestRecursiveDiff:
+    def test_base_add(self):
+        out = product_config._recursive_diff({'a': 1}, {'a': 1, 'b': 2})
+        assert_equal(out, 'b added')
+
+    def test_base_remove(self):
+        out = product_config._recursive_diff({'a': 1, 'b': 2}, {'a': 1})
+        assert_equal(out, 'b removed')
+
+    def test_base_change(self):
+        out = product_config._recursive_diff({'a': 1, 'b': 2}, {'a': 1, 'b': 3})
+        assert_equal(out, 'b changed from 2 to 3')
+
+    def test_nested_add(self):
+        out = product_config._recursive_diff({'x': {}}, {'x': {'a': 1}})
+        assert_equal(out, 'x.a added')
+
+    def test_nested_remove(self):
+        out = product_config._recursive_diff({'x': {'a': 1}}, {'x': {}})
+        assert_equal(out, 'x.a removed')
+
+    def test_nested_change(self):
+        out = product_config._recursive_diff({'x': {'a': 1, 'b': 2}}, {'x': {'a': 1, 'b': 3}})
+        assert_equal(out, 'x.b changed from 2 to 3')
 
 
 class TestOverride:

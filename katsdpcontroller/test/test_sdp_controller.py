@@ -986,6 +986,26 @@ class TestSDPController(BaseTestSDPController):
         ]
         self.assertEqual(grouped_calls, expected_calls)
 
+    async def test_capture_init_bad_json(self):
+        """Check that capture-init fails if an override is illegal"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request("capture-init", SUBARRAY_PRODUCT4, 'not json')
+
+    async def test_capture_init_bad_override(self):
+        """Check that capture-init fails if an override makes the config illegal"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request("capture-init", SUBARRAY_PRODUCT4, '{"inputs": null}')
+
+    async def test_capture_init_bad_override_change(self):
+        """Check that capture-init fails if an override makes an invalid change"""
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        with assert_raises(FailReply):
+            await self.client.request(
+                "capture-init", SUBARRAY_PRODUCT4,
+                '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}')
+
     async def test_capture_init_failed_req(self):
         """Capture-init fails on some task"""
         await self._configure_subarray(SUBARRAY_PRODUCT4)
@@ -1110,6 +1130,21 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(done, started)
         self.assertEqual(failed, 0)
         self.assertEqual(skipped, 0)
+
+    async def test_capture_done_disable_batch(self):
+        """Checks that capture-init with override takes effect"""
+        init_batch_done = get_metric(scheduler.BATCH_TASKS_DONE)
+        await self._configure_subarray(SUBARRAY_PRODUCT4)
+        await self.client.request(
+            "capture-init", SUBARRAY_PRODUCT4,
+            '{"outputs": {"spectral_image": null}}')
+        cal_sensor = self.server.sensors[SUBARRAY_PRODUCT4 + '.cal.1.capture-block-state']
+        cal_sensor.value = b'{"123456789": "capturing"}'
+        await self.client.request("capture-done", SUBARRAY_PRODUCT4)
+        cal_sensor.value = b'{}'
+        await asynctest.exhaust_callbacks(self.loop)
+        done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
+        self.assertEqual(done, 3)    # 3 continuum, no spectral
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
