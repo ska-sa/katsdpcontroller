@@ -275,6 +275,11 @@ def validate(config):
             raise ValueError('{}: {}'.format(name, error)) from error
 
 
+def _join_prefix(prefix, name):
+    """Prepend `prefix` and a dot if `prefix` is non-empty."""
+    return prefix + '.' + name if prefix else name
+
+
 def _recursive_diff(a, b, prefix=''):
     """Provide human-readable explanation of the first difference found
     between two dicts, recursing into sub-dicts.
@@ -286,10 +291,10 @@ def _recursive_diff(a, b, prefix=''):
         return '{} changed from {} to {}'.format(prefix, a, b)
     removed = sorted(set(a) - set(b))
     if removed:
-        return '{}{} removed'.format(prefix, removed[0])
+        return '{} removed'.format(_join_prefix(prefix, removed[0]))
     added = sorted(set(b) - set(a))
     if added:
-        return '{}{} added'.format(prefix, added[0])
+        return '{} added'.format(_join_prefix(prefix, added[0]))
     for key in sorted(a.keys()):
         if a[key] != b[key]:
             desc = str(key) if not prefix else prefix + '.' + str(key)
