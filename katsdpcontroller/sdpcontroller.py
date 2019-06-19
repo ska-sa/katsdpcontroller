@@ -1216,6 +1216,7 @@ class SDPControllerServer(DeviceServer):
                 product_logger.error(retmsg)
                 raise FailReply(retmsg)
             # Re-normalise, in case the override denormalised it
+            config = await product_config.update_from_sensors(config)
             config = product_config.normalise(config)
 
         if subarray_product_id.endswith('*'):
@@ -1429,6 +1430,7 @@ class SDPControllerServer(DeviceServer):
         try:
             config_dict = _load_json_dict(config)
             product_config.validate(config_dict)
+            config_dict = await product_config.update_from_sensors(config_dict)
             config_dict = product_config.normalise(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = "Failed to process config: {}".format(error)

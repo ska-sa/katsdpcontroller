@@ -26,6 +26,7 @@ from katsdpcontroller.sdpcontroller import (
     _capture_block_names, _redact_keys)
 from katsdpcontroller import scheduler
 from katsdpcontroller.test.test_scheduler import AnyOrderList
+from . import fake_katportalclient
 
 ANTENNAS = 'm000,m001,m063,m064'
 
@@ -301,11 +302,34 @@ class BaseTestSDPController(asynctest.TestCase):
         self.addCleanup(patcher.stop)
         return mock_obj
 
+    async def setUp(self):
+        # Mock the CBF sensors
+        dummy_client = fake_katportalclient.KATPortalClient(
+            components={'cbf': 'cbf_1', 'sub': 'subarray_1'},
+            sensors={
+                'cbf_1_i0_antenna_channelised_voltage_n_chans': 4096,
+                'cbf_1_i0_antenna_channelised_voltage_adc_sample_rate': 1712e6,
+                'cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra': 8192,
+                'subarray_1_streams_i0_antenna_channelised_voltage_bandwidth': 856e6,
+                'cbf_1_i0_baseline_correlation_products_int_time': 0.499,
+                'cbf_1_i0_baseline_correlation_products_n_bls': 40,
+                'cbf_1_i0_baseline_correlation_products_xeng_out_bits_per_sample': 32,
+                'cbf_1_i0_baseline_correlation_products_n_chans_per_substream': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_spectra_per_heap': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_n_chans_per_substream': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_beng_out_bits_per_sample': 8,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
+            })
+        self.create_patch('katportalclient.KATPortalClient', return_value=dummy_client)
+
 
 @timelimit
 class TestSDPControllerInterface(BaseTestSDPController):
     """Testing of the SDP controller in interface mode."""
     async def setUp(self):
+        await super().setUp()
         await self.setup_server('127.0.0.1', 0, None, interface_mode=True,
                                 safe_multicast_cidr="225.100.0.0/16",
                                 batch_role='batch',
@@ -491,6 +515,7 @@ class TestSDPController(BaseTestSDPController):
         return getaddrinfo(host, *args, **kwargs)
 
     async def setUp(self):
+        await super().setUp()
         # Future that is already resolved with no return value
         done_future = asyncio.Future()
         done_future.set_result(None)
