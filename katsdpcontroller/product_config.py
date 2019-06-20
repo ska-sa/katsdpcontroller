@@ -46,7 +46,6 @@ class _Sensor(ABC):
         stream : str
             Name of the input stream (including instrument prefix)
         """
-        pass
 
 
 class _CBFSensor(_Sensor):
@@ -443,7 +442,7 @@ async def update_from_sensors(config):
                                 .format(name, exc)) from exc
 
     for stream_name, stream in config['inputs'].items():
-        if stream.get('simulate', False):
+        if stream.get('simulate', False) is not False:
             continue       # katportal won't know what values we're simulating for
         sensors = _SENSORS.get(stream['type'], [])
         for sensor in sensors:
@@ -464,6 +463,11 @@ async def update_from_sensors(config):
                 logger.warning('Changing %s %s from %s to %s from sensor',
                                stream_name, sensor.name, stream[sensor.name], sample.value)
             stream[sensor.name] = sample.value
+
+    try:
+        validate(config)
+    except (ValueError, jsonschema.ValidationError) as exc:
+        raise SensorFailure('A sensor value made the config invalid: {}'.format(exc)) from exc
     return config
 
 

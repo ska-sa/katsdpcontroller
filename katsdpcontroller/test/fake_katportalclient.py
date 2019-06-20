@@ -29,15 +29,15 @@ class KATPortalClient:
     """
 
     def __init__(self, components, sensors):
-        self._components = components
-        self._sensors = {key: _make_sample(value) for (key, value) in sensors.items()}
+        self.components = components
+        self.sensors = {key: _make_sample(value) for (key, value) in sensors.items()}
 
     @tornado.gen.coroutine
     def sensor_subarray_lookup(self, component, sensor, return_katcp_name=False):
         assert not return_katcp_name    # Not implemented and not needed
         assert sensor is None           # Alternative not implemented
         try:
-            return self._components[component]
+            return self.components[component]
         except KeyError:
             raise katportalclient.SensorLookupError('Not such component {}'
                                                     .format(component)) from None
@@ -46,7 +46,7 @@ class KATPortalClient:
     def sensor_value(self, sensor_name, include_value_ts=False):
         assert not include_value_ts     # Not implemented and not needed
         try:
-            return self._sensors[sensor_name]
+            return self.sensors[sensor_name]
         except KeyError:
             raise katportalclient.SensorNotFoundError('Value for sensor {} not found'
                                                       .format(sensor_name)) from None

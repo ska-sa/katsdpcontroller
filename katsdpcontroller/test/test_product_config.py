@@ -2,10 +2,15 @@
 
 import jsonschema
 import copy
+import logging
+from unittest import mock
+import asynctest
 
-from nose.tools import assert_equal, assert_in, assert_raises
+import katportalclient
+from nose.tools import assert_equal, assert_in, assert_raises, assert_logs
 
 from .. import product_config
+from . import fake_katportalclient
 
 
 class TestRecursiveDiff:
@@ -58,10 +63,10 @@ class TestOverride:
         assert_equal({"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}, out)
 
 
-class Fixture:
+class Fixture(asynctest.TestCase):
     """Base class providing some sample config dicts"""
 
-    def setup(self):
+    def setUp(self):
         self.config = {
             "version": "2.4",
             "inputs": {
@@ -357,6 +362,101 @@ class TestValidate(Fixture):
         self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config_v1_0)
+
+
+class TestUpdateFromSensors(Fixture):
+    """Tests for :func:`~katsdpcontroller.product_config.update_from_sensors`"""
+    def setUp(self):
+        super().setUp()
+        # Create dummy sensors. Some deliberately have different values to
+        # self.config to ensure that the changes are picked up.
+        self.client = fake_katportalclient.KATPortalClient(
+            components={'cbf': 'cbf_1', 'sub': 'subarray_1'},
+            sensors={
+                'cbf_1_i0_antenna_channelised_voltage_n_chans': 1024,
+                'cbf_1_i0_antenna_channelised_voltage_adc_sample_rate': 1088e6,
+                'cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra': 2048,
+                'subarray_1_streams_i0_antenna_channelised_voltage_bandwidth': 544e6,
+                'cbf_1_i0_baseline_correlation_products_int_time': 0.25,
+                'cbf_1_i0_baseline_correlation_products_n_bls': 40,
+                'cbf_1_i0_baseline_correlation_products_xeng_out_bits_per_sample': 32,
+                'cbf_1_i0_baseline_correlation_products_n_chans_per_substream': 64,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_spectra_per_heap': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_n_chans_per_substream': 64,
+                'cbf_1_i0_tied_array_channelised_voltage_0x_beng_out_bits_per_sample': 8,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap': 256,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 64,
+                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
+            })
+        # Needed to make the updated config valid
+        del self.config['outputs']['l0']['output_channels']
+        del self.config['outputs']['beamformer_engineering']['output_channels']
+        self.config['outputs']['spectral_image']['output_channels'] = [100, 400]
+        patcher = mock.patch('katportalclient.KATPortalClient', return_value=self.client)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def test_basic(self):
+        with assert_logs(product_config.logger, logging.WARNING):
+            config = await product_config.update_from_sensors(self.config)
+        acv = config['inputs']['i0_antenna_channelised_voltage']
+        assert_equal(acv['n_chans'], 1024)
+        assert_equal(acv['adc_sample_rate'], 1088e6)
+        assert_equal(acv['bandwidth'], 544e6)
+        assert_equal(acv['n_samples_between_spectra'], 2048)
+        bcp = config['inputs']['i0_baseline_correlation_products']
+        assert_equal(bcp['int_time'], 0.25)
+        assert_equal(bcp['n_bls'], 40)
+        assert_equal(bcp['xeng_out_bits_per_sample'], 32)
+        assert_equal(bcp['n_chans_per_substream'], 64)
+        beam_x = config['inputs']['i0_tied_array_channelised_voltage_0x']
+        assert_equal(beam_x['beng_out_bits_per_sample'], 8)
+        assert_equal(beam_x['n_chans_per_substream'], 64)
+        assert_equal(beam_x['spectra_per_heap'], 256)
+        # Ensure that the original was not modified
+        assert_equal(self.config['inputs']['i0_antenna_channelised_voltage']['n_chans'], 4096)
+
+    async def test_no_cam_http(self):
+        del self.config['inputs']['camdata']
+        config = await product_config.update_from_sensors(self.config)
+        # Ensure that nothing happened
+        assert_equal(config['inputs']['i0_antenna_channelised_voltage']['n_chans'], 4096)
+
+    async def test_simulate(self):
+        self.config['inputs']['i0_baseline_correlation_products']['simulate'] = {}
+        # Needed to make the config valid after i0_antenna_channelised_voltage is overridden
+        self.config['inputs']['i0_baseline_correlation_products']['n_chans_per_substream'] = 64
+        config = await product_config.update_from_sensors(self.config)
+        # Ensure that nothing happened on i0_baseline_correlation_products
+        assert_equal(config['inputs']['i0_baseline_correlation_products']['int_time'], 0.499)
+
+    async def test_connection_failed(self):
+        with mock.patch.object(self.client, 'sensor_subarray_lookup',
+                               side_effect=ConnectionRefusedError):
+            with assert_raises(product_config.SensorFailure):
+                await product_config.update_from_sensors(self.config)
+
+        with mock.patch.object(self.client, 'sensor_value',
+                               side_effect=ConnectionRefusedError):
+            with assert_raises(product_config.SensorFailure):
+                await product_config.update_from_sensors(self.config)
+
+    async def test_sensor_not_found(self):
+        del self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls']
+        with assert_raises(product_config.SensorFailure):
+            await product_config.update_from_sensors(self.config)
+
+    async def test_bad_status(self):
+        self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
+            katportalclient.SensorSample(1234567890.0, 40, 'unreachable')
+        with assert_raises(product_config.SensorFailure):
+            await product_config.update_from_sensors(self.config)
+
+    async def test_bad_schema(self):
+        self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
+            katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
+        with assert_raises(product_config.SensorFailure):
+            await product_config.update_from_sensors(self.config)
 
 
 class TestNormalise(Fixture):
