@@ -1176,13 +1176,14 @@ class SDPControllerServer(DeviceServer):
         FailReply
             If any of the following occur
             - The specified subarray product id already exists, but the config
-              differs from that specified
-            - If docker python libraries are not installed and we are not using interface mode
-            - There are insufficient resources to launch
-            - A docker image could not be found
-            - If one or more nodes fail to launch (e.g. container not found)
-            - If one or more nodes fail to become alive
-            - If we fail to establish katcp connection to all nodes requiring them.
+              differs from that specified.
+            - Docker Python libraries are not installed and we are not using interface mode.
+            - There are insufficient resources to launch.
+            - A docker image could not be found.
+            - One or more nodes fail to launch (e.g. container not found).
+            - One or more nodes fail to become alive.
+            - We fail to establish katcp connection to all nodes requiring them.
+            - A config override yields an invalid config.
 
         Returns
         -------
@@ -1208,16 +1209,18 @@ class SDPControllerServer(DeviceServer):
             product_logger.warning("Setting overrides on %s for the following: %s",
                                    subarray_product_id, odict)
             config = product_config.override(config, odict)
-            # Re-validate, since the override may have broken it
             try:
+                # Re-validate, since the override may have broken it
                 product_config.validate(config)
-            except (ValueError, jsonschema.ValidationError) as error:
-                retmsg = "Overrides make the config invalid: {}".format(error)
+                # Fetch sensor values again, since the override may have
+                # changed the inputs.
+                config = await product_config.update_from_sensors(config)
+                # Re-normalise, in case the override denormalised it
+                config = product_config.normalise(config)
+            except (ValueError, product_config.SensorFailure, jsonschema.ValidationError) as error:
+                retmsg = "Failed to apply override: {}".format(error)
                 product_logger.error(retmsg)
                 raise FailReply(retmsg)
-            # Re-normalise, in case the override denormalised it
-            config = await product_config.update_from_sensors(config)
-            config = product_config.normalise(config)
 
         if subarray_product_id.endswith('*'):
             # Requested a unique name. NB: it is important not to yield
@@ -1432,7 +1435,7 @@ class SDPControllerServer(DeviceServer):
             product_config.validate(config_dict)
             config_dict = await product_config.update_from_sensors(config_dict)
             config_dict = product_config.normalise(config_dict)
-        except (ValueError, jsonschema.ValidationError) as error:
+        except (ValueError, product_config.SensorFailure, jsonschema.ValidationError) as error:
             retmsg = "Failed to process config: {}".format(error)
             product_logger.error(retmsg)
             raise FailReply(retmsg)

@@ -19,6 +19,11 @@ from . import schemas
 logger = logging.getLogger(__name__)
 
 
+class SensorFailure(RuntimeError):
+    """Failed to obtain a sensor value from katportal"""
+    pass
+
+
 class _Sensor(ABC):
     """A sensor that provides some data about an input stream.
 
@@ -396,11 +401,26 @@ def validate_capture_block(product, capture_block):
 async def update_from_sensors(config):
     """Compute an updated config using sensor values.
 
-    The input must be validated but need not be normalised.
-
     This replaces attributes of CBF streams that correspond directly to
     sensors, by obtaining the values of the sensors. If there is no
     cam.http stream, no changes are made.
+
+    Parameters
+    ----------
+    config : dict
+        Product configuration, which must be validated but need not be
+        normalised.
+
+    Returns
+    -------
+    new_config : dict
+        Copy of `config` with some values replaced
+
+    Raises
+    ------
+    SensorFailure
+        If there were any problems loading the sensor values. In must cases
+        it will be chained to an originating exception.
     """
     portal_url = None
     for stream in config['inputs'].values():
@@ -412,35 +432,38 @@ async def update_from_sensors(config):
 
     config = copy.deepcopy(config)
     client = katportalclient.KATPortalClient(portal_url, None)
-    components = {
-        name: await client.sensor_subarray_lookup(name, None)
-        for name in ['cbf', 'sub']
-    }
+    components = {}
+    for name in ['cbf', 'sub']:
+        try:
+            components[name] = await client.sensor_subarray_lookup(name, None)
+        except Exception as exc:
+            # There are too many possible exceptions from katportalclient to
+            # try to list them all explicitly.
+            raise SensorFailure('Could not get component name for {}: {}'
+                                .format(name, exc)) from exc
+
     for stream_name, stream in config['inputs'].items():
         if stream.get('simulate', False):
             continue       # katportal won't know what values we're simulating for
         sensors = _SENSORS.get(stream['type'], [])
         for sensor in sensors:
             sample = None
+            full_name = sensor.full_name(components, stream_name)
             try:
-                full_name = sensor.full_name(components, stream_name)
                 sample = await client.sensor_value(full_name)
-            except (katportalclient.SensorLookupError,
-                    katportalclient.SensorNotFoundError,
-                    katportalclient.InvalidResponseError) as exc:
-                logger.warning('Could not get %s: %s', full_name, exc)
-            else:
-                if sample.status not in {'nominal', 'warn', 'error'}:
-                    logger.warning('Sensor %s is in status %s', full_name, sample.status)
-                    sample = None
-            if sample is not None:
-                if sensor.name not in stream:
-                    logger.info('Setting %s %s to %s from sensor',
-                                stream_name, sensor.name, sample.value)
-                elif sample.value != stream[sensor.name]:
-                    logger.warning('Changing %s %s from %s to %s from sensor',
-                                   stream_name, sensor.name, stream[sensor.name], sample.value)
-                stream[sensor.name] = sample.value
+            except Exception as exc:
+                raise SensorFailure('Could not get value for {}: {}'
+                                    .format(full_name, exc)) from exc
+            if sample.status not in {'nominal', 'warn', 'error'}:
+                raise SensorFailure('Sensor {} has status {}'
+                                    .format(full_name, sample.status))
+            if sensor.name not in stream:
+                logger.info('Setting %s %s to %s from sensor',
+                            stream_name, sensor.name, sample.value)
+            elif sample.value != stream[sensor.name]:
+                logger.warning('Changing %s %s from %s to %s from sensor',
+                               stream_name, sensor.name, stream[sensor.name], sample.value)
+            stream[sensor.name] = sample.value
     return config
 
 
