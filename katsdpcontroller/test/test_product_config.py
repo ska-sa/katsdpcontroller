@@ -58,8 +58,8 @@ class TestOverride:
         assert_equal({"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}, out)
 
 
-class TestValidate:
-    """Tests for :func:`~katsdpcontroller.product_config.validate`"""
+class Fixture:
+    """Base class providing some sample config dicts"""
 
     def setup(self):
         self.config = {
@@ -166,6 +166,10 @@ class TestValidate:
         del self.config_v1_0["outputs"]["continuum_image"]
         del self.config_v1_0["outputs"]["spectral_image"]
         del self.config_v1_0["outputs"]["l0"]["archive"]
+
+
+class TestValidate(Fixture):
+    """Tests for :func:`~katsdpcontroller.product_config.validate`"""
 
     def test_good(self):
         product_config.validate(self.config)
@@ -354,7 +358,11 @@ class TestValidate:
         with assert_raises(jsonschema.ValidationError):
             product_config.validate(self.config_v1_0)
 
-    def test_normalise_v1_0(self):
+
+class TestNormalise(Fixture):
+    """Tests for :func:`~katsdpcontroller.product_config.normalise`"""
+
+    def test_v1_0(self):
         # Adjust some things to get full test coverage
         del self.config_v1_0["outputs"]["l0"]["output_channels"]
         del self.config_v1_0["outputs"]["beamformer_engineering"]["output_channels"]
@@ -378,7 +386,7 @@ class TestValidate:
         del expected["outputs"]["spectral_image"]
         assert_equal(config, expected)
 
-    def test_normalise_latest(self):
+    def test_latest(self):
         # Adjust some things to get full test coverage
         expected = copy.deepcopy(self.config)
         self.config["inputs"]["i0_baseline_correlation_products"]["simulate"] = True
@@ -412,7 +420,7 @@ class TestValidate:
         #     json.dump(expected, f, indent=2, sort_keys=True)
         assert_equal(config, expected)
 
-    def test_normalise_name_conflict(self):
+    def test_name_conflict(self):
         self.config_v1_0["outputs"]["cal"] = self.config_v1_0["outputs"]["l0"]
         config = product_config.normalise(self.config_v1_0)
         assert_in("cal0", config["outputs"])
