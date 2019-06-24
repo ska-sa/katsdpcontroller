@@ -35,7 +35,7 @@ class _Sensor(ABC):
         self.name = name
 
     @abstractmethod
-    def full_name(self, components, stream):
+    def full_name(self, components, stream, instrument):
         """Obtain system-wide name for the sensor.
 
         Parameters
@@ -45,16 +45,24 @@ class _Sensor(ABC):
             name (e.g. 'cbf_1').
         stream : str
             Name of the input stream (including instrument prefix)
+        instrument : str
+            Name of the instrument providing the stream, or ``None`` if
+            the stream is not a CBF stream.
         """
 
 
 class _CBFSensor(_Sensor):
-    def full_name(self, components, stream):
+    def full_name(self, components, stream, instrument):
         return '{}_{}_{}'.format(components['cbf'], stream, self.name)
 
 
+class _CBFInstrumentSensor(_Sensor):
+    def full_name(self, components, stream, instrument):
+        return '{}_{}_{}'.format(components['cbf'], instrument, self.name)
+
+
 class _SubSensor(_Sensor):
-    def full_name(self, components, stream):
+    def full_name(self, components, stream, instrument):
         return '{}_streams_{}_{}'.format(components['sub'], stream, self.name)
 
 
@@ -62,7 +70,7 @@ class _SubSensor(_Sensor):
 _SENSORS = {
     'cbf.antenna_channelised_voltage': [
         _CBFSensor('n_chans'),
-        _CBFSensor('adc_sample_rate'),
+        _CBFInstrumentSensor('adc_sample_rate'),
         _CBFSensor('n_samples_between_spectra'),
         _SubSensor('bandwidth')
     ],
@@ -445,9 +453,10 @@ async def update_from_sensors(config):
         if stream.get('simulate', False) is not False:
             continue       # katportal won't know what values we're simulating for
         sensors = _SENSORS.get(stream['type'], [])
+        instrument_name = stream.get('instrument_dev_name')
         for sensor in sensors:
             sample = None
-            full_name = sensor.full_name(components, stream_name)
+            full_name = sensor.full_name(components, stream_name, instrument_name)
             try:
                 sample = await client.sensor_value(full_name)
             except Exception as exc:

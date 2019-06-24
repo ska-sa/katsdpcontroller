@@ -374,7 +374,7 @@ class TestUpdateFromSensors(Fixture):
             components={'cbf': 'cbf_1', 'sub': 'subarray_1'},
             sensors={
                 'cbf_1_i0_antenna_channelised_voltage_n_chans': 1024,
-                'cbf_1_i0_antenna_channelised_voltage_adc_sample_rate': 1088e6,
+                'cbf_1_i0_adc_sample_rate': 1088e6,
                 'cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra': 2048,
                 'subarray_1_streams_i0_antenna_channelised_voltage_bandwidth': 544e6,
                 'cbf_1_i0_baseline_correlation_products_int_time': 0.25,
