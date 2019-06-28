@@ -38,6 +38,8 @@ setup(
         'katsdpservices',
         'katportalclient',
         'kazoo',
+        'aiozk',
+        'yarl',
         'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
         'prometheus_async',
         'dash',
@@ -51,6 +53,7 @@ setup(
         'agent': ['psutil', 'py3nvml', 'pycuda'],
         'test': tests_require
     },
+    python_requires='>=3.6',
     use_katversion=True,
     license='MIT',
     zip_safe=False

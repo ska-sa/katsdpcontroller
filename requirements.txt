@@ -4,6 +4,7 @@ aiohttp==3.5.4
 aiohttp-jinja2==1.1.0
 aiokatcp
 aiomonitor
+aiozk==0.14.0
 async-timeout==3.0.1
 attrs==18.1.0              # via prometheus_async
 certifi                    # via requests

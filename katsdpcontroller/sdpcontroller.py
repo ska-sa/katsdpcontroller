@@ -110,38 +110,6 @@ def _redact_keys(taskinfo, s3_config):
     return taskinfo
 
 
-def _load_json_dict(text):
-    """Loads from JSON and checks that the result is a dict.
-
-    Raises
-    ------
-    ValueError
-        if `text` is not valid JSON or is valid JSON but not a dict
-    """
-    ans = json.loads(text)
-    if not isinstance(ans, dict):
-        raise ValueError('not a dict')
-    return ans
-
-
-class ProductState(scheduler.OrderedEnum):
-    """State of a subarray.
-
-    Only the following transitions can occur (TODO: make a picture):
-    - CONFIGURING -> IDLE (via product-configure)
-    - IDLE -> CAPTURING (via capture-init)
-    - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING/ERROR -> DECONFIGURING -> DEAD (via product-deconfigure)
-    - IDLE/CAPTURING/DECONFIGURING -> ERROR (via an internal error)
-    """
-    CONFIGURING = 0
-    IDLE = 1
-    CAPTURING = 2
-    DECONFIGURING = 3
-    DEAD = 4
-    ERROR = 5
-
-
 class MulticastIPResources:
     def __init__(self, network):
         self._hosts = network.hosts()
@@ -1039,15 +1007,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             await asyncio.gather(*wait_tasks, loop=self.loop)
             ready.set()
             await shutdown_task
-
-
-def time_request(func):
-    """Decorator to record request servicing time as a Prometheus histogram."""
-    @functools.wraps(func)
-    async def wrapper(self, ctx, *args, **kwargs):
-        with REQUEST_TIME.labels(ctx.req.name).time():
-            return await func(self, ctx, *args, **kwargs)
-    return wrapper
 
 
 class DeviceStatus(enum.Enum):
