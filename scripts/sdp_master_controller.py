@@ -100,6 +100,11 @@ def main() -> None:
     if args.log_level is not None:
         logging.root.setLevel(args.log_level.upper())
 
+    if args.interface_mode:
+        logging.warning("Note: Running master controller in interface mode. "
+                        "This allows testing of the interface only, "
+                        "no actual command logic will be enacted.")
+
     server = master_controller.DeviceServer(args)
     loop = asyncio.get_event_loop()
     for sig in [signal.SIGINT, signal.SIGTERM]:

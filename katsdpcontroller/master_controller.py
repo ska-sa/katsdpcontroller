@@ -1,5 +1,10 @@
 """Science Data Processor Master Controller"""
 
+# TODO:
+# - internal sensors (including products)
+# - sensor proxy
+# - get internal states for product-list
+
 import asyncio
 import logging
 import argparse
