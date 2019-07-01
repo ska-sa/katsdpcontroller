@@ -36,6 +36,7 @@ setup(
         'katdal',
         'katsdptelstate',
         'katsdpservices',
+        'katportalclient',
         'kazoo',
         'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
         'prometheus_async',

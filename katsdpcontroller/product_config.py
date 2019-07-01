@@ -5,16 +5,87 @@ import itertools
 import json
 import urllib
 import copy
+from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 
 import jsonschema
 
 from katsdptelstate.endpoint import endpoint_list_parser
+import katportalclient
 
 from . import schemas
 
 
 logger = logging.getLogger(__name__)
+
+
+class SensorFailure(RuntimeError):
+    """Failed to obtain a sensor value from katportal"""
+    pass
+
+
+class _Sensor(ABC):
+    """A sensor that provides some data about an input stream.
+
+    This is an abstract base class. Derived classes implement
+    :meth:`full_name` to map the base name to the system-wide
+    sensor name to query from katportal.
+    """
+    def __init__(self, name):
+        self.name = name
+
+    @abstractmethod
+    def full_name(self, components, stream, instrument):
+        """Obtain system-wide name for the sensor.
+
+        Parameters
+        ----------
+        components: Mapping[str, str]
+            Maps logical component name (e.g. 'cbf') to actual component
+            name (e.g. 'cbf_1').
+        stream : str
+            Name of the input stream (including instrument prefix)
+        instrument : str
+            Name of the instrument providing the stream, or ``None`` if
+            the stream is not a CBF stream.
+        """
+
+
+class _CBFSensor(_Sensor):
+    def full_name(self, components, stream, instrument):
+        return '{}_{}_{}'.format(components['cbf'], stream, self.name)
+
+
+class _CBFInstrumentSensor(_Sensor):
+    def full_name(self, components, stream, instrument):
+        return '{}_{}_{}'.format(components['cbf'], instrument, self.name)
+
+
+class _SubSensor(_Sensor):
+    def full_name(self, components, stream, instrument):
+        return '{}_streams_{}_{}'.format(components['sub'], stream, self.name)
+
+
+# Sensor values to fetch via katportalclient, per input stream type
+_SENSORS = {
+    'cbf.antenna_channelised_voltage': [
+        _CBFSensor('n_chans'),
+        _CBFInstrumentSensor('adc_sample_rate'),
+        _CBFSensor('n_samples_between_spectra'),
+        _SubSensor('bandwidth')
+    ],
+    'cbf.baseline_correlation_products': [
+        _CBFSensor('int_time'),
+        _CBFSensor('n_bls'),
+        _CBFSensor('xeng_out_bits_per_sample'),
+        _CBFSensor('n_chans_per_substream')
+    ],
+    'cbf.tied_array_channelised_voltage': [
+        _CBFSensor('beng_out_bits_per_sample'),
+        _CBFSensor('spectra_per_heap'),
+        _CBFSensor('n_chans_per_substream')
+    ]
+}
 
 
 def override(config, overrides):
@@ -332,6 +403,81 @@ def validate_capture_block(product, capture_block):
 
     if product != capture_block:
         raise ValueError(_recursive_diff(product, capture_block))
+
+
+async def update_from_sensors(config):
+    """Compute an updated config using sensor values.
+
+    This replaces attributes of CBF streams that correspond directly to
+    sensors, by obtaining the values of the sensors. If there is no
+    cam.http stream, no changes are made.
+
+    Parameters
+    ----------
+    config : dict
+        Product configuration, which must be validated but need not be
+        normalised.
+
+    Returns
+    -------
+    new_config : dict
+        Copy of `config` with some values replaced
+
+    Raises
+    ------
+    SensorFailure
+        If there were any problems loading the sensor values. In most cases
+        it will be chained to an originating exception.
+    """
+    portal_url = None
+    for stream in config['inputs'].values():
+        if stream['type'] == 'cam.http':
+            portal_url = stream['url']
+            break
+    if portal_url is None:
+        return config
+
+    config = copy.deepcopy(config)
+    client = katportalclient.KATPortalClient(portal_url, None)
+    components = {}
+    for name in ['cbf', 'sub']:
+        try:
+            components[name] = await client.sensor_subarray_lookup(name, None)
+        except Exception as exc:
+            # There are too many possible exceptions from katportalclient to
+            # try to list them all explicitly.
+            raise SensorFailure('Could not get component name for {}: {}'
+                                .format(name, exc)) from exc
+
+    for stream_name, stream in config['inputs'].items():
+        if stream.get('simulate', False) is not False:
+            continue       # katportal won't know what values we're simulating for
+        sensors = _SENSORS.get(stream['type'], [])
+        instrument_name = stream.get('instrument_dev_name')
+        for sensor in sensors:
+            sample = None
+            full_name = sensor.full_name(components, stream_name, instrument_name)
+            try:
+                sample = await client.sensor_value(full_name)
+            except Exception as exc:
+                raise SensorFailure('Could not get value for {}: {}'
+                                    .format(full_name, exc)) from exc
+            if sample.status not in {'nominal', 'warn', 'error'}:
+                raise SensorFailure('Sensor {} has status {}'
+                                    .format(full_name, sample.status))
+            if sensor.name not in stream:
+                logger.info('Setting %s %s to %s from sensor',
+                            stream_name, sensor.name, sample.value)
+            elif sample.value != stream[sensor.name]:
+                logger.warning('Changing %s %s from %s to %s from sensor',
+                               stream_name, sensor.name, stream[sensor.name], sample.value)
+            stream[sensor.name] = sample.value
+
+    try:
+        validate(config)
+    except (ValueError, jsonschema.ValidationError) as exc:
+        raise SensorFailure('A sensor value made the config invalid: {}'.format(exc)) from exc
+    return config
 
 
 def normalise(config):

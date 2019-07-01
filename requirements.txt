@@ -2,7 +2,7 @@ addict==2.1.1
 aioconsole                 # via aiomonitor
 aiohttp==3.5.4
 aiohttp-jinja2==1.1.0
-aiokatcp==0.5.0            # docker-base currently has an older version
+aiokatcp
 aiomonitor
 async-timeout==3.0.1
 attrs==18.1.0              # via prometheus_async
@@ -48,6 +48,7 @@ numba                      # via katdal
 netifaces
 networkx==2.0
 numpy
+omnijson==0.1.2            # via katportalclient
 pkginfo
 plotly==3.5.0              # via plotly
 prometheus_async==18.1.0
@@ -65,15 +66,18 @@ rfc3987==1.3.7
 six                        # via docker, plotly and others
 terminaltables             # via aiomonitor
 toolz                      # via katdal
+tornado==6.0.2             # via katportalclient
 traitlets==4.3.2           # via nbformat
 typing-extensions==3.7.2   # via aiohttp
+ujson==1.35                # via katportalclient
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 werkzeug==0.14.1           # via flask
 wrapt==1.10.11             # via prometheus_async
 yarl                       # via aiohttp
 
-git+ssh://git@github.com/ska-sa/katpoint#egg=katpoint
-git+ssh://git@github.com/ska-sa/katdal#egg=katdal
-git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
-git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
+katpoint @ git+https://github.com/ska-sa/katpoint
+katdal @ git+https://github.com/ska-sa/katdal
+katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
+katsdpservices @ git+ssh://git@github.com/ska-sa/katsdpservices
+katportalclient @ git+https://github.com/ska-sa/katportalclient
