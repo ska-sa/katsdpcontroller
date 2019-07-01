@@ -269,14 +269,12 @@ class SingularityProductManager(ProductManagerBase):
         deploy = {
             "requestId": request_id,
             # TODO: pass through options from self
-            # TODO: change to sdp_product_controller
             # TODO: pass most arguments to the run, not the deploy
-            "command": "sdp_master_controller.py",
+            "command": "sdp_product_controller.py",
             "arguments": [
                 "--port", "5101",
                 "--http-port", "5102",
                 "--user", "kat",
-                "--s3-config-file", "dummy.json",
                 "--interface-mode",             # TODO
                 "zk://172.17.0.1:2181/mesos"    # TODO
             ],
@@ -284,7 +282,7 @@ class SingularityProductManager(ProductManagerBase):
                 "type": "DOCKER",
                 "docker": {
                     "image": image,
-                    "forcePullImage": True,
+                    "forcePullImage": False,    # TODO: switch to true
                     "network": "BRIDGE",
                     "portMappings": [
                         {
@@ -463,7 +461,7 @@ class SingularityProductManager(ProductManagerBase):
         request_id = await self._ensure_request(name)
         # TODO: use image resolver
         await self._ensure_deploy(
-            name, 'sdp-docker-registry.kat.ac.za:5000/katsdpcontroller')
+            name, 'katsdpcontroller')
         await self._sing.create_run(request_id, {"runId": product.run_id})
         # Wait until the task is running or dead
         task_id: Optional[str] = None
@@ -732,7 +730,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                     raise FailReply(f"Product {name} is not yet configured")
                 if not product.katcp_conn or not product.katcp_conn.is_connected:
                     raise FailReply('Not connected to product controller (try with force=True)')
-                await product.katcp_conn.request('product-deconfigure', name, force)
+                await product.katcp_conn.request('product-deconfigure', force)
                 if force:
                     # Make sure it actually dies; if not we'll force it when we
                     # time out.

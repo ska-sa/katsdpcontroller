@@ -21,7 +21,7 @@ import pymesos
 import aiomonitor
 import katsdpservices
 
-from katsdpcontroller import scheduler, sdpcontroller, web
+from katsdpcontroller import scheduler, product_controller, web
 
 
 async def quiet_prometheus_stats(request):
@@ -43,6 +43,7 @@ class InvalidGuiUrlsError(RuntimeError):
     pass
 
 
+# TODO: move to master controller
 def load_gui_urls_file(filename):
     try:
         with open(filename) as gui_urls_file:
@@ -90,16 +91,21 @@ if __name__ == "__main__":
 
     usage = "%(prog)s [options] master"
     parser = argparse.ArgumentParser(usage=usage)
+    if 'TASK_HOST' in os.environ:
+        # Set by Singularity
+        default_external_hostname = os.environ['TASK_HOST']
+    else:
+        default_external_hostname = socket.getfqdn()
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='attach to server HOST [localhost]')
-    parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
+    parser.add_argument('-p', '--port', type=int, default=5101, metavar='N',
                         help='katcp listen port [%(default)s]')
     parser.add_argument('-l', '--loglevel',
                         default="info", metavar='LOGLEVEL',
                         help='set the Python logging level [%(default)s]')
-    parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
+    parser.add_argument('--external-hostname', metavar='FQDN', default=default_external_hostname,
                         help='Name by which others connect to this machine [%(default)s]')
-    parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
+    parser.add_argument('--http-port', type=int, default=5102, metavar='PORT',
                         help='port that slaves communicate with [%(default)s]')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port')
@@ -119,19 +125,11 @@ if __name__ == "__main__":
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup [none]')
-    parser.add_argument('--image-tag-file',
-                        metavar='FILE', help='Load image tag to run from file (on each configure)')
-    parser.add_argument('--s3-config-file',
-                        metavar='FILE',
-                        help='Configuration for connecting services to S3 '
-                             '(loaded on each configure)')
-    parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
-                        metavar='MULTICAST-CIDR',
-                        help='Block of multicast addresses from which to draw internal allocation. '
-                             'Needs to be at least /16. [%(default)s]')
-    parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='File containing JSON describing related GUIs, '
-                             'or directory with .json files [none]')
+    parser.add_argument('--image-tag',
+                        metavar='TAG', help='Image tag to use')
+    parser.add_argument('--s3-config',
+                        metavar='JSON',
+                        help='Configuration for connecting services to S3')
     parser.add_argument('--no-pull', action='store_true', default=False,
                         help='Skip pulling images from the registry if already present')
     parser.add_argument('--write-graphs', metavar='DIR',
@@ -152,7 +150,7 @@ if __name__ == "__main__":
     if opts.loglevel is not None:
         logging.root.setLevel(opts.loglevel.upper())
     logger = logging.getLogger('sdpcontroller')
-    logger.info("Starting SDP Controller...")
+    logger.info("Starting SDP product controller...")
     if opts.http_url is None:
         opts.http_url = 'http://{}:{}/'.format(urllib.parse.quote(opts.external_hostname),
                                                opts.http_port)
@@ -160,7 +158,7 @@ if __name__ == "__main__":
 
     image_resolver_factory = scheduler.ImageResolverFactory(
         private_registry=opts.private_registry or None,
-        tag_file=opts.image_tag_file,
+        tag=opts.image_tag,
         use_digests=not opts.no_pull)
     for override in opts.image_override:
         fields = override.split(':', 1)
@@ -168,20 +166,8 @@ if __name__ == "__main__":
             parser.error("--image-override option must have a colon")
         image_resolver_factory.override(fields[0], fields[1])
 
-    gui_urls = None
-    if opts.gui_urls is not None:
-        try:
-            if os.path.isdir(opts.gui_urls):
-                gui_urls = load_gui_urls_dir(opts.gui_urls)
-            else:
-                gui_urls = load_gui_urls_file(opts.gui_urls)
-        except InvalidGuiUrlsError as error:
-            parser.error(str(error))
-        except Exception as error:
-            parser.error('Could not read {}: {}'.format(opts.gui_urls, error))
-
-    if opts.s3_config_file is None and not opts.interface_mode:
-        parser.error('--s3-config-file is required (unless --interface-mode is given)')
+    if opts.s3_config is None and not opts.interface_mode:
+        parser.error('--s3-config is required (unless --interface-mode is given)')
 
     framework_info = addict.Dict()
     framework_info.user = opts.user
@@ -203,14 +189,12 @@ if __name__ == "__main__":
             implicit_acknowledgements=False)
         sched.set_driver(driver)
         driver.start()
-    server = sdpcontroller.SDPControllerServer(
-        opts.host, opts.port, sched, loop,
+    server = product_controller.DeviceServer(
+        opts.host, opts.port, '', 0, sched,    # TODO
         batch_role=opts.batch_role,
         interface_mode=opts.interface_mode,
         image_resolver_factory=image_resolver_factory,
-        s3_config_file=opts.s3_config_file,
-        safe_multicast_cidr=opts.safe_multicast_cidr,
-        gui_urls=gui_urls,
+        s3_config={},     # TODO
         graph_dir=opts.write_graphs)
     if not opts.interface_mode and opts.dashboard_port != 0:
         init_dashboard(server, opts)

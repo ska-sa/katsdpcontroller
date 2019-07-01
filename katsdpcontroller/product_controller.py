@@ -660,9 +660,9 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
     """Dummy implementation of SDPSubarrayProductBase interface that does not
     actually run anything.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id, self.logger)
+        self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
         sensors = self._interface_mode_sensors.sensors
         self._capture_block_states = [
             sensor for sensor in sensors.values() if sensor.name.endswith('.capture-block-state')]
@@ -1040,7 +1040,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = s3_config
         self.graph_dir = graph_dir
-        self.parent = aiokatcp.Client(parent_host, parent_port)
+        # TODO self.parent = aiokatcp.Client(parent_host, parent_port)
         self.product: Optional[SDPSubarrayProductBase] = None
 
         super().__init__(host, port)
