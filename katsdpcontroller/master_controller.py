@@ -197,8 +197,7 @@ class SingularityProductManager(ProductManagerBase):
 
     def __init__(self, args) -> None:
         super().__init__(args)
-        self._request_id = args.name + '_product'
-        self._deploy_id = uuid.uuid4().hex
+        self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         self._products: Dict[str, SingularityProduct] = {}
         self._reconciliation_task: Optional[asyncio.Task] = None
@@ -242,21 +241,48 @@ class SingularityProductManager(ProductManagerBase):
         except aiozk.exc.NodeExists as exc:
             raise RuntimeError('Another instance is already running - kill it first') from exc
 
-    async def _ensure_request(self) -> None:
-        """Create or update the Singularity request object"""
+    async def _ensure_request(self, product_name: str) -> str:
+        """Create or update a Singularity request object
+
+        Parameters
+        ----------
+        product_name
+            Name of the subarray product
+
+        Returns
+        -------
+        request_id
+            Singularity request ID
+        """
         # Singularity allows requests to be updated with POST, so just do it unconditionally
+        request_id = self._request_id_prefix + product_name
         await self._sing.create_request({
-            "id": self._request_id,
+            "id": request_id,
             "requestType": "ON_DEMAND"
         })
+        return request_id
 
-    async def _ensure_deploy(self) -> None:
-        """Create or update the Singularity deploy object"""
+    async def _ensure_deploy(self, product_name: str, image: str) -> str:
+        """Create or update the Singularity deploy object
+
+        Parameters
+        ----------
+        product_name
+            Subarray product being configured (determines the request name)
+        image
+            Docker image to run
+
+        Returns
+        -------
+        deploy_id
+            Singularity deploy ID
+        """
+        request_id = self._request_id_prefix + product_name
         deploy = {
-            "id": self._deploy_id,
-            "requestId": self._request_id,
+            "requestId": request_id,
             # TODO: pass through options from self
             # TODO: change to sdp_product_controller
+            # TODO: pass most arguments to the run, not the deploy
             "command": "sdp_master_controller.py",
             "arguments": [
                 "--port", "5101",
@@ -269,8 +295,7 @@ class SingularityProductManager(ProductManagerBase):
             "containerInfo": {
                 "type": "DOCKER",
                 "docker": {
-                    # TODO: use image resolver
-                    "image": "sdp-docker-registry.kat.ac.za:5000/katsdpcontroller",
+                    "image": image,
                     "forcePullImage": True,
                     "network": "BRIDGE",
                     "portMappings": [
@@ -306,7 +331,7 @@ class SingularityProductManager(ProductManagerBase):
         # previous request.
         try:
             (old_deploy_raw, stat), current_request = await asyncio.gather(
-                self._zk.get('/deploy'), self._sing.get_request(self._request_id))
+                self._zk.get(f'/deploys/{request_id}'), self._sing.get_request(request_id))
             old_deploy = json.loads(old_deploy_raw)
             old_id = old_deploy['id']
             current_id = current_request['activeDeploy']['id']
@@ -314,14 +339,15 @@ class SingularityProductManager(ProductManagerBase):
                 deploy['id'] = current_id
                 if deploy == old_deploy:
                     logger.info('Reusing deploy ID %s', current_id)
-                    self._deploy_id = current_id
-                    return
+                    return current_id
         except (aiozk.exc.NoNode, KeyError, TypeError, ValueError):
             logger.debug('Cannot reuse deploy', exc_info=True)
-        logger.info('Creating new deploy with ID %s', self._deploy_id)
-        deploy['id'] = self._deploy_id
+        deploy['id'] = uuid.uuid4().hex
+        logger.info('Creating new deploy with ID %s', deploy['id'])
         await self._sing.create_deploy({"deploy": deploy})
-        await self._zk_set('/deploy', json.dumps(deploy).encode())
+        await self._zk.ensure_path('/deploys')
+        await self._zk_set(f'/deploys/{request_id}', json.dumps(deploy).encode())
+        return deploy['id']
 
     async def _load_state(self) -> None:
         """Load existing subarray product state from Zookeeper"""
@@ -370,24 +396,27 @@ class SingularityProductManager(ProductManagerBase):
 
     async def _reconcile_once(self) -> None:
         logger.debug('Starting reconciliation')
-        data = await self._sing.get_request_tasks(self._request_id)
+        requests = await self._sing.get_requests(request_type=['ON_DEMAND'])
         # Start by assuming everything died and remove tasks as they're seen
         dead_tasks = set(self._task_cache.keys())
         expected_run_ids = {product.run_id for product in self._products.values()}
-        for state, tasks in data.items():
-            if state in {'pending', 'cleaning'}:
-                continue      # TODO: cancel unwanted pending tasks before they launch
-            for task in tasks:
-                task_id: str = task['id']
-                task_info = await self._get_task_info(task_id)
-                if task_info is None:
-                    continue       # Died before we could query it
-                dead_tasks.discard(task_id)
-                logger.debug('Reconciliation: %s is in state %s', task_id, state)
-                run_id: str = task_info['taskRequest']['pendingTask']['runId']
-                if run_id not in expected_run_ids:
-                    logger.info('Killing task %s with unknown run_id %s', task_id, run_id)
-                    await self._try_kill_task(task_id)
+        for request in requests:
+            request_id = request['request']['id']
+            data = await self._sing.get_request_tasks(request_id)
+            for state, tasks in data.items():
+                if state in {'pending', 'cleaning'}:
+                    continue      # TODO: cancel unwanted pending tasks before they launch
+                for task in tasks:
+                    task_id: str = task['id']
+                    task_info = await self._get_task_info(task_id)
+                    if task_info is None:
+                        continue       # Died before we could query it
+                    dead_tasks.discard(task_id)
+                    logger.debug('Reconciliation: %s is in state %s', task_id, state)
+                    run_id: str = task_info['taskRequest']['pendingTask']['runId']
+                    if run_id not in expected_run_ids:
+                        logger.info('Killing task %s with unknown run_id %s', task_id, run_id)
+                        await self._try_kill_task(task_id)
         for task_id in dead_tasks:
             logger.debug('Task %s died', task_id)
             del self._task_cache[task_id]
@@ -414,8 +443,6 @@ class SingularityProductManager(ProductManagerBase):
         await self._zk.start()
         await self._mark_running()
         await self._load_state()
-        await self._ensure_request()
-        await self._ensure_deploy()
         await self._reconcile_once()
         self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconcile_repeat())
         _log_exceptions(self._reconciliation_task, 'reconciliation')
@@ -445,7 +472,11 @@ class SingularityProductManager(ProductManagerBase):
         assert name not in self._products
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
-        await self._sing.create_run(self._request_id, {"runId": product.run_id})
+        request_id = await self._ensure_request(name)
+        # TODO: use image resolver
+        await self._ensure_deploy(
+            name, 'sdp-docker-registry.kat.ac.za:5000/katsdpcontroller')
+        await self._sing.create_run(request_id, {"runId": product.run_id})
         # Wait until the task is running or dead
         task_id: Optional[str] = None
         success = False
@@ -453,7 +484,7 @@ class SingularityProductManager(ProductManagerBase):
         try:
             while True:
                 try:
-                    data = await self._sing.track_run(self._request_id, product.run_id)
+                    data = await self._sing.track_run(request_id, product.run_id)
                 except singularity.NotFoundError:
                     # Singularity is asynchronous, so it doesn't immediately recognise run_id
                     pass
@@ -685,7 +716,6 @@ class DeviceServer(aiokatcp.DeviceServer):
                 product.configure_task = None
                 if not success:
                     await self._manager.kill_product(product)
-
 
     @time_request
     async def request_product_deconfigure(self, ctx, name: str, force: bool = False) -> None:

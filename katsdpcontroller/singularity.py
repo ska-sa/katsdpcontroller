@@ -1,7 +1,7 @@
 """Wrappers for Hubspot Singularity"""
 
 import json
-from typing import Union
+from typing import Union, Sequence
 import logging
 
 import yarl
@@ -57,23 +57,30 @@ class Singularity:
     async def close(self) -> None:
         await self._http_session.close()
 
-    async def _post(self, path: str, data: dict) -> dict:
+    async def _post(self, path: str, data: dict, *args, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.post(url, headers=_CT_JSON, data=json.dumps(data)) as resp:
+        async with self._http_session.post(url, headers=_CT_JSON,
+                                           data=json.dumps(data), *args, **kwargs) as resp:
             return await _read_resp(resp)
 
-    async def _get(self, path: str) -> dict:
+    async def _get(self, path: str, *args, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.get(url) as resp:
+        async with self._http_session.get(url, *args, **kwargs) as resp:
             return await _read_resp(resp)
 
-    async def _delete(self, path: str) -> dict:
+    async def _delete(self, path: str, *args, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.delete(url) as resp:
+        async with self._http_session.delete(url, *args, **kwargs) as resp:
             return await _read_resp(resp)
 
     async def get_request(self, request_id: str) -> dict:
         return await self._get(f'requests/request/{request_id}')
+
+    async def get_requests(self, *, request_type: Union[str, Sequence[str]] = ()) -> dict:
+        if isinstance(request_type, str):
+            request_type = [request_type]
+        params = [('requestType', r) for r in request_type]
+        return await self._get('requests', params=params)
 
     async def create_request(self, request: dict) -> dict:
         return await self._post('requests', request)
