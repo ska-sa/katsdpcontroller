@@ -426,7 +426,7 @@ async def update_from_sensors(config):
     Raises
     ------
     SensorFailure
-        If there were any problems loading the sensor values. In must cases
+        If there were any problems loading the sensor values. In most cases
         it will be chained to an originating exception.
     """
     portal_url = None
