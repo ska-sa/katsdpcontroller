@@ -57,20 +57,20 @@ class Singularity:
     async def close(self) -> None:
         await self._http_session.close()
 
-    async def _post(self, path: str, data: dict, *args, **kwargs) -> dict:
+    async def _post(self, path: str, data: dict, **kwargs) -> dict:
         url = self._url / path
         async with self._http_session.post(url, headers=_CT_JSON,
-                                           data=json.dumps(data), *args, **kwargs) as resp:
+                                           data=json.dumps(data), **kwargs) as resp:
             return await _read_resp(resp)
 
-    async def _get(self, path: str, *args, **kwargs) -> dict:
+    async def _get(self, path: str, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.get(url, *args, **kwargs) as resp:
+        async with self._http_session.get(url, **kwargs) as resp:
             return await _read_resp(resp)
 
-    async def _delete(self, path: str, *args, **kwargs) -> dict:
+    async def _delete(self, path: str, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.delete(url, *args, **kwargs) as resp:
+        async with self._http_session.delete(url, **kwargs) as resp:
             return await _read_resp(resp)
 
     async def get_request(self, request_id: str) -> dict:

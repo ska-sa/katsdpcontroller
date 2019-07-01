@@ -22,8 +22,10 @@ import aiomonitor
 import katsdpservices
 
 from katsdpcontroller import scheduler, product_controller, web
+from katsdpcontroller.controller import add_shared_options
 
 
+# TODO: move Prometheus stats to master
 async def quiet_prometheus_stats(request):
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
@@ -39,40 +41,11 @@ def on_shutdown(loop, server):
     server.halt()
 
 
-class InvalidGuiUrlsError(RuntimeError):
-    pass
-
-
-# TODO: move to master controller
-def load_gui_urls_file(filename):
-    try:
-        with open(filename) as gui_urls_file:
-            gui_urls = json.load(gui_urls_file)
-    except (IOError, OSError) as error:
-        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
-    except ValueError as error:
-        raise InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
-    if not isinstance(gui_urls, list):
-        raise InvalidGuiUrlsError('{} does not contain a list'.format(filename))
-    return gui_urls
-
-
-def load_gui_urls_dir(dirname):
-    try:
-        gui_urls = []
-        for name in sorted(os.listdir(dirname)):
-            filename = os.path.join(dirname, name)
-            if filename.endswith('.json') and os.path.isfile(filename):
-                gui_urls.extend(load_gui_urls_file(filename))
-    except (IOError, OSError) as error:
-        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
-    return gui_urls
-
-
-async def run(loop, sched, server):
+async def run(sched, server):
     if sched is not None:
         await sched.start()
     await server.start()
+    loop = asyncio.get_event_loop()
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, lambda: on_shutdown(loop, server))
     await server.join()
@@ -100,8 +73,7 @@ if __name__ == "__main__":
                         help='attach to server HOST [localhost]')
     parser.add_argument('-p', '--port', type=int, default=5101, metavar='N',
                         help='katcp listen port [%(default)s]')
-    parser.add_argument('-l', '--loglevel',
-                        default="info", metavar='LOGLEVEL',
+    parser.add_argument('-l', '--log-level', metavar='LEVEL',
                         help='set the Python logging level [%(default)s]')
     parser.add_argument('--external-hostname', metavar='FQDN', default=default_external_hostname,
                         help='Name by which others connect to this machine [%(default)s]')
@@ -114,96 +86,74 @@ if __name__ == "__main__":
     parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
                         action='store_false',
                         help='disable aiomonitor debugging server')
-    parser.add_argument('-i', '--interface-mode', default=False,
-                        action='store_true',
-                        help='run the controller in interface only mode for testing '
-                             'integration and ICD compliance. [%(default)s]')
-    parser.add_argument('--registry', dest='private_registry',
-                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images (use empty string to disable) '
-                             '[%(default)s]')
-    parser.add_argument('--image-override', action='append',
-                        default=[], metavar='NAME:IMAGE',
-                        help='Override an image name lookup [none]')
     parser.add_argument('--image-tag',
                         metavar='TAG', help='Image tag to use')
     parser.add_argument('--s3-config',
                         metavar='JSON',
                         help='Configuration for connecting services to S3')
-    parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
-    parser.add_argument('--write-graphs', metavar='DIR',
-                        help='Write visualisations of the processing graph to directory')
-    parser.add_argument('--realtime-role', default='realtime',
-                        help='Mesos role for realtime capture tasks [%(default)s]')
-    parser.add_argument('--batch-role', default='batch',
-                        help='Mesos role for batch processing tasks [%(default)s]')
-    parser.add_argument('--principal', default='katsdpcontroller',
-                        help='Mesos principal for the principal [%(default)s]')
-    parser.add_argument('--user', default='root',
-                        help='User to run as on the Mesos agents [%(default)s]')
     parser.add_argument('master',
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
-    opts = parser.parse_args()
+    add_shared_options(parser)
+    args = parser.parse_args()
 
-    if opts.loglevel is not None:
-        logging.root.setLevel(opts.loglevel.upper())
+    if args.log_level is not None:
+        logging.root.setLevel(args.log_level.upper())
     logger = logging.getLogger('sdpcontroller')
     logger.info("Starting SDP product controller...")
-    if opts.http_url is None:
-        opts.http_url = 'http://{}:{}/'.format(urllib.parse.quote(opts.external_hostname),
-                                               opts.http_port)
-        logger.info('Setting --http-url to %s', opts.http_url)
+    if args.http_url is None:
+        args.http_url = 'http://{}:{}/'.format(urllib.parse.quote(args.external_hostname),
+                                               args.http_port)
+        logger.info('Setting --http-url to %s', args.http_url)
 
     image_resolver_factory = scheduler.ImageResolverFactory(
-        private_registry=opts.private_registry or None,
-        tag=opts.image_tag,
-        use_digests=not opts.no_pull)
-    for override in opts.image_override:
+        private_registry=args.registry or None,
+        tag=args.image_tag,
+        use_digests=not args.no_pull)
+    for override in args.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:
             parser.error("--image-override option must have a colon")
         image_resolver_factory.override(fields[0], fields[1])
 
-    if opts.s3_config is None and not opts.interface_mode:
+    if args.s3_config is None and not args.interface_mode:
         parser.error('--s3-config is required (unless --interface-mode is given)')
 
     framework_info = addict.Dict()
-    framework_info.user = opts.user
+    framework_info.user = args.user
     framework_info.name = 'katsdpcontroller'
     framework_info.checkpoint = True
-    framework_info.principal = opts.principal
-    framework_info.roles = [opts.realtime_role, opts.batch_role]
+    framework_info.principal = args.principal
+    framework_info.roles = [args.realtime_role, args.batch_role]
     framework_info.capabilities = [{'type': 'MULTI_ROLE'}]
 
     loop = asyncio.get_event_loop()
-    if opts.interface_mode:
+    if args.interface_mode:
         sched = None
     else:
-        sched = scheduler.Scheduler(loop, opts.realtime_role, opts.http_port, opts.http_url,
+        sched = scheduler.Scheduler(args.realtime_role, args.http_port, args.http_url,
                                     dict(access_log_class=web.AccessLogger))
         sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
         driver = pymesos.MesosSchedulerDriver(
-            sched, framework_info, opts.master, use_addict=True,
+            sched, framework_info, args.master, use_addict=True,
             implicit_acknowledgements=False)
         sched.set_driver(driver)
         driver.start()
     server = product_controller.DeviceServer(
-        opts.host, opts.port, '', 0, sched,    # TODO
-        batch_role=opts.batch_role,
-        interface_mode=opts.interface_mode,
+        args.host, args.port, '', 0, sched,    # TODO
+        batch_role=args.batch_role,
+        interface_mode=args.interface_mode,
         image_resolver_factory=image_resolver_factory,
         s3_config={},     # TODO
-        graph_dir=opts.write_graphs)
-    if not opts.interface_mode and opts.dashboard_port != 0:
-        init_dashboard(server, opts)
+        graph_dir=args.write_graphs)
+    if not args.interface_mode and args.dashboard_port != 0:
+        init_dashboard(server, args)
 
     logger.info("Starting SDP...")
 
-    if opts.aiomonitor:
+    if args.aiomonitor:
         with aiomonitor.start_monitor(loop=loop):
-            loop.run_until_complete(run(loop, sched, server))
+            loop.run_until_complete(run(sched, server))
     else:
-        loop.run_until_complete(run(loop, sched, server))
+        loop.run_until_complete(run(sched, server))
     loop.close()

@@ -8,10 +8,41 @@ import logging
 import signal
 import functools
 import socket
+import os
 
 import katsdpservices
 
 from katsdpcontroller import master_controller
+from katsdpcontroller.controller import add_shared_options
+
+
+class InvalidGuiUrlsError(RuntimeError):
+    pass
+
+
+def load_gui_urls_file(filename):
+    try:
+        with open(filename) as gui_urls_file:
+            gui_urls = json.load(gui_urls_file)
+    except (IOError, OSError) as error:
+        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
+    except ValueError as error:
+        raise InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
+    if not isinstance(gui_urls, list):
+        raise InvalidGuiUrlsError('{} does not contain a list'.format(filename))
+    return gui_urls
+
+
+def load_gui_urls_dir(dirname):
+    try:
+        gui_urls = []
+        for name in sorted(os.listdir(dirname)):
+            filename = os.path.join(dirname, name)
+            if filename.endswith('.json') and os.path.isfile(filename):
+                gui_urls.extend(load_gui_urls_file(filename))
+    except (IOError, OSError) as error:
+        raise InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
+    return gui_urls
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,17 +60,6 @@ def parse_args() -> argparse.Namespace:
                         help='Name by which others connect to this machine [%(default)s]')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
-    parser.add_argument('-i', '--interface-mode', default=False,
-                        action='store_true',
-                        help='run the controller in interface only mode for testing '
-                             'integration and ICD compliance. [%(default)s]')
-    parser.add_argument('--registry', dest='private_registry',
-                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images (use empty string to disable) '
-                             '[%(default)s]')
-    parser.add_argument('--image-override', action='append',
-                        default=[], metavar='NAME:IMAGE',
-                        help='Override an image name lookup [none]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
@@ -53,20 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
                         help='File containing JSON describing related GUIs, '
                              'or directory with .json files [none]')
-    # TODO: most of the below get passed straight through, so move them to
-    # common code.
-    parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
-    parser.add_argument('--write-graphs', metavar='DIR',
-                        help='Write visualisations of the processing graph to directory')
-    parser.add_argument('--realtime-role', default='realtime',
-                        help='Mesos role for realtime capture tasks [%(default)s]')
-    parser.add_argument('--batch-role', default='batch',
-                        help='Mesos role for batch processing tasks [%(default)s]')
-    parser.add_argument('--principal', default='katsdpcontroller',
-                        help='Mesos principal for the framework [%(default)s]')
-    parser.add_argument('--user', default='root',
-                        help='User to run as on the Mesos agents [%(default)s]')
+    add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble
     parser.add_argument('zk',
@@ -74,6 +81,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('singularity',
                         help='URL for Singularity server')
     args = parser.parse_args()
+
+    if args.gui_urls is not None:
+        try:
+            if os.path.isdir(args.gui_urls):
+                args.gui_urls = load_gui_urls_dir(args.gui_urls)
+            else:
+                args.gui_urls = load_gui_urls_file(args.gui_urls)
+        except InvalidGuiUrlsError as exc:
+            parser.error(str(exc))
+        except Exception as exc:
+            parser.error(f'Could not read {args.gui_urls}: {exc}')
+
+    if args.s3_config_file is None and not args.interface_mode:
+        parser.error('--s3-config-file is required (unless --interface-mode is given)')
+
     return args
 
 

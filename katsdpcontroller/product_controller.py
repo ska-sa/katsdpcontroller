@@ -163,7 +163,7 @@ class SDPSubarrayProductBase:
     asynchronous operations. They need to be cancellation-safe, to allow for
     forced deconfiguration to abort them.
     """
-    def __init__(self, sched: scheduler.Scheduler,
+    def __init__(self, sched: Optional[scheduler.Scheduler],
                  config: dict,
                  resolver: Resolver,
                  subarray_product_id: str,
@@ -708,6 +708,8 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
+    sched: scheduler.Scheduler     # Override Optional[] from base class
+
     def _instantiate(self, logical_node: scheduler.LogicalNode,
                      capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
         if isinstance(logical_node, tasks.SDPLogicalTask):
@@ -1028,7 +1030,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def __init__(self, host: str, port: int,
                  parent_host: str, parent_port: int,
-                 sched: scheduler.Scheduler,
+                 sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
                  image_resolver_factory: scheduler.ImageResolverFactory,

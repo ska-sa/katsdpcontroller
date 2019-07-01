@@ -24,8 +24,9 @@ import async_timeout
 import yarl
 
 import katsdpcontroller
-from . import singularity, product_config
-from .controller import time_request, load_json_dict, log_task_exceptions, ProductState
+from . import singularity, product_config, schemas
+from .controller import (time_request, load_json_dict, log_task_exceptions,
+                         extract_shared_options, ProductState)
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,13 @@ class NoAddressesError(Exception):
 
 class ProductFailed(Exception):
     """Attempt to create a subarray product was unsuccessful"""
+
+
+def _load_s3_config(filename):
+    with open(filename, 'r') as f:
+        config = json.load(f)
+    schemas.S3_CONFIG.validate(config)
+    return config
 
 
 class Product:
@@ -183,7 +191,7 @@ class SingularityProduct(Product):
 class SingularityProductManager(ProductManagerBase):
     """Run subarray products as tasks within Hubspot Singularity."""
 
-    def __init__(self, args) -> None:
+    def __init__(self, args: argparse.Namespace) -> None:
         super().__init__(args)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
@@ -191,6 +199,8 @@ class SingularityProductManager(ProductManagerBase):
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._sing = singularity.Singularity(yarl.URL(args.singularity) / 'api')
         self._zk = aiozk.ZKClient(args.zk, chroot=args.name)
+        print(args)
+        self._args = args
 
     async def _zk_set(self, key: str, payload: bytes) -> None:
         """Set content for a Zookeeper node, creating it if necessary"""
@@ -268,14 +278,11 @@ class SingularityProductManager(ProductManagerBase):
         request_id = self._request_id_prefix + product_name
         deploy = {
             "requestId": request_id,
-            # TODO: pass through options from self
             # TODO: pass most arguments to the run, not the deploy
             "command": "sdp_product_controller.py",
             "arguments": [
                 "--port", "5101",
                 "--http-port", "5102",
-                "--user", "kat",
-                "--interface-mode",             # TODO
                 "zk://172.17.0.1:2181/mesos"    # TODO
             ],
             "containerInfo": {
@@ -456,13 +463,20 @@ class SingularityProductManager(ProductManagerBase):
 
     async def create_product(self, name: str) -> Product:
         assert name not in self._products
+        s3_config = _load_s3_config(self._args.s3_config_file)
+        args = extract_shared_options(self._args)
+        args.append('--s3-config=' + json.dumps(s3_config))
+        # TODO: append --image-tag
+
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
         request_id = await self._ensure_request(name)
         # TODO: use image resolver
-        await self._ensure_deploy(
-            name, 'katsdpcontroller')
-        await self._sing.create_run(request_id, {"runId": product.run_id})
+        await self._ensure_deploy(name, 'katsdpcontroller')
+        await self._sing.create_run(request_id, {
+            "runId": product.run_id,
+            "commandLineArgs": args
+        })
         # Wait until the task is running or dead
         task_id: Optional[str] = None
         success = False
