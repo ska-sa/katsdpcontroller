@@ -128,8 +128,8 @@ class SDPConfigMixin:
     def _graph_config(self, resolver, graph):
         return graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         if not self.logical_node.katsdpservices_config:
             if self._graph_config(resolver, graph):
                 logger.warning('Graph node %s has explicit config but katsdpservices_config=False',
@@ -165,9 +165,8 @@ class CaptureBlockStateObserver:
     """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """
-    def __init__(self, sensor, loop, logger):
+    def __init__(self, sensor, logger):
         self.sensor = sensor
-        self.loop = loop
         self.logger = logger
         self._last = {}
         self._waiters = []    # Each a tuple of a predicate and a future
@@ -201,7 +200,7 @@ class CaptureBlockStateObserver:
     async def wait(self, condition):
         if condition(self._last):
             return      # Already satisfied, no need to wait
-        future = asyncio.Future(loop=self.loop)
+        future = asyncio.Future()
         self._waiters.append((condition, future))
         await future
 
@@ -226,12 +225,12 @@ class CaptureBlockStateObserver:
 class DeviceStatusObserver:
     """Watches a device-status sensor from a child, and reports when it is in error."""
 
-    def __init__(self, sensor, task, loop):
+    def __init__(self, sensor, task):
         self.sensor = sensor
         self.task = task
         sensor.attach(self)
         # Arrange to observe the initial value
-        loop.call_soon(self, sensor, sensor.reading)
+        asyncio.get_event_loop().call_soon(self, sensor, sensor.reading)
 
     def __call__(self, sensor, reading):
         if reading.status == Sensor.Status.ERROR:
@@ -256,10 +255,10 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
       For example:
         array_1.ingest.1.input_rate
     """
-    def __init__(self, logical_task, loop, sdp_controller, subarray_product, capture_block_id):
+    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         # Turn .status into a property that updates a sensor
         self._status = None
-        super().__init__(logical_task, loop)
+        super().__init__(logical_task)
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
         self.capture_block_id = capture_block_id   # Only useful for batch tasks
@@ -278,7 +277,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         # references.
         self._capture_blocks = set()
         # Event set to true whenever _capture_blocks is empty
-        self._capture_blocks_empty = asyncio.Event(loop=loop)
+        self._capture_blocks_empty = asyncio.Event()
         self._capture_blocks_empty.set()
 
         self._state_sensor = Sensor(scheduler.TaskState, self.name + '.state',
@@ -353,7 +352,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller, prefix,
                     PROMETHEUS_SENSORS, labels, _prometheus_factory,
-                    host=self.host, port=self.ports['port'], loop=self.loop)
+                    host=self.host, port=self.ports['port'])
                 try:
                     await self.katcp_connection.wait_synced()
                     self.logger.info("Connected to %s:%s for node %s",
@@ -361,11 +360,11 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
-                            sensor, loop=self.loop, logger=self.logger)
+                            sensor, logger=self.logger)
                     sensor = self.sdp_controller.sensors.get(prefix + 'device-status')
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(
-                            sensor, self, loop=self.loop)
+                            sensor, self)
                     return
                 except RuntimeError:
                     self.katcp_connection.close()
@@ -377,7 +376,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                                           self.name, self.host, self.ports['port'])
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
-                    await asyncio.sleep(1.0, loop=self.loop)
+                    await asyncio.sleep(1.0)
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -424,13 +423,13 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
     def kill(self, driver, **kwargs):
         force = kwargs.pop('force', False)
         if not force:
-            asyncio.ensure_future(self.graceful_kill(driver, **kwargs), loop=self.loop)
+            asyncio.ensure_future(self.graceful_kill(driver, **kwargs))
         else:
             self._disconnect()
             super().kill(driver, **kwargs)
 
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
 
         self.gui_urls = gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -450,7 +449,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 aiokatcp.Address,
                 '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
             try:
-                addrinfo = await loop.getaddrinfo(self.host, value)
+                addrinfo = await asyncio.get_event_loop().getaddrinfo(self.host, value)
                 host, port = addrinfo[0][4][:2]
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
             except socket.gaierror as error:
@@ -507,7 +506,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
 
     def clone(self):
         clone = self.logical_node.physical_factory(
-            self.logical_node, self.loop, self.sdp_controller, self.subarray_product,
+            self.logical_node, self.sdp_controller, self.subarray_product,
             self.capture_block_id)
         clone.generation = self.generation + 1
         return clone

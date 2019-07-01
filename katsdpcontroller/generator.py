@@ -76,8 +76,8 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
@@ -87,8 +87,8 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
 
 class TelstateTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
         portmap = addict.Dict()
@@ -99,8 +99,8 @@ class TelstateTask(SDPPhysicalTask):
 
 
 class IngestTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image. If it is the standard GPU, don't try to override
         # anything, but otherwise synthesize an image name by mangling the
@@ -112,7 +112,7 @@ class IngestTask(SDPPhysicalTask):
             # allow uppercase in image names).
             mangled = re.sub('[- ]', '_', gpu.name.lower())
             mangled = re.sub('[^a-z0-9_]', '', mangled)
-            image_path = await resolver.image_resolver('katsdpingest_' + mangled, loop)
+            image_path = await resolver.image_resolver('katsdpingest_' + mangled)
             self.taskinfo.container.docker.image = image_path
             logger.info('Develop mode: using %s for ingest', image_path)
 

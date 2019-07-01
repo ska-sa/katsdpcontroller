@@ -25,7 +25,7 @@ import yarl
 
 import katsdpcontroller
 from . import singularity, product_config
-from .controller import time_request, load_json_dict, ProductState
+from .controller import time_request, load_json_dict, log_task_exceptions, ProductState
 
 
 logger = logging.getLogger(__name__)
@@ -37,18 +37,6 @@ class NoAddressesError(Exception):
 
 class ProductFailed(Exception):
     """Attempt to create a subarray product was unsuccessful"""
-
-
-def _log_exceptions(task: asyncio.Task, name: str, *, logger=logger) -> None:
-    def callback(future):
-        try:
-            future.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception('Exception in %s', name)
-
-    task.add_done_callback(callback)
 
 
 class Product:
@@ -445,7 +433,7 @@ class SingularityProductManager(ProductManagerBase):
         await self._load_state()
         await self._reconcile_once()
         self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconcile_repeat())
-        _log_exceptions(self._reconciliation_task, 'reconciliation')
+        log_task_exceptions(self._reconciliation_task, logger, 'reconciliation')
 
     async def stop(self) -> None:
         if self._reconciliation_task is not None:
@@ -523,7 +511,7 @@ class SingularityProductManager(ProductManagerBase):
                 if task_id is not None:
                     # Make best effort to kill it; it might be dead already though
                     kill_task = loop.create_task(self._try_kill_task(task_id))
-                    _log_exceptions(kill_task, f'kill {task_id}', logger=product.logger)
+                    log_task_exceptions(kill_task, product.logger, f'kill {task_id}')
                 if self._products.get(name) is product:
                     del self._products[name]
                 product.configure_task = None   # Stops died() from trying to cancel us
