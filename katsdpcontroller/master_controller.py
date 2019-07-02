@@ -19,7 +19,7 @@ import itertools
 import re
 import time
 from abc import abstractmethod
-from typing import Dict, Mapping, Optional, Tuple, Set
+from typing import Dict, Tuple, Set, List, Mapping, Optional, Callable
 
 import aiozk
 import aiokatcp
@@ -28,7 +28,7 @@ import async_timeout
 import yarl
 
 import katsdpcontroller
-from . import singularity, product_config, schemas, scheduler
+from . import singularity, product_config, scheduler
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState)
 
@@ -57,7 +57,7 @@ class Product:
         ACTIVE = 3
         DEAD = 4
 
-    def __init__(self, name: str, configure_task: Optional[asyncio.Task]):
+    def __init__(self, name: str, configure_task: Optional[asyncio.Task]) -> None:
         self.name = name
         self.configure_task = configure_task
         self.katcp_conn: Optional[aiokatcp.Client] = None
@@ -67,13 +67,18 @@ class Product:
         self.multicast_groups: Set[ipaddress.IPv4Address] = set()
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
         self.dead_event = asyncio.Event()
+        self._dead_callbacks: List[Callable[['Product'], None]] = []
 
     def connect(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
         self.katcp_conn = aiokatcp.Client(host, port)
+        self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
         # TODO: set up sensor proxying
+
+    def _disconnect_callback(self, *args: bytes) -> None:
+        self.died()
 
     def died(self) -> None:
         self.task_state = Product.TaskState.DEAD
@@ -83,8 +88,11 @@ class Product:
             self.configure_task = None
         if self.katcp_conn is not None:
             self.katcp_conn.close()
+            self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
             self.katcp_conn = None
             # TODO: should this be async and await it being closed
+        for callback in self._dead_callbacks:
+            callback(self)
 
     async def get_state(self) -> ProductState:
         if self.task_state == Product.TaskState.ACTIVE:
@@ -95,6 +103,9 @@ class Product:
             return ProductState.DEAD
         else:
             return ProductState.CONFIGURING
+
+    def add_dead_callback(self, callback: Callable[['Product'], None]):
+        self._dead_callbacks.append(callback)
 
 
 class ProductManagerBase:
@@ -203,10 +214,15 @@ class SingularityProductManager(ProductManagerBase):
         super().__init__(args)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
+        # Task IDs that we didn't expect to see, but have been seen once.
+        # They might be tasks we killed which haven't quite died yet, so they get
+        # one reconciliation cycle to disappear on their own.
+        self._probation: Set[str] = set()
         self._products: Dict[str, SingularityProduct] = {}
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._sing = singularity.Singularity(yarl.URL(args.singularity) / 'api')
         self._zk = aiozk.ZKClient(args.zk, chroot=args.name)
+        self._zk_state_lock = asyncio.Lock()
         self._args = args
         self._next_capture_block_id = 0
 
@@ -363,58 +379,66 @@ class SingularityProductManager(ProductManagerBase):
 
     async def _load_state(self) -> None:
         """Load existing subarray product state from Zookeeper"""
-        default = {
-            "version": 1,
-            "products": {},
-            "next_multicast_group": "0.0.0.0",
-            "next_capture_block_id": 0
-        }
-        try:
-            payload = (await self._zk.get('/state'))[0]
-            data = json.loads(payload)
-            if data['version'] != 1:
-                raise ValueError('Version mismatch')
-            # TODO: apply a JSON schema check?
-        except aiozk.exc.NoNode:
-            logger.info('No existing state found')
-            data = default
-        except (KeyError, ValueError) as exc:
-            logger.warning('Could not load existing state (%s), so starting fresh', exc)
-            data = default
-        for name, info in data['products'].items():
-            prod = SingularityProduct(name, None)
-            prod.run_id = info['run_id']
-            prod.task_id = info['task_id']
-            prod.task_state = Product.TaskState.ACTIVE
-            prod.multicast_groups = {ipaddress.ip_address(addr)
-                                     for addr in info['multicast_groups']}
-            prod.connect(info['host'], info['port'])
-            self._products[name] = prod
-        # The implementation overrides it if it doesn't match the current
-        # _multicast_network.
-        self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
-        self._next_capture_block_id = data['next_capture_block_id']
+        async with self._zk_state_lock:
+            default = {
+                "version": 1,
+                "products": {},
+                "next_multicast_group": "0.0.0.0",
+                "next_capture_block_id": 0
+            }
+            try:
+                payload = (await self._zk.get('/state'))[0]
+                data = json.loads(payload)
+                if data['version'] != 1:
+                    raise ValueError('Version mismatch')
+                # TODO: apply a JSON schema check?
+            except aiozk.exc.NoNode:
+                logger.info('No existing state found')
+                data = default
+            except (KeyError, ValueError) as exc:
+                logger.warning('Could not load existing state (%s), so starting fresh', exc)
+                data = default
+            for name, info in data['products'].items():
+                prod = SingularityProduct(name, None)
+                prod.run_id = info['run_id']
+                prod.task_id = info['task_id']
+                prod.task_state = Product.TaskState.ACTIVE
+                prod.multicast_groups = {ipaddress.ip_address(addr)
+                                         for addr in info['multicast_groups']}
+                prod.connect(info['host'], info['port'])
+                self._products[name] = prod
+            # The implementation overrides it if it doesn't match the current
+            # _multicast_network.
+            self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
+            self._next_capture_block_id = data['next_capture_block_id']
 
     async def _save_state(self) -> None:
-        data = {
-            'version': 1,
-            'products': {
-                prod.name: {
-                    'run_id': prod.run_id,
-                    'task_id': prod.task_id,
-                    'host': prod.host,
-                    'port': prod.port,
-                    'multicast_groups': [str(group) for group in prod.multicast_groups]
-                } for prod in self._products.values() if prod.task_state == Product.TaskState.ACTIVE
-            },
-            'next_multicast_group': str(self._next_multicast_group),
-            'next_capture_block_id': self._next_capture_block_id
-        }
-        payload = json.dumps(data).encode()
-        await self._zk_set('/state', payload)
+        async with self._zk_state_lock:
+            data = {
+                'version': 1,
+                'products': {
+                    prod.name: {
+                        'run_id': prod.run_id,
+                        'task_id': prod.task_id,
+                        'host': prod.host,
+                        'port': prod.port,
+                        'multicast_groups': [str(group) for group in prod.multicast_groups]
+                    } for prod in self._products.values()
+                    if prod.task_state == Product.TaskState.ACTIVE
+                },
+                'next_multicast_group': str(self._next_multicast_group),
+                'next_capture_block_id': self._next_capture_block_id
+            }
+            payload = json.dumps(data).encode()
+            await self._zk_set('/state', payload)
+
+    def _save_state_bg(self) -> None:
+        task = asyncio.get_event_loop().create_task(self._save_state())
+        log_task_exceptions(task, logger, '_save_state')
 
     async def _reconcile_once(self) -> None:
         logger.debug('Starting reconciliation')
+        new_probation: Set[str] = set()
         requests = await self._sing.get_requests(request_type=['ON_DEMAND'])
         # Start by assuming everything died and remove tasks as they're seen
         dead_tasks = set(self._task_cache.keys())
@@ -434,8 +458,13 @@ class SingularityProductManager(ProductManagerBase):
                     logger.debug('Reconciliation: %s is in state %s', task_id, state)
                     run_id: str = task_info['taskRequest']['pendingTask']['runId']
                     if run_id not in expected_run_ids:
-                        logger.info('Killing task %s with unknown run_id %s', task_id, run_id)
-                        await self._try_kill_task(task_id)
+                        if task_id in self._probation:
+                            logger.info('Killing task %s with unknown run_id %s', task_id, run_id)
+                            await self._try_kill_task(task_id)
+                        else:
+                            logger.debug('Task %s with unknown run_id %s will be killed next time',
+                                         task_id, run_id)
+                            new_probation.add(task_id)
         for task_id in dead_tasks:
             logger.debug('Task %s died', task_id)
             del self._task_cache[task_id]
@@ -444,10 +473,10 @@ class SingularityProductManager(ProductManagerBase):
             if product.task_id is not None and product.task_id not in self._task_cache:
                 product.logger.info('Task for %s died', product.name)
                 product.died()
-                del self._products[product.name]
                 n_died += 1
         if n_died > 0:
             await self._save_state()
+        self._probation = new_probation
         logging.debug('Reconciliation finished')
 
     async def _reconcile_repeat(self):
@@ -457,6 +486,11 @@ class SingularityProductManager(ProductManagerBase):
                 await self._reconcile_once()
             except Exception:
                 logger.warning('Exception in reconciliation', exc_info=True)
+
+    def _product_died(self, product: Product):
+        if self._products.get(product.name) is product:
+            del self._products[product.name]
+            self._save_state_bg()
 
     async def start(self) -> None:
         await self._zk.start()
@@ -504,6 +538,7 @@ class SingularityProductManager(ProductManagerBase):
 
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
+        product.add_dead_callback(self._product_died)
         request_id = await self._ensure_request(name)
         # TODO: use image resolver
         await self._ensure_deploy(name, 'katsdpcontroller')
@@ -558,10 +593,10 @@ class SingularityProductManager(ProductManagerBase):
                     # Make best effort to kill it; it might be dead already though
                     kill_task = loop.create_task(self._try_kill_task(task_id))
                     log_task_exceptions(kill_task, product.logger, f'kill {task_id}')
-                if self._products.get(name) is product:
-                    del self._products[name]
                 product.configure_task = None   # Stops died() from trying to cancel us
                 product.died()
+                # No need for self._save_state, because the product never had a chance to
+                # reach ACTIVE state and hence wasn't stored
         return product
 
     async def product_active(self, product: Product) -> None:

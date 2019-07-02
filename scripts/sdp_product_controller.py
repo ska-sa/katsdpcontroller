@@ -18,7 +18,6 @@ import urllib.parse
 import addict
 import prometheus_async
 import pymesos
-import aiomonitor
 import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
