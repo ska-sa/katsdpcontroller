@@ -74,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
                         help='File containing JSON describing related GUIs, '
                              'or directory with .json files [none]')
+    parser.add_argument('--registry',
+                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
+                        help='registry from which to pull images [%(default)s]')
+    parser.add_argument('--no-pull', action='store_true', default=False,
+                        help='Skip pulling images from the registry if already present')
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble

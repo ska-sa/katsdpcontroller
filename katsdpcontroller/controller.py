@@ -72,14 +72,9 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
                         action='store_true',
                         help='run the controller in interface only mode for testing '
                              'integration and ICD compliance. [%(default)s]')
-    parser.add_argument('--registry',
-                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images [%(default)s]')
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup [none]')
-    parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
     parser.add_argument('--write-graphs', metavar='DIR',
                         help='Write visualisations of the processing graph to directory')
     parser.add_argument('--realtime-role', default='realtime',
@@ -95,7 +90,6 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
 def extract_shared_options(args: argparse.Namespace) -> List[str]:
     """Turn the arguments provided by :func:`add_shared_options` into command-line arguments."""
     ret = [
-        f'--registry={args.registry}',
         f'--realtime-role={args.realtime_role}',
         f'--batch-role={args.batch_role}',
         f'--principal={args.principal}',
@@ -103,8 +97,6 @@ def extract_shared_options(args: argparse.Namespace) -> List[str]:
     ]
     if args.interface_mode:
         ret.append('--interface-mode')
-    if args.no_pull:
-        ret.append('--no-pull')
     if args.write_graphs is not None:
         ret.append(f'--write-graphs={args.write_graphs}')
     for override in args.image_override:

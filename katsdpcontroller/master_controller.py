@@ -24,7 +24,7 @@ import async_timeout
 import yarl
 
 import katsdpcontroller
-from . import singularity, product_config, schemas
+from . import singularity, product_config, schemas, scheduler
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState)
 
@@ -279,18 +279,16 @@ class SingularityProductManager(ProductManagerBase):
         request_id = self._request_id_prefix + product_name
         deploy = {
             "requestId": request_id,
-            # TODO: pass most arguments to the run, not the deploy
             "command": "sdp_product_controller.py",
             "arguments": [
                 "--port", "5101",
-                "--http-port", "5102",
-                "--no-pull"                     # TODO: temporary hack
+                "--http-port", "5102"
             ],
             "containerInfo": {
                 "type": "DOCKER",
                 "docker": {
                     "image": image,
-                    "forcePullImage": False,    # TODO: switch to true
+                    "forcePullImage": False,    # TODO: switch to true?
                     "network": "BRIDGE",
                     "portMappings": [
                         {
@@ -553,6 +551,8 @@ class DeviceServer(aiokatcp.DeviceServer):
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     _manager: ProductManagerBase
+    _override_dicts: Dict[str, dict]
+    _image_lookup: scheduler.ImageLookup
 
     def __init__(self, args: argparse.Namespace) -> None:
         if args.interface_mode:
@@ -560,7 +560,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         else:
             self._manager = SingularityProductManager(args)
         self._manager_stopped = asyncio.Event()
-        self._override_dicts: Dict[str, dict] = {}
+        self._override_dicts = {}
+        if args.no_pull:
+            self._image_lookup = scheduler.SimpleImageLookup(args.registry)
+        else:
+            self._image_lookup = scheduler.HTTPImageLookup(args.registry)
         super().__init__(args.host, args.port)
 
     async def start(self) -> None:
@@ -616,8 +620,27 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply('Insufficient multicast addresses available') from exc
 
     @time_request
-    async def request_set_config_override(
-            self, ctx, name: str, override_dict_json: str) -> str:
+    async def request_image_lookup(self, ctx, repo: str, tag: str) -> str:
+        """Look up the full name to use for an image.
+
+        This should only be used by product controllers.
+
+        Parameters
+        ----------
+        repo : str
+            Image repository name
+        tag : str
+            Docker image tag
+
+        Returns
+        -------
+        str
+            Full image name
+        """
+        return await self._image_lookup(repo, tag)
+
+    @time_request
+    async def request_set_config_override(self, ctx, name: str, override_dict_json: str) -> str:
         """Override internal configuration parameters for the next configure of the
         specified subarray product.
 

@@ -19,6 +19,7 @@ import addict
 import prometheus_async
 import pymesos
 import aiomonitor
+import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -112,11 +113,8 @@ if __name__ == "__main__":
                                                http_port)
         logger.info('Setting --http-url to %s', args.http_url)
 
-    image_lookup: scheduler.ImageLookup
-    if args.no_pull:
-        image_lookup = scheduler.SimpleImageLookup(args.registry)
-    else:
-        image_lookup = scheduler.HTTPImageLookup(args.registry)
+    master_controller = aiokatcp.Client(args.master_controller.host, args.master_controller.port)
+    image_lookup = product_controller.KatcpImageLookup(master_controller)
     image_resolver_factory = scheduler.ImageResolverFactory(lookup=image_lookup, tag=args.image_tag)
     for override in args.image_override:
         fields = override.split(':', 1)
@@ -148,9 +146,7 @@ if __name__ == "__main__":
         sched.set_driver(driver)
         driver.start()
     server = product_controller.DeviceServer(
-        args.host, args.port,
-        args.master_controller.host, args.master_controller.port,
-        sched,
+        args.host, args.port, master_controller, sched,
         batch_role=args.batch_role,
         interface_mode=args.interface_mode,
         image_resolver_factory=image_resolver_factory,

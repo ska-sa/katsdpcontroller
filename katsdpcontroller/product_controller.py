@@ -72,6 +72,20 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
     return taskinfo
 
 
+class KatcpImageLookup(scheduler.ImageLookup):
+    """Image lookup that asks the master controller to do the work.
+
+    Tunnelling the lookup avoids the need for the product controller to
+    have the right CA certificates and credentials for the Docker registry.
+    """
+    def __init__(self, conn: aiokatcp.Client) -> None:
+        self._conn = conn
+
+    async def __call__(self, repo: str, tag: str) -> str:
+        reply, informs = await self._conn.request('image-lookup', repo, tag)
+        return reply[0].decode()
+
+
 class Resolver(scheduler.Resolver):
     """Resolver with some extra fields"""
     def __init__(self,
@@ -100,7 +114,7 @@ class SDPResources:
         return reply[0].decode()
 
     @staticmethod
-    async def get_port():
+    async def get_port() -> int:
         """Return an assigned port for a multicast group"""
         return 7148
 
@@ -1032,8 +1046,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     VERSION = 'product-controller-1.0'
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
-    def __init__(self, host: str, port: int,
-                 master_controller_host: str, master_controller_port: int,
+    def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,
                  sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
@@ -1046,7 +1059,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = s3_config
         self.graph_dir = graph_dir
-        self.master_controller = aiokatcp.Client(master_controller_host, master_controller_port)
+        self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
 
         super().__init__(host, port)
