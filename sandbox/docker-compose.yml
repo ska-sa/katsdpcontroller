@@ -34,7 +34,7 @@ services:
       MESOS_WORK_DIR: /var/tmp/mesos
       MESOS_SYSTEMD_ENABLE_SUPPORT: "false"
     volumes:
-      - "${HOME}/.docker/config.json:/etc/mesos/config.json"
+      - "${HOME}/.docker/config.json:/etc/mesos/config.json:ro"
       - /var/run/docker.sock:/var/run/docker.sock
       - /sys:/sys
       - /usr/bin/docker:/usr/local/bin/docker
@@ -49,9 +49,10 @@ services:
   singularity:
     network_mode: host
     image: hubspot/singularityservice:0.22.0
+    volumes:
+      - ./etc/singularity/singularity.yaml:/etc/singularity/singularity.yaml:ro
     environment:
       - SINGULARITY_MESOS_MASTER=172.17.0.1:5050
-      - SINGULARITY_CACHE_UNUSED_OFFERS=false
 
   minio:
     network_mode: host
