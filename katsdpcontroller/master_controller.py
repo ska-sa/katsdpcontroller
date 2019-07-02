@@ -534,7 +534,7 @@ class SingularityProductManager(ProductManagerBase):
         args.append('--s3-config=' + json.dumps(s3_config))
         # TODO: append --image-tag
         args.append(f'{self._args.external_hostname}:{self._args.port}')
-        args.append('zk://172.17.0.1:2181/mesos')    # TODO: construct from self._args.zk
+        args.append(f'zk://{self._args.zk}/mesos')
 
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
