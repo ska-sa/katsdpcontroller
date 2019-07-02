@@ -4,6 +4,9 @@
 # - internal sensors (including products)
 # - sensor proxy
 # - get internal states for product-list
+# - disable offer caching in singularity
+# - decide how to do product-reconfigure
+# - fill in remaining requests
 
 import asyncio
 import logging
@@ -14,6 +17,7 @@ import ipaddress
 import json
 import itertools
 import re
+import time
 from abc import abstractmethod
 from typing import Dict, Mapping, Optional, Tuple, Set
 
@@ -43,7 +47,6 @@ class ProductFailed(Exception):
 def _load_s3_config(filename):
     with open(filename, 'r') as f:
         config = json.load(f)
-    schemas.S3_CONFIG.validate(config)
     return config
 
 
@@ -173,6 +176,9 @@ class ProductManagerBase:
                     ans += '+{}'.format(n_addresses - 1)
                 return ans
 
+    @abstractmethod
+    async def get_capture_block_id(self) -> str: pass
+
 
 class InternalProductManager(ProductManagerBase):
     """Run subarray products as asyncio tasks within the process.
@@ -200,8 +206,8 @@ class SingularityProductManager(ProductManagerBase):
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._sing = singularity.Singularity(yarl.URL(args.singularity) / 'api')
         self._zk = aiozk.ZKClient(args.zk, chroot=args.name)
-        print(args)
         self._args = args
+        self._next_capture_block_id = 0
 
     async def _zk_set(self, key: str, payload: bytes) -> None:
         """Set content for a Zookeeper node, creating it if necessary"""
@@ -356,7 +362,12 @@ class SingularityProductManager(ProductManagerBase):
 
     async def _load_state(self) -> None:
         """Load existing subarray product state from Zookeeper"""
-        default = {"version": 1, "products": {}, "next_multicast_group": "0.0.0.0"}
+        default = {
+            "version": 1,
+            "products": {},
+            "next_multicast_group": "0.0.0.0",
+            "next_capture_block_id": 0
+        }
         try:
             payload = (await self._zk.get('/state'))[0]
             data = json.loads(payload)
@@ -381,6 +392,7 @@ class SingularityProductManager(ProductManagerBase):
         # The implementation overrides it if it doesn't match the current
         # _multicast_network.
         self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
+        self._next_capture_block_id = data['next_capture_block_id']
 
     async def _save_state(self) -> None:
         data = {
@@ -394,7 +406,8 @@ class SingularityProductManager(ProductManagerBase):
                     'multicast_groups': [str(group) for group in prod.multicast_groups]
                 } for prod in self._products.values() if prod.task_state == Product.TaskState.ACTIVE
             },
-            'next_multicast_group': str(self._next_multicast_group)
+            'next_multicast_group': str(self._next_multicast_group),
+            'next_capture_block_id': self._next_capture_block_id
         }
         payload = json.dumps(data).encode()
         await self._zk_set('/state', payload)
@@ -468,6 +481,12 @@ class SingularityProductManager(ProductManagerBase):
         ans = await super().get_multicast_groups(product, n_addresses)
         await self._save_state()
         return ans
+
+    async def get_capture_block_id(self) -> str:
+        cbid = max(int(time.time()), self._next_capture_block_id)
+        self._next_capture_block_id = cbid + 1
+        await self._save_state()
+        return str(cbid)
 
     @property
     def products(self) -> Mapping[str, Product]:
@@ -607,6 +626,22 @@ class DeviceServer(aiokatcp.DeviceServer):
         # itertools.count never finishes, but to keep mypy happy:
         assert False     # pragma: noqa
 
+    def _get_katcp(self, subarray_product_id: str) -> aiokatcp.Client:
+        """Get the katcp connection to an active subarray product.
+
+        Raises
+        ------
+        FailReply
+            if `subarray_product_id` is not the name of an active product
+        """
+        product = self._manager.products.get(subarray_product_id)
+        if product is None:
+            raise FailReply(f'There is no subarray product with ID {subarray_product_id}')
+        if product.task_state != Product.TaskState.ACTIVE:
+            raise FailReply(f'Subarray product {subarray_product_id} is still being configured')
+        assert product.katcp_conn is not None    # Guaranteed by task_state == ACTIVE
+        return product.katcp_conn
+
     @time_request
     async def request_get_multicast_groups(
             self, ctx, name: str, n_addresses: int) -> str:
@@ -715,7 +750,6 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         Returns
         -------
-        success : {'ok', 'fail'}
         name : str
             Actual subarray-product-id
         host : str
@@ -792,10 +826,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         force : bool, optional
             Take down the subarray immediately, even if it is still capturing,
             and without waiting for completion.
-
-        Returns
-        -------
-        success : {'ok', 'fail'}
         """
         product = self._manager.products.get(name)
         if product is None:
@@ -833,8 +863,6 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         Returns
         -------
-        success : {'ok', 'fail'}
-
         num_informs : int
             Number of subarray products listed
         """
@@ -845,3 +873,55 @@ class DeviceServer(aiokatcp.DeviceServer):
         else:
             raise FailReply("This product id has no current configuration.")
         ctx.informs([(s.name, await s.get_state()) for s in products])
+
+    @time_request
+    async def request_capture_init(self, ctx, subarray_product_id: str,
+                                   override_dict_json: str = '{}') -> str:
+        """Request capture of the specified subarray product to start.
+
+        Note: This command is used to prepare the SDP for reception of data as
+        specified by the subarray product provided. It is necessary to call this
+        command before issuing a start command to the CBF. Essentially the SDP
+        will, once this command has returned 'OK', be in a wait state until
+        reception of the stream control start packet.
+
+        Upon capture-init the subarray product starts a new capture block which
+        lasts until the next capture-done command. This corresponds to the
+        notion of a "file". The capture-init command returns an ID string that
+        uniquely identifies the capture block and can be used to link various
+        output products and data sets produced during the capture block.
+
+        Parameters
+        ----------
+        subarray_product_id : str
+            The ID of the subarray product to initialise. This must have
+            already been configured via the product-configure command.
+        override_dict_json : str, optional
+            Configuration dictionary to merge with the subarray config.
+
+        Returns
+        -------
+        capture_block_id : str
+            ID of the new capture block
+        """
+        katcp_conn = self._get_katcp(subarray_product_id)
+        await product.katcp_conn.request('capture-init', capture_block_id, override_dict_json)
+        return capture_block_id
+
+    @time_request
+    async def request_capture_done(self, ctx, subarray_product_id: str) -> str:
+        """Halts the currently specified subarray product
+
+        Parameters
+        ----------
+        subarray_product_id : str
+            The id of the subarray product whose state we wish to halt.
+
+        Returns
+        -------
+        cbid : str
+            Capture-block ID that was stopped
+        """
+        katcp_conn = self._get_katcp(subarray_product_id)
+        reply, informs = await katcp_conn.request('capture-done')
+        return reply[0].decode()

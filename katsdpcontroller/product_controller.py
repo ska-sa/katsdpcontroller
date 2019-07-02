@@ -1,5 +1,9 @@
 """Control of a single subarray product"""
 
+# TODO:
+# - validate S3 config
+# - fill in remaining requests
+
 import asyncio
 import logging
 import json
@@ -1161,3 +1165,55 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply('Have not yet configured')
         await self.product.deconfigure(force=force)
         self.halt()
+
+    async def request_capture_init(self, ctx, capture_block_id: str,
+                                   override_dict_json: str = '{}') -> None:
+        """Request capture of the specified subarray product to start.
+
+        Parameters
+        ----------
+        capture_block_id : str
+            The capture block ID for the new capture block.
+        override_dict_json : str, optional
+            Configuration dictionary to merge with the subarray config.
+        """
+        if self.product is None:
+            raise FailReply('Have not yet configured')
+        try:
+            overrides = load_json_dict(override_dict_json)
+        except ValueError as error:
+            retmsg = f'Override {override_dict_json} is not a valid JSON dict: {error}'
+            logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        config = product_config.override(self.product.config, overrides)
+        # Re-validate, since the override may have broken it
+        try:
+            product_config.validate(config)
+        except (ValueError, jsonschema.ValidationError) as error:
+            retmsg = f"Overrides make the config invalid: {error}"
+            logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        config = product_config.normalise(config)
+        try:
+            product_config.validate_capture_block(self.product.config, config)
+        except ValueError as error:
+            retmsg = f"Invalid config override: {error}"
+            logger.error(retmsg)
+            raise FailReply(retmsg) from error
+
+        await self.product.capture_init(capture_block_id, config)
+
+    async def request_capture_done(self, ctx) -> str:
+        """Halts the current capture block.
+
+        Returns
+        -------
+        cbid : str
+            Capture-block ID that was stopped
+        """
+        if self.product is None:
+            raise FailReply('Have not yet configured')
+        cbid = await self.product.capture_done()
+        return cbid
