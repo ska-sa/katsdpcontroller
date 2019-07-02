@@ -14,16 +14,18 @@ import logging
 import asyncio
 import socket
 import urllib.parse
+from typing import Tuple
 
 import addict
+import jsonschema
 import prometheus_async
 import pymesos
 import aiokatcp
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
-from katsdpcontroller import scheduler, product_controller, web
-from katsdpcontroller.controller import add_shared_options
+from katsdpcontroller import scheduler, schemas, product_controller, web
+from katsdpcontroller.controller import add_shared_options, load_json_dict
 
 
 # TODO: move Prometheus stats to master
@@ -59,11 +61,17 @@ def init_dashboard(controller, opts):
     dashboard.start(opts.dashboard_port)
 
 
-if __name__ == "__main__":
-    katsdpservices.setup_logging()
-    katsdpservices.setup_restart()
+def parse_s3_config(value: str) -> dict:
+    try:
+        s3_config = load_json_dict(value)
+        schemas.S3_CONFIG.validate(s3_config)   # type: ignore
+    except jsonschema.ValidationError as exc:
+        raise ValueError(str(exc))
+    return s3_config
 
-    usage = "%(prog)s [options] master"
+
+def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
+    usage = "%(prog)s [options] master_controller mesos_master"
     parser = argparse.ArgumentParser(usage=usage)
     if 'TASK_HOST' in os.environ:
         # Set by Singularity
@@ -86,8 +94,7 @@ if __name__ == "__main__":
                         help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--image-tag',
                         metavar='TAG', help='Image tag to use')
-    parser.add_argument('--s3-config',
-                        metavar='JSON',
+    parser.add_argument('--s3-config', type=parse_s3_config, metavar='JSON',
                         help='Configuration for connecting services to S3')
     parser.add_argument('master_controller', type=endpoint_parser(None),
                         help='Master controller katcp endpoint')
@@ -98,17 +105,29 @@ if __name__ == "__main__":
     katsdpservices.add_aiomonitor_arguments(parser)
     args = parser.parse_args()
 
-    if args.log_level is not None:
-        logging.root.setLevel(args.log_level.upper())
-    logger = logging.getLogger('sdpcontroller')
-    logger.info("Starting SDP product controller...")
+    if args.s3_config is None and not args.interface_mode:
+        parser.error('--s3-config is required (unless --interface-mode is given)')
+
     if args.http_url is None:
         # When Singularity creates the port mapping, it puts the host ports
         # in PORT0 (katcp) and PORT1 (http).
         http_port = os.environ.get('PORT1', args.http_port)
         args.http_url = 'http://{}:{}/'.format(urllib.parse.quote(args.external_hostname),
                                                http_port)
-        logger.info('Setting --http-url to %s', args.http_url)
+
+    return parser, args
+
+
+def main() -> None:
+    katsdpservices.setup_logging()
+    katsdpservices.setup_restart()
+    parser, args = parse_args()
+    if args.log_level is not None:
+        logging.root.setLevel(args.log_level.upper())
+    logger = logging.getLogger('katsdpcontroller')
+    logger.info("Starting SDP product controller...")
+    logger.info('katcp: %s:%d', args.host, args.port)
+    logger.info('http: %s', args.http_url)
 
     master_controller = aiokatcp.Client(args.master_controller.host, args.master_controller.port)
     image_lookup = product_controller.KatcpImageLookup(master_controller)
@@ -118,9 +137,6 @@ if __name__ == "__main__":
         if len(fields) < 2:
             parser.error("--image-override option must have a colon")
         image_resolver_factory.override(fields[0], fields[1])
-
-    if args.s3_config is None and not args.interface_mode:
-        parser.error('--s3-config is required (unless --interface-mode is given)')
 
     framework_info = addict.Dict()
     framework_info.user = args.user
@@ -147,7 +163,7 @@ if __name__ == "__main__":
         batch_role=args.batch_role,
         interface_mode=args.interface_mode,
         image_resolver_factory=image_resolver_factory,
-        s3_config=json.loads(args.s3_config),   # TODO: validate
+        s3_config=args.s3_config,
         graph_dir=args.write_graphs)
     if not args.interface_mode and args.dashboard_port != 0:
         init_dashboard(server, args)
@@ -157,3 +173,7 @@ if __name__ == "__main__":
     with katsdpservices.start_aiomonitor(loop, args, locals()):
         loop.run_until_complete(run(sched, server))
     loop.close()
+
+
+if __name__ == "__main__":
+    main()
