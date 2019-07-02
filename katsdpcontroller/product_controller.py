@@ -1131,6 +1131,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
         await product.configure()
+        self.product.dead_callbacks.append(self.halt)
 
     @time_request
     async def request_product_configure(self, ctx, name: str, config: str) -> None:
@@ -1164,7 +1165,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         if self.product is None:
             raise FailReply('Have not yet configured')
         await self.product.deconfigure(force=force)
-        self.halt()
 
     async def request_capture_init(self, ctx, capture_block_id: str,
                                    override_dict_json: str = '{}') -> None:
