@@ -169,6 +169,8 @@ import decimal
 from decimal import Decimal
 import time
 import io
+from abc import abstractmethod
+from typing import Optional, Mapping
 
 import pkg_resources
 import docker
@@ -860,31 +862,90 @@ class ResourceAllocation:
         self.volumes = []
 
 
+class ImageLookup:
+    """Abstract base class to get a full image name from a repo and tag."""
+    @abstractmethod
+    async def __call__(self, repo: str, tag: str) -> str: pass
+
+
+class SimpleImageLookup(ImageLookup):
+    """Resolver that simply concatenates registry, repo and tag."""
+    def __init__(self, private_registry: str) -> None:
+        self._private_registry = private_registry
+
+    async def __call__(self, repo: str, tag: str) -> str:
+        return f'{self._private_registry}/{repo}:{tag}'
+
+
+class HTTPImageLookup(ImageLookup):
+    """Resolve digests from tags by directly contacting registry."""
+    _private_registry: str
+    _auth: Optional[aiohttp.BasicAuth]
+
+    def __init__(self, private_registry: str) -> None:
+        self._private_registry = private_registry
+        authconfig = docker.auth.load_config()
+        authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
+        if authdata is None:
+            self._auth = None
+        else:
+            self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
+
+    async def __call__(self, repo: str, tag: str) -> str:
+        # TODO: see if it's possible to do some connection pooling
+        # here. That probably requires the caller to initiate a
+        # Session and close it when done.
+        url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
+        if not url.startswith('http'):
+            # If no scheme is specified, assume https
+            url = 'https://' + url
+        cafile = '/etc/ssl/certs/ca-certificates.crt'
+        ssl_context: Optional[ssl.SSLContext]
+        if os.path.exists(cafile):
+            ssl_context = ssl.create_default_context(cafile=cafile)
+        else:
+            ssl_context = None
+        async with aiohttp.ClientSession(
+                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
+                auth=self._auth) as session:
+            try:
+                # Use a lowish timeout, so that we don't wedge the entire launch if
+                # there is a connection problem.
+                async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
+                    response.raise_for_status()
+                    digest = response.headers['Docker-Content-Digest']
+            except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+                raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
+                    from error
+            except KeyError:
+                raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+        return f'{self._private_registry}/{repo}@{digest}'
+
+
 class ImageResolver:
     """Class to map an abstract Docker image name to a fully-qualified name.
     If no private registry is specified, it looks up names in the `sdp/`
     namespace, otherwise in the private registry. One can also override
     individual entries.
 
+    This wraps an instance of :class:`ImageLookup` to do the actual lookups,
+    and handles the generic logic like caching, overrides etc.
+
     Parameters
     ----------
-    private_registry : str, optional
-        Address (hostname and port) for a private registry
+    lookup : :class:`ImageLookup`
+        Low-level image lookup.
     tag_file : str, optional
         If specified, the file will be read to determine the image tag to use.
         It does not affect overrides, to allow them to specify their own tags.
     tag : str, optional
         If specified, `tag_file` is ignored and this tag is used.
-    use_digests : bool, optional
-        Whether to look up the latest digests from the `registry`. If this is
-        not specified, old versions of images on the agents could be used.
     """
-    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
+    def __init__(self, lookup: ImageLookup, tag_file: str = None, tag: str = None) -> None:
+        self._lookup = lookup
         self._tag_file = tag_file
-        self._private_registry = private_registry
-        self._overrides = {}
+        self._overrides: Dict[str, str] = {}
         self._cache = {}
-        self._use_digests = use_digests
         if tag is not None:
             self._tag = tag
             self._tag_file = None
@@ -900,28 +961,19 @@ class ImageResolver:
                 # longer enforces it.
                 if not re.match(r'^[\w][\w.-]{0,127}$', self._tag):
                     raise ValueError('Invalid tag {} in {}'.format(repr(self._tag), self._tag_file))
-        if use_digests and private_registry is not None:
-            authconfig = docker.auth.load_config()
-            authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
-            if authdata is None:
-                self._auth = None
-            else:
-                self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
-        else:
-            self._auth = None
 
     @property
-    def tag(self):
+    def tag(self) -> str:
         return self._tag
 
     @property
-    def overrides(self):
+    def overrides(self) -> Mapping[str, str]:
         return dict(self._overrides)
 
-    def override(self, name, path):
+    def override(self, name: str, path: str):
         self._overrides[name] = path
 
-    async def __call__(self, name):
+    async def __call__(self, name: str) -> str:
         if name in self._overrides:
             return self._overrides[name]
         elif name in self._cache:
@@ -937,39 +989,7 @@ class ImageResolver:
             tag = self._tag
             repo = name
 
-        if self._private_registry is None:
-            resolved = 'sdp/{}:{}'.format(repo, tag)
-        elif self._use_digests:
-            # TODO: see if it's possible to do some connection pooling
-            # here. That probably requires the caller to initiate a
-            # Session and close it when done.
-            url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
-            if not url.startswith('http'):
-                # If no scheme is specified, assume https
-                url = 'https://' + url
-            kwargs = dict(
-                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
-                auth=self._auth)
-            cafile = '/etc/ssl/certs/ca-certificates.crt'
-            if os.path.exists(cafile):
-                ssl_context = ssl.create_default_context(cafile=cafile)
-            else:
-                ssl_context = None
-            async with aiohttp.ClientSession(**kwargs) as session:
-                try:
-                    # Use a lowish timeout, so that we don't wedge the entire launch if
-                    # there is a connection problem.
-                    async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
-                        response.raise_for_status()
-                        digest = response.headers['Docker-Content-Digest']
-                except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-                    raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
-                        from error
-                except KeyError:
-                    raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-            resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
-        else:
-            resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
+        resolved = await self._lookup(repo, tag)
         if name in self._cache:
             # Another asynchronous caller beat us to it. Use the value
             # that caller put in the cache so that calls with the same
@@ -990,9 +1010,8 @@ class ImageResolverFactory:
     See :class:`ImageResolver` for an explanation of the constructor
     arguments and :meth:`~ImageResolver.override`.
     """
-    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
-        self._args = dict(private_registry=private_registry,
-                          tag_file=tag_file, tag=tag, use_digests=use_digests)
+    def __init__(self, lookup, tag_file=None, tag=None):
+        self._args = dict(lookup=lookup, tag_file=tag_file, tag=tag)
         self._overrides = {}
 
     def override(self, name, path):

@@ -9,6 +9,7 @@ import signal
 import functools
 import socket
 import os
+import json
 
 import katsdpservices
 

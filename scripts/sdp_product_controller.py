@@ -112,10 +112,12 @@ if __name__ == "__main__":
                                                http_port)
         logger.info('Setting --http-url to %s', args.http_url)
 
-    image_resolver_factory = scheduler.ImageResolverFactory(
-        private_registry=args.registry or None,
-        tag=args.image_tag,
-        use_digests=not args.no_pull)
+    image_lookup: scheduler.ImageLookup
+    if args.no_pull:
+        image_lookup = scheduler.SimpleImageLookup(args.registry)
+    else:
+        image_lookup = scheduler.HTTPImageLookup(args.registry)
+    image_resolver_factory = scheduler.ImageResolverFactory(lookup=image_lookup, tag=args.image_tag)
     for override in args.image_override:
         fields = override.split(':', 1)
         if len(fields) < 2:

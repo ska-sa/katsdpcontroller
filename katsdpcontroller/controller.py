@@ -74,8 +74,7 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
                              'integration and ICD compliance. [%(default)s]')
     parser.add_argument('--registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images (use empty string to disable) '
-                             '[%(default)s]')
+                        help='registry from which to pull images [%(default)s]')
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup [none]')
