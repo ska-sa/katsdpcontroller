@@ -3,10 +3,10 @@
 # TODO:
 # - internal sensors (including products)
 # - sensor proxy
-# - get internal states for product-list
-# - disable offer caching in singularity
 # - decide how to do product-reconfigure
 # - fill in remaining requests
+# - possibly add some barriers to ensure that existing state is saved before
+#   handling new katcp requests.
 
 import asyncio
 import logging
