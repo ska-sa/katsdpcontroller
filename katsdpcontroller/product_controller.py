@@ -21,7 +21,7 @@ import katsdptelstate
 
 import katsdpcontroller
 from . import scheduler, product_config, generator, tasks
-from .controller import (time_request, load_json_dict, log_task_exceptions,
+from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, ProductState)
 from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
 
@@ -1133,7 +1133,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         await product.configure()
         self.product.dead_callbacks.append(self.halt)
 
-    @time_request
     async def request_product_configure(self, ctx, name: str, config: str) -> None:
         """Configure a SDP subarray product instance.
 
@@ -1159,7 +1158,6 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, config_dict)
 
-    @time_request
     async def request_product_deconfigure(self, ctx, force: bool = False) -> None:
         """Deconfigure the product and shut down the server."""
         if self.product is None:
@@ -1205,7 +1203,17 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.product.capture_init(capture_block_id, config)
 
-    @time_request
+    async def request_telstate_endpoint(self, ctx) -> str:
+        """Returns the endpoint for the telescope state repository.
+
+        Returns
+        -------
+        endpoint : str
+        """
+        if self.product is None:
+            raise FailReply('Have not yet configured')
+        return self.product.telstate_endpoint
+
     async def request_capture_status(self, ctx) -> ProductState:
         """Returns the status of the subarray product.
 

@@ -19,7 +19,7 @@ import itertools
 import re
 import time
 from abc import abstractmethod
-from typing import Dict, Tuple, Set, List, Mapping, Optional, Callable
+from typing import Type, TypeVar, Dict, Tuple, Set, List, Mapping, Optional, Callable, Any
 
 import aiozk
 import aiokatcp
@@ -34,6 +34,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions,
 
 
 logger = logging.getLogger(__name__)
+_T = TypeVar('_T')
 
 
 class NoAddressesError(Exception):
@@ -94,15 +95,23 @@ class Product:
         for callback in self._dead_callbacks:
             callback(self)
 
-    async def get_state(self) -> ProductState:
+    async def _katcp_request(self, type_: Type[_T], configuring: _T, dead: _T,
+                             message: str, *args: Any) -> _T:
         if self.task_state == Product.TaskState.ACTIVE:
             assert self.katcp_conn is not None
-            reply, informs = await self.katcp_conn.request('capture-status')
-            return aiokatcp.decode(ProductState, reply[0])
+            reply, informs = await self.katcp_conn.request(message, *args)
+            return aiokatcp.decode(type_, reply[0])
         elif self.task_state == Product.TaskState.DEAD:
-            return ProductState.DEAD
+            return dead
         else:
-            return ProductState.CONFIGURING
+            return configuring
+
+    async def get_state(self) -> ProductState:
+        return await self._katcp_request(
+            ProductState, ProductState.CONFIGURING, ProductState.DEAD, 'capture-status')
+
+    async def get_telstate_endpoint(self) -> str:
+        return await self._katcp_request(str, '', '', 'telstate-endpoint')
 
     def add_dead_callback(self, callback: Callable[['Product'], None]):
         self._dead_callbacks.append(callback)
@@ -946,6 +955,32 @@ class DeviceServer(aiokatcp.DeviceServer):
         return capture_block_id
 
     @time_request
+    async def request_telstate_endpoint(
+            self, ctx, subarray_product_id: str = None) -> Optional[str]:
+        """Returns the endpoint for the telescope state of the specified subarray product.
+
+        If no subarray product is specified, generates an inform for each
+        active subarray product.
+
+        Parameters
+        ----------
+        subarray_product_id : str, optional
+            The id of the subarray product whose state we wish to return.
+
+        Returns
+        -------
+        state : str
+        """
+        if subarray_product_id is None:
+            ctx.informs([(product_id, await product.get_telstate_endpoint())
+                         for (product_id, product) in self._manager.products.items()])
+            return None   # ctx.informs sends the reply
+        product = self._manager.products.get(subarray_product_id)
+        if product is None:
+            raise FailReply('No existing subarray product configuration with this id found')
+        return await product.get_telstate_endpoint()
+
+    @time_request
     async def request_capture_status(
             self, ctx, subarray_product_id: str = None) -> Optional[ProductState]:
         """Returns the status of the specified subarray product.
@@ -962,7 +997,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         -------
         state : str
         """
-        if not subarray_product_id:
+        if subarray_product_id is None:
             return await self.request_product_list(ctx, None)
 
         product = self._manager.products.get(subarray_product_id)
