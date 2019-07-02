@@ -905,8 +905,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         capture_block_id : str
             ID of the new capture block
         """
+        capture_block_id = await self._manager.get_capture_block_id()
         katcp_conn = self._get_katcp(subarray_product_id)
-        await product.katcp_conn.request('capture-init', capture_block_id, override_dict_json)
+        await katcp_conn.request('capture-init', capture_block_id, override_dict_json)
         return capture_block_id
 
     @time_request
