@@ -1205,6 +1205,18 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.product.capture_init(capture_block_id, config)
 
+    @time_request
+    async def request_capture_status(self, ctx) -> ProductState:
+        """Returns the status of the subarray product.
+
+        Returns
+        -------
+        state : str
+        """
+        if self.product is None:
+            raise FailReply('Have not yet configured')
+        return self.product.state
+
     async def request_capture_done(self, ctx) -> str:
         """Halts the current capture block.
 

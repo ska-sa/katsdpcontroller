@@ -88,8 +88,9 @@ class Product:
 
     async def get_state(self) -> ProductState:
         if self.task_state == Product.TaskState.ACTIVE:
-            # TODO: get actual state from katcp query
-            return ProductState.IDLE
+            assert self.katcp_conn is not None
+            reply, informs = await self.katcp_conn.request('capture-status')
+            return aiokatcp.decode(ProductState, reply[0])
         elif self.task_state == Product.TaskState.DEAD:
             return ProductState.DEAD
         else:
@@ -907,6 +908,31 @@ class DeviceServer(aiokatcp.DeviceServer):
         katcp_conn = self._get_katcp(subarray_product_id)
         await product.katcp_conn.request('capture-init', capture_block_id, override_dict_json)
         return capture_block_id
+
+    @time_request
+    async def request_capture_status(
+            self, ctx, subarray_product_id: str = None) -> Optional[ProductState]:
+        """Returns the status of the specified subarray product.
+
+        If no subarray product is specified, generates an inform per subarray
+        product and return the number of such informs.
+
+        Request Arguments
+        -----------------
+        subarray_product_id : string
+            The id of the subarray product whose state we wish to return.
+
+        Returns
+        -------
+        state : str
+        """
+        if not subarray_product_id:
+            return await self.request_product_list(ctx, None)
+
+        product = self._manager.products.get(subarray_product_id)
+        if product is None:
+            raise FailReply('No existing subarray product configuration with this id found')
+        return await product.get_state()
 
     @time_request
     async def request_capture_done(self, ctx, subarray_product_id: str) -> str:
