@@ -282,7 +282,8 @@ class SingularityProductManager(ProductManagerBase):
             "command": "sdp_product_controller.py",
             "arguments": [
                 "--port", "5101",
-                "--http-port", "5102"
+                "--http-port", "5102",
+                "--aiomonitor", "--aiomonitor-host", "0.0.0.0"
             ],
             "containerInfo": {
                 "type": "DOCKER",
@@ -293,15 +294,27 @@ class SingularityProductManager(ProductManagerBase):
                     "portMappings": [
                         {
                             "containerPortType": "LITERAL",
-                            "containerPort": 5101,
+                            "containerPort": 5101,             # katcp
                             "hostPortType": "FROM_OFFER",
                             "hostPort": 0
                         },
                         {
                             "containerPortType": "LITERAL",
-                            "containerPort": 5102,
+                            "containerPort": 5102,             # http
                             "hostPortType": "FROM_OFFER",
                             "hostPort": 1
+                        },
+                        {
+                            "containerPortType": "LITERAL",
+                            "containerPort": 50101,            # aiomonitor
+                            "hostPortType": "FROM_OFFER",
+                            "hostPort": 2
+                        },
+                        {
+                            "containerPortType": "LITERAL",
+                            "containerPort": 50102,            # aioconsole
+                            "hostPortType": "FROM_OFFER",
+                            "hostPort": 3
                         }
                     ]
                 }
@@ -309,7 +322,7 @@ class SingularityProductManager(ProductManagerBase):
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 128,
-                "numPorts": 2
+                "numPorts": 4
             }
         }
 

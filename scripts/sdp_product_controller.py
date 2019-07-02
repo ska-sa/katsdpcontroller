@@ -85,9 +85,6 @@ if __name__ == "__main__":
                         help='URL at which slaves connect to the HTTP port')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
-    parser.add_argument('--no-aiomonitor', dest='aiomonitor', default=True,
-                        action='store_false',
-                        help='disable aiomonitor debugging server')
     parser.add_argument('--image-tag',
                         metavar='TAG', help='Image tag to use')
     parser.add_argument('--s3-config',
@@ -99,6 +96,7 @@ if __name__ == "__main__":
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
     add_shared_options(parser)
+    katsdpservices.add_aiomonitor_arguments(parser)
     args = parser.parse_args()
 
     if args.log_level is not None:
@@ -157,9 +155,6 @@ if __name__ == "__main__":
 
     logger.info("Starting SDP...")
 
-    if args.aiomonitor:
-        with aiomonitor.start_monitor(loop=loop):
-            loop.run_until_complete(run(sched, server))
-    else:
+    with katsdpservices.start_aiomonitor(loop, args, locals()):
         loop.run_until_complete(run(sched, server))
     loop.close()
