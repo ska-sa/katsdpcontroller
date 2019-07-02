@@ -89,15 +89,18 @@ class Resolver(scheduler.Resolver):
 
 class SDPResources:
     """Helper class to allocate resources for a single subarray-product."""
-    def __init__(self, subarray_product_id: str) -> None:
+    def __init__(self, master_controller: aiokatcp.Client, subarray_product_id: str) -> None:
+        self.master_controller = master_controller
         self.subarray_product_id = subarray_product_id
 
-    def get_multicast_ip(self, n_addresses):
+    async def get_multicast_groups(self, n_addresses: int) -> str:
         """Assign multicast addresses for a group."""
-        raise NotImplementedError      # TODO: need to request from master controller
+        reply, informs = await self.master_controller.request(
+            'get-multicast-groups', self.subarray_product_id, n_addresses)
+        return reply[0].decode()
 
     @staticmethod
-    def get_port():
+    async def get_port():
         """Return an assigned port for a multicast group"""
         return 7148
 
@@ -736,6 +739,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Nodes indexed by logical name
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes[telstate_name]
+        self.master_controller = sdp_controller.master_controller
 
     def __del__(self) -> None:
         if hasattr(self, 'batch_queue'):
@@ -972,7 +976,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         try:
             try:
                 resolver = self.resolver
-                resolver.resources = SDPResources(self.subarray_product_id)
+                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
                 # launch the telescope state for this graph
                 await self._launch_telstate()
                 # launch containers for those nodes that require them
@@ -1029,7 +1033,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host: str, port: int,
-                 parent_host: str, parent_port: int,
+                 master_controller_host: str, master_controller_port: int,
                  sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
@@ -1042,7 +1046,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = s3_config
         self.graph_dir = graph_dir
-        # TODO self.parent = aiokatcp.Client(parent_host, parent_port)
+        self.master_controller = aiokatcp.Client(master_controller_host, master_controller_port)
         self.product: Optional[SDPSubarrayProductBase] = None
 
         super().__init__(host, port)
@@ -1050,6 +1054,15 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the subarray product controller",
                                 default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+
+    async def start(self) -> None:
+        await self.master_controller.wait_connected()
+        await super().start()
+
+    async def stop(self, cancel: bool = True) -> None:
+        await super().stop(cancel)
+        self.master_controller.close()
+        await self.master_controller.wait_closed()
 
     async def configure_product(self, name: str, config: dict) -> None:
         """Configure a subarray product in response to a request.

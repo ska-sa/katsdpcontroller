@@ -20,6 +20,7 @@ import prometheus_async
 import pymesos
 import aiomonitor
 import katsdpservices
+from katsdptelstate.endpoint import endpoint_parser
 
 from katsdpcontroller import scheduler, product_controller, web
 from katsdpcontroller.controller import add_shared_options
@@ -91,7 +92,9 @@ if __name__ == "__main__":
     parser.add_argument('--s3-config',
                         metavar='JSON',
                         help='Configuration for connecting services to S3')
-    parser.add_argument('master',
+    parser.add_argument('master_controller', type=endpoint_parser(None),
+                        help='Master controller katcp endpoint')
+    parser.add_argument('mesos_master',
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
     add_shared_options(parser)
@@ -102,8 +105,11 @@ if __name__ == "__main__":
     logger = logging.getLogger('sdpcontroller')
     logger.info("Starting SDP product controller...")
     if args.http_url is None:
+        # When Singularity creates the port mapping, it puts the host ports
+        # in PORT0 (katcp) and PORT1 (http).
+        http_port = os.environ.get('PORT1', args.http_port)
         args.http_url = 'http://{}:{}/'.format(urllib.parse.quote(args.external_hostname),
-                                               args.http_port)
+                                               http_port)
         logger.info('Setting --http-url to %s', args.http_url)
 
     image_resolver_factory = scheduler.ImageResolverFactory(
@@ -135,16 +141,18 @@ if __name__ == "__main__":
                                     dict(access_log_class=web.AccessLogger))
         sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
         driver = pymesos.MesosSchedulerDriver(
-            sched, framework_info, args.master, use_addict=True,
+            sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)
         sched.set_driver(driver)
         driver.start()
     server = product_controller.DeviceServer(
-        args.host, args.port, '', 0, sched,    # TODO
+        args.host, args.port,
+        args.master_controller.host, args.master_controller.port,
+        sched,
         batch_role=args.batch_role,
         interface_mode=args.interface_mode,
         image_resolver_factory=image_resolver_factory,
-        s3_config={},     # TODO
+        s3_config=json.loads(args.s3_config),   # TODO: validate
         graph_dir=args.write_graphs)
     if not args.interface_mode and args.dashboard_port != 0:
         init_dashboard(server, args)

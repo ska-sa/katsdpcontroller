@@ -143,9 +143,10 @@ class ProductManagerBase:
         NoAddressesError
             if there are no enough free multicast addresses
         """
+        if n_addresses <= 0:
+            raise ValueError('n_addresses must be positive')
         products = self.products.values()
         wrapped = False
-        assert n_addresses >= 1
         # It might be the broadcast address, but must always be inside the network
         assert self._next_multicast_group in self._multicast_network
         while True:
@@ -283,7 +284,7 @@ class SingularityProductManager(ProductManagerBase):
             "arguments": [
                 "--port", "5101",
                 "--http-port", "5102",
-                "zk://172.17.0.1:2181/mesos"    # TODO
+                "--no-pull"                     # TODO: temporary hack
             ],
             "containerInfo": {
                 "type": "DOCKER",
@@ -467,6 +468,8 @@ class SingularityProductManager(ProductManagerBase):
         args = extract_shared_options(self._args)
         args.append('--s3-config=' + json.dumps(s3_config))
         # TODO: append --image-tag
+        args.append(f'{self._args.external_hostname}:{self._args.port}')
+        args.append('zk://172.17.0.1:2181/mesos')    # TODO: construct from self._args.zk
 
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
@@ -586,6 +589,31 @@ class DeviceServer(aiokatcp.DeviceServer):
                 return name
         # itertools.count never finishes, but to keep mypy happy:
         assert False     # pragma: noqa
+
+    @time_request
+    async def request_get_multicast_groups(
+            self, ctx, name: str, n_addresses: int) -> str:
+        """Allocate multicast groups for a subarray product.
+
+        This should only be used by product controllers.
+
+        Parameters
+        ----------
+        name : str
+            Subarray product
+        n_addresses : int
+            Number of multicast addresses to allocate
+        """
+        try:
+            product = self._manager.products[name]
+        except KeyError as exc:
+            raise FailReply(f'No product named {name}') from exc
+        if n_addresses <= 0:
+            raise FailReply('n_addresses must be positive')
+        try:
+            return await self._manager.get_multicast_groups(product, n_addresses)
+        except NoAddressesError as exc:
+            raise FailReply('Insufficient multicast addresses available') from exc
 
     @time_request
     async def request_set_config_override(

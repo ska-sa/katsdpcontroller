@@ -82,8 +82,8 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
         else:
-            self.host = resolver.resources.get_multicast_ip(self.logical_node.n_addresses)
-            self.ports = {'spead': resolver.resources.get_port()}
+            self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
+            self.ports = {'spead': await resolver.resources.get_port()}
 
 
 class TelstateTask(SDPPhysicalTask):
