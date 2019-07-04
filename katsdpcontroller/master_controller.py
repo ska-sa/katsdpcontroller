@@ -456,7 +456,7 @@ class SingularityProductManager(ProductManagerBase):
                                          for addr in info['multicast_groups']}
                 prod.connect(self._server, info['host'], info['port'])
                 self._products[name] = prod
-                product.add_dead_callback(self._product_died)
+                prod.add_dead_callback(self._product_died)
             # The implementation overrides it if it doesn't match the current
             # _multicast_network.
             self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
