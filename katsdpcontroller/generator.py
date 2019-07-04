@@ -1770,6 +1770,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
             imager.mem = 8192
             imager.disk = 8192
             imager.max_run_time = 3600     # 1 hour
+            imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
             # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
             # it can help improve parallelism). There is no memory enforcement, so
@@ -1790,7 +1791,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 '--no-tmp-file',
                 data_url,
-                '/mnt/mesos/sandbox',
+                DATA_VOL.container_path,
                 '{}_{}'.format(capture_block_id, target_name)
             ]
             if continuum_telstate_name is not None:
