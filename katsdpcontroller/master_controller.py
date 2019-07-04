@@ -7,6 +7,8 @@
 # - fill in remaining requests
 # - possibly add some barriers to ensure that existing state is saved before
 #   handling new katcp requests.
+# - possibly add wait_connected to _katcp_request
+# - pass logging environment variables through to product controller
 
 import asyncio
 import logging
