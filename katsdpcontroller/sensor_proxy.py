@@ -11,7 +11,7 @@ from prometheus_client import Gauge, Counter, Histogram
 logger = logging.getLogger(__name__)
 _Metric = Union[Gauge, Counter, Histogram]
 # Use a string so that code won't completely break if Prometheus internals change.
-# The Union is required because mypy doesn't like strings being used indirectly.
+# The Union is required because mypy doesn't like pure strings being used indirectly.
 _LabelWrapper = Union['prometheus_client.core._LabelWrapper']
 _Factory = Callable[[str, aiokatcp.Sensor], Optional['PrometheusInfo']]
 
@@ -114,7 +114,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def __init__(self, client: aiokatcp.Client, server: aiokatcp.DeviceServer,
                  prefix: str,
                  prometheus_labels: Mapping[str, str] = None,
-                 prometheus_factory: _Factory = None):
+                 prometheus_factory: _Factory = None) -> None:
         super().__init__(client)
         self.prefix = prefix
         self.server = server
@@ -155,9 +155,10 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         label_values = list(self.prometheus_labels.values()) + list(info.labels.values())
         return PrometheusObserver(sensor, value_metric, status_metric, label_values)
 
-    def sensor_added(self, name, *args):
+    def sensor_added(self, name: str, description: str, units: str, type_name: str,
+                     *args: bytes) -> None:
         """Add a new or replaced sensor with unqualified name `name`."""
-        super().sensor_added(name, *args)
+        super().sensor_added(name, description, units, type_name, *args)
         sensor = self.sensors[self.rewrite_name(name)]
         self.server.sensors.add(sensor)
         old_observer = self._observers.get(name)
@@ -166,19 +167,20 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         self._observers[name] = self._make_observer(name, sensor)
         self._interface_changed = True
 
-    def _sensor_removed(self, name):
+    def _sensor_removed(self, name: str) -> None:
+        """Like :meth:`sensor_removed`, but takes the prefixed name"""
         self.server.sensors.pop(name, None)
         observer = self._observers.pop(name, None)
         if observer is not None:
             observer.close()
         self._interface_changed = True
 
-    def sensor_removed(self, name):
+    def sensor_removed(self, name: str) -> None:
         super().sensor_removed(name)
         rewritten = self.rewrite_name(name)
         self._sensor_removed(rewritten)
 
-    def batch_stop(self):
+    def batch_stop(self) -> None:
         super().batch_stop()
         if self._interface_changed:
             self.server.mass_inform('interface-changed', 'sensor-list')
@@ -219,11 +221,11 @@ class SensorProxyClient(aiokatcp.Client):
     def __init__(self, server: aiokatcp.DeviceServer, prefix: str,
                  prometheus_labels: Mapping[str, str] = None,
                  prometheus_factory: _Factory = None,
-                 *args, **kwargs):
+                 *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         watcher = SensorWatcher(self, server, prefix, prometheus_labels, prometheus_factory)
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
 
-    async def wait_synced(self):
+    async def wait_synced(self) -> None:
         await self._synced.wait()
