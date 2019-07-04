@@ -4,14 +4,12 @@ import asyncio
 import socket
 import ipaddress
 import os
-import re
 
 from addict import Dict
 import async_timeout
 
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
-from prometheus_client import Gauge, Counter, Histogram
 
 from katsdptelstate.endpoint import Endpoint
 
@@ -21,45 +19,6 @@ from . import scheduler, sensor_proxy, product_config
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
 DEPENDS_INIT = 'depends_init'
-PROMETHEUS_LABELS = ('subarray_product_id', 'service')
-# Dictionary of sensors to be exposed via Prometheus.
-# Some of these will match multiple nodes, which is fine since they get labels
-# in Prometheus.
-PROMETHEUS_SENSORS = {}
-_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)', re.IGNORECASE)
-
-
-def _prometheus_factory(name, sensor):
-    match = _HINT_RE.search(sensor.description)
-    if not match:
-        return None, None
-    type_ = match.group('type').lower()
-    args_ = match.group('args')
-    kwargs = {}
-    if type_ == 'counter':
-        class_ = Counter
-        if args_ is not None:
-            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
-    elif type_ == 'gauge':
-        class_ = Gauge
-        if args_ is not None:
-            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
-    elif type_ == 'histogram':
-        class_ = Histogram
-        if args_ is not None:
-            try:
-                buckets = [float(x.strip()) for x in args_.split(',')]
-                kwargs['buckets'] = buckets
-            except ValueError as exc:
-                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
-    else:
-        logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
-        return None, None
-    return (
-        class_('katsdpcontroller_' + name, sensor.description, PROMETHEUS_LABELS, **kwargs),
-        Gauge('katsdpcontroller_' + name + '_status',
-              'Status of katcp sensor ' + name, PROMETHEUS_LABELS)
-    )
 
 
 class CaptureBlockState(scheduler.OrderedEnum):
@@ -348,11 +307,8 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
                                  self.host, self.ports['port'], self.name)
                 prefix = self.name + '.'
-                labels = (self.subarray_product_id, self.logical_node.name)
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
-                    self.sdp_controller, prefix,
-                    PROMETHEUS_SENSORS, labels, _prometheus_factory,
-                    host=self.host, port=self.ports['port'])
+                    self.sdp_controller, prefix, host=self.host, port=self.ports['port'])
                 try:
                     await self.katcp_connection.wait_synced()
                     self.logger.info("Connected to %s:%s for node %s",

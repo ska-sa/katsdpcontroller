@@ -2,7 +2,6 @@
 
 # TODO:
 # - internal sensors (including products)
-# - sensor proxy
 # - decide how to do product-reconfigure
 # - fill in remaining requests
 # - possibly add some barriers to ensure that existing state is saved before
@@ -18,6 +17,7 @@ import uuid
 import ipaddress
 import json
 import itertools
+import functools
 import re
 import time
 from abc import abstractmethod
@@ -28,13 +28,16 @@ import aiokatcp
 from aiokatcp import FailReply
 import async_timeout
 import yarl
+from prometheus_client import Gauge, Counter, Histogram
 
 import katsdpcontroller
-from . import singularity, product_config, scheduler
+from . import singularity, product_config, scheduler, sensor_proxy
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState)
 
 
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
+                      re.IGNORECASE)
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 
@@ -45,6 +48,39 @@ class NoAddressesError(Exception):
 
 class ProductFailed(Exception):
     """Attempt to create a subarray product was unsuccessful"""
+
+
+def _prometheus_factory(name: str,
+                        sensor: aiokatcp.Sensor) -> Optional[sensor_proxy.PrometheusInfo]:
+    assert sensor.description is not None
+    match = _HINT_RE.search(sensor.description)
+    if not match:
+        return None
+    type_ = match.group('type').lower()
+    args_ = match.group('args')
+    if type_ == 'counter':
+        class_ = Counter
+        if args_ is not None:
+            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
+    elif type_ == 'gauge':
+        class_ = Gauge
+        if args_ is not None:
+            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
+    elif type_ == 'histogram':
+        class_ = Histogram
+        if args_ is not None:
+            try:
+                buckets = [float(x.strip()) for x in args_.split(',')]
+                class_ = functools.partial(Histogram, buckets=buckets)
+            except ValueError as exc:
+                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
+    else:
+        logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
+        return None
+    service, base = name.rsplit('.', 1)
+    normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
+    return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
+                                       {'service': service})
 
 
 def _load_s3_config(filename):
@@ -72,13 +108,14 @@ class Product:
         self.dead_event = asyncio.Event()
         self._dead_callbacks: List[Callable[['Product'], None]] = []
 
-    def connect(self, host: str, port: int) -> None:
+    def connect(self, server: aiokatcp.DeviceServer, host: str, port: int) -> None:
         self.host = host
         self.port = port
-        self.katcp_conn = aiokatcp.Client(host, port)
+        self.katcp_conn = sensor_proxy.SensorProxyClient(
+            server, f'{self.name}.', {'subarray_product_id': self.name}, _prometheus_factory,
+            host=host, port=port)
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
-        # TODO: set up sensor proxying
 
     def _disconnect_callback(self, *args: bytes) -> None:
         self.died()
@@ -90,8 +127,8 @@ class Product:
             self.configure_task.cancel()
             self.configure_task = None
         if self.katcp_conn is not None:
-            self.katcp_conn.close()
             self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
+            self.katcp_conn.close()
             self.katcp_conn = None
             # TODO: should this be async and await it being closed
         for callback in self._dead_callbacks:
@@ -122,9 +159,10 @@ class Product:
 class ProductManagerBase:
     """Abstract base class for launching and managing subarray products."""
 
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
         self._next_multicast_group = self._multicast_network.network_address + 1
+        self._server = server
 
     @abstractmethod
     async def start(self) -> None: pass
@@ -221,8 +259,8 @@ class SingularityProduct(Product):
 class SingularityProductManager(ProductManagerBase):
     """Run subarray products as tasks within Hubspot Singularity."""
 
-    def __init__(self, args: argparse.Namespace) -> None:
-        super().__init__(args)
+    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
+        super().__init__(args, server)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.
@@ -416,8 +454,9 @@ class SingularityProductManager(ProductManagerBase):
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
-                prod.connect(info['host'], info['port'])
+                prod.connect(self._server, info['host'], info['port'])
                 self._products[name] = prod
+                product.add_dead_callback(self._product_died)
             # The implementation overrides it if it doesn't match the current
             # _multicast_network.
             self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
@@ -597,7 +636,7 @@ class SingularityProductManager(ProductManagerBase):
             env: Dict[str, str] = {item['name']: item['value'] for item in env_list}
             host = env['TASK_HOST']
             port = int(env['PORT0'])
-            product.connect(host, port)
+            product.connect(self._server, host, port)
             success = True
             await self._save_state()
 
@@ -638,9 +677,9 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def __init__(self, args: argparse.Namespace) -> None:
         if args.interface_mode:
-            self._manager = InternalProductManager(args)
+            self._manager = InternalProductManager(args, self)
         else:
-            self._manager = SingularityProductManager(args)
+            self._manager = SingularityProductManager(args, self)
         self._manager_stopped = asyncio.Event()
         self._override_dicts = {}
         if args.no_pull:

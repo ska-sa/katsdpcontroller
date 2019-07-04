@@ -188,6 +188,7 @@ from katsdptelstate.endpoint import Endpoint
 from . import schemas
 
 
+# TODO: these need to become sensors to pass them from product controller to master controller
 TASKS_IN_STATE = prometheus_client.Gauge(
     'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
     ['queue', 'state'])

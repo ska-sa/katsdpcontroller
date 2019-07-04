@@ -17,7 +17,6 @@ from typing import Tuple
 
 import addict
 import jsonschema
-import prometheus_async
 import pymesos
 import aiokatcp
 import katsdpservices
@@ -25,15 +24,6 @@ from katsdptelstate.endpoint import endpoint_parser
 
 from katsdpcontroller import scheduler, schemas, product_controller, web
 from katsdpcontroller.controller import add_shared_options, load_json_dict
-
-
-# TODO: move Prometheus stats to master
-async def quiet_prometheus_stats(request):
-    response = await prometheus_async.aio.web.server_stats(request)
-    if response.status == 200:
-        # Avoid spamming logs (feeds into web.AccessLogger).
-        response.log_level = logging.DEBUG
-    return response
 
 
 def on_shutdown(loop, server):
@@ -153,7 +143,6 @@ def main() -> None:
     else:
         sched = scheduler.Scheduler(args.realtime_role, args.http_port, args.http_url,
                                     dict(access_log_class=web.AccessLogger))
-        sched.app.router.add_route('GET', '/metrics', quiet_prometheus_stats)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)
