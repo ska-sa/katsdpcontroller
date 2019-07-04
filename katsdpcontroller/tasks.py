@@ -251,9 +251,9 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
     - Connects to the service's katcp port and mirrors katcp sensors. Such
       are exposed at the master controller level using the
       following syntax:
-        <subarray_product_id>.<name>.<sensor_name>
+        <name>.<sensor_name>
       For example:
-        array_1.ingest.1.input_rate
+        ingest.sdp_l0.1.input_rate
     """
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         # Turn .status into a property that updates a sensor
@@ -263,11 +263,11 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         self.subarray_product = subarray_product
         self.capture_block_id = capture_block_id   # Only useful for batch tasks
         self.logger = logging.LoggerAdapter(
-            logger, dict(subarray_product_id=self.subarray_product_id, child_task=self.name))
+            logger, dict(child_task=self.name))
         if capture_block_id is None:
-            self.name = '.'.join([self.subarray_product_id, logical_task.name])
+            self.name = logical_task.name
         else:
-            self.name = '.'.join([self.subarray_product_id, capture_block_id, logical_task.name])
+            self.name = '.'.join([capture_block_id, logical_task.name])
         self.gui_urls = []
         # dict of exposed KATCP sensors. This excludes the state sensors, which
         # are present even when the process is not running.

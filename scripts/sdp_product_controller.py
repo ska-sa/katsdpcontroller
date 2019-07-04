@@ -7,7 +7,6 @@
 
 import os
 import os.path
-import json
 import signal
 import argparse
 import logging
@@ -92,6 +91,8 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
                         help='URL at which slaves connect to the HTTP port')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
+    parser.add_argument('--subarray-product-id', default='UNKNOWN',
+                        help='Subarray product ID, used to name the framework [%(default)s]')
     parser.add_argument('--image-tag',
                         metavar='TAG', help='Image tag to use')
     parser.add_argument('--s3-config', type=parse_s3_config, metavar='JSON',
@@ -140,7 +141,7 @@ def main() -> None:
 
     framework_info = addict.Dict()
     framework_info.user = args.user
-    framework_info.name = 'katsdpcontroller'
+    framework_info.name = args.subarray_product_id
     framework_info.checkpoint = True
     framework_info.principal = args.principal
     framework_info.roles = [args.realtime_role, args.batch_role]

@@ -542,10 +542,13 @@ class SingularityProductManager(ProductManagerBase):
         assert name not in self._products
         s3_config = _load_s3_config(self._args.s3_config_file)
         args = extract_shared_options(self._args)
-        args.append('--s3-config=' + json.dumps(s3_config))
         # TODO: append --image-tag
-        args.append(f'{self._args.external_hostname}:{self._args.port}')
-        args.append(f'zk://{self._args.zk}/mesos')
+        args.extend([
+            '--s3-config=' + json.dumps(s3_config),
+            f'--subarray-product-id={name}',
+            f'{self._args.external_hostname}:{self._args.port}',
+            f'zk://{self._args.zk}/mesos'
+        ])
 
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._products[name] = product
