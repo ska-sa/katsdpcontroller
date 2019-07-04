@@ -1792,7 +1792,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 '--no-tmp-file',
                 data_url,
                 DATA_VOL.container_path,
-                '{}_{}'.format(capture_block_id, target_name)
+                '{}_{}_{}'.format(capture_block_id, name, target_name)
             ]
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(capture_block_id, continuum_telstate_name, target)
