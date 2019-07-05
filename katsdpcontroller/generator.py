@@ -1770,6 +1770,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
             imager.mem = 8192
             imager.disk = 8192
             imager.max_run_time = 3600     # 1 hour
+            imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
             # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
             # it can help improve parallelism). There is no memory enforcement, so
@@ -1778,7 +1779,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
             imager.image = 'katsdpimager'
             # TODO: add lots more options to the ICD
             imager.command = [
-                'imager.py',
+                'imager-mkat-pipeline.py',
                 '-i', 'target={}'.format(target.description),
                 '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
                 '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
@@ -1790,7 +1791,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 '--no-tmp-file',
                 data_url,
-                '/mnt/mesos/sandbox/{}-%d.fits'.format(target_name)
+                DATA_VOL.container_path,
+                '{}_{}_{}'.format(capture_block_id, name, target_name)
             ]
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(capture_block_id, continuum_telstate_name, target)
