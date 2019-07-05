@@ -170,7 +170,9 @@ from decimal import Decimal
 import time
 import io
 from abc import abstractmethod
-from typing import Optional, Mapping
+import typing
+# Note: don't include Dict here, because it conflicts with addict.Dict.
+from typing import Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -423,7 +425,7 @@ class Resource:
         only be accessed by subclasses.
     """
 
-    ZERO = 0
+    ZERO: ClassVar[Union[int, Decimal]] = 0
     REQUEST_CLASS = ResourceRequest
 
     def __init__(self, name):
@@ -688,7 +690,7 @@ class ResourceRequestsContainer(metaclass=ResourceRequestsContainerMeta):
     Subclasses must provide a RESOURCE_REQUESTS class member dictionary listing
     the supported requests.
     """
-    RESOURCE_REQUESTS = {}
+    RESOURCE_REQUESTS: Mapping[str, Type[Resource]] = {}
 
     def __init__(self):
         self.requests = {name: cls.empty_request() for name, cls in self.RESOURCE_REQUESTS.items()}
@@ -945,8 +947,8 @@ class ImageResolver:
     def __init__(self, lookup: ImageLookup, tag_file: str = None, tag: str = None) -> None:
         self._lookup = lookup
         self._tag_file = tag_file
-        self._overrides: Dict[str, str] = {}
-        self._cache = {}
+        self._overrides: typing.Dict[str, str] = {}
+        self._cache: typing.Dict[str, str] = {}
         if tag is not None:
             self._tag = tag
             self._tag_file = None
@@ -1033,7 +1035,7 @@ class TaskIDAllocator:
     Because IDs must be globally unique (within the framework), the
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
-    _by_prefix = {}
+    _by_prefix: ClassVar[typing.Dict[str, 'TaskIDAllocator']] = {}
 
     def __init__(self, prefix=''):
         pass   # Initialised by new
