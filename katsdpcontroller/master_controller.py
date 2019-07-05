@@ -3,11 +3,13 @@
 # TODO:
 # - internal sensors (including products)
 # - decide how to do product-reconfigure
+# - sdp-shutdown
 # - fill in remaining requests
 # - possibly add some barriers to ensure that existing state is saved before
 #   handling new katcp requests.
 # - possibly add wait_connected to _katcp_request
 # - pass logging environment variables through to product controller
+# - interface mode
 
 import asyncio
 import logging
@@ -938,7 +940,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             product.logger.info(f'Graceful kill failed, force-killing: {exc}')
             # Mesos will eventually kill the slave tasks when it sees that
             # the framework has disappeared.
-            # TODO: product controller needs to self-terminate when finished.
             await self._manager.kill_product(product)
 
     @time_request
