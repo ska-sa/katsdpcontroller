@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Callable, Mapping, Iterable, Union, Optional, Cl
 
 import aiokatcp
 import prometheus_client       # noqa: F401
-from prometheus_client import Gauge, Counter, Histogram
+from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,13 @@ class PrometheusInfo:
 
     def __init__(self, class_: Callable[..., 'prometheus_client.core._LabelWrapper'],
                  name: str, description: str,
-                 labels: Mapping[str, str]) -> None:
+                 labels: Mapping[str, str],
+                 registry: CollectorRegistry = prometheus_client.REGISTRY) -> None:
         self.class_ = class_
         self.name = name
         self.description = description
         self.labels = dict(labels)
+        self.registry = registry
 
 
 class PrometheusObserver:
@@ -109,12 +111,13 @@ class SensorWatcher(aiokatcp.SensorWatcher):
 
     # Caches metrics by name. Each entry stores the primary metric
     # and the status metric.
-    _prometheus_sensors: ClassVar[Dict[str, Tuple[_LabelWrapper, _LabelWrapper]]] = {}
+    prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = {}
 
     def __init__(self, client: aiokatcp.Client, server: aiokatcp.DeviceServer,
                  prefix: str,
                  prometheus_labels: Mapping[str, str] = None,
-                 prometheus_factory: _Factory = None) -> None:
+                 prometheus_factory: _Factory = None,
+                 prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None) -> None:
         super().__init__(client)
         self.prefix = prefix
         self.server = server
@@ -126,6 +129,8 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.prometheus_factory = prometheus_factory
         else:
             self.prometheus_factory = _dummy_factory
+        if prometheus_sensors is not None:
+            self.prometheus_sensors = prometheus_sensors
         # Indexed by unqualified sensor name; None if no observer is needed.
         # Invariant: _observers has an entry if and only if the corresponding
         # sensor exists in self.server.sensors
@@ -144,13 +149,14 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         if info is None:
             return None
         try:
-            value_metric, status_metric = self._prometheus_sensors[info.name]
+            value_metric, status_metric = self.prometheus_sensors[info.name]
         except KeyError:
             label_names = list(self.prometheus_labels.keys()) + list(info.labels.keys())
-            value_metric = info.class_(info.name, info.description, label_names)
+            value_metric = info.class_(info.name, info.description, label_names,
+                                       registry=info.registry)
             status_metric = Gauge(info.name + '_status', f'Status of katcp sensor {info.name}',
-                                  label_names)
-            self._prometheus_sensors[info.name] = (value_metric, status_metric)
+                                  label_names, registry=info.registry)
+            self.prometheus_sensors[info.name] = (value_metric, status_metric)
 
         label_values = list(self.prometheus_labels.values()) + list(info.labels.values())
         return PrometheusObserver(sensor, value_metric, status_metric, label_values)
@@ -214,6 +220,10 @@ class SensorProxyClient(aiokatcp.Client):
         It may return ``None`` to skip generating a Prometheus series for that
         sensor. This argument may also be ``None`` to skip creating any
         Prometheus metrics.
+    prometheus_sensors
+        Store for Prometheus metrics. If not provided, generated sensors are
+        stored in a class-level variable. This is mainly intended to allow
+        tests to by isolated from global state.
     args, kwargs
         Passed to the base class
     """
@@ -221,9 +231,11 @@ class SensorProxyClient(aiokatcp.Client):
     def __init__(self, server: aiokatcp.DeviceServer, prefix: str,
                  prometheus_labels: Mapping[str, str] = None,
                  prometheus_factory: _Factory = None,
+                 prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
                  *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        watcher = SensorWatcher(self, server, prefix, prometheus_labels, prometheus_factory)
+        watcher = SensorWatcher(self, server, prefix,
+                                prometheus_labels, prometheus_factory, prometheus_sensors)
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
 
