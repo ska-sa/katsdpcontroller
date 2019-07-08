@@ -319,32 +319,15 @@ class TestTaskState:
             TaskState.RUNNING >= 3
 
 
-class TestImageResolver(asynctest.TestCase):
-    """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
-    def setUp(self):
-        patcher = mock.patch('builtins.open', new_callable=open_file_mock.MockOpen)
-        self._open_mock = patcher.start()
-        self.addCleanup(patcher.stop)
+class TestSimpleImageLookup(asynctest.TestCase):
+    async def test(self) -> None:
+        lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+        assert_equal('registry.invalid:5000/foo:latest', await lookup('foo', 'latest'))
 
-    async def test_simple(self):
-        """Test the base case"""
-        resolver = scheduler.ImageResolver()
-        resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('sdp/test1:latest', (await resolver('test1')))
-        assert_equal('sdp/test1:tagged', (await resolver('test1:tagged')))
-        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo'))))
 
-    async def test_private_registry(self):
-        """Test with a private registry"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
-        resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:latest', await resolver('test1'))
-        assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', await(resolver('foo')))
-
+class TestHTTPImageLookup(asynctest.TestCase):
     @mock.patch('docker.auth.load_config', autospec=True)
-    async def test_private_registry_digests(self, load_config_mock):
-        """Test with a private registry, looking up a digest"""
+    async def test(self, load_config_mock) -> None:
         digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
         # Response headers are modelled on an actual registry response
         with aioresponses.aioresponses() as rmock:
@@ -368,31 +351,46 @@ class TestImageResolver(asynctest.TestCase):
                     'serveraddress': 'registry.invalid:5000'
                 }
             }
-            resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
-            image = await resolver('myimage')
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            image = await lookup('myimage', 'latest')
         assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
-    async def test_tag_file(self):
+
+class TestImageResolver(asynctest.TestCase):
+    """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
+    def setUp(self) -> None:
+        patcher = mock.patch('builtins.open', new_callable=open_file_mock.MockOpen)
+        self._open_mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+
+    async def test_simple(self) -> None:
+        """Test the base case"""
+        resolver = scheduler.ImageResolver(self.lookup)
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        assert_equal('registry.invalid:5000/test1:latest', await resolver('test1'))
+        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', await(resolver('foo')))
+
+    async def test_tag_file(self) -> None:
         """Test with a tag file"""
         self._open_mock.set_read_data_for('tag_file', 'tag1\n')
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', use_digests=False)
+        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:tag1', await resolver('test1'))
-        assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged'))
+        assert_equal('registry.invalid:5000/test1:tag1', await resolver('test1'))
+        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', await resolver('foo'))
 
-    async def test_bad_tag_file(self):
+    async def test_bad_tag_file(self) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
         self._open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
         with assert_raises(ValueError):
-            scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+            scheduler.ImageResolver(self.lookup, tag_file='tag_file')
 
-    async def test_tag(self):
+    async def test_tag(self) -> None:
         """Test with an explicit tag"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', tag='mytag', use_digests=False)
-        assert_equal('my-registry:5000/test1:mytag', await resolver('test1'))
+        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file', tag='mytag')
+        assert_equal('registry.invalid:5000/test1:mytag', await resolver('test1'))
 
 
 class TestTaskIDAllocator:
@@ -1192,7 +1190,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Normally TaskIDAllocator's constructor returns a singleton to keep
         # IDs globally unique, but we want the test to be isolated. Bypass its
         # __new__.
-        self.image_resolver = scheduler.ImageResolver()
+        self.image_resolver = scheduler.ImageResolver(scheduler.SimpleImageLookup('sdp'))
         self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator)
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
