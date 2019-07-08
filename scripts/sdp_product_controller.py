@@ -12,6 +12,7 @@ import argparse
 import logging
 import asyncio
 import socket
+import json
 import urllib.parse
 from typing import Tuple
 
@@ -109,12 +110,24 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     return parser, args
 
 
+def prepare_env(args: argparse.Namespace) -> None:
+    """Update os.environ with logging settings extracted from arguments"""
+    if os.environ.get('KATSDP_LOG_GELF_ADDRESS'):
+        extra = load_json_dict(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}'))
+        extra['subarray_product_id'] = args.subarray_product_id
+        os.environ['KATSDP_LOG_GELF_EXTRA'] = json.dumps(extra)
+        if not os.environ.get('KATSDP_LOG_GELF_LOCALNAME'):
+            os.environ['KATSDP_LOG_GELF_LOCALNAME'] = args.external_hostname
+
+
 def main() -> None:
+    parser, args = parse_args()
+    prepare_env(args)
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
-    parser, args = parse_args()
     if args.log_level is not None:
         logging.root.setLevel(args.log_level.upper())
+
     logger = logging.getLogger('katsdpcontroller')
     logger.info("Starting SDP product controller...")
     logger.info('katcp: %s:%d', args.host, args.port)
@@ -157,8 +170,6 @@ def main() -> None:
         graph_dir=args.write_graphs)
     if not args.interface_mode and args.dashboard_port != 0:
         init_dashboard(server, args)
-
-    logger.info("Starting SDP...")
 
     with katsdpservices.start_aiomonitor(loop, args, locals()):
         loop.run_until_complete(run(sched, server))

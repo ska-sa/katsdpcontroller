@@ -91,5 +91,16 @@ services:
       - ./etc/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./etc/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
+  logstash:
+    image: docker.elastic.co/logstash/logstash-oss:7.2.0
+    command: logstash -w 1 -f /etc/logstash.conf
+    environment:
+      - LS_HEAP_SIZE=2048m
+    volumes:
+      - ./etc/logstash.conf:/etc/logstash.conf:ro
+      - ./logs:/logstash-logs
+    ports:
+      - "12201:12201/udp"    # GELF
+
 volumes:
   prometheus_data: {}

@@ -427,8 +427,11 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
 
         # Set extra fields for SDP services to log to logspout
         if self.logical_node.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
-            extras = dict(labels)
-            extras['docker.image'] = self.taskinfo.container.docker.image
+            extras = {
+                **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
+                **labels,
+                'docker.image': self.taskinfo.container.docker.image
+            }
             env = {
                 'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
                 'KATSDP_LOG_GELF_EXTRA': json.dumps(extras),

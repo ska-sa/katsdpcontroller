@@ -22,6 +22,7 @@ import itertools
 import functools
 import re
 import time
+import os
 from abc import abstractmethod
 from typing import Type, TypeVar, Dict, Tuple, Set, List, Mapping, Optional, Callable, Any
 
@@ -351,6 +352,11 @@ class SingularityProductManager(ProductManagerBase):
             Singularity deploy ID
         """
         request_id = self._request_id_prefix + product_name
+        environ = {}
+        for key in ['KATSDP_LOG_ONELINE', 'KATSDP_LOG_LEVEL', 'KATSDP_LOG_GELF_ADDRESS',
+                    'KATSDP_LOG_GELF_EXTRA']:
+            if key in os.environ:
+                environ[key] = os.environ[key]
         deploy = {
             "requestId": request_id,
             "command": "sdp_product_controller.py",
@@ -359,6 +365,7 @@ class SingularityProductManager(ProductManagerBase):
                 "--http-port", "5102",
                 "--aiomonitor", "--aiomonitor-host", "0.0.0.0"
             ],
+            "env": environ,
             "containerInfo": {
                 "type": "DOCKER",
                 "docker": {
