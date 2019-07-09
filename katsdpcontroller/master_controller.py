@@ -93,9 +93,21 @@ def _load_s3_config(filename):
 
 
 class Product:
+    """A single subarray product
+
+    Parameters
+    ----------
+    name
+        Subarray product ID
+    configure_task
+        The asyncio task corresponding to the product-configure command. If the
+        process dies, this task is cancelled to notify it.
+    """
+
     class TaskState(enum.Enum):
+        """State of the product controller process"""
         CREATED = 1
-        STARTING = 2
+        STARTING = 2      # The task is running, but we haven't finished product-configure on it
         ACTIVE = 3
         DEAD = 4
 
@@ -112,6 +124,11 @@ class Product:
         self._dead_callbacks: List[Callable[['Product'], None]] = []
 
     def connect(self, server: aiokatcp.DeviceServer, host: str, port: int) -> None:
+        """Notify product of the location of the katcp interface.
+
+        After calling this, :attr:`host`, :attr:`port` and :attr:`katcp_conn`
+        are all ready to use.
+        """
         self.host = host
         self.port = port
         self.katcp_conn = sensor_proxy.SensorProxyClient(
@@ -121,9 +138,14 @@ class Product:
         # TODO: start a watchdog
 
     def _disconnect_callback(self, *args: bytes) -> None:
+        """Called when the remote katcp server tells us it is shutting down.
+
+        In normal use, this indicates that the product has been fully deconfigured.
+        """
         self.died()
 
     def died(self) -> None:
+        """The remote server has died or the product is otherwise dead."""
         self.task_state = Product.TaskState.DEAD
         self.dead_event.set()
         if self.configure_task is not None:
@@ -139,6 +161,21 @@ class Product:
 
     async def _katcp_request(self, type_: Type[_T], configuring: _T, dead: _T,
                              message: str, *args: Any) -> _T:
+        """Query a single value from the product using katcp
+
+        Parameters
+        ----------
+        type_
+            The type of the value (used to decode the raw bytes from katcp)
+        configuring
+            Value to return if the product has not yet become active.
+        dead
+            Value to return if the product has died.
+        message
+            katcp request name
+        args
+            katcp arguments
+        """
         if self.task_state == Product.TaskState.ACTIVE:
             assert self.katcp_conn is not None
             reply, informs = await self.katcp_conn.request(message, *args)
@@ -156,6 +193,7 @@ class Product:
         return await self._katcp_request(str, '', '', 'telstate-endpoint')
 
     def add_dead_callback(self, callback: Callable[['Product'], None]):
+        """Add a function to call when :meth:`died` is called."""
         self._dead_callbacks.append(callback)
 
 
@@ -175,22 +213,35 @@ class ProductManagerBase:
 
     @property
     @abstractmethod
-    def products(self) -> Mapping[str, Product]: pass
+    def products(self) -> Mapping[str, Product]:
+        """Get a list of all defined products, indexed by name.
+
+        The caller should treat this as read-only, using the methods on this
+        class to add/remove products or change their state.
+        """
 
     @abstractmethod
-    async def create_product(self, name: str) -> Product: pass
+    async def create_product(self, name: str) -> Product:
+        """Create a new product called `name`.
+
+        The product is brought to state :const:`~Product.TaskState.STARTING`
+        before return.
+        """
 
     @abstractmethod
-    async def product_active(self, product: Product) -> None: pass
+    async def product_active(self, product: Product) -> None:
+        """Move a product to state :const:`~Product.TaskState.ACTIVE`"""
 
     @abstractmethod
-    async def kill_product(self, product: Product) -> None: pass
+    async def kill_product(self, product: Product) -> None:
+        """Move a product to state :const:`~Product.TaskState.DEAD`"""
 
     def _set_next_multicast_group(self, value: ipaddress.IPv4Address) -> None:
         """Control where to start looking in :meth:`get_multicast_groups`.
 
-        Any `value` is accepted, but if it is out of range, it will be replaced
-        by the first host address in the network.
+        This is intended for use by subclasses. Any `value` is accepted, but
+        if it is out of range, it will be replaced by the first host address in
+        the network.
         """
         if value not in self._multicast_network or value == self._multicast_network.network_address:
             value = self._multicast_network.network_address + 1
@@ -241,7 +292,8 @@ class ProductManagerBase:
                 return ans
 
     @abstractmethod
-    async def get_capture_block_id(self) -> str: pass
+    async def get_capture_block_id(self) -> str:
+        """Generate a unique capture block ID"""
 
 
 class InternalProductManager(ProductManagerBase):
@@ -253,6 +305,8 @@ class InternalProductManager(ProductManagerBase):
 
 
 class SingularityProduct(Product):
+    """Subarray product launched as a task within Hubspot Singularity"""
+
     def __init__(self, name: str, configure_task: Optional[asyncio.Task]) -> None:
         super().__init__(name, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
@@ -472,6 +526,7 @@ class SingularityProductManager(ProductManagerBase):
             self._next_capture_block_id = data['next_capture_block_id']
 
     async def _save_state(self) -> None:
+        """Save the current state to Zookeeper"""
         async with self._zk_state_lock:
             data = {
                 'version': 1,
@@ -492,10 +547,17 @@ class SingularityProductManager(ProductManagerBase):
             await self._zk_set('/state', payload)
 
     def _save_state_bg(self) -> None:
+        """Save current state to Zookeeper in the background"""
         task = asyncio.get_event_loop().create_task(self._save_state())
         log_task_exceptions(task, logger, '_save_state')
 
     async def _reconcile_once(self) -> None:
+        """Reconcile internal state with state reported by Singularity.
+
+        Tasks that we didn't expect to see are killed if they don't promptly
+        kill themselves. Tasks that we expected to see but are missing cause
+        products to be marked as dead.
+        """
         logger.debug('Starting reconciliation')
         new_probation: Set[str] = set()
         requests = await self._sing.get_requests(request_type=['ON_DEMAND'])
@@ -538,7 +600,8 @@ class SingularityProductManager(ProductManagerBase):
         self._probation = new_probation
         logging.debug('Reconciliation finished')
 
-    async def _reconcile_repeat(self):
+    async def _reconcile_repeat(self) -> None:
+        """Run :meth:_reconcile_once regularly"""
         while True:
             await asyncio.sleep(10)
             try:
@@ -546,7 +609,8 @@ class SingularityProductManager(ProductManagerBase):
             except Exception:
                 logger.warning('Exception in reconciliation', exc_info=True)
 
-    def _product_died(self, product: Product):
+    def _product_died(self, product: Product) -> None:
+        """Called by product.died"""
         if self._products.get(product.name) is product:
             del self._products[product.name]
             self._save_state_bg()
@@ -677,6 +741,8 @@ class SingularityProductManager(ProductManagerBase):
 
 
 class DeviceServer(aiokatcp.DeviceServer):
+    """katcp server around a :class:`ProductManagerBase`."""
+
     VERSION = "sdpcontroller-3.2"
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
