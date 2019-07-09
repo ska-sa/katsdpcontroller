@@ -601,7 +601,7 @@ class SDPSubarrayProductBase:
 
 class InterfaceModeSensors:
     def __init__(self, subarray_product_id: str) -> None:
-        """Manage dummy subarray product sensors on a SDPControllerServer instance
+        """Manage dummy subarray product sensors on a DeviceServer instance
 
         Parameters
         ----------
@@ -1076,6 +1076,12 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     async def stop(self, cancel: bool = True) -> None:
         await super().stop(cancel)
+        if self.product is not None and self.product.state != ProductState.DEAD:
+            logger.warning('Product controller interrupted - deconfiguring running product')
+            try:
+                await self.product.deconfigure(force=True)
+            except Exception:
+                logger.warning('Failed to deconfigure product %s during shutdown', exc_info=True)
         self.master_controller.close()
         await self.master_controller.wait_closed()
 
@@ -1103,6 +1109,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             Final name of the subarray-product.
         """
 
+        def dead_callback(product):
+            # Don't stop immediately. This gives a bit of time for final
+            # replies and sensor updates to be transmitted.
+            asyncio.get_event_loop().call_later(0.02, self.halt)
+
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching subarray product.")
 
@@ -1128,8 +1139,12 @@ class DeviceServer(aiokatcp.DeviceServer):
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
-        await product.configure()
-        self.product.dead_callbacks.append(self.halt)
+        self.product.dead_callbacks.append(dead_callback)
+        try:
+            await product.configure()
+        except Exception:
+            self.product = None
+            raise
 
     async def request_product_configure(self, ctx, name: str, config: str) -> None:
         """Configure a SDP subarray product instance.
@@ -1141,6 +1156,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         config : str
             A JSON-encoded dictionary of configuration data.
         """
+        # TODO: remove name - it is already a command-line argument
         logger.info("?product-configure called with: %s", ctx.req)
 
         if self.product is not None:
