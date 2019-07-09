@@ -24,10 +24,10 @@ import netifaces
 import katsdptelstate
 import katpoint
 
-from katsdpcontroller.product_controller import (
+from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
     ProductState, DeviceStatus, _redact_keys)
-from katsdpcontroller import scheduler
+from .. import scheduler
 from . import fake_katportalclient
 
 ANTENNAS = 'm000,m001,m063,m064'
