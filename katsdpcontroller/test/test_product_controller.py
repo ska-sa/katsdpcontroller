@@ -235,7 +235,7 @@ class DummyMasterController(aiokatcp.DeviceServer):
         if n_addresses > 1:
             ans += '+{}'.format(n_addresses - 1)
         self._next += n_addresses
-        return ans;
+        return ans
 
 
 def get_metric(metric):

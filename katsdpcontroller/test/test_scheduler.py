@@ -1533,7 +1533,8 @@ class TestScheduler(asynctest.ClockedTestCase):
                         await asynctest.exhaust_callbacks(self.loop)
                         assert_equal(TaskState.READY, self.nodes[0].state)
                         if target_state > TaskState.READY:
-                            kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, nodes))
+                            kill = asyncio.ensure_future(
+                                self.sched.kill(self.physical_graph, nodes))
                             await asynctest.exhaust_callbacks(self.loop)
                             assert_equal(TaskState.KILLING, self.nodes[0].state)
                             if target_state > TaskState.KILLING:

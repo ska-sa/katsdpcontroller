@@ -1,7 +1,7 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import logging
-from typing import Tuple, Dict, Callable, Mapping, Iterable, Union, Optional, ClassVar
+from typing import Tuple, Dict, Callable, Mapping, Iterable, Union, Optional
 
 import aiokatcp
 import prometheus_client       # noqa: F401

@@ -76,7 +76,6 @@ class TestSensorProxyClient(asynctest.TestCase):
         prom_sensors: Dict[str, Any] = {}
 
         def prom_factory(name: str, sensor: aiokatcp.Sensor) -> Optional[PrometheusInfo]:
-            normalised_name = name.replace('-', '_')
             if name == 'int-sensor':
                 return PrometheusInfo(Counter, 'test_int_sensor', 'A counter', {}, self.registry)
             elif name == 'float-sensor':
