@@ -1570,8 +1570,15 @@ def build_logical_graph(config):
     return g
 
 
-def _imager_cpus(config):
+def _continuum_imager_cpus(config):
     return 24 if not is_develop(config) else 2
+
+
+def _spectral_imager_cpus(config):
+    # Fairly arbitrary number, based on looking at typical usage during a run.
+    # In practice the number of spectral imagers per box is limited by GPUs,
+    # so the value doesn't make a huge difference.
+    return 2 if not is_develop(config) else 1
 
 
 def _stream_url(capture_block_id, stream_name):
@@ -1672,7 +1679,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
     l0_info = L0Info(config, l0_name)
     l0_stream = name + '.' + l0_name
     data_url = _stream_url(capture_block_id, l0_stream)
-    cpus = _imager_cpus(config)
+    cpus = _continuum_imager_cpus(config)
     targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
 
     # katdal doesn't support selection by target description, and selection by
@@ -1765,7 +1772,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
 
             imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
                 name, first_channel, last_channel, target_name))
-            imager.cpus = _imager_cpus(config)
+            imager.cpus = _spectral_imager_cpus(config)
             # TODO: these resources are very rough estimates
             imager.mem = 8192
             imager.disk = 8192
