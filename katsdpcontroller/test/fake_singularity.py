@@ -250,8 +250,19 @@ class SingularityServer:
                 "currentState": "TASK_DEAD",
                 "pending": False
             }
+        elif task.state == TaskState.PENDING:
+            data = {
+                "runId": run_id,
+                "pending": True,
+                "pendingTaskId": {
+                    "id": task.pending_task_id,
+                    "deployId": task.deploy.deploy_id,
+                    "requestId": task.deploy.request.request_id
+                    "pendingType": "ONEOFF"
+                }
+            }
         else:
-            data = {}      # TODO
+            data = {}    # TODO
         return aiohttp.web.json_response(data)
 
     async def start(self) -> None:
