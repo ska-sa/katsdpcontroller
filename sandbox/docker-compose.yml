@@ -6,15 +6,16 @@ services:
     image: netflixoss/exhibitor:1.5.2
     ports:
       - "127.0.0.1:2181:2181"
-      - "172.17.0.1:2181:2181"
 
   mesos-master:
     network_mode: host
     image: mesosphere/mesos-master:1.5.0
+    depends_on:
+      - exhibitor
     environment:
-      MESOS_IP: 172.17.0.1
+      MESOS_IP: 127.0.0.1
       MESOS_PORT: 5050
-      MESOS_ZK: zk://172.17.0.1:2181/mesos
+      MESOS_ZK: zk://127.0.0.1:2181/mesos
       MESOS_QUORUM: 1
       MESOS_REGISTRY: in_memory
       MESOS_LOG_DIR: /var/log/mesos
@@ -24,10 +25,12 @@ services:
     network_mode: host
     pid: host
     image: mesosphere/mesos-slave:1.5.0
+    depends_on:
+      - exhibitor
     environment:
-      MESOS_IP: 172.17.0.1
+      MESOS_IP: 127.0.0.1
       MESOS_PORT: 5051
-      MESOS_MASTER: zk://172.17.0.1:2181/mesos
+      MESOS_MASTER: zk://127.0.0.1:2181/mesos
       MESOS_CONTAINERIZERS: docker,mesos
       MESOS_DOCKER_CONFIG: file:///etc/mesos/config.json
       MESOS_EXECUTOR_REGISTRATION_TIMEOUT: 5mins
@@ -49,10 +52,11 @@ services:
   singularity:
     network_mode: host
     image: hubspot/singularityservice:0.22.0
+    depends_on:
+      - mesos-master
+      - exhibitor
     volumes:
       - ./etc/singularity/singularity.yaml:/etc/singularity/singularity.yaml:ro
-    environment:
-      - SINGULARITY_MESOS_MASTER=172.17.0.1:5050
 
   minio:
     network_mode: host

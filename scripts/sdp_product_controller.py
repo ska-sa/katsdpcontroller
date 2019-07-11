@@ -20,6 +20,7 @@ import addict
 import jsonschema
 import pymesos
 import aiokatcp
+import aiomonitor
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -70,13 +71,14 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
         default_external_hostname = socket.getfqdn()
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='attach to server HOST [localhost]')
-    parser.add_argument('-p', '--port', type=int, default=5101, metavar='N',
+    parser.add_argument('-p', '--port', type=int, default=os.environ.get('PORT0', '5101'),
                         help='katcp listen port [%(default)s]')
     parser.add_argument('-l', '--log-level', metavar='LEVEL',
                         help='set the Python logging level [%(default)s]')
     parser.add_argument('--external-hostname', metavar='FQDN', default=default_external_hostname,
                         help='Name by which others connect to this machine [%(default)s]')
-    parser.add_argument('--http-port', type=int, default=5102, metavar='PORT',
+    parser.add_argument('--http-port', type=int, default=os.environ.get('PORT1', '5102'),
+                        metavar='PORT',
                         help='port that slaves communicate with [%(default)s]')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port')
@@ -94,6 +96,9 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
     add_shared_options(parser)
+    parser.set_defaults(
+        aiomonitor_port=os.environ.get('PORT2', aiomonitor.MONITOR_PORT),
+        aioconsole_port=os.environ.get('PORT3', aiomonitor.CONSOLE_PORT))
     katsdpservices.add_aiomonitor_arguments(parser)
     args = parser.parse_args()
 

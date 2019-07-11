@@ -257,7 +257,7 @@ class SingularityServer:
                 "pendingTaskId": {
                     "id": task.pending_task_id,
                     "deployId": task.deploy.deploy_id,
-                    "requestId": task.deploy.request.request_id
+                    "requestId": task.deploy.request.request_id,
                     "pendingType": "ONEOFF"
                 }
             }

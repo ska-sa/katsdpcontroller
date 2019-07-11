@@ -76,4 +76,4 @@ def main(argv: List[str]) -> None:
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main(sys.argv[1:])

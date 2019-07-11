@@ -416,50 +416,20 @@ class SingularityProductManager(ProductManagerBase):
         deploy = {
             "requestId": request_id,
             "command": "sdp_product_controller.py",
-            "arguments": [
-                "--port", "5101",
-                "--http-port", "5102",
-                "--aiomonitor", "--aiomonitor-host", "0.0.0.0"
-            ],
+            "arguments": ["--aiomonitor"],
             "env": environ,
             "containerInfo": {
                 "type": "DOCKER",
                 "docker": {
                     "image": image,
                     "forcePullImage": False,    # TODO: switch to true?
-                    "network": "BRIDGE",
-                    "portMappings": [
-                        {
-                            "containerPortType": "LITERAL",
-                            "containerPort": 5101,             # katcp
-                            "hostPortType": "FROM_OFFER",
-                            "hostPort": 0
-                        },
-                        {
-                            "containerPortType": "LITERAL",
-                            "containerPort": 5102,             # http
-                            "hostPortType": "FROM_OFFER",
-                            "hostPort": 1
-                        },
-                        {
-                            "containerPortType": "LITERAL",
-                            "containerPort": 50101,            # aiomonitor
-                            "hostPortType": "FROM_OFFER",
-                            "hostPort": 2
-                        },
-                        {
-                            "containerPortType": "LITERAL",
-                            "containerPort": 50102,            # aioconsole
-                            "hostPortType": "FROM_OFFER",
-                            "hostPort": 3
-                        }
-                    ]
+                    "network": "HOST"
                 }
             },
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 128,
-                "numPorts": 4
+                "numPorts": 4         # katcp, http, aiomonitor and aioconsole
             }
         }
 

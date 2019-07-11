@@ -3,6 +3,7 @@ server:
   applicationContextPath: /singularity
   connector:
     type: http
+    bindHost: 127.0.0.1
     port: 7099
   requestLog:
     appenders:
@@ -11,7 +12,7 @@ server:
         archivedLogFilenamePattern: ../logs/access-%d.log.gz
 
 mesos:
-  master: localhost:5050
+  master: 127.0.0.1:5050
   defaultCpus: 1
   defaultMemory: 128
   defaultDisk: 1024
@@ -20,7 +21,7 @@ mesos:
   frameworkFailoverTimeout: 1000000
 
 zookeeper:
-  quorum: localhost:2181
+  quorum: 127.0.0.1:2181
   zkNamespace: singularity
   sessionTimeoutMillis: 60000
   connectTimeoutMillis: 5000
