@@ -21,7 +21,8 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 import asynctest
 
-from katsdpcontroller.sensor_proxy import SensorProxyClient, PrometheusInfo
+from ..sensor_proxy import SensorProxyClient, PrometheusInfo
+from .utils import device_server_sockname
 
 
 class MyEnum(enum.Enum):
@@ -93,7 +94,7 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.addCleanup(self.server.stop)
         assert self.server.server is not None
         assert self.server.server.sockets is not None
-        port = self.server.server.sockets[0].getsockname()[1]
+        port = device_server_sockname(self.server)[1]
         self.client = SensorProxyClient(self.mirror, 'prefix-',
                                         {'label1': 'labelvalue1'}, prom_factory, prom_sensors,
                                         host='127.0.0.1', port=port)

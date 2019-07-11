@@ -29,6 +29,8 @@ from ..product_controller import (
     ProductState, DeviceStatus, _redact_keys)
 from .. import scheduler
 from . import fake_katportalclient
+from .utils import create_patch, device_server_sockname
+
 
 ANTENNAS = 'm000,m001,m063,m064'
 
@@ -286,8 +288,7 @@ class BaseTestSDPController(asynctest.TestCase):
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
         self.addCleanup(mc_server.stop)
-        assert mc_server.server and mc_server.server.sockets
-        mc_address = mc_server.server.sockets[0].getsockname()
+        mc_address = device_server_sockname(mc_server)
         mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
         self.addCleanup(mc_client.wait_closed)
         self.addCleanup(mc_client.close)
@@ -295,8 +296,7 @@ class BaseTestSDPController(asynctest.TestCase):
         self.server = DeviceServer(master_controller=mc_client, **server_kwargs)
         await self.server.start()
         self.addCleanup(self.server.stop)
-        assert self.server.server and self.server.server.sockets
-        bind_address = self.server.server.sockets[0].getsockname()
+        bind_address = device_server_sockname(self.server)
         self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
@@ -319,12 +319,6 @@ class BaseTestSDPController(asynctest.TestCase):
         reply, informs = await self.client.request("sensor-value", name)
         self.assertEqual(informs[0].arguments[4], encoded)
 
-    def create_patch(self, *args, **kwargs) -> Any:
-        patcher = mock.patch(*args, **kwargs)
-        mock_obj = patcher.start()
-        self.addCleanup(patcher.stop)
-        return mock_obj
-
     async def setUp(self) -> None:
         # Mock the CBF sensors
         dummy_client = fake_katportalclient.KATPortalClient(
@@ -345,7 +339,7 @@ class BaseTestSDPController(asynctest.TestCase):
                 'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 256,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
             })
-        self.create_patch('katportalclient.KATPortalClient', return_value=dummy_client)
+        create_patch(self, 'katportalclient.KATPortalClient', return_value=dummy_client)
 
 
 @timelimit
@@ -359,7 +353,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
                                 interface_mode=True,
                                 image_resolver_factory=image_resolver_factory,
                                 s3_config=None)
-        self.create_patch('time.time', return_value=123456789.5)
+        create_patch(self, 'time.time', return_value=123456789.5)
 
     async def test_capture_init(self) -> None:
         await self.assert_request_fails("capture-init", CAPTURE_BLOCK)
@@ -522,8 +516,8 @@ class TestSDPController(BaseTestSDPController):
         # Future that is already resolved with no return value
         done_future: asyncio.Future[None] = asyncio.Future()
         done_future.set_result(None)
-        self.create_patch('time.time', return_value=123456789.5)
-        self.create_patch('socket.getaddrinfo', side_effect=self._getaddrinfo)
+        create_patch(self, 'time.time', return_value=123456789.5)
+        create_patch(self, 'socket.getaddrinfo', side_effect=self._getaddrinfo)
         # Mock TelescopeState's constructor to create an in-memory telstate
         orig_telstate_init = katsdptelstate.TelescopeState.__init__
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
@@ -531,19 +525,19 @@ class TestSDPController(BaseTestSDPController):
         def _telstate_init(obj, *args, **kwargs):
             self.telstate = obj
             orig_telstate_init(obj)
-        self.create_patch('katsdptelstate.TelescopeState.__init__', side_effect=_telstate_init,
-                          autospec=True)
-        self.sensor_proxy_client_class = self.create_patch(
-            'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
+        create_patch(self, 'katsdptelstate.TelescopeState.__init__', side_effect=_telstate_init,
+                     autospec=True)
+        self.sensor_proxy_client_class = create_patch(
+            self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
         sensor_proxy_client.wait_connected.return_value = done_future
         sensor_proxy_client.wait_synced.return_value = done_future
         sensor_proxy_client.wait_closed.return_value = done_future
         sensor_proxy_client.request.side_effect = self._request
-        self.create_patch(
-            'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future)
-        self.create_patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
-        self.create_patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
+        create_patch(
+            self, 'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future)
+        create_patch(self, 'netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
+        create_patch(self, 'netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
         self.sched = mock.create_autospec(spec=scheduler.Scheduler, instance=True)
         self.sched.launch.side_effect = self._launch
         self.sched.kill.side_effect = self._kill
@@ -617,7 +611,7 @@ class TestSDPController(BaseTestSDPController):
         # Two targets with the same name, to check disambiguation
         catalogue.add('My Target, radec target, 0:00:00.00, -10:00:00.0')
         catalogue.add('My Target, radec target, 0:00:00.00, -20:00:00.0')
-        self.create_patch('katsdpcontroller.generator._get_targets', return_value=catalogue)
+        create_patch(self, 'katsdpcontroller.generator._get_targets', return_value=catalogue)
 
     async def _launch(self, graph: networkx.MultiDiGraph,
                       resolver: scheduler.Resolver,
@@ -1165,8 +1159,7 @@ class TestSDPResources(asynctest.TestCase):
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
         self.addCleanup(mc_server.stop)
-        assert mc_server.server and mc_server.server.sockets
-        mc_address = mc_server.server.sockets[0].getsockname()
+        mc_address = device_server_sockname(mc_server)
         mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
         self.resources = SDPResources(mc_client, SUBARRAY_PRODUCT)
 

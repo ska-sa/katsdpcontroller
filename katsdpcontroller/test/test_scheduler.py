@@ -21,8 +21,9 @@ import aioresponses
 import open_file_mock
 import aiohttp
 
-from katsdpcontroller import scheduler
-from katsdpcontroller.scheduler import TaskState
+from .. import scheduler
+from ..scheduler import TaskState
+from .utils import create_patch
 
 
 class AnyOrderList(list):
@@ -359,9 +360,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
 class TestImageResolver(asynctest.TestCase):
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
     def setUp(self) -> None:
-        patcher = mock.patch('builtins.open', new_callable=open_file_mock.MockOpen)
-        self._open_mock = patcher.start()
-        self.addCleanup(patcher.stop)
+        self._open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
         self.lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
 
     async def test_simple(self) -> None:

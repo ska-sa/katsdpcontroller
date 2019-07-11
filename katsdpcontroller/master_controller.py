@@ -23,6 +23,7 @@ import functools
 import re
 import time
 import os
+import socket
 from abc import abstractmethod
 from typing import Type, TypeVar, Dict, Tuple, Set, List, Mapping, Optional, Callable, Any
 
@@ -32,11 +33,12 @@ from aiokatcp import FailReply
 import async_timeout
 import yarl
 from prometheus_client import Gauge, Counter, Histogram
+import katsdpservices
 
 import katsdpcontroller
 from . import singularity, product_config, scheduler, sensor_proxy
 from .controller import (time_request, load_json_dict, log_task_exceptions,
-                         extract_shared_options, ProductState)
+                         extract_shared_options, ProductState, add_shared_options)
 
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
@@ -678,6 +680,7 @@ class SingularityProductManager(ProductManagerBase):
         loop = asyncio.get_event_loop()
         try:
             while True:
+                logger.debug('Checking if task is running yet')
                 try:
                     data = await self._sing.track_run(request_id, product.run_id)
                 except singularity.NotFoundError:
@@ -1140,3 +1143,93 @@ class DeviceServer(aiokatcp.DeviceServer):
         katcp_conn = self._get_katcp(subarray_product_id)
         reply, informs = await katcp_conn.request('capture-done')
         return reply[0].decode()
+
+
+class _InvalidGuiUrlsError(RuntimeError):
+    pass
+
+
+def _load_gui_urls_file(filename):
+    try:
+        with open(filename) as gui_urls_file:
+            gui_urls = json.load(gui_urls_file)
+    except (IOError, OSError) as error:
+        raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
+    except ValueError as error:
+        raise _InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
+    if not isinstance(gui_urls, list):
+        raise _InvalidGuiUrlsError('{} does not contain a list'.format(filename))
+    return gui_urls
+
+
+def _load_gui_urls_dir(dirname):
+    try:
+        gui_urls = []
+        for name in sorted(os.listdir(dirname)):
+            filename = os.path.join(dirname, name)
+            if filename.endswith('.json') and os.path.isfile(filename):
+                gui_urls.extend(_load_gui_urls_file(filename))
+    except (IOError, OSError) as error:
+        raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
+    return gui_urls
+
+
+def parse_args(argv: List[str]) -> argparse.Namespace:
+    usage = "%(prog)s [options] zk singularity"
+    parser = argparse.ArgumentParser(usage=usage)
+    parser.add_argument('-a', '--host', default="", metavar='HOST',
+                        help='attach to server HOST [localhost]')
+    parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
+                        help='katcp listen port [%(default)s]')
+    parser.add_argument('-l', '--log-level', metavar='LEVEL',
+                        help='set the Python logging level [%(default)s]')
+    parser.add_argument('--name', default='sdpmc',
+                        help='name to use in Zookeeper and Singularity [%(default)s]')
+    parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
+                        help='Name by which others connect to this machine [%(default)s]')
+    parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
+                        help='port for the Dash backend for the GUI [%(default)s]')
+    parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
+                        help='port for Prometheus metrics [%(default)s]')
+    parser.add_argument('--image-tag-file',
+                        metavar='FILE', help='Load image tag to run from file (on each configure)')
+    parser.add_argument('--s3-config-file',
+                        metavar='FILE',
+                        help='Configuration for connecting services to S3 '
+                             '(loaded on each configure)')
+    parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
+                        metavar='MULTICAST-CIDR',
+                        help='Block of multicast addresses from which to draw internal allocation. '
+                             'Needs to be at least /16. [%(default)s]')
+    parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
+                        help='File containing JSON describing related GUIs, '
+                             'or directory with .json files [none]')
+    parser.add_argument('--registry',
+                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
+                        help='registry from which to pull images [%(default)s]')
+    parser.add_argument('--no-pull', action='store_true', default=False,
+                        help='Skip pulling images from the registry if already present')
+    add_shared_options(parser)
+    katsdpservices.add_aiomonitor_arguments(parser)
+    # TODO: support Zookeeper ensemble
+    parser.add_argument('zk',
+                        help='Endpoint for Zookeeper server e.g. server.domain:2181')
+    parser.add_argument('singularity',
+                        help='URL for Singularity server')
+    args = parser.parse_args(argv)
+
+    if args.gui_urls is not None:
+        try:
+            if os.path.isdir(args.gui_urls):
+                args.gui_urls = _load_gui_urls_dir(args.gui_urls)
+            else:
+                args.gui_urls = _load_gui_urls_file(args.gui_urls)
+        except _InvalidGuiUrlsError as exc:
+            parser.error(str(exc))
+        except Exception as exc:
+            parser.error(f'Could not read {args.gui_urls}: {exc}')
+
+    if args.s3_config_file is None and not args.interface_mode:
+        parser.error('--s3-config-file is required (unless --interface-mode is given)')
+
+    return args
