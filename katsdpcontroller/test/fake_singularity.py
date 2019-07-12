@@ -11,7 +11,6 @@ import asyncio
 import enum
 import uuid
 from collections import deque
-from abc import abstractmethod
 from typing import List, Dict, Deque, Mapping, Callable, Awaitable, Optional, Any, TypeVar
 
 import aiohttp.web
@@ -31,8 +30,8 @@ class TaskState(enum.Enum):
     DEAD = 'dead'                 # Not reported by Singularity, but a useful internal state
 
 
-def _next_enum(x : _E) -> _E:
-    items = list(type(x))
+def _next_enum(x: _E) -> _E:
+    items: List[_E] = list(type(x))
     return items[items.index(x) + 1]
 
 

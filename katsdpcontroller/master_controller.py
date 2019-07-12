@@ -474,7 +474,7 @@ class SingularityProductManager(ProductManagerBase):
                 payload = (await self._zk.get('/state'))[0]
                 data = json.loads(payload)
                 if data['version'] != 1:
-                    raise ValueError('Version mismatch')
+                    raise ValueError('version mismatch')
                 # TODO: apply a JSON schema check?
             except aiozk.exc.NoNode:
                 logger.info('No existing state found')
@@ -619,7 +619,7 @@ class SingularityProductManager(ProductManagerBase):
         return str(cbid)
 
     @property
-    def products(self) -> Mapping[str, Product]:
+    def products(self) -> Mapping[str, SingularityProduct]:
         return self._products
 
     async def create_product(self, name: str) -> Product:
