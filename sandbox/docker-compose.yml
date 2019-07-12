@@ -42,6 +42,9 @@ services:
       - /sys:/sys
       - /usr/bin/docker:/usr/local/bin/docker
       - ./etc/mesos-slave:/etc/mesos-slave:ro
+      # /var/tmp/mesos needs to be the same on the host and the container,
+      # because mesos-slave writes to the sandbox and then tells the host
+      # Docker to bind-mount it into the newly started container.
       - /var/tmp/mesos:/var/tmp/mesos
       - ./etc/passwd:/etc/passwd:ro
       - ./etc/group:/etc/group:ro
