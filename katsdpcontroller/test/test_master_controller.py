@@ -188,7 +188,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertIsNotNone(product2.katcp_conn)
         self.assertIsNot(product, product2)   # Must be reconstituted from state
 
-    async def test_spontaneous_death(self):
+    async def test_spontaneous_death(self) -> None:
         """Product must be cleaned up if it dies on its own"""
         await self.start_manager()
         product = await self.start_product(spontaneous_death_lifecycle)
@@ -201,13 +201,25 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # Check that Zookeeper was updated
         self.assertEqual((await self.get_zk_state())['products'], {})
 
-    async def test_bad_zk_version(self):
-        """Wrong version in state stored in Zookeeper"""
-        payload = json.dumps({"version": 200000}).encode()
+    async def _test_bad_zk(self, payload: bytes) -> None:
+        """Existing state data in Zookeeper is not valid"""
         await self.manager._zk.create('/state', payload)
         with self.assertLogs(master_controller.logger, logging.WARNING) as cm:
             await self.start_manager()
-        self.assertEqual(
-            cm.output[0],
-            'WARNING:katsdpcontroller.master_controller:'
-            'Could not load existing state (version mismatch), so starting fresh')
+        self.assertRegex(cm.output[0], '.*:Could not load existing state')
+
+    async def test_bad_zk_version(self):
+        """Wrong version in state stored in Zookeeper"""
+        await self._test_bad_zk(json.dumps({"version": 200000}).encode())
+
+    async def test_bad_zk_schema(self):
+        """Data in Zookeeper is not valid JSON"""
+        await self._test_bad_zk(b'I am not JSON')
+
+    async def test_bad_zk_utf8(self):
+        """Data in Zookeeper is not valid UTF-8"""
+        await self._test_bad_zk(b'\xff')
+
+    async def test_bad_zk_schema(self):
+        """Data in Zookeeper does not conform to schema"""
+        await self._test_bad_zk(json.dumps({"version": 1}).encode())

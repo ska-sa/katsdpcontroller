@@ -26,12 +26,14 @@ import aiozk
 import aiokatcp
 from aiokatcp import FailReply
 import async_timeout
+import jsonschema
 import yarl
 from prometheus_client import Gauge, Counter, Histogram
 import katsdpservices
 
 import katsdpcontroller
 from . import singularity, product_config, scheduler, sensor_proxy
+from .schemas import ZK_STATE
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState, add_shared_options)
 
@@ -473,13 +475,13 @@ class SingularityProductManager(ProductManagerBase):
             try:
                 payload = (await self._zk.get('/state'))[0]
                 data = json.loads(payload)
-                if data['version'] != 1:
+                if data.get('version') != 1:
                     raise ValueError('version mismatch')
-                # TODO: apply a JSON schema check?
+                ZK_STATE.validate(data)
             except aiozk.exc.NoNode:
                 logger.info('No existing state found')
                 data = default
-            except (KeyError, ValueError) as exc:
+            except (ValueError, jsonschema.ValidationError) as exc:
                 logger.warning('Could not load existing state (%s), so starting fresh', exc)
                 data = default
             for name, info in data['products'].items():

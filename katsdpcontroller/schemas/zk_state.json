@@ -1,0 +1,38 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["version", "next_capture_block_id", "next_multicast_group", "products"],
+    "properties": {
+        "version": {
+            "type": "integer",
+            "enum": [1]
+        },
+        "next_capture_block_id": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "next_multicast_group": {
+            "type": "string",
+            "format": "ipv4"
+        },
+        "products": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["run_id", "task_id", "host", "port", "multicast_groups"],
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "host": {"type": "string"},
+                    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+                    "multicast_groups": {
+                        "type": "array",
+                        "items": {"type": "string", "format": "ipv4"}
+                    }
+                }
+            }
+        }
+    }
+}
