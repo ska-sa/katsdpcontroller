@@ -1255,7 +1255,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.numa_attr
         ]
         self._make_physical()
-        self.sched = scheduler.Scheduler('default', 0, 'http://scheduler/')
+        self.sched = scheduler.Scheduler('default', '127.0.0.1', 0, 'http://scheduler/')
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
                                            self.sched.http_url)
         self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,

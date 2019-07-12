@@ -107,7 +107,7 @@ services:
       - ./etc/logstash.conf:/etc/logstash.conf:ro
       - ./logs:/logstash-logs
     ports:
-      - "12201:12201/udp"    # GELF
+      - "127.0.0.1:12201:12201/udp"    # GELF
 
 volumes:
   prometheus_data: {}

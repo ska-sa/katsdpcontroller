@@ -2367,6 +2367,8 @@ class Scheduler(pymesos.Scheduler):
     ----------
     default_role : str
         Mesos role used by the default queue
+    http_host : str
+        Hostname to bind for the embedded HTTP server (defaults to all interfaces)
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
@@ -2383,6 +2385,8 @@ class Scheduler(pymesos.Scheduler):
     app : :class:`aiohttp.web.Application`
         Web application used internally for scheduling. Prior to calling
         :meth:`start` it can be modified e.g. to add additional endpoints.
+    http_host : str
+        Actual host binding for the HTTP server (after :meth:`start`)
     http_port : int
         Actual HTTP port used for the HTTP server (after :meth:`start`)
     http_url : str
@@ -2390,7 +2394,7 @@ class Scheduler(pymesos.Scheduler):
     http_runner : :class:`aiohttp.web.AppRunner`
         Runner for the HTTP app
     """
-    def __init__(self, default_role, http_port, http_url=None, runner_kwargs=None):
+    def __init__(self, default_role, http_host, http_port, http_url=None, runner_kwargs=None):
         self._loop = asyncio.get_event_loop()
         self._driver = None
         self._offers = {}           #: offers keyed by role then agent ID then offer ID
@@ -2406,6 +2410,7 @@ class Scheduler(pymesos.Scheduler):
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
+        self.http_host = http_host
         self.http_port = http_port
         self.http_url = http_url
         self._launcher_task = self._loop.create_task(self._launcher())
@@ -2435,12 +2440,11 @@ class Scheduler(pymesos.Scheduler):
         # See https://stackoverflow.com/questions/45907833 for more details.
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('::', self.http_port))
+        sock.bind((self.http_host, self.http_port))
 
         site = aiohttp.web.SockSite(self.http_runner, sock)
         await site.start()
-        if not self.http_port:
-            self.http_port = self.http_runner.addresses[0][1]
+        self.http_host, self.http_port = self.http_runner.addresses[0][:2]
         if not self.http_url:
             self.http_url = site.name
         logger.info('Internal HTTP server at %s', self.http_url)

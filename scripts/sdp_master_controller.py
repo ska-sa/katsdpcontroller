@@ -40,7 +40,7 @@ async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
     app.add_routes([aiohttp.web.get('/metrics', quiet_prometheus_stats)])
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, '', args.http_port)
+    site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
     await site.start()
     return runner
 

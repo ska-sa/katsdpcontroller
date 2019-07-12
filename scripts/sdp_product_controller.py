@@ -49,7 +49,7 @@ def init_dashboard(controller, opts):
     from katsdpcontroller.dashboard import Dashboard
 
     dashboard = Dashboard(controller)
-    dashboard.start(opts.dashboard_port)
+    dashboard.start(opts.host, opts.dashboard_port)
 
 
 def parse_s3_config(value: str) -> dict:
@@ -101,6 +101,10 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
         aioconsole_port=os.environ.get('PORT3', aiomonitor.CONSOLE_PORT))
     katsdpservices.add_aiomonitor_arguments(parser)
     args = parser.parse_args()
+
+    if args.localhost:
+        args.host = '127.0.0.1'
+        args.external_hostname = '127.0.0.1'
 
     if args.s3_config is None and not args.interface_mode:
         parser.error('--s3-config is required (unless --interface-mode is given)')
@@ -159,7 +163,7 @@ def main() -> None:
     if args.interface_mode:
         sched = None
     else:
-        sched = scheduler.Scheduler(args.realtime_role, args.http_port, args.http_url,
+        sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
                                     dict(access_log_class=web.AccessLogger))
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
@@ -170,6 +174,7 @@ def main() -> None:
         args.host, args.port, master_controller, sched,
         batch_role=args.batch_role,
         interface_mode=args.interface_mode,
+        localhost=args.localhost,
         image_resolver_factory=image_resolver_factory,
         s3_config=args.s3_config,
         graph_dir=args.write_graphs)

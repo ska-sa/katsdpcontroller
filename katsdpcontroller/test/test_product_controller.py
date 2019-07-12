@@ -351,6 +351,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await self.setup_server(host='127.0.0.1', port=0, sched=None,
                                 batch_role='batch',
                                 interface_mode=True,
+                                localhost=True,
                                 image_resolver_factory=image_resolver_factory,
                                 s3_config=None)
         create_patch(self, 'time.time', return_value=123456789.5)
@@ -588,6 +589,7 @@ class TestSDPController(BaseTestSDPController):
             image_resolver_factory=scheduler.ImageResolverFactory(
                 scheduler.SimpleImageLookup('sdp')),
             interface_mode=False,
+            localhost=True,
             batch_role='batch')
         # Creating the sensor here isn't quite accurate (it is a dynamic sensor
         # created on subarray activation), but it shouldn't matter.

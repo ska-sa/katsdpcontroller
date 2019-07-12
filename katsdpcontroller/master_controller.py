@@ -409,10 +409,15 @@ class SingularityProductManager(ProductManagerBase):
         """
         request_id = self._request_id_prefix + product_name
         environ = {}
-        for key in ['KATSDP_LOG_ONELINE', 'KATSDP_LOG_LEVEL', 'KATSDP_LOG_GELF_ADDRESS',
-                    'KATSDP_LOG_GELF_EXTRA']:
+        for key in ['KATSDP_LOG_ONELINE', 'KATSDP_LOG_LEVEL', 'KATSDP_LOG_GELF_ADDRESS']:
             if key in os.environ:
                 environ[key] = os.environ[key]
+        extra = {
+            **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
+            'task': 'product_controller',
+            'docker.image': image
+        }
+        environ['KATSDP_LOG_GELF_EXTRA'] = json.dumps(extra)
         deploy = {
             "requestId": request_id,
             "command": "sdp_product_controller.py",
@@ -422,7 +427,7 @@ class SingularityProductManager(ProductManagerBase):
                 "type": "DOCKER",
                 "docker": {
                     "image": image,
-                    "forcePullImage": False,    # TODO: switch to true?
+                    "forcePullImage": False,
                     "network": "HOST"
                 }
             },
@@ -1187,6 +1192,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument('singularity',
                         help='URL for Singularity server')
     args = parser.parse_args(argv)
+
+    if args.localhost:
+        args.host = '127.0.0.1'
+        args.external_hostname = '127.0.0.1'
 
     if args.gui_urls is not None:
         try:

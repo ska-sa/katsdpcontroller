@@ -896,6 +896,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             'config', lambda resolver: {})(self.resolver)
         base_params['subarray_product_id'] = self.subarray_product_id
         base_params['sdp_config'] = self.config
+        if self.sdp_controller.localhost:
+            base_params.setdefault('config', {})['host'] = '127.0.0.1'
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
@@ -1052,12 +1054,14 @@ class DeviceServer(aiokatcp.DeviceServer):
                  sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
+                 localhost: bool,
                  image_resolver_factory: scheduler.ImageResolverFactory,
                  s3_config: dict,
                  graph_dir: str = None) -> None:
         self.sched = sched
         self.batch_role = batch_role
         self.interface_mode = interface_mode
+        self.localhost = localhost
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = s3_config
         self.graph_dir = graph_dir

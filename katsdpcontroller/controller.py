@@ -68,6 +68,8 @@ def log_task_exceptions(task: asyncio.Future,
 def add_shared_options(parser: argparse.ArgumentParser) -> None:
     """Add command-line options that flow through master controller to the product controller."""
     # Keep these in sync with extract_shared_options
+    parser.add_argument('--localhost', action='store_true',
+                        help='Bind all ports to localhost (for security on dev systems)')
     parser.add_argument('-i', '--interface-mode', default=False,
                         action='store_true',
                         help='run the controller in interface only mode for testing '
@@ -95,6 +97,8 @@ def extract_shared_options(args: argparse.Namespace) -> List[str]:
         f'--principal={args.principal}',
         f'--user={args.user}'
     ]
+    if args.localhost:
+        ret.append('--localhost')
     if args.interface_mode:
         ret.append('--interface-mode')
     if args.write_graphs is not None:
