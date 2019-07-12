@@ -10,10 +10,16 @@ the test.
 import asyncio
 import enum
 import uuid
-from typing import List, Dict, Optional, Any
+from collections import deque
+from abc import abstractmethod
+from typing import List, Dict, Deque, Mapping, Callable, Awaitable, Optional, Any, TypeVar
 
 import aiohttp.web
 import aiohttp.test_utils
+
+
+_E = TypeVar('_E', bound=enum.Enum)
+Lifecycle = Callable[['Task'], Awaitable[None]]
 
 
 class TaskState(enum.Enum):
@@ -25,13 +31,18 @@ class TaskState(enum.Enum):
     DEAD = 'dead'                 # Not reported by Singularity, but a useful internal state
 
 
+def _next_enum(x : _E) -> _E:
+    items = list(type(x))
+    return items[items.index(x) + 1]
+
+
 class _Request:
     def __init__(self, config: Dict[str, Any]) -> None:
         self.request_id: str = config['id']
         self.config = config
         self.active_deploy: Optional['_Deploy'] = None
         self.deploys: Dict[str, '_Deploy'] = {}
-        self.tasks: Dict[str, '_Task'] = {}    # Indexed by run_id
+        self.tasks: Dict[str, 'Task'] = {}    # Indexed by run_id
 
     def task_ids(self) -> Dict[str, List[Dict[str, Any]]]:
         ans: Dict[str, List[Dict[str, Any]]] = {
@@ -65,7 +76,7 @@ class _Deploy:
         self.config = config
 
 
-class _Task:
+class Task:
     def __init__(self, deploy: _Deploy, config: Dict[str, Any]) -> None:
         self.deploy = deploy
         self.run_id: str = config['runId']
@@ -73,7 +84,10 @@ class _Task:
         self.task_id = uuid.uuid4().hex
         self.state = TaskState.NOT_CREATED
         self.config = config
-        self.future = asyncio.get_event_loop().create_task(self._run())
+
+        self.killed = asyncio.Event()
+        self.force_killed = asyncio.Event()
+        self.task_id_known = asyncio.Event()
 
     @property
     def visible(self) -> bool:
@@ -113,37 +127,56 @@ class _Task:
                                 {"name": "TASK_HOST", "value": "slave.invalid"},
                                 {"name": "PORT", "value": "12345"},
                                 {"name": "PORT0", "value": "12345"},
-                                {"name": "PORT1", "value": "12345"}
+                                {"name": "PORT1", "value": "12346"}
                             ]
                         }
                     }
                 }
             }
 
-    async def _run(self) -> None:
-        """Background asyncio task to simulate running the process.
+    def kill(self, force: bool = False) -> None:
+        self.killed.set()
+        if force:
+            self.force_killed.set()
 
-        To "kill" the process, cancel this task. If it was "running", it will die
-        gracefully, going via :const:`TaskState.CLEANING`.
-        """
-        # TODO: make this progression (particularly the sleeps) configurable
-        try:
-            try:
-                for state in [TaskState.PENDING, TaskState.NOT_YET_HEALTHY, TaskState.HEALTHY]:
-                    await asyncio.sleep(1)
-                    self.state = state
-                never_done = asyncio.get_event_loop().create_future()
-                await never_done
-            except asyncio.CancelledError:
-                pass
-            if not self.visible:
-                self.state = TaskState.DEAD
+
+async def default_lifecycle(task: Task,
+                            times: Optional[Mapping[TaskState, Optional[float]]] = None) -> None:
+    """Runs task through the full lifecycle, pausing for some time in each state.
+
+    Parameters
+    ----------
+    task
+        Task to run
+    times
+        The time to spend in each state. If not specified, defaults to 10 seconds,
+        except for :const:`TaskState.HEALTHY` which is only interrupted by
+        killing. Times may also be ``None`` to never leave the state.
+    """
+    try:
+        times = dict(times) if times is not None else {}
+        for state in TaskState:
+            if state not in times:
+                times[state] = None if state == TaskState.HEALTHY else 10.0
+
+        while not task.force_killed.is_set() and task.state != TaskState.DEAD:
+            state = task.state
+            if state == TaskState.CLEANING:
+                event = task.force_killed
             else:
-                for state in [TaskState.CLEANING, TaskState.DEAD]:
-                    await asyncio.sleep(1)
-                    self.state = state
-        finally:
-            self.state = TaskState.DEAD
+                event = task.killed
+
+            try:
+                await asyncio.wait_for(event.wait(), timeout=times[state])
+            except asyncio.TimeoutError:
+                task.state = _next_enum(state)
+            else:
+                if state in {TaskState.NOT_YET_HEALTHY, TaskState.HEALTHY}:
+                    task.state = TaskState.CLEANING
+                else:
+                    task.state = TaskState.DEAD
+    finally:
+        task.state = TaskState.DEAD
 
 
 class SingularityServer:
@@ -161,8 +194,11 @@ class SingularityServer:
             aiohttp.web.get('/api/track/run/{request_id}/{run_id}', self._track_run)
         ])
         self.server = aiohttp.test_utils.TestServer(app)
+        # Each time a task is created, the next class is taken from this deque and
+        # used to construct it's lifecycle controller.
+        self.lifecycles: Deque[Lifecycle] = deque()
         self._requests: Dict[str, _Request] = {}
-        self._tasks: Dict[str, _Task] = {}    # Indexed by task ID
+        self._tasks: Dict[str, Task] = {}    # Indexed by task ID
 
     async def _get_request(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
@@ -210,7 +246,12 @@ class SingularityServer:
             raise aiohttp.web.HTTPBadRequest(text='Duplicate runId')
         if request.active_deploy is None:
             raise aiohttp.web.HTTPConflict
-        task = _Task(request.active_deploy, config)
+        task = Task(request.active_deploy, config)
+        try:
+            lifecycle = self.lifecycles.popleft()
+        except IndexError:
+            lifecycle = default_lifecycle
+        asyncio.ensure_future(lifecycle(task))
         request.tasks[run_id] = task
         self._tasks[task.task_id] = task
         return aiohttp.web.json_response({})
@@ -244,12 +285,14 @@ class SingularityServer:
                 "currentState": "TASK_RUNNING",
                 "pending": False
             }
+            task.task_id_known.set()
         elif task.state == TaskState.DEAD:
             data = {
                 "taskId": {"id": task.task_id},
-                "currentState": "TASK_DEAD",
+                "currentState": "TASK_KILLED",
                 "pending": False
             }
+            task.task_id_known.set()
         elif task.state == TaskState.PENDING:
             data = {
                 "runId": run_id,
@@ -270,6 +313,8 @@ class SingularityServer:
 
     async def close(self) -> None:
         await self.server.close()
+        for task in self._tasks.values():
+            task.kill(force=True)
 
     @property
     def root_url(self) -> str:

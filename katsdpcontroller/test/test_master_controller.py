@@ -6,7 +6,7 @@ import aiokatcp
 import asynctest
 import open_file_mock
 
-from ..master_controller import SingularityProductManager, parse_args
+from ..master_controller import ProductFailed, Product, SingularityProductManager, parse_args
 from . import fake_zk, fake_singularity
 from .utils import create_patch, device_server_sockname
 
@@ -56,24 +56,38 @@ class DummyServer(aiokatcp.DeviceServer):
     BUILD_STATE = 'dummy-1.0'
 
 
+async def quick_death_lifecycle(task: fake_singularity.Task) -> None:
+    """Task dies instantly"""
+    task.state = fake_singularity.TaskState.DEAD
+
+
+async def death_after_task_id_lifecycle(task: fake_singularity.Task) -> None:
+    """Task dies as soon as the client sees the task ID."""
+    task.state = fake_singularity.TaskState.NOT_YET_HEALTHY
+    await task.task_id_known.wait()
+    task.state = fake_singularity.TaskState.DEAD
+
+
 class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def setUp(self) -> None:
-        singularity_server = fake_singularity.SingularityServer()
-        await singularity_server.start()
-        self.addCleanup(singularity_server.close)
-        server = DummyServer('127.0.0.1', 0)
-        await server.start()
-        self.addCleanup(server.stop)
+        self.singularity_server = fake_singularity.SingularityServer()
+        await self.singularity_server.start()
+        self.addCleanup(self.singularity_server.close)
+        self.server = DummyServer('127.0.0.1', 0)
+        await self.server.start()
+        self.addCleanup(self.server.stop)
         args = parse_args([
             '--host', '127.0.0.1',
-            '--port', str(device_server_sockname(server)[1]),
+            '--port', str(device_server_sockname(self.server)[1]),
             '--name', 'sdpmc_test',
             '--external-hostname', 'me.invalid',
             '--s3-config-file', 's3_config.json',
-            'zk.invalid:2181', singularity_server.root_url
+            'zk.invalid:2181', self.singularity_server.root_url
         ])
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
-            self.manager = SingularityProductManager(args, server)
+            self.manager = SingularityProductManager(args, self.server)
+        self.sensor_proxy_client_mock = \
+            create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG_JSON)
 
@@ -92,3 +106,34 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.advance(100)
         self.assertTrue(task.done())
         product = await task
+        self.assertEqual(product.task_state, Product.TaskState.STARTING)
+        self.assertEqual(product.host, 'slave.invalid')
+        self.assertEqual(product.port, 12345)
+        self.sensor_proxy_client_mock.assert_called_with(
+            self.server, 'foo.', {'subarray_product_id': 'foo'}, mock.ANY,
+            host='slave.invalid', port=12345)
+
+        await self.manager.product_active(product)
+        self.assertEqual(product.task_state, Product.TaskState.ACTIVE)
+
+    async def test_create_product_dies_fast(self) -> None:
+        """Task dies before we observe it running"""
+        await self.clean_start()
+        self.singularity_server.lifecycles.append(quick_death_lifecycle)
+        task = self.loop.create_task(self.manager.create_product('foo'))
+        await self.advance(100)
+        self.assertTrue(task.done())
+        with self.assertRaises(ProductFailed):
+            await task
+        self.assertEqual(self.manager.products, {})
+
+    async def test_create_product_dies_after_task_id(self) -> None:
+        """Task dies immediately after we learn its task ID"""
+        await self.clean_start()
+        self.singularity_server.lifecycles.append(death_after_task_id_lifecycle)
+        task = self.loop.create_task(self.manager.create_product('foo'))
+        await self.advance(100)
+        self.assertTrue(task.done())
+        with self.assertRaises(ProductFailed):
+            await task
+        self.assertEqual(self.manager.products, {})

@@ -1,15 +1,10 @@
 """Science Data Processor Master Controller"""
 
 # TODO:
-# - internal sensors (including products)
-# - decide how to do product-reconfigure
-# - sdp-shutdown
 # - fill in remaining requests
 # - possibly add some barriers to ensure that existing state is saved before
 #   handling new katcp requests.
 # - possibly add wait_connected to _katcp_request
-# - pass logging environment variables through to product controller
-# - interface mode
 
 import asyncio
 import logging
