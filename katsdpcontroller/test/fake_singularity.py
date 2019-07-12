@@ -98,6 +98,7 @@ class Task:
         elif self.state == TaskState.PENDING:
             return {}   # TODO
         else:
+            self.task_id_known.set()
             return {
                 "id": self.task_id,
                 "requestId": self.deploy.request.request_id,
@@ -281,7 +282,8 @@ class SingularityServer:
         if task.visible:
             data = {
                 "taskId": {"id": task.task_id},
-                "currentState": "TASK_RUNNING",
+                "currentState":
+                    "TASK_CLEANING" if task.state == TaskState.CLEANING else "TASK_RUNNING",
                 "pending": False
             }
             task.task_id_known.set()

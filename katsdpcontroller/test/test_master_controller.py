@@ -1,5 +1,6 @@
 """Tests for :mod:`katsdpcontroller.master_controller."""
 
+import asyncio
 import logging
 import json
 from unittest import mock
@@ -78,6 +79,12 @@ async def spontaneous_death_lifecycle(task: fake_singularity.Task) -> None:
         task, times={fake_singularity.TaskState.HEALTHY: 1000.0})
 
 
+async def long_pending_lifecycle(task: fake_singularity.Task) -> None:
+    """Task takes longer than the timeout to make it out of pending state"""
+    await fake_singularity.default_lifecycle(
+        task, times={fake_singularity.TaskState.PENDING: 1000.0})
+
+
 class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def setUp(self) -> None:
         self.singularity_server = fake_singularity.SingularityServer()
@@ -106,7 +113,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.manager.start()
         self.addCleanup(self.manager.stop)
 
-    async def get_zk_state(self) -> None:
+    async def get_zk_state(self) -> dict:
         payload = (await self.manager._zk.get('/state'))[0]
         return json.loads(payload)
 
@@ -201,6 +208,24 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # Check that Zookeeper was updated
         self.assertEqual((await self.get_zk_state())['products'], {})
 
+    async def test_stuck_pending(self) -> None:
+        """Task takes a long time to be launched.
+
+        The configure gets cancelled before then, and reconciliation must
+        clean up the task.
+        """
+        await self.start_manager()
+        self.singularity_server.lifecycles.append(long_pending_lifecycle)
+        task = self.loop.create_task(self.manager.create_product('foo'))
+        await self.advance(500)
+        self.assertFalse(task.done())
+        task.cancel()
+
+        await self.advance(1000)
+        self.assertTrue(task.done())
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
     async def _test_bad_zk(self, payload: bytes) -> None:
         """Existing state data in Zookeeper is not valid"""
         await self.manager._zk.create('/state', payload)
@@ -212,7 +237,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """Wrong version in state stored in Zookeeper"""
         await self._test_bad_zk(json.dumps({"version": 200000}).encode())
 
-    async def test_bad_zk_schema(self):
+    async def test_bad_zk_json(self):
         """Data in Zookeeper is not valid JSON"""
         await self._test_bad_zk(b'I am not JSON')
 

@@ -33,7 +33,7 @@ import katsdpservices
 
 import katsdpcontroller
 from . import singularity, product_config, scheduler, sensor_proxy
-from .schemas import ZK_STATE
+from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState, add_shared_options)
 
