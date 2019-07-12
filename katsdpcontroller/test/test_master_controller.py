@@ -76,7 +76,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.server = DummyServer('127.0.0.1', 0)
         await self.server.start()
         self.addCleanup(self.server.stop)
-        args = parse_args([
+        self.args = parse_args([
             '--host', '127.0.0.1',
             '--port', str(device_server_sockname(self.server)[1]),
             '--name', 'sdpmc_test',
@@ -85,7 +85,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             'zk.invalid:2181', self.singularity_server.root_url
         ])
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
-            self.manager = SingularityProductManager(args, self.server)
+            self.manager = SingularityProductManager(self.args, self.server)
         self.sensor_proxy_client_mock = \
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
@@ -137,3 +137,32 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         with self.assertRaises(ProductFailed):
             await task
         self.assertEqual(self.manager.products, {})
+
+    async def test_persist(self) -> None:
+        await self.manager.start()
+        task = self.loop.create_task(self.manager.create_product('foo'))
+        await self.advance(100)
+        self.assertTrue(task.done())
+        product = await task
+        await self.manager.product_active(product)
+
+        # Throw away the manager, create a new one
+        zk = self.manager._zk
+        await self.manager.stop()
+        # We don't model ephemeral nodes in fake_zk, so have to delete manually
+        await zk.delete('/running')
+        with mock.patch('aiozk.ZKClient', return_value=zk):
+            self.manager = SingularityProductManager(self.args, self.server)
+        await self.manager.start()
+        self.addCleanup(self.manager.stop)
+        self.assertEqual(self.manager.products, {'foo': mock.ANY})
+
+        product2 = self.manager.products['foo']
+        self.assertEqual(product.task_state, product2.task_state)
+        self.assertEqual(product.run_id, product2.run_id)
+        self.assertEqual(product.task_id, product2.task_id)
+        self.assertEqual(product.multicast_groups, product2.multicast_groups)
+        self.assertEqual(product.host, product2.host)
+        self.assertEqual(product.port, product2.port)
+        self.assertIsNotNone(product2.katcp_conn)
+        self.assertIsNot(product, product2)   # Must be reconstituted from state

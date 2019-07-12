@@ -66,3 +66,12 @@ class ZKClient:
             await self.ensure_path(self._parent(path))
         if path not in self._nodes:
             self._nodes[path] = _Node()
+
+    async def delete(self, path: str) -> None:
+        path = self.normalize_path(path)
+        if path not in self._nodes:
+            raise aiozk.exc.NoNode
+        for name in self._nodes:
+            if name != path and name.startswith(path):
+                raise aiozk.exc.NotEmpty
+        del self._nodes[path]
