@@ -189,7 +189,7 @@ class SingularityServer:
             aiohttp.web.post('/api/deploys', self._create_deploy),
             aiohttp.web.post('/api/requests/request/{request_id}/run', self._create_run),
             aiohttp.web.get('/api/tasks/task/{task_id}', self._get_task),
-            #aiohttp.web.delete('/api/tasks/task/{task_id}', self._delete_task),
+            aiohttp.web.delete('/api/tasks/task/{task_id}', self._delete_task),
             aiohttp.web.get('/api/tasks/ids/request/{request_id}', self._get_request_tasks),
             aiohttp.web.get('/api/track/run/{request_id}/{run_id}', self._track_run)
         ])
@@ -308,6 +308,14 @@ class SingularityServer:
         else:
             data = {}    # TODO
         return aiohttp.web.json_response(data)
+
+    async def _delete_task(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
+        task_id = http_request.match_info['task_id']
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise aiohttp.web.HTTPNotFound
+        task.kill()
+        return aiohttp.web.json_response({})
 
     async def start(self) -> None:
         await self.server.start_server()
