@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import json
+import functools
 from unittest import mock
 
 import aiokatcp
@@ -66,8 +67,9 @@ async def quick_death_lifecycle(task: fake_singularity.Task) -> None:
     task.state = fake_singularity.TaskState.DEAD
 
 
-async def death_after_task_id_lifecycle(task: fake_singularity.Task) -> None:
+async def death_after_task_id_lifecycle(init_wait: float, task: fake_singularity.Task) -> None:
     """Task dies as soon as the client sees the task ID."""
+    await asyncio.sleep(init_wait)
     task.state = fake_singularity.TaskState.NOT_YET_HEALTHY
     await task.task_id_known.wait()
     task.state = fake_singularity.TaskState.DEAD
@@ -106,6 +108,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.sensor_proxy_client_mock = \
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
+        self.open_mock.default_behavior = open_file_mock.DEFAULTS_ORIGINAL
         self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG_JSON)
 
     async def start_manager(self) -> None:
@@ -148,16 +151,29 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             await task
         self.assertEqual(self.manager.products, {})
 
-    async def test_create_product_dies_after_task_id(self) -> None:
-        """Task dies immediately after we learn its task ID"""
+    async def _test_create_product_dies_after_task_id(self, init_wait: float) -> None:
+        """Task dies immediately after we learn its task ID
+
+        This test is parametrised so that we can control whether the task ID is
+        learnt during polling for the new task or during task reconciliation.
+        """
         await self.start_manager()
-        self.singularity_server.lifecycles.append(death_after_task_id_lifecycle)
+        self.singularity_server.lifecycles.append(
+            functools.partial(death_after_task_id_lifecycle, init_wait))
         task = self.loop.create_task(self.manager.create_product('foo'))
         await self.advance(100)
         self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
             await task
         self.assertEqual(self.manager.products, {})
+
+    async def test_create_product_dies_after_task_id_reconciliation(self) -> None:
+        """Task dies immediately after we learn its task ID during reconciliation"""
+        await self._test_create_product_dies_after_task_id(self.manager.reconciliation_interval)
+
+    async def test_create_product_dies_after_task_id_poll(self) -> None:
+        """Task dies immediately after we learn its task ID during polling"""
+        await self._test_create_product_dies_after_task_id(self.manager.new_task_poll_interval)
 
     async def start_product(
             self, lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:

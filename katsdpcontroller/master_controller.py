@@ -315,6 +315,15 @@ class SingularityProduct(Product):
 class SingularityProductManager(ProductManagerBase):
     """Run subarray products as tasks within Hubspot Singularity."""
 
+    # Interval between polling Singularity for data on tasks
+    reconciliation_interval = 10.0
+    # Once we create a new singularity run, this is the interval at which
+    # we poll to try to find the task ID. It is deliberately chosen not to
+    # divide into the reconciliation interval, which is needed for some of
+    # the clocked unit tests so that it's possible to control which event
+    # happens next.
+    new_task_poll_interval = 0.3
+
     def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
         super().__init__(args, server)
         self._request_id_prefix = args.name + '_product_'
@@ -577,7 +586,7 @@ class SingularityProductManager(ProductManagerBase):
     async def _reconcile_repeat(self) -> None:
         """Run :meth:_reconcile_once regularly"""
         while True:
-            await asyncio.sleep(10)
+            await asyncio.sleep(self.reconciliation_interval)
             try:
                 await self._reconcile_once()
             except Exception:
@@ -669,7 +678,7 @@ class SingularityProductManager(ProductManagerBase):
                     except KeyError:
                         # Happens if the task hasn't been launched yet
                         pass
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(self.new_task_poll_interval)
 
             # Update task cache
             assert task_id is not None
