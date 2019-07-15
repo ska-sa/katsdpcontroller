@@ -1,15 +1,15 @@
 """Utilities for unit tests"""
 
 import unittest
-from unittest import mock
 from typing import Any, Tuple
 
 import aiokatcp
+import asynctest
 
 
 def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:
     """Wrap mock.patch such that it will be unpatched as part of test case cleanup"""
-    patcher = mock.patch(*args, **kwargs)
+    patcher = asynctest.patch(*args, **kwargs)
     mock_obj = patcher.start()
     test_case.addCleanup(patcher.stop)
     return mock_obj
