@@ -142,8 +142,10 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             '--safe-multicast-cidr', '225.100.0.0/24',
             'zk.invalid:2181', self.singularity_server.root_url
         ])
+        self.prometheus_registry = prometheus_client.CollectorRegistry()
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
-            self.manager = SingularityProductManager(self.args, self.server)
+            self.manager = SingularityProductManager(self.args, self.server,
+                                                     self.prometheus_registry)
         self.sensor_proxy_client_mock = \
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
@@ -380,8 +382,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(await product.get_state(), ProductState.IDLE)
         self.assertEqual(self.server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value,
                          42)
-        prom_value = prometheus_client.REGISTRY.get_sample_value(
+        prom_value = self.prometheus_registry.get_sample_value(
             'katsdpcontroller_input_bytes_total',
             {'subarray_product_id': 'product1', 'service': 'ingest.sdp_l0.1'})
         self.assertEqual(prom_value, 42)
-

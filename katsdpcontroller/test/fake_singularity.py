@@ -118,9 +118,9 @@ class Task:
         else:
             env = {'TASK_HOST': self.host}
             for i, port in enumerate(self.ports):
-                env[f'PORT{i}'] = port
+                env[f'PORT{i}'] = str(port)
                 if i == 0:
-                    env['PORT'] = port
+                    env['PORT'] = str(port)
             return {
                 "taskId": self.short_info(),
                 "taskRequest": {

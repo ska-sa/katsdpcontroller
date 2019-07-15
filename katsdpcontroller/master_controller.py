@@ -28,7 +28,7 @@ from aiokatcp import FailReply
 import async_timeout
 import jsonschema
 import yarl
-from prometheus_client import Gauge, Counter, Histogram
+from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import katsdpservices
 
 import katsdpcontroller
@@ -52,7 +52,8 @@ class ProductFailed(Exception):
     """Attempt to create a subarray product was unsuccessful"""
 
 
-def _prometheus_factory(name: str,
+def _prometheus_factory(registry: CollectorRegistry,
+                        name: str,
                         sensor: aiokatcp.Sensor) -> Optional[sensor_proxy.PrometheusInfo]:
     assert sensor.description is not None
     match = _HINT_RE.search(sensor.description)
@@ -82,7 +83,7 @@ def _prometheus_factory(name: str,
     service, base = name.rsplit('.', 1)
     normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
     return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
-                                       {'service': service})
+                                       {'service': service}, registry)
 
 
 def _load_s3_config(filename):
@@ -122,7 +123,8 @@ class Product:
         self.dead_event = asyncio.Event()
         self._dead_callbacks: List[Callable[['Product'], None]] = []
 
-    def connect(self, server: aiokatcp.DeviceServer, host: str, port: int) -> None:
+    def connect(self, server: aiokatcp.DeviceServer, registry: CollectorRegistry,
+                host: str, port: int) -> None:
         """Notify product of the location of the katcp interface.
 
         After calling this, :attr:`host`, :attr:`port` and :attr:`katcp_conn`
@@ -131,7 +133,8 @@ class Product:
         self.host = host
         self.port = port
         self.katcp_conn = sensor_proxy.SensorProxyClient(
-            server, f'{self.name}.', {'subarray_product_id': self.name}, _prometheus_factory,
+            server, f'{self.name}.', {'subarray_product_id': self.name},
+            functools.partial(_prometheus_factory, registry),
             host=host, port=port)
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
@@ -327,7 +330,9 @@ class SingularityProductManager(ProductManagerBase):
     # happens next.
     new_task_poll_interval = 0.3
 
-    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
+    def __init__(self, args: argparse.Namespace,
+                 server: aiokatcp.DeviceServer,
+                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
         super().__init__(args, server)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
@@ -342,6 +347,7 @@ class SingularityProductManager(ProductManagerBase):
         self._zk_state_lock = asyncio.Lock()
         self._args = args
         self._next_capture_block_id = 0
+        self._prometheus_registry = prometheus_registry
 
     async def _zk_set(self, key: str, payload: bytes) -> None:
         """Set content for a Zookeeper node, creating it if necessary"""
@@ -503,7 +509,7 @@ class SingularityProductManager(ProductManagerBase):
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
-                prod.connect(self._server, info['host'], info['port'])
+                prod.connect(self._server, self._prometheus_registry, info['host'], info['port'])
                 self._products[name] = prod
                 prod.add_dead_callback(self._product_died)
             # The implementation overrides it if it doesn't match the current
@@ -696,7 +702,7 @@ class SingularityProductManager(ProductManagerBase):
             env: Dict[str, str] = {item['name']: item['value'] for item in env_list}
             host = env['TASK_HOST']
             port = int(env['PORT0'])
-            product.connect(self._server, host, port)
+            product.connect(self._server, self._prometheus_registry, host, port)
             success = True
             await self._save_state()
 
@@ -737,11 +743,12 @@ class DeviceServer(aiokatcp.DeviceServer):
     _override_dicts: Dict[str, dict]
     _image_lookup: scheduler.ImageLookup
 
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args: argparse.Namespace,
+                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
         if args.interface_mode:
             self._manager = InternalProductManager(args, self)
         else:
-            self._manager = SingularityProductManager(args, self)
+            self._manager = SingularityProductManager(args, self, prometheus_registry)
         self._manager_stopped = asyncio.Event()
         self._override_dicts = {}
         if args.no_pull:
