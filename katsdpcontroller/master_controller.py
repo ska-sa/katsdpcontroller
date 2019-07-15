@@ -32,7 +32,7 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGI
 import katsdpservices
 
 import katsdpcontroller
-from . import singularity, product_config, scheduler, sensor_proxy
+from . import singularity, product_config, product_controller, scheduler, sensor_proxy
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions,
                          extract_shared_options, ProductState, add_shared_options)
@@ -198,6 +198,13 @@ class Product:
         """Add a function to call when :meth:`died` is called."""
         self._dead_callbacks.append(callback)
 
+    async def close(self):
+        if self.katcp_conn is not None:
+            self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
+            self.katcp_conn.close()
+            await self.katcp_conn.wait_closed()
+            self.katcp_conn.close()
+
 
 class ProductManagerBase:
     """Abstract base class for launching and managing subarray products."""
@@ -211,7 +218,9 @@ class ProductManagerBase:
     async def start(self) -> None: pass
 
     @abstractmethod
-    async def stop(self) -> None: pass
+    async def stop(self) -> None:
+        for product in self.products.values():
+            await product.close()
 
     @property
     @abstractmethod
@@ -301,12 +310,81 @@ class ProductManagerBase:
         """Generate a unique capture block ID"""
 
 
+class InternalProduct(Product):
+    def __init__(self, name: str, configure_task: Optional[asyncio.Task],
+                 server: aiokatcp.DeviceServer) -> None:
+        super().__init__(name, configure_task)
+        self.server = server
+
+    async def close(self) -> None:
+        await super().close()
+        await self.server.stop()
+
+
 class InternalProductManager(ProductManagerBase):
     """Run subarray products as asyncio tasks within the process.
 
     This is intended **only** for integration testing.
     """
-    pass
+    def __init__(self, args: argparse.Namespace,
+                 server: aiokatcp.DeviceServer,
+                 image_lookup: scheduler.ImageLookup,
+                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
+        super().__init__(args, server)
+        self._args = args
+        self._products: Dict[str, InternalProduct] = {}
+        self._image_resolver_factory = scheduler.ImageResolverFactory(image_lookup)
+        self._prometheus_registry = prometheus_registry
+        self._next_capture_block_id = 1
+
+    async def start(self) -> None:
+        await super().start()
+
+    async def stop(self) -> None:
+        await super().stop()
+        for product in self._products.values():
+            if product.server is not None:
+                await product.server.stop()
+
+    @property
+    def products(self) -> Mapping[str, Product]:
+        return self._products
+
+    async def create_product(self, name: str) -> Product:
+        assert name not in self._products
+        mc_client = aiokatcp.Client(self._args.external_hostname, self._args.port)
+        server = product_controller.DeviceServer(
+            '127.0.0.1', 0, mc_client, None, self._args.batch_role,
+            True, self._args.localhost, self._image_resolver_factory, {})
+        product = InternalProduct(name, asyncio.Task.current_task(), server)
+        product.add_dead_callback(self._product_died)
+        self._products[name] = product
+        await product.server.start()
+        assert product.server.server and product.server.server.sockets   # for mypy
+        host, port = product.server.server.sockets[0].getsockname()[:2]
+        product.task_state = Product.TaskState.STARTING
+        product.connect(self._server, self._prometheus_registry, host, port)
+        return product
+
+    async def product_active(self, product: Product) -> None:
+        product.task_state = Product.TaskState.ACTIVE
+
+    async def kill_product(self, product: Product) -> None:
+        assert isinstance(product, InternalProduct)
+        if self._products.get(product.name) is product:
+            del self._products[product.name]
+        await product.server.stop()
+        product.died()
+
+    async def get_capture_block_id(self) -> str:
+        cbid = self._next_capture_block_id
+        self._next_capture_block_id += 1
+        return f'{cbid:010}'
+
+    def _product_died(self, product: Product) -> None:
+        """Called by product.died"""
+        if self._products.get(product.name) is product:
+            del self._products[product.name]
 
 
 class SingularityProduct(Product):
@@ -614,6 +692,7 @@ class SingularityProductManager(ProductManagerBase):
         await self._reconcile_once()
         self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconcile_repeat())
         log_task_exceptions(self._reconciliation_task, logger, 'reconciliation')
+        await super().start()
 
     async def stop(self) -> None:
         if self._reconciliation_task is not None:
@@ -623,9 +702,7 @@ class SingularityProductManager(ProductManagerBase):
         await self._save_state()   # Should all be saved already, but belt-and-braces
         await self._sing.close()
         await self._zk.close()
-        for product in self._products.values():
-            if product.katcp_conn is not None:
-                product.katcp_conn.close()
+        await super().stop()
 
     async def get_multicast_groups(self, product: Product, n_addresses: int) -> str:
         ans = await super().get_multicast_groups(product, n_addresses)
@@ -745,16 +822,17 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def __init__(self, args: argparse.Namespace,
                  prometheus_registry: CollectorRegistry = REGISTRY) -> None:
+        if args.no_pull or args.interface_mode:
+            self._image_lookup = scheduler.SimpleImageLookup(args.registry)
+        else:
+            self._image_lookup = scheduler.HTTPImageLookup(args.registry)
         if args.interface_mode:
-            self._manager = InternalProductManager(args, self)
+            self._manager = InternalProductManager(
+                args, self, self._image_lookup, prometheus_registry)
         else:
             self._manager = SingularityProductManager(args, self, prometheus_registry)
         self._manager_stopped = asyncio.Event()
         self._override_dicts = {}
-        if args.no_pull:
-            self._image_lookup = scheduler.SimpleImageLookup(args.registry)
-        else:
-            self._image_lookup = scheduler.HTTPImageLookup(args.registry)
         super().__init__(args.host, args.port)
 
     async def start(self) -> None:
