@@ -84,6 +84,10 @@ class Task:
         self.state = TaskState.NOT_CREATED
         self.config = config
 
+        # These may be replaced by the lifecycle
+        self.host = 'slave.invalid'
+        self.ports = list(range(12345, 12345 + deploy.config['resources'].get('numPorts', 0)))
+
         self.killed = asyncio.Event()
         self.force_killed = asyncio.Event()
         self.task_id_known = asyncio.Event()
@@ -112,6 +116,11 @@ class Task:
         elif self.state == TaskState.PENDING:
             return {}   # TODO
         else:
+            env = {'TASK_HOST': self.host}
+            for i, port in enumerate(self.ports):
+                env[f'PORT{i}'] = port
+                if i == 0:
+                    env['PORT'] = port
             return {
                 "taskId": self.short_info(),
                 "taskRequest": {
@@ -123,12 +132,8 @@ class Task:
                 "mesosTask": {
                     "command": {
                         "environment": {
-                            "variables": [
-                                {"name": "TASK_HOST", "value": "slave.invalid"},
-                                {"name": "PORT", "value": "12345"},
-                                {"name": "PORT0", "value": "12345"},
-                                {"name": "PORT1", "value": "12346"}
-                            ]
+                            "variables": [{'name': key, 'value': value}
+                                          for (key, value) in env.items()]
                         }
                     }
                 }
@@ -197,34 +202,34 @@ class SingularityServer:
         # Each time a task is created, the next class is taken from this deque and
         # used to construct it's lifecycle controller.
         self.lifecycles: Deque[Lifecycle] = deque()
-        self._requests: Dict[str, _Request] = {}
-        self._tasks: Dict[str, Task] = {}    # Indexed by task ID
+        self.requests: Dict[str, _Request] = {}
+        self.tasks: Dict[str, Task] = {}    # Indexed by task ID
 
     async def _get_request(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
-        request = self._requests[request_id]
+        request = self.requests[request_id]
         if request is None:
             raise aiohttp.web.HTTPNotFound
         return aiohttp.web.json_response(request.info())
 
     async def _get_requests(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
-        info = [request.short_info() for request in self._requests.values()]
+        info = [request.short_info() for request in self.requests.values()]
         return aiohttp.web.json_response(info)
 
     async def _create_request(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         config = await http_request.json()
         request_id = config['id']
-        if request_id not in self._requests:
-            self._requests[request_id] = _Request(config)
+        if request_id not in self.requests:
+            self.requests[request_id] = _Request(config)
         else:
-            self._requests[request_id].config = config
+            self.requests[request_id].config = config
         return aiohttp.web.json_response({})
 
     async def _create_deploy(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         config = (await http_request.json())['deploy']
         request_id = config['requestId']
         deploy_id = config['id']
-        request = self._requests.get(request_id)
+        request = self.requests.get(request_id)
         if request is None:
             raise aiohttp.web.HTTPNotFound
         if deploy_id in request.deploys:
@@ -235,12 +240,12 @@ class SingularityServer:
 
     async def _create_run(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
-        request = self._requests.get(request_id)
+        request = self.requests.get(request_id)
         if request is None:
             raise aiohttp.web.HTTPNotFound
         config = await http_request.json()
         run_id = config['runId']
-        if any(task.run_id == run_id for task in self._tasks.values()):
+        if any(task.run_id == run_id for task in self.tasks.values()):
             # This is actually legal in Singularity, but complicates matters
             # and not what we want master controller to be doing.
             raise aiohttp.web.HTTPBadRequest(text='Duplicate runId')
@@ -253,19 +258,19 @@ class SingularityServer:
             lifecycle = default_lifecycle
         asyncio.ensure_future(lifecycle(task))
         request.tasks[run_id] = task
-        self._tasks[task.task_id] = task
+        self.tasks[task.task_id] = task
         return aiohttp.web.json_response({})
 
     async def _get_task(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         task_id = http_request.match_info['task_id']
-        task = self._tasks.get(task_id)
+        task = self.tasks.get(task_id)
         if task is None or not task.visible:
             raise aiohttp.web.HTTPNotFound
         return aiohttp.web.json_response(task.info())
 
     async def _get_request_tasks(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
-        request = self._requests.get(request_id)
+        request = self.requests.get(request_id)
         if request is None:
             raise aiohttp.web.HTTPNotFound
         return aiohttp.web.json_response(request.task_ids())
@@ -273,7 +278,7 @@ class SingularityServer:
     async def _track_run(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
         run_id = http_request.match_info['run_id']
-        request = self._requests.get(request_id)
+        request = self.requests.get(request_id)
         if request is None:
             raise aiohttp.web.HTTPNotFound
         task = request.tasks.get(run_id)
@@ -311,7 +316,7 @@ class SingularityServer:
 
     async def _delete_task(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         task_id = http_request.match_info['task_id']
-        task = self._tasks.get(task_id)
+        task = self.tasks.get(task_id)
         if task is None:
             raise aiohttp.web.HTTPNotFound
         task.kill()
@@ -322,7 +327,7 @@ class SingularityServer:
 
     async def close(self) -> None:
         await self.server.close()
-        for task in self._tasks.values():
+        for task in self.tasks.values():
             task.kill(force=True)
 
     @property

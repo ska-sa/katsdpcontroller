@@ -6,16 +6,19 @@ import json
 import functools
 import ipaddress
 from unittest import mock
-from typing import Set
+from typing import Set, List
 
 import aiokatcp
+import prometheus_client
 import asynctest
 import open_file_mock
 
 from .. import master_controller
+from ..controller import ProductState
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
                                  parse_args)
+from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import create_patch, device_server_sockname
 
@@ -62,7 +65,28 @@ S3_CONFIG_JSON = '''
 
 class DummyServer(aiokatcp.DeviceServer):
     VERSION = 'dummy-1.0'
-    BUILD_STATE = 'dummy-1.0'
+    BUILD_STATE = VERSION
+
+
+class DummyProductController(aiokatcp.DeviceServer):
+    VERSION = 'dummy-product-controller-1.0'
+    BUILD_STATE = VERSION
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sensors.add(aiokatcp.Sensor(
+            int, 'ingest.sdp_l0.1.input-bytes-total',
+            'Total input bytes (prometheus: gauge)',
+            default=42,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        self.requests: List[aiokatcp.Message] = []
+
+    async def unhandled_request(self, ctx: aiokatcp.RequestContext, req: aiokatcp.Message) -> None:
+        self.requests.append(req)
+
+    async def request_capture_status(self, ctx: aiokatcp.RequestContext) -> str:
+        """Get product status"""
+        return 'idle'
 
 
 async def quick_death_lifecycle(task: fake_singularity.Task) -> None:
@@ -88,6 +112,17 @@ async def long_pending_lifecycle(task: fake_singularity.Task) -> None:
     """Task takes longer than the timeout to make it out of pending state"""
     await fake_singularity.default_lifecycle(
         task, times={fake_singularity.TaskState.PENDING: 1000.0})
+
+
+async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
+    """The default lifecycle, but creates a real katcp port"""
+    server = DummyProductController('127.0.0.1', 0)
+    await server.start()
+    try:
+        task.host, task.ports[0] = device_server_sockname(server)
+        await fake_singularity.default_lifecycle(task)
+    finally:
+        await server.stop()
 
 
 class TestSingularityProductManager(asynctest.ClockedTestCase):
@@ -336,3 +371,17 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # Must persist state over restarts
         await self.reset_manager()
         self.assertEqual(await self.manager.get_capture_block_id(), '1122334461')
+
+    async def test_katcp(self) -> None:
+        await self.start_manager()
+        # Disable the mocking by making the real version the side effect
+        self.sensor_proxy_client_mock.side_effect = SensorProxyClient
+        product = await self.start_product(name='product1', lifecycle=katcp_server_lifecycle)
+        self.assertEqual(await product.get_state(), ProductState.IDLE)
+        self.assertEqual(self.server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value,
+                         42)
+        prom_value = prometheus_client.REGISTRY.get_sample_value(
+            'katsdpcontroller_input_bytes_total',
+            {'subarray_product_id': 'product1', 'service': 'ingest.sdp_l0.1'})
+        self.assertEqual(prom_value, 42)
+
