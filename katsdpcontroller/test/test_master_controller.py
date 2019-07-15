@@ -4,7 +4,9 @@ import asyncio
 import logging
 import json
 import functools
+import ipaddress
 from unittest import mock
+from typing import Set
 
 import aiokatcp
 import asynctest
@@ -116,7 +118,16 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def start_manager(self) -> None:
         """Start the manager and arrange for it to be stopped"""
         await self.manager.start()
-        self.addCleanup(self.manager.stop)
+        self.addCleanup(self.stop_manager)
+
+    async def stop_manager(self) -> None:
+        """Stop the manager.
+
+        This is used as a cleanup function rather than ``self.manager.stop``
+        directly, because it binds to the manager set at the time of call
+        whereas ``self.manager.stop`` binds immediately.
+        """
+        await self.manager.stop()
 
     async def get_zk_state(self) -> dict:
         payload = (await self.manager._zk.get('/state'))[0]
@@ -189,11 +200,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.manager.product_active(product)
         return product
 
-    async def test_persist(self) -> None:
-        await self.manager.start()
-        product = await self.start_product()
-
-        # Throw away the manager, create a new one
+    async def reset_manager(self) -> None:
+        """Throw away the manager and create a new one"""
         zk = self.manager._zk
         await self.manager.stop()
         # We don't model ephemeral nodes in fake_zk, so have to delete manually
@@ -201,7 +209,11 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         with mock.patch('aiozk.ZKClient', return_value=zk):
             self.manager = SingularityProductManager(self.args, self.server)
         await self.manager.start()
-        self.addCleanup(self.manager.stop)
+
+    async def test_persist(self) -> None:
+        await self.start_manager()
+        product = await self.start_product()
+        await self.reset_manager()
         self.assertEqual(self.manager.products, {'foo': mock.ANY})
 
         product2 = self.manager.products['foo']
@@ -286,3 +298,41 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # around to reuse the space freed by product2.
         self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.134+99')
         self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.6+99')
+
+    async def test_get_multicast_groups_persist(self) -> None:
+        await self.test_get_multicast_groups()
+        await self.reset_manager()
+        product1 = self.manager.products['product1']
+        expected: Set[ipaddress.IPv4Address] = set()
+        for i in range(105):
+            expected.add(ipaddress.IPv4Address('225.100.0.1') + i)
+        for i in range(100):
+            expected.add(ipaddress.IPv4Address('225.100.0.134') + i)
+        self.assertEqual(product1.multicast_groups, expected)
+        self.assertEqual(self.manager._next_multicast_group,
+                         ipaddress.IPv4Address('225.100.0.106'))
+
+    async def test_get_multicast_groups_negative(self) -> None:
+        await self.start_manager()
+        product = await self.start_product()
+        with self.assertRaises(ValueError):
+            await self.manager.get_multicast_groups(product, -1)
+        with self.assertRaises(ValueError):
+            await self.manager.get_multicast_groups(product, 0)
+
+    @asynctest.patch('time.time')
+    async def test_capture_block_id(self, mock_time) -> None:
+        await self.start_manager()
+        mock_time.return_value = 1122334455.123
+        self.assertEqual(await self.manager.get_capture_block_id(), '1122334455')
+        self.assertEqual(await self.manager.get_capture_block_id(), '1122334456')
+        # Must still be monotonic, even if time.time goes backwards
+        mock_time.return_value -= 10
+        self.assertEqual(await self.manager.get_capture_block_id(), '1122334457')
+        # Once time.time goes past next, must use that again
+        mock_time.return_value = 1122334460.987
+        self.assertEqual(await self.manager.get_capture_block_id(), '1122334460')
+
+        # Must persist state over restarts
+        await self.reset_manager()
+        self.assertEqual(await self.manager.get_capture_block_id(), '1122334461')
