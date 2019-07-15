@@ -266,8 +266,8 @@ class ProductManagerBase:
         wrapped = False
         # It might be the broadcast address, but must always be inside the network
         assert self._next_multicast_group in self._multicast_network
+        start = self._next_multicast_group
         while True:
-            start = self._next_multicast_group
             # Check if there is enough space
             if int(self._multicast_network.broadcast_address) - int(start) < n_addresses:
                 if wrapped:
@@ -277,12 +277,15 @@ class ProductManagerBase:
                 start = self._multicast_network.network_address + 1
                 continue
             for i in range(n_addresses):
-                if any(self._next_multicast_group in prod.multicast_groups for prod in products):
-                    self._next_multicast_group = start + (i + 1)
+                cur = start + i
+                if any(cur in prod.multicast_groups for prod in products):
+                    # We've hit an already-allocated address. Go back around
+                    # the while loop, starting from the following address.
+                    start = cur + 1
                     break
             else:
                 # We've found a usable range
-                self._next_multicast_group += n_addresses
+                self._next_multicast_group = start + n_addresses
                 for i in range(n_addresses):
                     product.multicast_groups.add(start + i)
                 ans = str(start)

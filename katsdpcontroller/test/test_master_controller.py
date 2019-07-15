@@ -12,7 +12,8 @@ import open_file_mock
 
 from .. import master_controller
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
-                                 SingularityProductManager, parse_args)
+                                 SingularityProductManager, NoAddressesError,
+                                 parse_args)
 from . import fake_zk, fake_singularity
 from .utils import create_patch, device_server_sockname
 
@@ -101,6 +102,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             '--name', 'sdpmc_test',
             '--external-hostname', 'me.invalid',
             '--s3-config-file', 's3_config.json',
+            '--safe-multicast-cidr', '225.100.0.0/24',
             'zk.invalid:2181', self.singularity_server.root_url
         ])
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
@@ -176,10 +178,11 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self._test_create_product_dies_after_task_id(self.manager.new_task_poll_interval)
 
     async def start_product(
-            self, lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
+            self, name: str = 'foo',
+            lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
         if lifecycle:
             self.singularity_server.lifecycles.append(lifecycle)
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product(name))
         await self.advance(100)
         self.assertTrue(task.done())
         product = await task
@@ -214,7 +217,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def test_spontaneous_death(self) -> None:
         """Product must be cleaned up if it dies on its own"""
         await self.start_manager()
-        product = await self.start_product(spontaneous_death_lifecycle)
+        product = await self.start_product(lifecycle=spontaneous_death_lifecycle)
         # Check that Zookeeper initially knows about the product
         self.assertEqual((await self.get_zk_state())['products'], {'foo': mock.ANY})
 
@@ -249,18 +252,37 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             await self.start_manager()
         self.assertRegex(cm.output[0], '.*:Could not load existing state')
 
-    async def test_bad_zk_version(self):
+    async def test_bad_zk_version(self) -> None:
         """Wrong version in state stored in Zookeeper"""
         await self._test_bad_zk(json.dumps({"version": 200000}).encode())
 
-    async def test_bad_zk_json(self):
+    async def test_bad_zk_json(self) -> None:
         """Data in Zookeeper is not valid JSON"""
         await self._test_bad_zk(b'I am not JSON')
 
-    async def test_bad_zk_utf8(self):
+    async def test_bad_zk_utf8(self) -> None:
         """Data in Zookeeper is not valid UTF-8"""
         await self._test_bad_zk(b'\xff')
 
-    async def test_bad_zk_schema(self):
+    async def test_bad_zk_schema(self) -> None:
         """Data in Zookeeper does not conform to schema"""
         await self._test_bad_zk(json.dumps({"version": 1}).encode())
+
+    async def test_get_multicast_groups(self) -> None:
+        await self.start_manager()
+        product1 = await self.start_product('product1')
+        product2 = await self.start_product('product2')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 1), '225.100.0.1')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 4), '225.100.0.2+3')
+        with self.assertRaises(NoAddressesError):
+            await self.manager.get_multicast_groups(product1, 1000)
+
+        self.assertEqual(await self.manager.get_multicast_groups(product2, 128), '225.100.0.6+127')
+        # Now product1 owns .1-.5, product2 owns .6-.133.
+        await self.manager.kill_product(product2)
+        await self.advance(100)   # Give it time to clean up
+
+        # Allocations should continue from where they left off, then cycle
+        # around to reuse the space freed by product2.
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.134+99')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.6+99')
