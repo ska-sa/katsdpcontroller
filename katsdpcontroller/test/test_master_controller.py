@@ -93,6 +93,10 @@ class DummyProductController(aiokatcp.DeviceServer):
         """Get product status"""
         return 'idle'
 
+    async def request_telstate_endpoint(self, ctx: aiokatcp.RequestContext) -> str:
+        """Get the telescope state endpoint"""
+        return 'telstate.invalid:31000'
+
 
 async def quick_death_lifecycle(task: fake_singularity.Task) -> None:
     """Task dies instantly"""
@@ -402,10 +406,28 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.start_manager()
         # Disable the mocking by making the real version the side effect
         self.sensor_proxy_client_mock.side_effect = SensorProxyClient
-        product = await self.start_product(name='product1', lifecycle=katcp_server_lifecycle)
+        self.singularity_server.lifecycles.append(katcp_server_lifecycle)
+        task = self.loop.create_task(self.manager.create_product('product1'))
+        await self.advance(100)
+        self.assertTrue(task.done())
+        product = await task
+
+        # We haven't called product_active yet, so it should still be CONFIGURING
+        self.assertEqual(await product.get_state(), ProductState.CONFIGURING)
+        self.assertEqual(await product.get_telstate_endpoint(), '')
+
+        await self.manager.product_active(product)
         self.assertEqual(await product.get_state(), ProductState.IDLE)
+        self.assertEqual(await product.get_telstate_endpoint(), 'telstate.invalid:31000')
         self.assertEqual(self.server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value,
                          42)
         check_prom('input_bytes_total', 'ingest.sdp_l0.1', 'counter', 42)
         check_prom('gauge', 'foo', 'gauge', 1.5)
         check_prom('histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
+
+        # Have the remote katcp server tell us it is going away. This also
+        # provides test coverage of this shutdown path.
+        await product.katcp_conn.request('halt')
+        await product.dead_event.wait()
+        self.assertEqual(await product.get_state(), ProductState.DEAD)
+        self.assertEqual(await product.get_telstate_endpoint(), '')
