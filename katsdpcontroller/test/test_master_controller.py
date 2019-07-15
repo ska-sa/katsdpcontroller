@@ -357,6 +357,16 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """Data in Zookeeper does not conform to schema"""
         await self._test_bad_zk(json.dumps({"version": 1}).encode())
 
+    async def test_bad_s3_config(self) -> None:
+        await self.start_manager()
+        self.open_mock.unregister_path('s3_config.json')
+        self.open_mock.set_read_data_for('s3_config.json', 'I am not JSON')
+        task = self.loop.create_task(self.manager.create_product('foo'))
+        await self.advance(100)
+        self.assertTrue(task.done())
+        with self.assertRaises(ProductFailed):
+            await task
+
     async def test_get_multicast_groups(self) -> None:
         await self.start_manager()
         product1 = await self.start_product('product1')

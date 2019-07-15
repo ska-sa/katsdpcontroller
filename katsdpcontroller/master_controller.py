@@ -721,7 +721,10 @@ class SingularityProductManager(ProductManagerBase):
 
     async def create_product(self, name: str) -> Product:
         assert name not in self._products
-        s3_config = _load_s3_config(self._args.s3_config_file)
+        try:
+            s3_config = _load_s3_config(self._args.s3_config_file)
+        except Exception as exc:
+            raise ProductFailed(f'Could not load {self._args.s3_config_file}: {exc}') from exc
         args = extract_shared_options(self._args)
         # TODO: append --image-tag
         args.extend([
