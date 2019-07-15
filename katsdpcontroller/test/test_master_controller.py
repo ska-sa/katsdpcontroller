@@ -6,7 +6,7 @@ import json
 import functools
 import ipaddress
 from unittest import mock
-from typing import Set, List
+from typing import Set, List, Mapping
 
 import aiokatcp
 import prometheus_client
@@ -76,9 +76,14 @@ class DummyProductController(aiokatcp.DeviceServer):
         super().__init__(*args, **kwargs)
         self.sensors.add(aiokatcp.Sensor(
             int, 'ingest.sdp_l0.1.input-bytes-total',
-            'Total input bytes (prometheus: gauge)',
+            'Total input bytes (prometheus: counter)',
             default=42,
             initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        self.sensors.add(aiokatcp.Sensor(
+            float, 'foo.gauge', '(prometheus: gauge)', default=1.5,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        self.sensors.add(aiokatcp.Sensor(
+            int, 'foo.histogram', '(prometheus: histogram(1, 10, 100))'))
         self.requests: List[aiokatcp.Message] = []
 
     async def unhandled_request(self, ctx: aiokatcp.RequestContext, req: aiokatcp.Message) -> None:
@@ -375,6 +380,25 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(await self.manager.get_capture_block_id(), '1122334461')
 
     async def test_katcp(self) -> None:
+        def check_prom(name: str, service: str, type: str, value: float,
+                       sample_name: str = None, extra_labels: Mapping[str, str] = None) -> None:
+            name = 'katsdpcontroller_' + name
+            registry = self.prometheus_registry
+            for metric in registry.collect():
+                if metric.name == name:
+                    break
+            else:
+                raise KeyError(f'Metric {name} not found')
+            self.assertEqual(metric.type, type)
+            labels = {'subarray_product_id': 'product1', 'service': service}
+            if sample_name is None:
+                sample_name = name
+            else:
+                sample_name = 'katsdpcontroller_' + sample_name
+            if extra_labels is not None:
+                labels.update(extra_labels)
+            self.assertEqual(registry.get_sample_value(sample_name, labels), value)
+
         await self.start_manager()
         # Disable the mocking by making the real version the side effect
         self.sensor_proxy_client_mock.side_effect = SensorProxyClient
@@ -382,7 +406,6 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(await product.get_state(), ProductState.IDLE)
         self.assertEqual(self.server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value,
                          42)
-        prom_value = self.prometheus_registry.get_sample_value(
-            'katsdpcontroller_input_bytes_total',
-            {'subarray_product_id': 'product1', 'service': 'ingest.sdp_l0.1'})
-        self.assertEqual(prom_value, 42)
+        check_prom('input_bytes_total', 'ingest.sdp_l0.1', 'counter', 42)
+        check_prom('gauge', 'foo', 'gauge', 1.5)
+        check_prom('histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
