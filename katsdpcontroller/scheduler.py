@@ -2434,15 +2434,7 @@ class Scheduler(pymesos.Scheduler):
         if self.http_runner.sites:
             raise RuntimeError('Already started')
         await self.http_runner.setup()
-        # We want a single port serving both IPv4 and IPv6. Using TCPSite
-        # will create a separate socket for each, and if http_port is 0 (used
-        # by unit tests) they end up with different ports.
-        # See https://stackoverflow.com/questions/45907833 for more details.
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.http_host, self.http_port))
-
-        site = aiohttp.web.SockSite(self.http_runner, sock)
+        site = aiohttp.web.TCPSite(self.http_runner, self.http_host, self.http_port)
         await site.start()
         self.http_host, self.http_port = self.http_runner.addresses[0][:2]
         if not self.http_url:
