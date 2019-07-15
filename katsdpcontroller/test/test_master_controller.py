@@ -5,6 +5,7 @@ import logging
 import json
 import functools
 import ipaddress
+import os
 from unittest import mock
 from typing import Set, List, Mapping
 
@@ -302,6 +303,36 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertTrue(task.done())
         with self.assertRaises(asyncio.CancelledError):
             await task
+
+    async def test_reuse_deploy(self) -> None:
+        await self.start_manager()
+        product = await self.start_product()
+        deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
+
+        # Reuse, without restarting the manager
+        await self.manager.kill_product(product)
+        # Give it time to die
+        await self.advance(100)
+        product = await self.start_product()
+        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
+        self.assertEqual(new_deploy_id, deploy_id)
+
+        # Reuse, after a restart
+        await self.manager.kill_product(product)
+        # Give it time to die
+        await self.advance(100)
+        await self.reset_manager()
+        product = await self.start_product()
+        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
+        self.assertEqual(new_deploy_id, deploy_id)
+
+        # Alter the necessary state to ensure that a new deploy is used
+        await self.manager.kill_product(product)
+        await self.advance(100)
+        with mock.patch.dict(os.environ, {'KATSDP_LOG_LEVEL': 'test'}):
+            product = await self.start_product()
+        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
+        self.assertNotEqual(new_deploy_id, deploy_id)
 
     async def _test_bad_zk(self, payload: bytes) -> None:
         """Existing state data in Zookeeper is not valid"""
