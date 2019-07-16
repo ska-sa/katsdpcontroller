@@ -196,11 +196,17 @@ class Product:
     async def get_telstate_endpoint(self) -> str:
         return await self._katcp_request(str, '', '', 'telstate-endpoint')
 
-    def add_dead_callback(self, callback: Callable[['Product'], None]):
+    def add_dead_callback(self, callback: Callable[['Product'], None]) -> None:
         """Add a function to call when :meth:`died` is called."""
         self._dead_callbacks.append(callback)
 
-    async def close(self):
+    async def close(self) -> None:
+        """Disconnect from the product controller.
+
+        For a "real" product, this should *not* try to shut down the remote
+        side. This is called if the master controller is shut down, not when
+        ``product-deconfigure`` is called.
+        """
         if self.katcp_conn is not None:
             self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
             self.katcp_conn.close()
@@ -209,7 +215,10 @@ class Product:
 
 
 class ProductManagerBase(Generic[_P]):
-    """Abstract base class for launching and managing subarray products."""
+    """Abstract base class for launching and managing subarray products.
+
+    It also handles allocation of multicast groups and capture block IDs.
+    """
 
     def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
         self._args = args
@@ -237,7 +246,8 @@ class ProductManagerBase(Generic[_P]):
 
     def _init_state(self, products: Iterable[_P], next_capture_block_id: int,
                     next_multicast_group: ipaddress.IPv4Address) -> None:
-        """Set the initial state from persistent storage
+        """Set the initial state from persistent storage. This is intended to
+        be called by subclasses.
 
         Parameters
         ----------
@@ -246,7 +256,7 @@ class ProductManagerBase(Generic[_P]):
             and have katcp information filled in, but the _product_died callback should
             not have been added.
         next_capture_block_id
-            Lower bound for the next capture block ID
+            Lower bound for the next capture block ID.
         next_multicast_group
             Hint for the next multicast group to allocate. If it is outside the allowed
             range, it will be ignored.
@@ -279,7 +289,7 @@ class ProductManagerBase(Generic[_P]):
         """
 
     def _add_product(self, product: _P) -> None:
-        """Used by subclasses to add a newly created product."""
+        """Used by subclasses to add a newly-created product."""
         assert product.name not in self._products
         self._products[product.name] = product
         product.add_dead_callback(self._product_died)
@@ -291,7 +301,10 @@ class ProductManagerBase(Generic[_P]):
 
     @abstractmethod
     async def kill_product(self, product: _P) -> None:
-        """Move a product to state :const:`~Product.TaskState.DEAD`"""
+        """Move a product to state :const:`~Product.TaskState.DEAD`.
+
+        Subclasses should override this to actually kill off the product.
+        """
         if self._products.get(product.name) is product:
             del self._products[product.name]
             await self._save_state()
@@ -363,6 +376,7 @@ class ProductManagerBase(Generic[_P]):
 
 
 class InternalProduct(Product):
+    """Product with internal :class:`.product_controller.DeviceServer`"""
     def __init__(self, name: str, configure_task: Optional[asyncio.Task],
                  server: aiokatcp.DeviceServer) -> None:
         super().__init__(name, configure_task)
