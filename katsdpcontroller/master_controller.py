@@ -34,8 +34,8 @@ import katsdpservices
 import katsdpcontroller
 from . import singularity, product_config, product_controller, scheduler, sensor_proxy
 from .schemas import ZK_STATE       # type: ignore
-from .controller import (time_request, load_json_dict, log_task_exceptions,
-                         extract_shared_options, ProductState, add_shared_options)
+from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
+                         add_shared_options, extract_shared_options, ProductState)
 
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
@@ -352,7 +352,7 @@ class InternalProductManager(ProductManagerBase):
 
     async def create_product(self, name: str) -> Product:
         assert name not in self._products
-        mc_client = aiokatcp.Client(self._args.external_hostname, self._args.port)
+        mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
             '127.0.0.1', 0, mc_client, None, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory, {})
@@ -361,7 +361,7 @@ class InternalProductManager(ProductManagerBase):
         self._products[name] = product
         await product.server.start()
         assert product.server.server and product.server.server.sockets   # for mypy
-        host, port = product.server.server.sockets[0].getsockname()[:2]
+        host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
         product.connect(self._server, self._prometheus_registry, host, port)
         return product
@@ -727,10 +727,11 @@ class SingularityProductManager(ProductManagerBase):
             raise ProductFailed(f'Could not load {self._args.s3_config_file}: {exc}') from exc
         args = extract_shared_options(self._args)
         # TODO: append --image-tag
+        port = device_server_sockname(self._server)[1]
         args.extend([
             '--s3-config=' + json.dumps(s3_config),
             f'--subarray-product-id={name}',
-            f'{self._args.external_hostname}:{self._args.port}',
+            f'{self._args.external_hostname}:{port}',
             f'zk://{self._args.zk}/mesos'
         ])
 

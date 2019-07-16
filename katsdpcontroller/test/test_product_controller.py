@@ -3,6 +3,7 @@
 import unittest
 from unittest import mock
 import itertools
+import json
 import asyncio
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
@@ -24,12 +25,14 @@ import netifaces
 import katsdptelstate
 import katpoint
 
+from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
     ProductState, DeviceStatus, _redact_keys)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import create_patch, device_server_sockname
+from .utils import (create_patch, assert_request_fails, assert_sensors,
+                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
 
 
 ANTENNAS = 'm000,m001,m063,m064'
@@ -51,142 +54,6 @@ STREAMS = '''{
     }
 }'''
 
-CONFIG = '''{
-    "version": "2.4",
-    "inputs": {
-        "camdata": {
-            "type": "cam.http",
-            "url": "http://127.0.0.1:8999"
-        },
-        "i0_antenna_channelised_voltage": {
-            "type": "cbf.antenna_channelised_voltage",
-            "url": "spead://239.102.252.0+15:7148",
-            "antennas": ["m000", "m001", "m063", "m064"],
-            "n_chans": 4096,
-            "n_pols": 2,
-            "adc_sample_rate": 1712000000.0,
-            "bandwidth": 856000000.0,
-            "n_samples_between_spectra": 8192,
-            "instrument_dev_name": "i0"
-        },
-        "i0_baseline_correlation_products": {
-            "type": "cbf.baseline_correlation_products",
-            "url": "spead://239.102.255.0+15:7148",
-            "src_streams": ["i0_antenna_channelised_voltage"],
-            "int_time": 0.499,
-            "n_bls": 40,
-            "xeng_out_bits_per_sample": 32,
-            "n_chans_per_substream": 256,
-            "instrument_dev_name": "i0",
-            "simulate": {
-                "center_freq": 1284000000.0,
-                "sources": ["PKS 1934-638, radec, 19:39:25.03, -63:42:45.63"]
-            }
-        },
-        "i0_tied_array_channelised_voltage_0x": {
-            "type": "cbf.tied_array_channelised_voltage",
-            "url": "spead://239.102.254.1+15:7148",
-            "src_streams": ["i0_antenna_channelised_voltage"],
-            "spectra_per_heap": 256,
-            "n_chans_per_substream": 256,
-            "beng_out_bits_per_sample": 8,
-            "instrument_dev_name": "i0"
-        },
-        "i0_tied_array_channelised_voltage_0y": {
-            "type": "cbf.tied_array_channelised_voltage",
-            "url": "spead://239.102.253.1+15:7148",
-            "src_streams": ["i0_antenna_channelised_voltage"],
-            "spectra_per_heap": 256,
-            "n_chans_per_substream": 256,
-            "beng_out_bits_per_sample": 8,
-            "instrument_dev_name": "i0"
-        }
-    },
-    "outputs": {
-        "sdp_l0": {
-            "type": "sdp.vis",
-            "src_streams": ["i0_baseline_correlation_products"],
-            "output_int_time": 4.0,
-            "continuum_factor": 1,
-            "archive": true
-        },
-        "sdp_l0_continuum": {
-            "type": "sdp.vis",
-            "src_streams": ["i0_baseline_correlation_products"],
-            "output_int_time": 4.0,
-            "continuum_factor": 16,
-            "archive": true
-        },
-        "sdp_l0_spectral_only": {
-            "type": "sdp.vis",
-            "src_streams": ["i0_baseline_correlation_products"],
-            "output_int_time": 1.9,
-            "continuum_factor": 1,
-            "archive": true
-        },
-        "sdp_l0_continuum_only": {
-            "type": "sdp.vis",
-            "src_streams": ["i0_baseline_correlation_products"],
-            "output_int_time": 2.1,
-            "continuum_factor": 16,
-            "output_channels": [117, 3472],
-            "archive": true
-        },
-        "sdp_beamformer": {
-            "type": "sdp.beamformer",
-            "src_streams": [
-                "i0_tied_array_channelised_voltage_0x",
-                "i0_tied_array_channelised_voltage_0y"
-            ]
-        },
-        "sdp_beamformer_engineering_ssd": {
-            "type": "sdp.beamformer_engineering",
-            "src_streams": [
-                "i0_tied_array_channelised_voltage_0x",
-                "i0_tied_array_channelised_voltage_0y"
-            ],
-            "output_channels": [0, 4096],
-            "store": "ssd"
-        },
-        "sdp_beamformer_engineering_ram": {
-            "type": "sdp.beamformer_engineering",
-            "src_streams": [
-                "i0_tied_array_channelised_voltage_0x",
-                "i0_tied_array_channelised_voltage_0y"
-            ],
-            "output_channels": [0, 4096],
-            "store": "ram"
-        },
-        "cal": {
-            "type": "sdp.cal",
-            "src_streams": ["sdp_l0"],
-            "buffer_time": 1800.0
-        },
-        "sdp_l1_flags": {
-            "type": "sdp.flags",
-            "src_streams": ["sdp_l0"],
-            "calibration": ["cal"],
-            "archive": true
-        },
-        "sdp_l1_flags_continuum": {
-            "type": "sdp.flags",
-            "src_streams": ["sdp_l0_continuum"],
-            "calibration": ["cal"],
-            "archive": true
-        },
-        "continuum_image": {
-            "type": "sdp.continuum_image",
-            "src_streams": ["sdp_l1_flags_continuum"]
-        },
-        "spectral_image": {
-            "type": "sdp.spectral_image",
-            "src_streams": ["sdp_l1_flags"],
-            "output_channels": [60, 70]
-        }
-    },
-    "config": {}
-}'''
-
 EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
     (b'api-version', b'', b'string'),
     (b'build-state', b'', b'string'),
@@ -195,17 +62,6 @@ EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
     (b'time-synchronised', b'', b'boolean'),
     (b'gui-urls', b'', b'string'),
     (b'products', b'', b'string')
-)
-
-EXPECTED_INTERFACE_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
-    (b'bf_ingest.beamformer.1.port', b'', b'address'),
-    (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
-    (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
-    (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
-    (b'cal.1.capture-block-state', b'', b'string'),
-    (b'state', b'', b'discrete',
-     b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error'),
-    (b'capture-block-state', b'', b'string')
 )
 
 EXPECTED_REQUEST_LIST = [
@@ -301,24 +157,6 @@ class BaseTestSDPController(asynctest.TestCase):
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
 
-    async def assert_request_fails(self, name: str, *args: Any) -> None:
-        with self.assertRaises(aiokatcp.FailReply):
-            await self.client.request(name, *args)
-
-    async def assert_sensors(self, expected_list: Iterable[Tuple[bytes, ...]]) -> None:
-        expected = {item[0]: item[1:] for item in expected_list}
-        reply, informs = await self.client.request("sensor-list")
-        actual = {}
-        for inform in informs:
-            # Skip the description
-            actual[inform.arguments[0]] = tuple(inform.arguments[2:])
-        self.assertEqual(expected, actual)
-
-    async def assert_sensor_value(self, name: str, value: Any) -> None:
-        encoded = aiokatcp.encode(value)
-        reply, informs = await self.client.request("sensor-value", name)
-        self.assertEqual(informs[0].arguments[4], encoded)
-
     async def setUp(self) -> None:
         # Mock the CBF sensors
         dummy_client = fake_katportalclient.KATPortalClient(
@@ -357,21 +195,21 @@ class TestSDPControllerInterface(BaseTestSDPController):
         create_patch(self, 'time.time', return_value=123456789.5)
 
     async def test_capture_init(self) -> None:
-        await self.assert_request_fails("capture-init", CAPTURE_BLOCK)
+        await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
 
         reply, informs = await self.client.request("capture-status")
         self.assertEqual(reply, [b"capturing"])
-        await self.assert_request_fails("capture-init", CAPTURE_BLOCK)
+        await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
 
     async def test_interface_sensors(self) -> None:
-        await self.assert_sensors(EXPECTED_SENSOR_LIST)
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         interface_changed_callback.assert_called_once_with([b'sensor-list'])
-        await self.assert_sensors(EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
 
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
@@ -381,31 +219,31 @@ class TestSDPControllerInterface(BaseTestSDPController):
         self.client.remove_inform_callback('interface-changed', interface_changed_callback)
 
     async def test_capture_done(self) -> None:
-        await self.assert_request_fails("capture-done")
+        await assert_request_fails(self.client, "capture-done")
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await self.assert_request_fails("capture-done")
+        await assert_request_fails(self.client, "capture-done")
 
         await self.client.request("capture-init", CAPTURE_BLOCK)
         reply, informs = await self.client.request("capture-done")
         self.assertEqual(reply, [CAPTURE_BLOCK.encode()])
-        await self.assert_request_fails("capture-done")
+        await assert_request_fails(self.client, "capture-done")
 
     async def test_deconfigure_subarray_product(self) -> None:
-        await self.assert_request_fails("product-configure")
+        await assert_request_fails(self.client, "product-configure")
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         # should not be able to deconfigure when not in idle state
-        await self.assert_request_fails("product-deconfigure")
+        await assert_request_fails(self.client, "product-deconfigure")
         await self.client.request("capture-done")
         await self.client.request("product-deconfigure")
         # server should now shut itself down
         await self.client.wait_disconnected()
 
     async def test_configure_subarray_product(self) -> None:
-        await self.assert_request_fails("product-deconfigure")
+        await assert_request_fails(self.client, "product-deconfigure")
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         # Can't reconfigure when already configured
-        await self.assert_request_fails("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await assert_request_fails(self.client, "product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("product-deconfigure")
 
     async def test_help(self) -> None:
@@ -546,46 +384,9 @@ class TestSDPController(BaseTestSDPController):
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
-        s3_config = {
-            "continuum": {
-                "read": {
-                    "access_key": "not-really-an-access-key",
-                    "secret_key": "tellno1"
-                },
-                "write": {
-                    "access_key": "another-fake-key",
-                    "secret_key": "s3cr3t"
-                },
-                "url": "http://continuum.s3.invalid/",
-                "expiry_days": 7
-            },
-            "spectral": {
-                "read": {
-                    "access_key": "not-really-an-access-key",
-                    "secret_key": "tellno1"
-                },
-                "write": {
-                    "access_key": "another-fake-key",
-                    "secret_key": "s3cr3t"
-                },
-                "url": "http://spectral.s3.invalid/",
-                "expiry_days": 7
-            },
-            "archive": {
-                "read": {
-                    "access_key": "not-really-an-access-key",
-                    "secret_key": "tellno1"
-                },
-                "write": {
-                    "access_key": "another-fake-key",
-                    "secret_key": "s3cr3t"
-                },
-                "url": "http://archive.s3.invalid/"
-            }
-        }
         await self.setup_server(
             host='127.0.0.1', port=0, sched=self.sched,
-            s3_config=s3_config,
+            s3_config=json.loads(S3_CONFIG),
             image_resolver_factory=scheduler.ImageResolverFactory(
                 scheduler.SimpleImageLookup('sdp')),
             interface_mode=False,
@@ -809,7 +610,7 @@ class TestSDPController(BaseTestSDPController):
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
         katsdptelstate.TelescopeState.__init__.side_effect = katsdptelstate.ConnectionError
-        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT))
+        await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
@@ -818,7 +619,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_task_fail(self) -> None:
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
-        await self.assert_request_fails(*self._configure_args(SUBARRAY_PRODUCT))
+        await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         katsdptelstate.TelescopeState.__init__.assert_called_once_with(
             mock.ANY, 'host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
@@ -839,7 +640,7 @@ class TestSDPController(BaseTestSDPController):
         """product-deconfigure must fail while capturing"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         await self.client.request("capture-init", CAPTURE_BLOCK)
-        await self.assert_request_fails("product-deconfigure")
+        await assert_request_fails(self.client, "product-deconfigure")
 
     async def test_product_deconfigure_capturing_force(self) -> None:
         """forced product-deconfigure must succeed while capturing"""
@@ -853,7 +654,7 @@ class TestSDPController(BaseTestSDPController):
         """product-deconfigure cannot happen concurrently with capture-init"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         async with self._capture_init_slow(CAPTURE_BLOCK):
-            await self.assert_request_fails('product-deconfigure', False)
+            await assert_request_fails(self.client, 'product-deconfigure', False)
         # Check that the subarray still exists and has the right state
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
@@ -924,7 +725,7 @@ class TestSDPController(BaseTestSDPController):
         """Capture-init fails on some task"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         self.fail_requests.add('capture-init')
-        await self.assert_request_fails("capture-init", CAPTURE_BLOCK)
+        await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
@@ -946,7 +747,7 @@ class TestSDPController(BaseTestSDPController):
         await self._configure_subarray(SUBARRAY_PRODUCT)
         self.fail_requests.add('capture-done')
         reply, informs = await self.client.request("capture-init", CAPTURE_BLOCK)
-        await self.assert_request_fails("capture-done")
+        await assert_request_fails(self.client, "capture-done")
         # check that the subsequent transitions still run
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, True)
@@ -964,9 +765,9 @@ class TestSDPController(BaseTestSDPController):
         ?product-configure is in progress
         """
         async with self._product_configure_slow(SUBARRAY_PRODUCT):
-            await self.assert_request_fails(command, *args)
+            await assert_request_fails(self.client, command, *args)
         async with self._capture_init_slow(CAPTURE_BLOCK):
-            await self.assert_request_fails(command, *args)
+            await assert_request_fails(self.client, command, *args)
 
     async def test_capture_init_busy(self) -> None:
         """Capture-init fails if an asynchronous operation is already in progress"""
@@ -998,7 +799,7 @@ class TestSDPController(BaseTestSDPController):
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
         self._ingest_died(product)
         self.assertEqual(ProductState.ERROR, product.state)
-        await self.assert_request_fails("capture-init", CAPTURE_BLOCK)
+        await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         self.assertEqual(ProductState.ERROR, product.state)
         self.assertEqual({}, product.capture_blocks)
@@ -1139,14 +940,14 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_telstate_endpoint(self) -> None:
         """Test telstate-endpoint"""
-        await self.assert_request_fails('telstate-endpoint')
+        await assert_request_fails(self.client, 'telstate-endpoint')
         await self._configure_subarray(SUBARRAY_PRODUCT)
         reply, _ = await self.client.request('telstate-endpoint')
         self.assertEqual(reply, [b'host.telstate:20000'])
 
     async def test_capture_status(self) -> None:
         """Test capture-status"""
-        await self.assert_request_fails('capture-status')
+        await assert_request_fails(self.client, 'capture-status')
         await self._configure_subarray(SUBARRAY_PRODUCT)
         reply, _ = await self.client.request('capture-status')
         self.assertEqual(reply, [b'idle'])

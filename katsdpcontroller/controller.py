@@ -6,8 +6,9 @@ import logging
 import functools
 import json
 import enum
-from typing import List, Callable, Union, AnyStr
+from typing import List, Tuple, Callable, Union, AnyStr
 
+import aiokatcp
 from prometheus_client import Histogram
 
 from . import scheduler
@@ -130,3 +131,8 @@ class DeviceStatus(enum.Enum):
     OK = 1
     DEGRADED = 2
     FAIL = 3
+
+
+def device_server_sockname(server: aiokatcp.DeviceServer) -> Tuple[str, int]:
+    assert server.server and server.server.sockets, "Server is not yet started"
+    return server.server.sockets[0].getsockname()[:2]

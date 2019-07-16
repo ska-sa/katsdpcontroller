@@ -22,7 +22,7 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 import asynctest
 
 from ..sensor_proxy import SensorProxyClient, PrometheusInfo
-from .utils import device_server_sockname
+from ..controller import device_server_sockname
 
 
 class MyEnum(enum.Enum):

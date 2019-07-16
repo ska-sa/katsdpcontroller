@@ -7,7 +7,7 @@ import functools
 import ipaddress
 import os
 from unittest import mock
-from typing import Set, List, Mapping
+from typing import Tuple, Set, List, Mapping, Any
 
 import aiokatcp
 import prometheus_client
@@ -15,53 +15,43 @@ import asynctest
 import open_file_mock
 
 from .. import master_controller
-from ..controller import ProductState
+from ..controller import ProductState, device_server_sockname
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
-                                 parse_args)
+                                 DeviceServer, parse_args)
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
-from .utils import create_patch, device_server_sockname
+from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
+                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
 
 
-S3_CONFIG_JSON = '''
-{
-    "continuum": {
-        "read": {
-            "access_key": "not-really-an-access-key",
-            "secret_key": "tellno1"
-        },
-        "write": {
-            "access_key": "another-fake-key",
-            "secret_key": "s3cr3t"
-        },
-        "url": "http://continuum.s3.invalid/",
-        "expiry_days": 7
-    },
-    "spectral": {
-        "read": {
-            "access_key": "not-really-an-access-key",
-            "secret_key": "tellno1"
-        },
-        "write": {
-            "access_key": "another-fake-key",
-            "secret_key": "s3cr3t"
-        },
-        "url": "http://spectral.s3.invalid/",
-        "expiry_days": 7
-    },
-    "archive": {
-        "read": {
-            "access_key": "not-really-an-access-key",
-            "secret_key": "tellno1"
-        },
-        "write": {
-            "access_key": "another-fake-key",
-            "secret_key": "s3cr3t"
-        },
-        "url": "http://archive.s3.invalid/"
-    }
-}'''
+EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
+    (b'api-version', b'', b'string'),
+    (b'build-state', b'', b'string'),
+    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
+    (b'fmeca.FD0001', b'', b'boolean'),
+    (b'time-synchronised', b'', b'boolean'),
+    (b'gui-urls', b'', b'string'),
+    (b'products', b'', b'string')
+)
+
+EXPECTED_REQUEST_LIST = [
+    'product-configure',
+    'product-deconfigure',
+    'product-reconfigure',
+    'product-list',
+    'set-config-override',
+    'capture-done',
+    'capture-init',
+    'capture-status',
+    'telstate-endpoint',
+    # Internal commands
+    'get-multicast-groups',
+    'image-lookup',
+    # Standard katcp commands
+    'client-list', 'halt', 'help', 'log-level', 'sensor-list',
+    'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'
+]
 
 
 class DummyServer(aiokatcp.DeviceServer):
@@ -160,7 +150,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.default_behavior = open_file_mock.DEFAULTS_ORIGINAL
-        self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG_JSON)
+        self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
 
     async def start_manager(self) -> None:
         """Start the manager and arrange for it to be stopped"""
@@ -472,3 +462,100 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await product.dead_event.wait()
         self.assertEqual(await product.get_state(), ProductState.DEAD)
         self.assertEqual(await product.get_telstate_endpoint(), '')
+
+
+class TestDeviceServer(asynctest.TestCase):
+    """Tests for :class:`.master_controller.DeviceServer`.
+
+    The tests use interface mode, because that avoids the complications of
+    emulating Singularity and Zookeeper, and allows interaction with a mostly
+    real product controller.
+    """
+    async def setUp(self):
+        self.args = parse_args([
+            '--localhost',
+            '--interface-mode',
+            '--port', '0',
+            '--name', 'sdpmc_test',
+            '--safe-multicast-cidr', '225.100.0.0/24',
+            'unused argument (zk)', 'unused argument (Singularity)'
+        ])
+        self.server = DeviceServer(self.args)
+        await self.server.start()
+        self.addCleanup(self.server.stop)
+        host, port = device_server_sockname(self.server)
+        self.client = aiokatcp.Client(host, port)
+        await self.client.wait_connected()
+        self.addCleanup(self.client.wait_closed)
+        self.addCleanup(self.client.close)
+
+    async def test_capture_init(self):
+        await assert_request_fails(self.client, "capture-init", "product")
+        await self.client.request("product-configure", "product", CONFIG)
+        reply, informs = await self.client.request("capture-init", "product")
+        self.assertEqual(reply, [b"0000000002"])
+
+        reply, informs = await self.client.request("capture-status", "product")
+        self.assertEqual(reply, [b"capturing"])
+        await assert_request_fails(self.client, "capture-init", "product")
+
+    async def test_interface_sensors(self):
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
+        await assert_sensor_value(self.client, 'products', '[]')
+        interface_changed_callback = mock.MagicMock()
+        self.client.add_inform_callback('interface-changed', interface_changed_callback)
+        await self.client.request('product-configure', 'product', CONFIG)
+        interface_changed_callback.assert_called_once_with([b'sensor-list'])
+        # Prepend the subarray product ID to the names
+        expected_interface_sensors = tuple(('product.' + s[0]) + s[1:]
+                                           for s in EXPECTED_INTERFACE_SENSOR_LIST)
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_interface_sensors)
+        await assert_sensor_value(self.client, 'products', '["product"]')
+
+        # Deconfigure and check that the array sensors are gone
+        interface_changed_callback.reset_mock()
+        await self.client.request('product-deconfigure', 'product')
+        interface_changed_callback.assert_called_once_with([b'sensor-list'])
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
+        await assert_sensor_value(self.client, 'products', '[]')
+
+    async def test_capture_done(self):
+        await assert_request_fails(self.client, "capture-done", "product")
+        await self.client.request("product-configure", "product", CONFIG)
+        await assert_request_fails(self.client, "capture-done", "product")
+
+        await self.client.request("capture-init", "product")
+        reply, informs = await self.client.request("capture-done", "product")
+        self.assertEqual(reply, [b"0000000001"])
+        await assert_request_fails(self.client, "capture-done", "product")
+
+    async def test_deconfigure_subarray_product(self):
+        await assert_request_fails(self.client, "product-configure", "product")
+        await self.client.request("product-configure", "product", CONFIG)
+        await self.client.request("capture-init", "product")
+        # should not be able to deconfigure when not in idle state
+        await assert_request_fails(self.client, "product-deconfigure", "product")
+        await self.client.request("capture-done", "product")
+        await self.client.request("product-deconfigure", "product")
+
+    async def test_configure_subarray_product(self):
+        await assert_request_fails(self.client, "product-deconfigure", "product")
+        await self.client.request("product-list")
+        await self.client.request("product-configure", "product", CONFIG)
+        # Cannot configure an already-configured array
+        await assert_request_fails(self.client, "product-configure", "product", CONFIG)
+
+        reply, informs = await self.client.request('product-list')
+        self.assertEqual(reply, [b'1'])
+
+    async def test_reconfigure_subarray_product(self):
+        await assert_request_fails(self.client, "product-reconfigure", "product")
+        await self.client.request("product-configure", "product", CONFIG)
+        await self.client.request("product-reconfigure", "product")
+        await self.client.request("capture-init", "product")
+        await assert_request_fails(self.client, "product-reconfigure", "product")
+
+    async def test_help(self):
+        reply, informs = await self.client.request('help')
+        requests = [inform.arguments[0].decode('utf-8') for inform in informs]
+        self.assertEqual(set(EXPECTED_REQUEST_LIST), set(requests))
