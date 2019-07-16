@@ -906,6 +906,7 @@ class TestSDPController(BaseTestSDPController):
 
 class TestSDPResources(asynctest.TestCase):
     """Test :class:`katsdpcontroller.product_controller.SDPResources`."""
+
     async def setUp(self):
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
