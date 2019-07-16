@@ -9,12 +9,10 @@ import asyncio
 from socket import getaddrinfo
 import ipaddress
 import typing
-from typing import (List, Tuple, Set, Type, Callable, Coroutine,
-                    Sequence, Mapping, Any, Optional)
-from types import TracebackType
+from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
 import asynctest
-from nose.tools import assert_raises, assert_equal
+from nose.tools import assert_raises
 from addict import Dict
 import aiokatcp
 from aiokatcp import Message, FailReply, Sensor
@@ -31,7 +29,7 @@ from ..product_controller import (
     ProductState, DeviceStatus, _redact_keys)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import (create_patch, assert_request_fails, assert_sensors,
+from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
 
 
@@ -250,56 +248,6 @@ class TestSDPControllerInterface(BaseTestSDPController):
         reply, informs = await self.client.request('help')
         requests = [inform.arguments[0].decode('utf-8') for inform in informs]
         self.assertEqual(set(EXPECTED_REQUEST_LIST), set(requests))
-
-
-class DelayedManager:
-    """Asynchronous context manager that runs its block with a task in progress.
-
-    The `mock` is modified to return a future that only resolves to
-    `return_value` after exiting the context manager completed (the first
-    time it is called).
-
-    If `cancelled` is true, the request is expected to fail with a message
-    about being cancelled, otherwise it is expected to succeed.
-    """
-    def __init__(self, coro: Coroutine, mock: mock.Mock, return_value: Any,
-                 cancelled: bool) -> None:
-        # Set when the call to the mock is made
-        self._started: asyncio.Future[None] = asyncio.Future()
-        self.mock = mock
-        self.return_value = return_value
-        self.cancelled = cancelled
-        # Set to return_value when exiting the manager
-        self._result: asyncio.Future[Any] = asyncio.Future()
-        self._old_side_effect = mock.side_effect
-        mock.side_effect = self._side_effect
-        self._request_task = asyncio.get_event_loop().create_task(coro)
-
-    def _side_effect(self, *args, **kwargs) -> asyncio.Future:
-        self._started.set_result(None)
-        self.mock.side_effect = self._old_side_effect
-        return self._result
-
-    async def __aenter__(self) -> 'DelayedManager':
-        await self._started
-        return self
-
-    async def __aexit__(self, exc_type: Optional[Type[BaseException]],
-                        exc_value: Optional[BaseException],
-                        traceback: Optional[TracebackType]) -> None:
-        # Unblock the mock call
-        if not self._result.cancelled():
-            self._result.set_result(self.return_value)
-        if exc_type:
-            # If we already have an exception, don't make more assertions
-            self._request_task.cancel()
-            return
-        if self.cancelled:
-            with assert_raises(FailReply) as cm:
-                await self._request_task
-            assert_equal('request cancelled', str(cm.exception))
-        else:
-            await self._request_task     # Will raise if it failed
 
 
 @timelimit

@@ -1,7 +1,10 @@
 """Utilities for unit tests"""
 
+import asyncio
 import unittest
-from typing import Tuple, Iterable, Any
+from unittest import mock
+from typing import Tuple, Iterable, Coroutine, Optional, Type, Any
+from types import TracebackType
 
 import aiokatcp
 import asynctest
@@ -223,3 +226,53 @@ async def assert_sensors(client: aiokatcp.Client,
         # Skip the description
         actual[inform.arguments[0]] = tuple(inform.arguments[2:])
     assert_equal(expected, actual)
+
+
+class DelayedManager:
+    """Asynchronous context manager that runs its block with a task in progress.
+
+    The `mock` is modified to return a future that only resolves to
+    `return_value` after exiting the context manager completed (the first
+    time it is called).
+
+    If `cancelled` is true, the request is expected to fail with a message
+    about being cancelled, otherwise it is expected to succeed.
+    """
+    def __init__(self, coro: Coroutine, mock: mock.Mock, return_value: Any,
+                 cancelled: bool) -> None:
+        # Set when the call to the mock is made
+        self._started: asyncio.Future[None] = asyncio.Future()
+        self.mock = mock
+        self.return_value = return_value
+        self.cancelled = cancelled
+        # Set to return_value when exiting the manager
+        self._result: asyncio.Future[Any] = asyncio.Future()
+        self._old_side_effect = mock.side_effect
+        mock.side_effect = self._side_effect
+        self._request_task = asyncio.get_event_loop().create_task(coro)
+
+    def _side_effect(self, *args, **kwargs) -> asyncio.Future:
+        self._started.set_result(None)
+        self.mock.side_effect = self._old_side_effect
+        return self._result
+
+    async def __aenter__(self) -> 'DelayedManager':
+        await self._started
+        return self
+
+    async def __aexit__(self, exc_type: Optional[Type[BaseException]],
+                        exc_value: Optional[BaseException],
+                        traceback: Optional[TracebackType]) -> None:
+        # Unblock the mock call
+        if not self._result.cancelled():
+            self._result.set_result(self.return_value)
+        if exc_type:
+            # If we already have an exception, don't make more assertions
+            self._request_task.cancel()
+            return
+        if self.cancelled:
+            with assert_raises(aiokatcp.FailReply) as cm:
+                await self._request_task
+            assert_equal('request cancelled', str(cm.exception))
+        else:
+            await self._request_task     # Will raise if it failed

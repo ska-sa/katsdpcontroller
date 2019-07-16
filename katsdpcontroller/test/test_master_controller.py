@@ -7,7 +7,7 @@ import functools
 import ipaddress
 import os
 from unittest import mock
-from typing import Tuple, Set, List, Mapping
+from typing import Tuple, Set, List, Mapping, Optional
 
 import aiokatcp
 from aiokatcp import Sensor
@@ -23,7 +23,7 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
-                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
+                    DelayedManager, CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
 
 
 EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
@@ -219,6 +219,17 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             await task
         self.assertEqual(self.manager.products, {})
 
+    async def test_create_product_parallel(self) -> None:
+        """Can configure two subarray products at the same time"""
+        task1 = self.loop.create_task(self.start_product('product1'))
+        task2 = self.loop.cretae_task(self.start_product('product2'))
+        product1 = await task1
+        product2 = await task2
+        self.assertEqual(product1.name, 'product1')
+        self.assertEqual(product2.name, 'product2')
+        self.assertEqual(product1.task_state, Product.TaskState.ACTIVE)
+        self.assertEqual(product2.task_state, Product.TaskState.ACTIVE)
+
     async def _test_create_product_dies_after_task_id(self, init_wait: float) -> None:
         """Task dies immediately after we learn its task ID
 
@@ -369,15 +380,22 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """Data in Zookeeper does not conform to schema"""
         await self._test_bad_zk(json.dumps({"version": 1}).encode())
 
-    async def test_bad_s3_config(self) -> None:
+    async def _test_bad_s3_config(self, content: Optional[str]) -> None:
         await self.start_manager()
         self.open_mock.unregister_path('s3_config.json')
-        self.open_mock.set_read_data_for('s3_config.json', 'I am not JSON')
+        if content is not None:
+            self.open_mock.set_read_data_for('s3_config.json', 'I am not JSON')
         task = self.loop.create_task(self.manager.create_product('foo'))
         await self.advance(100)
         self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
             await task
+
+    async def test_s3_config_bad_json(self) -> None:
+        await self._test_bad_s3_config('I am not JSON')
+
+    async def test_s3_config_missing(self) -> None:
+        await self._test_bad_s3_config(None)
 
     async def test_get_multicast_groups(self) -> None:
         await self.start_manager()
@@ -486,7 +504,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(await product.get_telstate_endpoint(), '')
 
 
-class TestDeviceServer(asynctest.TestCase):
+class TestDeviceServer(asynctest.ClockedTestCase):
     """Tests for :class:`.master_controller.DeviceServer`.
 
     The tests use interface mode, because that avoids the complications of
@@ -551,16 +569,17 @@ class TestDeviceServer(asynctest.TestCase):
         self.assertEqual(reply, [b"0000000001"])
         await assert_request_fails(self.client, "capture-done", "product")
 
-    async def test_deconfigure_subarray_product(self):
+    async def test_product_deconfigure(self):
         await assert_request_fails(self.client, "product-configure", "product")
         await self.client.request("product-configure", "product", CONFIG)
         await self.client.request("capture-init", "product")
         # should not be able to deconfigure when not in idle state
         await assert_request_fails(self.client, "product-deconfigure", "product")
         await self.client.request("capture-done", "product")
+        await self.advance(1)    # interface mode has some sleeps in capture-done
         await self.client.request("product-deconfigure", "product")
 
-    async def test_configure_subarray_product(self):
+    async def test_product_configure(self):
         await assert_request_fails(self.client, "product-deconfigure", "product")
         await self.client.request("product-list")
         await self.client.request("product-configure", "product", CONFIG)
@@ -570,12 +589,44 @@ class TestDeviceServer(asynctest.TestCase):
         reply, informs = await self.client.request('product-list')
         self.assertEqual(reply, [b'1'])
 
-    async def test_reconfigure_subarray_product(self):
+    async def test_product_configure_generate_names(self):
+        """Name with trailing * must generate lowest-numbered name"""
+        async def product_configure():
+            return (await self.client.request('product-configure', 'prefix_*', CONFIG))[0][0]
+
+        self.assertEqual(b'prefix_0', await product_configure())
+        self.assertEqual(b'prefix_1', await product_configure())
+        # Deconfigure the product, then check that the name is recycled
+        await self.client.request('product-deconfigure', 'prefix_0')
+        # Interface mode has some small sleeps, which we have to get past for
+        # it to properly die.
+        await self.advance(1)
+        self.assertEqual(b'prefix_0', await product_configure())
+
+    def _product_configure_slow(self, subarray_product: str,
+                                      cancelled: bool = False) -> DelayedManager:
+        create_patch(self, 'aiokatcp.Client.wait_connected',
+                     side_effect=aiokatcp.Client.wait_connected, autospec=True)
+        return DelayedManager(
+            self.client.request('product-configure', subarray_product, CONFIG),
+            aiokatcp.Client.wait_connected,
+            None, cancelled)
+
+    async def test_product_deconfigure_while_configuring_force(self):
+        """Forced product-deconfigure must succeed while in product-configure"""
+        async with self._product_configure_slow('product', cancelled=True):
+            await self.client.request("product-deconfigure", 'product', True)
+        # Verify that it's gone
+        self.assertEqual({}, self.server._manager.products)
+
+    async def test_product_reconfigure(self):
         await assert_request_fails(self.client, "product-reconfigure", "product")
         await self.client.request("product-configure", "product", CONFIG)
         await self.client.request("product-reconfigure", "product")
         await self.client.request("capture-init", "product")
         await assert_request_fails(self.client, "product-reconfigure", "product")
+
+    # TODO: bring across more product-reconfigure tests from test_sdp_controller
 
     async def test_help(self):
         reply, informs = await self.client.request('help')
