@@ -25,7 +25,7 @@ from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
 
 import aiozk
 import aiokatcp
-from aiokatcp import FailReply
+from aiokatcp import FailReply, Sensor
 import async_timeout
 import jsonschema
 import yarl
@@ -36,7 +36,7 @@ import katsdpcontroller
 from . import singularity, product_config, product_controller, scheduler, sensor_proxy
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
-                         add_shared_options, extract_shared_options, ProductState)
+                         add_shared_options, extract_shared_options, ProductState, DeviceStatus)
 
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
@@ -288,11 +288,15 @@ class ProductManagerBase(Generic[_P]):
         before return.
         """
 
+    def _update_products_sensor(self) -> None:
+        self._server.sensors['products'].value = json.dumps(sorted(self._products.keys()))
+
     def _add_product(self, product: _P) -> None:
         """Used by subclasses to add a newly-created product."""
         assert product.name not in self._products
         self._products[product.name] = product
         product.add_dead_callback(self._product_died)
+        self._update_products_sensor()
 
     async def product_active(self, product: _P) -> None:
         """Move a product to state :const:`~Product.TaskState.ACTIVE`"""
@@ -307,12 +311,14 @@ class ProductManagerBase(Generic[_P]):
         """
         if self._products.get(product.name) is product:
             del self._products[product.name]
+            self._update_products_sensor()
             await self._save_state()
 
     def _product_died(self, product: Product) -> None:
         """Called by product.died"""
         if self._products.get(product.name) is product:
             del self._products[product.name]
+            self._update_products_sensor()
             self._save_state_bg()
 
     async def get_multicast_groups(self, product: _P, n_addresses: int) -> str:
@@ -844,6 +850,14 @@ class DeviceServer(aiokatcp.DeviceServer):
             self._manager = SingularityProductManager(args, self, prometheus_registry)
         self._override_dicts = {}
         super().__init__(args.host, args.port)
+        self.sensors.add(Sensor(DeviceStatus, "device-status",
+                                "Devices status of the SDP Master Controller",
+                                default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
+                                default=json.dumps(args.gui_urls),
+                                initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
+                                default="[]", initial_status=Sensor.Status.NOMINAL))
 
     async def start(self) -> None:
         await self._manager.start()
