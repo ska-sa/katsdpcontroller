@@ -10,7 +10,7 @@ from socket import getaddrinfo
 import ipaddress
 import typing
 from typing import (List, Tuple, Set, Type, Callable, Coroutine,
-                    Iterable, Sequence, Mapping, Any, Optional)
+                    Sequence, Mapping, Any, Optional)
 from types import TracebackType
 
 import asynctest

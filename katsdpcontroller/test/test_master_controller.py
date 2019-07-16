@@ -7,7 +7,7 @@ import functools
 import ipaddress
 import os
 from unittest import mock
-from typing import Tuple, Set, List, Mapping, Any
+from typing import Tuple, Set, List, Mapping
 
 import aiokatcp
 import prometheus_client
