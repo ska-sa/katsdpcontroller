@@ -6,7 +6,7 @@ import logging
 import functools
 import json
 import enum
-from typing import List, Tuple, Callable, Union, AnyStr
+from typing import List, Tuple, Callable, Union, Optional, AnyStr
 
 import aiokatcp
 from prometheus_client import Histogram
@@ -107,6 +107,21 @@ def extract_shared_options(args: argparse.Namespace) -> List[str]:
     for override in args.image_override:
         ret.append(f'--image-override={override}')
     return ret
+
+
+def make_image_resolver_factory(lookup: scheduler.ImageLookup,
+                                args: argparse.Namespace) -> scheduler.ImageResolverFactory:
+    # The master controller only has --image-tag-file and the product
+    # controller only has --image-tag, so we have to load them dynamically.
+    tag: Optional[str] = vars(args).get('image_tag')
+    tag_file: Optional[str] = vars(args).get('image_tag_file')
+    factory = scheduler.ImageResolverFactory(lookup=lookup, tag=tag, tag_file=tag_file)
+    for override in args.image_override:
+        fields = override.split(':', 1)
+        if len(fields) < 2:
+            raise ValueError("--image-override option must have a colon")
+        factory.override(fields[0], fields[1])
+    return factory
 
 
 class ProductState(scheduler.OrderedEnum):

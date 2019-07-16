@@ -36,7 +36,8 @@ import katsdpcontroller
 from . import singularity, product_config, product_controller, scheduler, sensor_proxy
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
-                         add_shared_options, extract_shared_options, ProductState, DeviceStatus)
+                         add_shared_options, extract_shared_options, make_image_resolver_factory,
+                         ProductState, DeviceStatus)
 
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
@@ -159,7 +160,7 @@ class Product:
             self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
             self.katcp_conn.close()
             self.katcp_conn = None
-            # TODO: should this be async and await it being closed
+            # TODO: should this be async and await it being closed?
         for callback in self._dead_callbacks:
             callback(self)
 
@@ -220,13 +221,17 @@ class ProductManagerBase(Generic[_P]):
     It also handles allocation of multicast groups and capture block IDs.
     """
 
-    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
+    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer,
+                 image_resolver_factory: scheduler.ImageResolverFactory,
+                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
         self._next_multicast_group = self._multicast_network.network_address + 1
         self._server = server
         self._products: Dict[str, _P] = {}
         self._next_capture_block_id = 1
+        self._image_resolver_factory = image_resolver_factory
+        self._prometheus_registry = prometheus_registry
 
     @abstractmethod
     async def start(self) -> None: pass
@@ -398,14 +403,6 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
 
     This is intended **only** for integration testing.
     """
-    def __init__(self, args: argparse.Namespace,
-                 server: aiokatcp.DeviceServer,
-                 image_lookup: scheduler.ImageLookup,
-                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
-        super().__init__(args, server)
-        self._image_resolver_factory = scheduler.ImageResolverFactory(image_lookup)
-        self._prometheus_registry = prometheus_registry
-
     async def start(self) -> None:
         await super().start()
 
@@ -460,8 +457,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
 
     def __init__(self, args: argparse.Namespace,
                  server: aiokatcp.DeviceServer,
+                 image_resolver_factory: scheduler.ImageResolverFactory,
                  prometheus_registry: CollectorRegistry = REGISTRY) -> None:
-        super().__init__(args, server)
+        super().__init__(args, server, image_resolver_factory, prometheus_registry)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.
@@ -472,7 +470,6 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         self._sing = singularity.Singularity(yarl.URL(args.singularity) / 'api')
         self._zk = aiozk.ZKClient(args.zk, chroot=args.name)
         self._zk_state_lock = asyncio.Lock()
-        self._prometheus_registry = prometheus_registry
 
     async def _zk_set(self, key: str, payload: bytes) -> None:
         """Set content for a Zookeeper node, creating it if necessary"""
@@ -747,10 +744,15 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         except Exception as exc:
             raise ProductFailed(f'Could not load {self._args.s3_config_file}: {exc}') from exc
         args = extract_shared_options(self._args)
-        # TODO: append --image-tag
+        # Causes the image tag file to be loaded
+        try:
+            image_resolver = self._image_resolver_factory()
+        except Exception as exc:
+            raise ProductFailed(f'Could not load image tag: {exc}')
         port = device_server_sockname(self._server)[1]
         args.extend([
             '--s3-config=' + json.dumps(s3_config),
+            f'--image-tag={image_resolver.tag}',
             f'--subarray-product-id={name}',
             f'{self._args.external_hostname}:{port}',
             f'zk://{self._args.zk}/mesos'
@@ -759,8 +761,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         product = SingularityProduct(name, asyncio.Task.current_task())
         self._add_product(product)
         request_id = await self._ensure_request(name)
-        # TODO: use image resolver
-        await self._ensure_deploy(name, 'katsdpcontroller')
+        # Creates a temporary ImageResolver so that we throw away the cache immediately.
+        image = await self._image_resolver_factory()('katsdpcontroller')
+        await self._ensure_deploy(name, image)
         await self._sing.create_run(request_id, {
             "runId": product.run_id,
             "commandLineArgs": args
@@ -843,11 +846,14 @@ class DeviceServer(aiokatcp.DeviceServer):
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
         else:
             self._image_lookup = scheduler.HTTPImageLookup(args.registry)
+        image_resolver_factory = make_image_resolver_factory(self._image_lookup, args)
+
+        manager_cls: Type[ProductManagerBase]
         if args.interface_mode:
-            self._manager = InternalProductManager(
-                args, self, self._image_lookup, prometheus_registry)
+            manager_cls = InternalProductManager
         else:
-            self._manager = SingularityProductManager(args, self, prometheus_registry)
+            manager_cls = SingularityProductManager
+        self._manager = manager_cls(args, self, image_resolver_factory, prometheus_registry)
         self._override_dicts = {}
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",

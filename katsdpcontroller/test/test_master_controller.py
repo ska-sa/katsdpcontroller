@@ -10,11 +10,12 @@ from unittest import mock
 from typing import Tuple, Set, List, Mapping
 
 import aiokatcp
+from aiokatcp import Sensor
 import prometheus_client
 import asynctest
 import open_file_mock
 
-from .. import master_controller
+from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
@@ -57,6 +58,11 @@ EXPECTED_REQUEST_LIST = [
 class DummyServer(aiokatcp.DeviceServer):
     VERSION = 'dummy-1.0'
     BUILD_STATE = VERSION
+
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(host, port)
+        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
+                                default="[]", initial_status=Sensor.Status.NOMINAL))
 
 
 class DummyProductController(aiokatcp.DeviceServer):
@@ -143,8 +149,11 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             'zk.invalid:2181', self.singularity_server.root_url
         ])
         self.prometheus_registry = prometheus_client.CollectorRegistry()
+        image_lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+        self.image_resolver_factory = scheduler.ImageResolverFactory(image_lookup)
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
             self.manager = SingularityProductManager(self.args, self.server,
+                                                     self.image_resolver_factory,
                                                      self.prometheus_registry)
         self.sensor_proxy_client_mock = \
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
@@ -244,7 +253,9 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # We don't model ephemeral nodes in fake_zk, so have to delete manually
         await zk.delete('/running')
         with mock.patch('aiozk.ZKClient', return_value=zk):
-            self.manager = SingularityProductManager(self.args, self.server)
+            self.manager = SingularityProductManager(self.args, self.server,
+                                                     self.image_resolver_factory,
+                                                     self.prometheus_registry)
         await self.manager.start()
 
     async def test_persist(self) -> None:
@@ -295,17 +306,21 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             await task
 
     async def test_reuse_deploy(self) -> None:
+        def get_deploy_id() -> str:
+            request = list(self.singularity_server.requests.values())[0]
+            assert request.active_deploy is not None
+            return request.active_deploy.deploy_id
+
         await self.start_manager()
         product = await self.start_product()
-        deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
+        deploy_id = get_deploy_id()
 
         # Reuse, without restarting the manager
         await self.manager.kill_product(product)
         # Give it time to die
         await self.advance(100)
         product = await self.start_product()
-        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
-        self.assertEqual(new_deploy_id, deploy_id)
+        self.assertEqual(get_deploy_id(), deploy_id)
 
         # Reuse, after a restart
         await self.manager.kill_product(product)
@@ -313,16 +328,14 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.advance(100)
         await self.reset_manager()
         product = await self.start_product()
-        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
-        self.assertEqual(new_deploy_id, deploy_id)
+        self.assertEqual(get_deploy_id(), deploy_id)
 
         # Alter the necessary state to ensure that a new deploy is used
         await self.manager.kill_product(product)
         await self.advance(100)
         with mock.patch.dict(os.environ, {'KATSDP_LOG_LEVEL': 'test'}):
             product = await self.start_product()
-        new_deploy_id = list(self.singularity_server.requests.values())[0].active_deploy.deploy_id
-        self.assertNotEqual(new_deploy_id, deploy_id)
+        self.assertNotEqual(get_deploy_id(), deploy_id)
 
     async def _test_bad_zk(self, payload: bytes) -> None:
         """Existing state data in Zookeeper is not valid"""

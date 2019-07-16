@@ -25,7 +25,8 @@ import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
 from katsdpcontroller import scheduler, schemas, product_controller, web
-from katsdpcontroller.controller import add_shared_options, load_json_dict
+from katsdpcontroller.controller import (
+    add_shared_options, load_json_dict, make_image_resolver_factory)
 
 
 def on_shutdown(loop, server):
@@ -144,12 +145,10 @@ def main() -> None:
 
     master_controller = aiokatcp.Client(args.master_controller.host, args.master_controller.port)
     image_lookup = product_controller.KatcpImageLookup(master_controller)
-    image_resolver_factory = scheduler.ImageResolverFactory(lookup=image_lookup, tag=args.image_tag)
-    for override in args.image_override:
-        fields = override.split(':', 1)
-        if len(fields) < 2:
-            parser.error("--image-override option must have a colon")
-        image_resolver_factory.override(fields[0], fields[1])
+    try:
+        image_resolver_factory = make_image_resolver_factory(image_lookup, args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     framework_info = addict.Dict()
     framework_info.user = args.user
