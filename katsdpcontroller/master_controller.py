@@ -20,7 +20,8 @@ import time
 import os
 import socket
 from abc import abstractmethod
-from typing import Type, TypeVar, Dict, Tuple, Set, List, Mapping, Optional, Callable, Any
+from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
+                    Iterable, Mapping, Optional, Callable, Any)
 
 import aiozk
 import aiokatcp
@@ -42,6 +43,7 @@ _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b
                       re.IGNORECASE)
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
+_P = TypeVar('_P', bound='Product')
 
 
 class NoAddressesError(Exception):
@@ -206,13 +208,16 @@ class Product:
             self.katcp_conn.close()
 
 
-class ProductManagerBase:
+class ProductManagerBase(Generic[_P]):
     """Abstract base class for launching and managing subarray products."""
 
     def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer) -> None:
+        self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
         self._next_multicast_group = self._multicast_network.network_address + 1
         self._server = server
+        self._products: Dict[str, _P] = {}
+        self._next_capture_block_id = 1
 
     @abstractmethod
     async def start(self) -> None: pass
@@ -222,43 +227,82 @@ class ProductManagerBase:
         for product in self.products.values():
             await product.close()
 
+    async def _save_state(self) -> None:
+        """Persist the state of the manager."""
+
+    def _save_state_bg(self) -> None:
+        """Persistent current state in the background"""
+        task = asyncio.get_event_loop().create_task(self._save_state())
+        log_task_exceptions(task, logger, '_save_state')
+
+    def _init_state(self, products: Iterable[_P], next_capture_block_id: int,
+                    next_multicast_group: ipaddress.IPv4Address) -> None:
+        """Set the initial state from persistent storage
+
+        Parameters
+        ----------
+        products
+            Subarray products. They must be in state :const:`~Product.TaskState.ACTIVE`
+            and have katcp information filled in, but the _product_died callback should
+            not have been added.
+        next_capture_block_id
+            Lower bound for the next capture block ID
+        next_multicast_group
+            Hint for the next multicast group to allocate. If it is outside the allowed
+            range, it will be ignored.
+        """
+        assert not self._products
+        for product in products:
+            self._add_product(product)
+        self._next_capture_block_id = next_capture_block_id
+
+        if (next_multicast_group not in self._multicast_network
+                or next_multicast_group == self._multicast_network.network_address):
+            next_multicast_group = self._multicast_network.network_address + 1
+        self._next_multicast_group = next_multicast_group
+
     @property
-    @abstractmethod
-    def products(self) -> Mapping[str, Product]:
+    def products(self) -> Mapping[str, _P]:
         """Get a list of all defined products, indexed by name.
 
         The caller should treat this as read-only, using the methods on this
         class to add/remove products or change their state.
         """
+        return self._products
 
     @abstractmethod
-    async def create_product(self, name: str) -> Product:
+    async def create_product(self, name: str) -> _P:
         """Create a new product called `name`.
 
         The product is brought to state :const:`~Product.TaskState.STARTING`
         before return.
         """
 
-    @abstractmethod
-    async def product_active(self, product: Product) -> None:
+    def _add_product(self, product: _P) -> None:
+        """Used by subclasses to add a newly created product."""
+        assert product.name not in self._products
+        self._products[product.name] = product
+        product.add_dead_callback(self._product_died)
+
+    async def product_active(self, product: _P) -> None:
         """Move a product to state :const:`~Product.TaskState.ACTIVE`"""
+        product.task_state = Product.TaskState.ACTIVE
+        await self._save_state()
 
     @abstractmethod
-    async def kill_product(self, product: Product) -> None:
+    async def kill_product(self, product: _P) -> None:
         """Move a product to state :const:`~Product.TaskState.DEAD`"""
+        if self._products.get(product.name) is product:
+            del self._products[product.name]
+            await self._save_state()
 
-    def _set_next_multicast_group(self, value: ipaddress.IPv4Address) -> None:
-        """Control where to start looking in :meth:`get_multicast_groups`.
+    def _product_died(self, product: Product) -> None:
+        """Called by product.died"""
+        if self._products.get(product.name) is product:
+            del self._products[product.name]
+            self._save_state_bg()
 
-        This is intended for use by subclasses. Any `value` is accepted, but
-        if it is out of range, it will be replaced by the first host address in
-        the network.
-        """
-        if value not in self._multicast_network or value == self._multicast_network.network_address:
-            value = self._multicast_network.network_address + 1
-        self._next_multicast_group = value
-
-    async def get_multicast_groups(self, product: Product, n_addresses: int) -> str:
+    async def get_multicast_groups(self, product: _P, n_addresses: int) -> str:
         """Allocate `n_addresses` consecutive multicast groups.
 
         Returns
@@ -303,11 +347,19 @@ class ProductManagerBase:
                 ans = str(start)
                 if n_addresses > 1:
                     ans += '+{}'.format(n_addresses - 1)
+                await self._save_state()
                 return ans
 
     @abstractmethod
+    def _gen_capture_block_id(self, minimum: int) -> int:
+        """Create a new capture block ID that must be at least `minimum`"""
+
     async def get_capture_block_id(self) -> str:
         """Generate a unique capture block ID"""
+        cbid = self._gen_capture_block_id(self._next_capture_block_id)
+        self._next_capture_block_id = cbid + 1
+        await self._save_state()
+        return f'{cbid:010}'
 
 
 class InternalProduct(Product):
@@ -321,7 +373,7 @@ class InternalProduct(Product):
         await self.server.stop()
 
 
-class InternalProductManager(ProductManagerBase):
+class InternalProductManager(ProductManagerBase[InternalProduct]):
     """Run subarray products as asyncio tasks within the process.
 
     This is intended **only** for integration testing.
@@ -331,60 +383,38 @@ class InternalProductManager(ProductManagerBase):
                  image_lookup: scheduler.ImageLookup,
                  prometheus_registry: CollectorRegistry = REGISTRY) -> None:
         super().__init__(args, server)
-        self._args = args
-        self._products: Dict[str, InternalProduct] = {}
         self._image_resolver_factory = scheduler.ImageResolverFactory(image_lookup)
         self._prometheus_registry = prometheus_registry
-        self._next_capture_block_id = 1
 
     async def start(self) -> None:
         await super().start()
 
     async def stop(self) -> None:
         await super().stop()
-        for product in self._products.values():
+        for product in self.products.values():
             if product.server is not None:
                 await product.server.stop()
 
-    @property
-    def products(self) -> Mapping[str, Product]:
-        return self._products
-
-    async def create_product(self, name: str) -> Product:
-        assert name not in self._products
+    async def create_product(self, name: str) -> InternalProduct:
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
             '127.0.0.1', 0, mc_client, None, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory, {})
         product = InternalProduct(name, asyncio.Task.current_task(), server)
-        product.add_dead_callback(self._product_died)
-        self._products[name] = product
+        self._add_product(product)
         await product.server.start()
-        assert product.server.server and product.server.server.sockets   # for mypy
         host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
         product.connect(self._server, self._prometheus_registry, host, port)
         return product
 
-    async def product_active(self, product: Product) -> None:
-        product.task_state = Product.TaskState.ACTIVE
-
-    async def kill_product(self, product: Product) -> None:
-        assert isinstance(product, InternalProduct)
-        if self._products.get(product.name) is product:
-            del self._products[product.name]
+    async def kill_product(self, product: InternalProduct) -> None:
+        await super().kill_product(product)
         await product.server.stop()
         product.died()
 
-    async def get_capture_block_id(self) -> str:
-        cbid = self._next_capture_block_id
-        self._next_capture_block_id += 1
-        return f'{cbid:010}'
-
-    def _product_died(self, product: Product) -> None:
-        """Called by product.died"""
-        if self._products.get(product.name) is product:
-            del self._products[product.name]
+    def _gen_capture_block_id(self, minimum: int) -> int:
+        return minimum
 
 
 class SingularityProduct(Product):
@@ -396,7 +426,7 @@ class SingularityProduct(Product):
         self.task_id: Optional[str] = None
 
 
-class SingularityProductManager(ProductManagerBase):
+class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     """Run subarray products as tasks within Hubspot Singularity."""
 
     # Interval between polling Singularity for data on tasks
@@ -418,13 +448,10 @@ class SingularityProductManager(ProductManagerBase):
         # They might be tasks we killed which haven't quite died yet, so they get
         # one reconciliation cycle to disappear on their own.
         self._probation: Set[str] = set()
-        self._products: Dict[str, SingularityProduct] = {}
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._sing = singularity.Singularity(yarl.URL(args.singularity) / 'api')
         self._zk = aiozk.ZKClient(args.zk, chroot=args.name)
         self._zk_state_lock = asyncio.Lock()
-        self._args = args
-        self._next_capture_block_id = 0
         self._prometheus_registry = prometheus_registry
 
     async def _zk_set(self, key: str, payload: bytes) -> None:
@@ -580,6 +607,7 @@ class SingularityProductManager(ProductManagerBase):
             except (ValueError, jsonschema.ValidationError) as exc:
                 logger.warning('Could not load existing state (%s), so starting fresh', exc)
                 data = default
+            products = []
             for name, info in data['products'].items():
                 prod = SingularityProduct(name, None)
                 prod.run_id = info['run_id']
@@ -588,12 +616,9 @@ class SingularityProductManager(ProductManagerBase):
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
                 prod.connect(self._server, self._prometheus_registry, info['host'], info['port'])
-                self._products[name] = prod
-                prod.add_dead_callback(self._product_died)
-            # The implementation overrides it if it doesn't match the current
-            # _multicast_network.
-            self._set_next_multicast_group(ipaddress.IPv4Address(data['next_multicast_group']))
-            self._next_capture_block_id = data['next_capture_block_id']
+                products.append(prod)
+            self._init_state(products, data['next_capture_block_id'],
+                             ipaddress.IPv4Address(data['next_multicast_group']))
 
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
@@ -607,7 +632,7 @@ class SingularityProductManager(ProductManagerBase):
                         'host': prod.host,
                         'port': prod.port,
                         'multicast_groups': [str(group) for group in prod.multicast_groups]
-                    } for prod in self._products.values()
+                    } for prod in self.products.values()
                     if prod.task_state == Product.TaskState.ACTIVE
                 },
                 'next_multicast_group': str(self._next_multicast_group),
@@ -615,11 +640,6 @@ class SingularityProductManager(ProductManagerBase):
             }
             payload = json.dumps(data).encode()
             await self._zk_set('/state', payload)
-
-    def _save_state_bg(self) -> None:
-        """Save current state to Zookeeper in the background"""
-        task = asyncio.get_event_loop().create_task(self._save_state())
-        log_task_exceptions(task, logger, '_save_state')
 
     async def _reconcile_once(self) -> None:
         """Reconcile internal state with state reported by Singularity.
@@ -633,7 +653,7 @@ class SingularityProductManager(ProductManagerBase):
         requests = await self._sing.get_requests(request_type=['ON_DEMAND'])
         # Start by assuming everything died and remove tasks as they're seen
         dead_tasks = set(self._task_cache.keys())
-        expected_run_ids = {product.run_id for product in self._products.values()}
+        expected_run_ids = {product.run_id for product in self.products.values()}
         for request in requests:
             request_id = request['request']['id']
             data = await self._sing.get_request_tasks(request_id)
@@ -660,7 +680,7 @@ class SingularityProductManager(ProductManagerBase):
             logger.debug('Task %s died', task_id)
             del self._task_cache[task_id]
         n_died = 0
-        for product in list(self._products.values()):
+        for product in list(self.products.values()):
             if product.task_id is not None and product.task_id not in self._task_cache:
                 product.logger.info('Task for %s died', product.name)
                 product.died()
@@ -678,12 +698,6 @@ class SingularityProductManager(ProductManagerBase):
                 await self._reconcile_once()
             except Exception:
                 logger.warning('Exception in reconciliation', exc_info=True)
-
-    def _product_died(self, product: Product) -> None:
-        """Called by product.died"""
-        if self._products.get(product.name) is product:
-            del self._products[product.name]
-            self._save_state_bg()
 
     async def start(self) -> None:
         await self._zk.start()
@@ -704,23 +718,10 @@ class SingularityProductManager(ProductManagerBase):
         await self._zk.close()
         await super().stop()
 
-    async def get_multicast_groups(self, product: Product, n_addresses: int) -> str:
-        ans = await super().get_multicast_groups(product, n_addresses)
-        await self._save_state()
-        return ans
+    def _gen_capture_block_id(self, minimum: int) -> int:
+        return max(int(time.time()), minimum)
 
-    async def get_capture_block_id(self) -> str:
-        cbid = max(int(time.time()), self._next_capture_block_id)
-        self._next_capture_block_id = cbid + 1
-        await self._save_state()
-        return str(cbid)
-
-    @property
-    def products(self) -> Mapping[str, SingularityProduct]:
-        return self._products
-
-    async def create_product(self, name: str) -> Product:
-        assert name not in self._products
+    async def create_product(self, name: str) -> SingularityProduct:
         try:
             s3_config = _load_s3_config(self._args.s3_config_file)
         except Exception as exc:
@@ -736,8 +737,7 @@ class SingularityProductManager(ProductManagerBase):
         ])
 
         product = SingularityProduct(name, asyncio.Task.current_task())
-        self._products[name] = product
-        product.add_dead_callback(self._product_died)
+        self._add_product(product)
         request_id = await self._ensure_request(name)
         # TODO: use image resolver
         await self._ensure_deploy(name, 'katsdpcontroller')
@@ -799,15 +799,8 @@ class SingularityProductManager(ProductManagerBase):
                 # reach ACTIVE state and hence wasn't stored
         return product
 
-    async def product_active(self, product: Product) -> None:
-        product.task_state = Product.TaskState.ACTIVE
-        await self._save_state()
-
-    async def kill_product(self, product: Product) -> None:
-        assert isinstance(product, SingularityProduct)
-        if self._products.get(product.name) is product:
-            del self._products[product.name]
-            await self._save_state()
+    async def kill_product(self, product: SingularityProduct) -> None:
+        await super().kill_product(product)
         if product.task_id is not None:
             await self._try_kill_task(product.task_id)
         # TODO: wait until it's actually dead?
@@ -1027,6 +1020,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 if name.endswith('*'):
                     name = self._unique_name(name[:-1])
                 product = await self._manager.create_product(name)
+                assert product is not None
                 assert product.katcp_conn is not None
                 assert product.host is not None and product.port is not None
 
