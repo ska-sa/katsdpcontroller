@@ -1031,7 +1031,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         success = False
         product: Optional[Product] = None
-        timeout = 60       # TODO: will need to be higher
+        timeout = 300
         try:
             async with async_timeout.timeout(timeout):
                 # This needs to be as close as possible to create_product
