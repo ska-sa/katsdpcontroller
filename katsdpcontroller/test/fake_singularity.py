@@ -110,17 +110,23 @@ class Task:
                 "host": "fakehost"
             }
 
+    def environment(self) -> Dict[str, str]:
+        env = {'TASK_HOST': self.host}
+        for i, port in enumerate(self.ports):
+            env[f'PORT{i}'] = str(port)
+            if i == 0:
+                env['PORT'] = str(port)
+        return env
+
+    def arguments(self) -> List[str]:
+        return self.deploy.config.get('arguments', []) + self.config.get('commandLineArgs', [])
+
     def info(self) -> Dict[str, Any]:
         if self.state in {TaskState.NOT_CREATED, TaskState.DEAD}:
             return {}                   # Generally shouldn't be called
         elif self.state == TaskState.PENDING:
             return {}   # TODO
         else:
-            env = {'TASK_HOST': self.host}
-            for i, port in enumerate(self.ports):
-                env[f'PORT{i}'] = str(port)
-                if i == 0:
-                    env['PORT'] = str(port)
             return {
                 "taskId": self.short_info(),
                 "taskRequest": {
@@ -133,9 +139,10 @@ class Task:
                     "command": {
                         "environment": {
                             "variables": [{'name': key, 'value': value}
-                                          for (key, value) in env.items()]
+                                          for (key, value) in self.environment().items()]
                         }
-                    }
+                    },
+                    "arguments": self.arguments()
                 }
             }
 

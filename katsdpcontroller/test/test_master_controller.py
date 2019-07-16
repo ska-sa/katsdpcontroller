@@ -16,7 +16,7 @@ import asynctest
 import open_file_mock
 
 from .. import master_controller, scheduler
-from ..controller import ProductState, device_server_sockname
+from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
                                  DeviceServer, parse_args)
@@ -143,6 +143,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             '--host', '127.0.0.1',
             '--port', str(device_server_sockname(self.server)[1]),
             '--name', 'sdpmc_test',
+            '--image-tag-file', 'sdp_image_tag',
+            '--image-override', 'katsdptelstate:branch',
             '--external-hostname', 'me.invalid',
             '--s3-config-file', 's3_config.json',
             '--safe-multicast-cidr', '225.100.0.0/24',
@@ -150,7 +152,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         ])
         self.prometheus_registry = prometheus_client.CollectorRegistry()
         image_lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
-        self.image_resolver_factory = scheduler.ImageResolverFactory(image_lookup)
+        self.image_resolver_factory = make_image_resolver_factory(image_lookup, self.args)
         with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
             self.manager = SingularityProductManager(self.args, self.server,
                                                      self.image_resolver_factory,
@@ -158,8 +160,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.sensor_proxy_client_mock = \
             create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
-        self.open_mock.default_behavior = open_file_mock.DEFAULTS_ORIGINAL
         self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
+        self.open_mock.set_read_data_for('sdp_image_tag', 'a_tag')
 
     async def start_manager(self) -> None:
         """Start the manager and arrange for it to be stopped"""
@@ -198,6 +200,13 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
         await self.manager.product_active(product)
         self.assertEqual(product.task_state, Product.TaskState.ACTIVE)
+        # Check that the right image selection options were passed to the task
+        task = list(self.singularity_server.tasks.values())[0]
+        arguments = task.arguments()
+        self.assertIn('--image-tag=a_tag', arguments)
+        self.assertIn('--image-override=katsdptelstate:branch', arguments)
+        self.assertEqual(task.deploy.config['containerInfo']['docker']['image'],
+                         'registry.invalid:5000/katsdpcontroller:a_tag')
 
     async def test_create_product_dies_fast(self) -> None:
         """Task dies before we observe it running"""
