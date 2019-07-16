@@ -33,7 +33,7 @@ setup(
         'networkx>=2.0',
         'pydotplus',
         'netifaces',
-        'aiokatcp>=0.5',
+        'aiokatcp>=0.6',
         'katdal',
         'katsdptelstate',
         'katsdpservices',

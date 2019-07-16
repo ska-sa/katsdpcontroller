@@ -828,7 +828,6 @@ class DeviceServer(aiokatcp.DeviceServer):
                 args, self, self._image_lookup, prometheus_registry)
         else:
             self._manager = SingularityProductManager(args, self, prometheus_registry)
-        self._manager_stopped = asyncio.Event()
         self._override_dicts = {}
         super().__init__(args.host, args.port)
 
@@ -836,19 +835,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         await self._manager.start()
         await super().start()
 
-    async def stop(self, cancel: bool = True) -> None:
-        await super().stop(cancel)
+    async def on_stop(self) -> None:
         await self._manager.stop()
-        self._manager_stopped.set()
-
-    async def join(self) -> None:
-        # The base version returns as soon as the superclass is stopped, but
-        # we want to wait for _manager to be stopped too. We can't stop the
-        # manager before stopping the server because that would introduce a
-        # race where new requests could arrive and be processed after stopping
-        # the manager.
-        await super().join()
-        await self._manager_stopped.wait()
 
     def _unique_name(self, prefix: str) -> str:
         """Find first unused name with the given prefix"""

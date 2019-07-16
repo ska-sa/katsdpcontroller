@@ -1067,8 +1067,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.graph_dir = graph_dir
         self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
-        # Used to indicate that stop has really fully stopped
-        self._controller_stopped = asyncio.Event()
 
         super().__init__(host, port)
         # setup sensors
@@ -1080,8 +1078,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         await self.master_controller.wait_connected()
         await super().start()
 
-    async def stop(self, cancel: bool = True) -> None:
-        await super().stop(cancel)
+    async def on_stop(self) -> None:
         if self.product is not None and self.product.state != ProductState.DEAD:
             logger.warning('Product controller interrupted - deconfiguring running product')
             try:
@@ -1090,12 +1087,6 @@ class DeviceServer(aiokatcp.DeviceServer):
                 logger.warning('Failed to deconfigure product %s during shutdown', exc_info=True)
         self.master_controller.close()
         await self.master_controller.wait_closed()
-        self._controller_stopped.set()
-
-    async def join(self):
-        await super().join()
-        # Give the force-deconfiguration time to happen
-        await self._controller_stopped.wait()
 
     async def configure_product(self, name: str, config: dict) -> None:
         """Configure a subarray product in response to a request.
