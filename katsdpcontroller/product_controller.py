@@ -1,8 +1,5 @@
 """Control of a single subarray product"""
 
-# TODO:
-# - fill in remaining requests
-
 import asyncio
 import logging
 import json
