@@ -102,6 +102,8 @@ class Product:
     ----------
     name
         Subarray product ID
+    config
+        Product configuration to pass to product controller
     configure_task
         The asyncio task corresponding to the product-configure command. If the
         process dies, this task is cancelled to notify it.
@@ -114,8 +116,9 @@ class Product:
         ACTIVE = 3
         DEAD = 4
 
-    def __init__(self, name: str, configure_task: Optional[asyncio.Task]) -> None:
+    def __init__(self, name: str, config: dict, configure_task: Optional[asyncio.Task]) -> None:
         self.name = name
+        self.config = config
         self.configure_task = configure_task
         self.katcp_conn: Optional[aiokatcp.Client] = None
         self.task_state = Product.TaskState.CREATED
@@ -286,11 +289,14 @@ class ProductManagerBase(Generic[_P]):
         return self._products
 
     @abstractmethod
-    async def create_product(self, name: str) -> _P:
+    async def create_product(self, name: str, config: dict) -> _P:
         """Create a new product called `name`.
 
         The product is brought to state :const:`~Product.TaskState.STARTING`
         before return.
+
+        The implementation *must not* yield control before calling
+        :meth:`add_product`.
         """
 
     def _update_products_sensor(self) -> None:
@@ -388,9 +394,9 @@ class ProductManagerBase(Generic[_P]):
 
 class InternalProduct(Product):
     """Product with internal :class:`.product_controller.DeviceServer`"""
-    def __init__(self, name: str, configure_task: Optional[asyncio.Task],
+    def __init__(self, name: str, config: dict, configure_task: Optional[asyncio.Task],
                  server: aiokatcp.DeviceServer) -> None:
-        super().__init__(name, configure_task)
+        super().__init__(name, config, configure_task)
         self.server = server
 
     async def close(self) -> None:
@@ -412,12 +418,12 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
             if product.server is not None:
                 await product.server.stop()
 
-    async def create_product(self, name: str) -> InternalProduct:
+    async def create_product(self, name: str, config: dict) -> InternalProduct:
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
             '127.0.0.1', 0, mc_client, None, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory, {})
-        product = InternalProduct(name, asyncio.Task.current_task(), server)
+        product = InternalProduct(name, config, asyncio.Task.current_task(), server)
         self._add_product(product)
         await product.server.start()
         host, port = device_server_sockname(product.server)
@@ -437,8 +443,8 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
 class SingularityProduct(Product):
     """Subarray product launched as a task within Hubspot Singularity"""
 
-    def __init__(self, name: str, configure_task: Optional[asyncio.Task]) -> None:
-        super().__init__(name, configure_task)
+    def __init__(self, name: str, config: dict, configure_task: Optional[asyncio.Task]) -> None:
+        super().__init__(name, config, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
 
@@ -626,7 +632,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 data = default
             products = []
             for name, info in data['products'].items():
-                prod = SingularityProduct(name, None)
+                prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
                 prod.task_state = Product.TaskState.ACTIVE
@@ -644,6 +650,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 'version': 1,
                 'products': {
                     prod.name: {
+                        'config': prod.config,
                         'run_id': prod.run_id,
                         'task_id': prod.task_id,
                         'host': prod.host,
@@ -738,7 +745,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     def _gen_capture_block_id(self, minimum: int) -> int:
         return max(int(time.time()), minimum)
 
-    async def create_product(self, name: str) -> SingularityProduct:
+    async def create_product(self, name: str, config: dict) -> SingularityProduct:
         try:
             s3_config = _load_s3_config(self._args.s3_config_file)
         except Exception as exc:
@@ -758,7 +765,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             f'zk://{self._args.zk}/mesos'
         ])
 
-        product = SingularityProduct(name, asyncio.Task.current_task())
+        product = SingularityProduct(name, config, asyncio.Task.current_task())
         self._add_product(product)
         request_id = await self._ensure_request(name)
         # Creates a temporary ImageResolver so that we throw away the cache immediately.
@@ -977,6 +984,66 @@ class DeviceServer(aiokatcp.DeviceServer):
         n = len(override)
         return f"Set {n} override keys for subarray product {name}"
 
+    async def product_configure(self, name: str, config: dict) -> Product:
+        """Implementation of :meth:`request_product_configure`."""
+        orig_name = name
+        if name.endswith('*'):
+            name = self._unique_name(name[:-1])
+        # NB: do not await between _unique_name and create_product below, as
+        # doing so would introduce a race condition where the name could get
+        # taken before we create it.
+
+        product_logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
+        if not re.match(r'^[A-Za-z0-9_]+\*?$', name):
+            raise FailReply('Subarray product ID contains illegal characters')
+        if orig_name in self._override_dicts:
+            # this is a use-once set of overrides
+            odict = self._override_dicts.pop(orig_name)
+            product_logger.warning("Setting overrides on %s for the following: %s",
+                                   name, odict)
+            config = product_config.override(config, odict)
+        product_logger.info("Configuring %s with '%s'", name, json.dumps(config))
+
+        success = False
+        product: Optional[Product] = None
+        timeout = 300
+        try:
+            async with async_timeout.timeout(timeout):
+                # This needs to be as close as possible to create_product
+                # (specifically, no intervening awaits) so that other events
+                # can't affect the set of valid names.
+                if name in self._manager.products:
+                    raise FailReply(f'Subarray product {name} already exists')
+                product = await self._manager.create_product(name, config)
+                assert product is not None
+                assert product.katcp_conn is not None
+                assert product.host is not None and product.port is not None
+
+                await product.katcp_conn.wait_connected()
+                await product.katcp_conn.request('product-configure', name,
+                                                 json.dumps(config))
+                await self._manager.product_active(product)
+                success = True
+                return product
+        except asyncio.TimeoutError:
+            raise FailReply(f'Subarray product did not configure within {timeout}s') from None
+        except asyncio.CancelledError:
+            # Could be because the request itself was cancelled (e.g. server
+            # going down) or because reconciliation noticed the task had
+            # died. We can distinguish them by checking the product state.
+            if product is not None and product.task_state == Product.TaskState.DEAD:
+                raise FailReply(
+                    f'Task for {name} died before the subarray was configured') from None
+            else:
+                raise
+        except ProductFailed as exc:
+            raise FailReply(f'Failed to configure {name}: {exc}') from exc
+        finally:
+            if product is not None:
+                product.configure_task = None
+                if not success:
+                    await self._manager.kill_product(product)
+
     @time_request
     async def request_product_configure(self, ctx, name: str, config: str) -> Tuple[str, str, int]:
         """Configure a SDP subarray product instance.
@@ -1012,64 +1079,35 @@ class DeviceServer(aiokatcp.DeviceServer):
         port : int
             Port of product controller katcp interface
         """
-        product_logger = logging.LoggerAdapter(
-            logger, dict(subarray_product_id=name))
-        product_logger.info("?product-configure called with: %s", ctx.req)
-        if not re.match(r'^[A-Za-z0-9_]+\*?$', name):
-            raise FailReply('Subarray product ID contains illegal characters')
         try:
             config_dict = load_json_dict(config)
         except ValueError as exc:
             raise FailReply(f'Config is not valid JSON: {exc}') from None
+        product = await self.product_configure(name, config_dict)
+        assert product.host is not None and product.port is not None
+        return product.name, product.host, product.port
 
-        if name in self._override_dicts:
-            # this is a use-once set of overrides
-            odict = self._override_dicts.pop(name)
-            product_logger.warning("Setting overrides on %s for the following: %s",
-                                   name, odict)
-            config_dict = product_config.override(config_dict, odict)
-
-        success = False
-        product: Optional[Product] = None
-        timeout = 300
+    async def product_deconfigure(self, product: Product, force: bool = False) -> None:
+        """Implementation of meth:`request_product_deconfigure`."""
+        timeout = 15 if force else None
         try:
             async with async_timeout.timeout(timeout):
-                # This needs to be as close as possible to create_product
-                # (specifically, no intervening awaits) so that other events
-                # can't affect the set of valid names.
-                if name in self._manager.products:
-                    raise FailReply(f'Subarray product {name} already exists')
-                if name.endswith('*'):
-                    name = self._unique_name(name[:-1])
-                product = await self._manager.create_product(name)
-                assert product is not None
-                assert product.katcp_conn is not None
-                assert product.host is not None and product.port is not None
-
-                await product.katcp_conn.wait_connected()
-                await product.katcp_conn.request('product-configure', name,
-                                                 json.dumps(config_dict))
-                await self._manager.product_active(product)
-                success = True
-                return name, product.host, product.port
-        except asyncio.TimeoutError:
-            raise FailReply(f'Subarray product did not configure within {timeout}s') from None
-        except asyncio.CancelledError:
-            # Could be because the request itself was cancelled (e.g. server
-            # going down) or because reconciliation noticed the task had
-            # died. We can distinguish them by checking the product state.
-            if product is not None and product.task_state == Product.TaskState.DEAD:
-                raise FailReply(
-                    f'Task for {name} died before the subarray was configured') from None
-            else:
+                if product.task_state != Product.TaskState.ACTIVE:
+                    raise FailReply(f"Product {product.name} is not yet configured")
+                if not product.katcp_conn or not product.katcp_conn.is_connected:
+                    raise FailReply('Not connected to product controller (try with force=True)')
+                await product.katcp_conn.request('product-deconfigure', force)
+                if force:
+                    # Make sure it actually dies; if not we'll force it when we
+                    # time out.
+                    await product.dead_event.wait()
+        except Exception as exc:
+            if not force:
                 raise
-        except ProductFailed as exc:
-            raise FailReply(f'Failed to configure {name}: {exc}') from exc
-        finally:
-            if product is not None:
-                product.configure_task = None
-                if not success:
-                    await self._manager.kill_product(product)
+            product.logger.info(f'Graceful kill failed, force-killing: {exc}')
+            # Mesos will eventually kill the slave tasks when it sees that
+            # the framework has disappeared.
+            await self._manager.kill_product(product)
 
     @time_request
     async def request_product_deconfigure(self, ctx, name: str, force: bool = False) -> None:
@@ -1087,25 +1125,52 @@ class DeviceServer(aiokatcp.DeviceServer):
         if product is None:
             raise FailReply(f"Deconfiguration of subarray product {name} requested, "
                             "but no configuration found.")
-        timeout = 15 if force else None
+        await self.product_deconfigure(product, force)
+
+    @time_request
+    async def request_product_reconfigure(self, ctx, name: str) -> None:
+        """
+        Reconfigure the specified SDP subarray product instance.
+
+        The primary use of this command is to restart the SDP components for a particular
+        subarray without having to reconfigure the rest of the system.
+
+        Essentially this runs a deconfigure() followed by a configure() with
+        the same parameters as originally specified via the
+        product-configure katcp request.
+
+        Parameters
+        ----------
+        subarray_product_id : string
+            The ID of the subarray product to reconfigure.
+        """
+        product_logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
+        product_logger.info("?product-reconfigure called on %s", name)
+        product = self._manager.products.get(name)
+        if product is None:
+            raise FailReply(f"The specified subarray product id {name} has no existing "
+                            f"configuration and thus cannot be reconfigured.")
+        config = product.config
+
+        product_logger.info("Deconfiguring %s as part of a reconfigure request", name)
         try:
-            async with async_timeout.timeout(timeout):
-                if product.task_state != Product.TaskState.ACTIVE:
-                    raise FailReply(f"Product {name} is not yet configured")
-                if not product.katcp_conn or not product.katcp_conn.is_connected:
-                    raise FailReply('Not connected to product controller (try with force=True)')
-                await product.katcp_conn.request('product-deconfigure', force)
-                if force:
-                    # Make sure it actually dies; if not we'll force it when we
-                    # time out.
-                    await product.dead_event.wait()
-        except Exception as exc:
-            if not force:
-                raise
-            product.logger.info(f'Graceful kill failed, force-killing: {exc}')
-            # Mesos will eventually kill the slave tasks when it sees that
-            # the framework has disappeared.
-            await self._manager.kill_product(product)
+            await self.product_deconfigure(product)
+        except Exception as error:
+            msg = "Unable to deconfigure as part of reconfigure"
+            product_logger.exception(msg)
+            raise FailReply(f"{msg}: {error}")
+
+        product_logger.info("Waiting for %s to disappear", name)
+        await product.dead_event.wait()
+
+        product_logger.info("Issuing new configure for %s as part of reconfigure request.",
+                            name)
+        try:
+            await self.product_configure(name, config)
+        except Exception as error:
+            msg = "Unable to configure as part of reconfigure, original array deconfigured"
+            product_logger.exception(msg)
+            raise FailReply(f"{msg}: {error}")
 
     @time_request
     async def request_product_list(self, ctx, name: str = None) -> None:
@@ -1232,6 +1297,19 @@ class DeviceServer(aiokatcp.DeviceServer):
         katcp_conn = self._get_katcp(subarray_product_id)
         reply, informs = await katcp_conn.request('capture-done')
         return reply[0].decode()
+
+    @time_request
+    async def request_sdp_shutdown(self, ctx) -> str:
+        """Shut down the SDP master controller and all controlled nodes.
+
+        Returns
+        -------
+        success : {'ok', 'fail'}
+            Whether the shutdown sequence of all other nodes succeeded.
+        hosts : str
+            Comma separated lists of hosts that have been shutdown (excl mc host)
+        """
+        raise FailReply('sdp-shutdown is not currently implemented')
 
 
 class _InvalidGuiUrlsError(RuntimeError):

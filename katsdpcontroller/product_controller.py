@@ -611,7 +611,7 @@ class InterfaceModeSensors:
     def add_sensors(self, server: aiokatcp.DeviceServer) -> None:
         """Add dummy subarray product sensors and issue #interface-changed"""
 
-        interface_sensors = [
+        interface_sensors: List[Sensor] = [
             Sensor(Address, 'bf_ingest.beamformer.1.port', 'IP endpoint for port',
                    default=Address(IPv4Address("1.2.3.4"), 31048),
                    initial_status=Sensor.Status.NOMINAL),

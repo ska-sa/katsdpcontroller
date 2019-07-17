@@ -185,7 +185,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
     async def test_create_product(self) -> None:
         await self.start_manager()
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product('foo', {}))
         await self.advance(100)
         self.assertTrue(task.done())
         product = await task
@@ -210,7 +210,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """Task dies before we observe it running"""
         await self.start_manager()
         self.singularity_server.lifecycles.append(quick_death_lifecycle)
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product('foo', {}))
         await self.advance(100)
         self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
@@ -220,8 +220,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def test_create_product_parallel(self) -> None:
         """Can configure two subarray products at the same time"""
         await self.start_manager()
-        task1 = self.loop.create_task(self.manager.create_product('product1'))
-        task2 = self.loop.create_task(self.manager.create_product('product2'))
+        task1 = self.loop.create_task(self.manager.create_product('product1', {}))
+        task2 = self.loop.create_task(self.manager.create_product('product2', {}))
         await self.advance(100)
         self.assertTrue(task1.done())
         self.assertTrue(task2.done())
@@ -241,7 +241,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.start_manager()
         self.singularity_server.lifecycles.append(
             functools.partial(death_after_task_id_lifecycle, init_wait))
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product('foo', {}))
         await self.advance(100)
         self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
@@ -261,7 +261,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
         if lifecycle:
             self.singularity_server.lifecycles.append(lifecycle)
-        task = self.loop.create_task(self.manager.create_product(name))
+        task = self.loop.create_task(self.manager.create_product(name, {}))
         await self.advance(100)
         self.assertTrue(task.done())
         product = await task
@@ -317,7 +317,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """
         await self.start_manager()
         self.singularity_server.lifecycles.append(long_pending_lifecycle)
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product('foo', {}))
         await self.advance(500)
         self.assertFalse(task.done())
         task.cancel()
@@ -387,7 +387,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.open_mock.unregister_path('s3_config.json')
         if content is not None:
             self.open_mock.set_read_data_for('s3_config.json', 'I am not JSON')
-        task = self.loop.create_task(self.manager.create_product('foo'))
+        task = self.loop.create_task(self.manager.create_product('foo', {}))
         await self.advance(100)
         self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
@@ -480,7 +480,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # Disable the mocking by making the real version the side effect
         self.sensor_proxy_client_mock.side_effect = SensorProxyClient
         self.singularity_server.lifecycles.append(katcp_server_lifecycle)
-        task = self.loop.create_task(self.manager.create_product('product1'))
+        task = self.loop.create_task(self.manager.create_product('product1', {}))
         await self.advance(100)
         self.assertTrue(task.done())
         product = await task
@@ -583,6 +583,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await self.client.request("capture-done", "product")
         await self.advance(1)    # interface mode has some sleeps in capture-done
         await self.client.request("product-deconfigure", "product")
+        await self.advance(1)    # product-deconfigure sleeps a bit before exiting the server
 
     async def test_product_configure(self):
         await assert_request_fails(self.client, "product-deconfigure", "product")
@@ -627,7 +628,11 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_product_reconfigure(self):
         await assert_request_fails(self.client, "product-reconfigure", "product")
         await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("product-reconfigure", "product")
+        # The product controller sleeps a bit before exiting, so we need to advance
+        # time during the request
+        task = self.loop.create_task(self.client.request("product-reconfigure", "product"))
+        await self.advance(1)
+        await task
         await self.client.request("capture-init", "product")
         await assert_request_fails(self.client, "product-reconfigure", "product")
 

@@ -27,6 +27,7 @@
                     "task_id": {"type": "string"},
                     "host": {"type": "string"},
                     "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+                    "config": {"type": "object"},
                     "multicast_groups": {
                         "type": "array",
                         "items": {"type": "string", "format": "ipv4"}
