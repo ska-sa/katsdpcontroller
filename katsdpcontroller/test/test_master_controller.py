@@ -14,7 +14,6 @@ from aiokatcp import Sensor
 import prometheus_client
 import asynctest
 import open_file_mock
-from nose.plugins.skip import SkipTest
 
 from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
@@ -220,16 +219,18 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
     async def test_create_product_parallel(self) -> None:
         """Can configure two subarray products at the same time"""
-        raise SkipTest('This test goes into an infinite loop, so disabled for now')
         await self.start_manager()
-        task1 = self.loop.create_task(self.start_product('product1'))
-        task2 = self.loop.create_task(self.start_product('product2'))
+        task1 = self.loop.create_task(self.manager.create_product('product1'))
+        task2 = self.loop.create_task(self.manager.create_product('product2'))
+        await self.advance(100)
+        self.assertTrue(task1.done())
+        self.assertTrue(task2.done())
         product1 = await task1
         product2 = await task2
         self.assertEqual(product1.name, 'product1')
         self.assertEqual(product2.name, 'product2')
-        self.assertEqual(product1.task_state, Product.TaskState.ACTIVE)
-        self.assertEqual(product2.task_state, Product.TaskState.ACTIVE)
+        self.assertEqual(product1.task_state, Product.TaskState.STARTING)
+        self.assertEqual(product2.task_state, Product.TaskState.STARTING)
 
     async def _test_create_product_dies_after_task_id(self, init_wait: float) -> None:
         """Task dies immediately after we learn its task ID
