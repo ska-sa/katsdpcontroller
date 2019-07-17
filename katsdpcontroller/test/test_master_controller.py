@@ -609,7 +609,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(b'prefix_0', await product_configure())
 
     def _product_configure_slow(self, subarray_product: str,
-                                      cancelled: bool = False) -> DelayedManager:
+                                cancelled: bool = False) -> DelayedManager:
         create_patch(self, 'aiokatcp.Client.wait_connected',
                      side_effect=aiokatcp.Client.wait_connected, autospec=True)
         return DelayedManager(
