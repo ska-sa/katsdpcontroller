@@ -3,13 +3,16 @@
 import asyncio
 import unittest
 from unittest import mock
-from typing import List, Tuple, Iterable, Coroutine, Optional, Type, Any
+from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
+                    Type, Any, TypeVar, Generic)
 from types import TracebackType
 
 import aiokatcp
 import asynctest
-from nose.tools import assert_raises, assert_equal
+from nose.tools import assert_raises, assert_equal, assert_true
 
+
+_T = TypeVar('_T')
 
 CONFIG = '''{
     "version": "2.4",
@@ -280,3 +283,61 @@ class DelayedManager:
             assert_equal('request cancelled', str(cm.exception))
         else:
             await self._request_task     # Will raise if it failed
+
+
+class Background(Generic[_T]):
+    """Asynchronous context manager that runs its argument in a separate task.
+
+    It can also be used as a normal context manager, but in that case it
+    asserts that the task is finished when it exits.
+
+    Parameters
+    ----------
+    awaitable
+        Coroutine to run in a separate task (or any future).
+
+    Example
+    -------
+    .. code:: python
+
+        async with Background(my_coro()) as cm:
+            await asyncio.sleep(1)
+        print(cm.result)
+    """
+
+    def __init__(self, awaitable: Awaitable[_T]) -> None:
+        self._future = asyncio.ensure_future(awaitable)
+
+    def __enter__(self) -> 'Background':
+        return self
+
+    def __exit__(self, exc_type: Optional[Type[BaseException]],
+                 exc_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
+        if not exc_type:
+            assert_true(self._future.done())
+
+    async def __aenter__(self) -> 'Background':
+        return self
+
+    async def __aexit__(self, exc_type: Optional[Type[BaseException]],
+                        exc_value: Optional[BaseException],
+                        traceback: Optional[TracebackType]) -> None:
+        if not exc_type:
+            await self._future
+
+    @property
+    def result(self) -> _T:
+        return self._future.result()
+
+
+async def run_clocked(test_case: asynctest.ClockedTestCase, time: float,
+                      awaitable: Awaitable[_T]) -> _T:
+    """Run a coroutine while advancing the clock on a clocked test case.
+
+    This is useful if the implementation of the `awaitable` sleeps and hence
+    needs the time advanced to make progress.
+    """
+    with Background(awaitable) as cm:
+        await test_case.advance(time)
+    return cm.result

@@ -7,13 +7,14 @@ import functools
 import ipaddress
 import os
 from unittest import mock
-from typing import Tuple, Set, List, Mapping, Optional
+from typing import Tuple, Set, List, Mapping, Optional, Any
 
 import aiokatcp
 from aiokatcp import Sensor
 import prometheus_client
 import asynctest
 import open_file_mock
+from nose.plugins.skip import SkipTest
 
 from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
@@ -23,7 +24,8 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
-                    DelayedManager, CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
+                    DelayedManager, Background, run_clocked,
+                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
@@ -185,10 +187,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
     async def test_create_product(self) -> None:
         await self.start_manager()
-        task = self.loop.create_task(self.manager.create_product('foo', {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
-        product = await task
+        product = await run_clocked(self, 100, self.manager.create_product('foo', {}))
         self.assertEqual(product.task_state, Product.TaskState.STARTING)
         self.assertEqual(product.host, 'slave.invalid')
         self.assertEqual(product.port, 12345)
@@ -210,23 +209,18 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         """Task dies before we observe it running"""
         await self.start_manager()
         self.singularity_server.lifecycles.append(quick_death_lifecycle)
-        task = self.loop.create_task(self.manager.create_product('foo', {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
-            await task
+            await run_clocked(self, 100, self.manager.create_product('foo', {}))
         self.assertEqual(self.manager.products, {})
 
     async def test_create_product_parallel(self) -> None:
         """Can configure two subarray products at the same time"""
         await self.start_manager()
-        task1 = self.loop.create_task(self.manager.create_product('product1', {}))
-        task2 = self.loop.create_task(self.manager.create_product('product2', {}))
-        await self.advance(100)
-        self.assertTrue(task1.done())
-        self.assertTrue(task2.done())
-        product1 = await task1
-        product2 = await task2
+        with Background(self.manager.create_product('product1', {})) as cm1, \
+                Background(self.manager.create_product('product2', {})) as cm2:
+            await self.advance(100)
+        product1 = cm1.result
+        product2 = cm2.result
         self.assertEqual(product1.name, 'product1')
         self.assertEqual(product2.name, 'product2')
         self.assertEqual(product1.task_state, Product.TaskState.STARTING)
@@ -241,11 +235,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.start_manager()
         self.singularity_server.lifecycles.append(
             functools.partial(death_after_task_id_lifecycle, init_wait))
-        task = self.loop.create_task(self.manager.create_product('foo', {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
-            await task
+            await run_clocked(self, 100, self.manager.create_product('foo', {}))
         self.assertEqual(self.manager.products, {})
 
     async def test_create_product_dies_after_task_id_reconciliation(self) -> None:
@@ -261,10 +252,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
         if lifecycle:
             self.singularity_server.lifecycles.append(lifecycle)
-        task = self.loop.create_task(self.manager.create_product(name, {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
-        product = await task
+        product = await run_clocked(self, 100, self.manager.create_product(name, {}))
         await self.manager.product_active(product)
         return product
 
@@ -387,11 +375,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.open_mock.unregister_path('s3_config.json')
         if content is not None:
             self.open_mock.set_read_data_for('s3_config.json', 'I am not JSON')
-        task = self.loop.create_task(self.manager.create_product('foo', {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
         with self.assertRaises(ProductFailed):
-            await task
+            await run_clocked(self, 100, self.manager.create_product('foo', {}))
 
     async def test_s3_config_bad_json(self) -> None:
         await self._test_bad_s3_config('I am not JSON')
@@ -480,10 +465,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         # Disable the mocking by making the real version the side effect
         self.sensor_proxy_client_mock.side_effect = SensorProxyClient
         self.singularity_server.lifecycles.append(katcp_server_lifecycle)
-        task = self.loop.create_task(self.manager.create_product('product1', {}))
-        await self.advance(100)
-        self.assertTrue(task.done())
-        product = await task
+        product = await run_clocked(self, 100, self.manager.create_product('product1', {}))
 
         # We haven't called product_active yet, so it should still be CONFIGURING
         self.assertEqual(await product.get_state(), ProductState.CONFIGURING)
@@ -500,6 +482,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
         # Have the remote katcp server tell us it is going away. This also
         # provides test coverage of this shutdown path.
+        assert product.katcp_conn is not None
         await product.katcp_conn.request('halt')
         await product.dead_event.wait()
         self.assertEqual(await product.get_state(), ProductState.DEAD)
@@ -595,6 +578,9 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         reply, informs = await self.client.request('product-list')
         self.assertEqual(reply, [b'1'])
 
+    async def test_product_configure_bad_json(self):
+        await assert_request_fails(self.client, 'product-configure', 'product', 'not JSON')
+
     async def test_product_configure_generate_names(self):
         """Name with trailing * must generate lowest-numbered name"""
         async def product_configure():
@@ -630,15 +616,109 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await self.client.request("product-configure", "product", CONFIG)
         # The product controller sleeps a bit before exiting, so we need to advance
         # time during the request
-        task = self.loop.create_task(self.client.request("product-reconfigure", "product"))
-        await self.advance(1)
-        await task
+        await run_clocked(self, 1, self.client.request("product-reconfigure", "product"))
         await self.client.request("capture-init", "product")
         await assert_request_fails(self.client, "product-reconfigure", "product")
 
-    # TODO: bring across more product-reconfigure tests from test_sdp_controller
+    async def test_product_reconfigure_override(self):
+        """?product-reconfigure must pick up config overrides"""
+        await self.client.request("product-configure", "product", CONFIG)
+        await self.client.request("set-config-override", "product", '{"config": {"develop": true}}')
+        # The product controller sleeps a bit before exiting, so we need to advance
+        # time during the request
+        await run_clocked(self, 1, self.client.request("product-reconfigure", "product"))
+        config = self.server._manager.products['product'].config
+        self.assertEqual(config['config'].get('develop'), True)
+
+    async def test_product_reconfigure_configure_busy(self):
+        """Can run product-reconfigure concurrently with another product-configure"""
+        await self.client.request('product-configure', 'product1', CONFIG)
+        async with self._product_configure_slow('product2'):
+            await run_clocked(self, 1, self.client.request('product-reconfigure', 'product1'))
+
+    async def test_product_reconfigure_configure_fails(self):
+        """Tests product-reconfigure when the new graph fails"""
+        async def request(self, name: str,
+                          *args: Any) -> Tuple[List[bytes], List[aiokatcp.Message]]:
+            # Mock implementation of request that fails product-configure
+            if name == 'product-configure':
+                raise aiokatcp.FailReply('Fault injected into product-configure')
+            else:
+                return await orig_request(self, name, *args)
+
+        await self.client.request('product-configure', 'product', CONFIG)
+        orig_request = aiokatcp.Client.request
+        with mock.patch.object(aiokatcp.Client, 'request', new=request):
+            with self.assertRaises(aiokatcp.FailReply):
+                await run_clocked(self, 1, self.client.request('product-reconfigure', 'product'))
+        # Check that the subarray was deconfigured cleanly
+        self.assertEqual({}, self.server._manager.products)
 
     async def test_help(self):
         reply, informs = await self.client.request('help')
         requests = [inform.arguments[0].decode('utf-8') for inform in informs]
         self.assertEqual(set(EXPECTED_REQUEST_LIST), set(requests))
+
+    async def test_telstate_endpoint_all(self):
+        """Test telstate-endpoint without a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product1', CONFIG)
+        await self.client.request('product-configure', 'product2', CONFIG)
+        reply, informs = await self.client.request('telstate-endpoint')
+        self.assertEqual(reply, [b'2'])
+        # Need to compare just arguments, because the message objects have message IDs
+        informs = [tuple(msg.arguments) for msg in informs]
+        self.assertEqual([
+            (b'product1', b''),
+            (b'product2', b'')
+        ], informs)
+
+    async def test_telstate_endpoint_one(self):
+        """Test telstate-endpoint with a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product', CONFIG)
+        reply, informs = await self.client.request('telstate-endpoint', 'product')
+        self.assertEqual(reply, [b''])
+
+    async def test_telstate_endpoint_not_found(self):
+        """Test telstate-endpoint with a subarray_product_id that does not exist"""
+        await assert_request_fails(self.client, 'telstate-endpoint', 'product')
+
+    async def test_capture_status_all(self):
+        """Test capture-status without a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product1', CONFIG)
+        await self.client.request('product-configure', 'product2', CONFIG)
+        await self.client.request('capture-init', 'product2')
+        reply, informs = await self.client.request('capture-status')
+        self.assertEqual(reply, [b'2'])
+        # Need to compare just arguments, because the message objects have message IDs
+        informs = [tuple(msg.arguments) for msg in informs]
+        self.assertEqual([
+            (b'product1', b'idle'),
+            (b'product2', b'capturing')
+        ], informs)
+
+    async def test_capture_status_one(self):
+        """Test capture-status with a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product', CONFIG)
+        reply, informs = await self.client.request('capture-status', 'product')
+        self.assertEqual(reply, [b'idle'])
+        self.assertEqual([], informs)
+        await self.client.request('capture-init', 'product')
+        reply, informs = await self.client.request('capture-status', 'product')
+        self.assertEqual(reply, [b'capturing'])
+        await self.client.request('capture-done', 'product')
+        reply, informs = await self.client.request('capture-status', 'product')
+        self.assertEqual(reply, [b'idle'])
+
+    async def test_capture_status_not_found(self):
+        """Test capture_status with a subarray_product_id that does not exist"""
+        await assert_request_fails(self.client, 'capture-status', 'product')
+
+    async def test_sdp_shutdown(self):
+        """Tests success path of sdp-shutdown"""
+        # TODO: adapt the old test
+        raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
+
+    async def test_sdp_shutdown_slaves_error(self):
+        """Test sdp-shutdown when get_master_and_slaves fails"""
+        # TODO: adapt the old test
+        raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
