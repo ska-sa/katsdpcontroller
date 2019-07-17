@@ -30,7 +30,8 @@ from ..product_controller import (
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
-                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
+                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
+                    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
 ANTENNAS = 'm000,m001,m063,m064'
@@ -51,16 +52,6 @@ STREAMS = '''{
         "i0.tied-array-channelised-voltage-0y": "spead://239.102.253.1+15:7148"
     }
 }'''
-
-EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
-    (b'api-version', b'', b'string'),
-    (b'build-state', b'', b'string'),
-    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
-    (b'fmeca.FD0001', b'', b'boolean'),
-    (b'time-synchronised', b'', b'boolean'),
-    (b'gui-urls', b'', b'string'),
-    (b'products', b'', b'string')
-)
 
 EXPECTED_REQUEST_LIST = [
     'product-configure',
@@ -202,17 +193,19 @@ class TestSDPControllerInterface(BaseTestSDPController):
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
 
     async def test_interface_sensors(self) -> None:
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
+        await assert_sensors(self.client, EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        interface_changed_callback.assert_called_once_with([b'sensor-list'])
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
+        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        await assert_sensors(
+            self.client,
+            EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
 
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
         await self.client.request("product-deconfigure")
-        interface_changed_callback.assert_called_once_with([b'sensor-list'])
+        interface_changed_callback.assert_called_once_with(b'sensor-list')
         await self.client.wait_disconnected()
         self.client.remove_inform_callback('interface-changed', interface_changed_callback)
 

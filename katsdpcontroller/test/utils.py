@@ -3,7 +3,7 @@
 import asyncio
 import unittest
 from unittest import mock
-from typing import Tuple, Iterable, Coroutine, Optional, Type, Any
+from typing import List, Tuple, Iterable, Coroutine, Optional, Type, Any
 from types import TracebackType
 
 import aiokatcp
@@ -186,7 +186,11 @@ S3_CONFIG = '''
     }
 }'''
 
-EXPECTED_INTERFACE_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
+EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
+    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail')
+]
+
+EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'bf_ingest.beamformer.1.port', b'', b'address'),
     (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
     (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
@@ -195,7 +199,7 @@ EXPECTED_INTERFACE_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
     (b'state', b'', b'discrete',
      b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error'),
     (b'capture-block-state', b'', b'string')
-)
+]
 
 
 def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:

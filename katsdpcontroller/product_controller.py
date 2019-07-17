@@ -611,48 +611,36 @@ class InterfaceModeSensors:
     def add_sensors(self, server: aiokatcp.DeviceServer) -> None:
         """Add dummy subarray product sensors and issue #interface-changed"""
 
-        interface_sensor_params = {
-            'bf_ingest.beamformer.1.port': dict(
-                default=Address(IPv4Address("1.2.3.4"), 31048),
-                sensor_type=Address,
-                description='IP endpoint for port',
-                initial_status=Sensor.Status.NOMINAL),
-            'ingest.sdp_l0.1.capture-active': dict(
-                default=False,
-                sensor_type=bool,
-                description='Is there a currently active capture session.',
-                initial_status=Sensor.Status.NOMINAL),
-            'timeplot.sdp_l0.1.gui-urls': dict(
-                default='[{"category": "Plot", '
-                '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
-                '"description": "Signal displays for array_1_bc856M4k", '
-                '"title": "Signal Display"}]',
-                sensor_type=str,
-                description='URLs for GUIs',
-                initial_status=Sensor.Status.NOMINAL),
-            'timeplot.sdp_l0.1.html_port': dict(
-                default=Address(IPv4Address("1.2.3.5"), 31054),
-                sensor_type=Address,
-                description='IP endpoint for html_port',
-                initial_status=Sensor.Status.NOMINAL),
-            'cal.1.capture-block-state': dict(
-                default='{}',
-                sensor_type=str,
-                description='JSON dict with the state of each capture block',
-                initial_status=Sensor.Status.NOMINAL)
-        }
+        interface_sensors = [
+            Sensor(Address, 'bf_ingest.beamformer.1.port', 'IP endpoint for port',
+                   default=Address(IPv4Address("1.2.3.4"), 31048),
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(bool, 'ingest.sdp_l0.1.capture-active',
+                   'Is there a currently active capture session.',
+                   default=False, initial_status=Sensor.Status.NOMINAL),
+            Sensor(str, 'timeplot.sdp_l0.1.gui-urls', 'URLs for GUIs',
+                   default='[{"category": "Plot", '
+                   '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
+                   '"description": "Signal displays for array_1_bc856M4k", '
+                   '"title": "Signal Display"}]',
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(Address, 'timeplot.sdp_l0.1.html_port', 'IP endpoint for html_port',
+                   default=Address(IPv4Address("1.2.3.5"), 31054),
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(str, 'cal.1.capture-block-state',
+                   'JSON dict with the state of each capture block',
+                   default='{}',
+                   initial_status=Sensor.Status.NOMINAL)
+        ]
 
         sensors_added = False
         try:
-            for postfix, sensor_params in interface_sensor_params.items():
-                sensor_name = self.subarray_product_id + '.' + postfix
-                if sensor_name in self.sensors:
+            for sensor in interface_sensors:
+                if sensor.name in self.sensors:
                     logger.info('Simulated sensor %r already exists, skipping',
-                                sensor_name)
+                                sensor.name)
                     continue
-                sensor_params['name'] = sensor_name
-                sensor = Sensor(**sensor_params)     # type: ignore
-                self.sensors[sensor_name] = sensor
+                self.sensors[sensor.name] = sensor
                 server.sensors.add(sensor)
                 sensors_added = True
         finally:

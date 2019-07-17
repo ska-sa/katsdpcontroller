@@ -23,18 +23,15 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
-                    DelayedManager, CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST)
+                    DelayedManager, CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
+                    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
-EXPECTED_SENSOR_LIST: Tuple[Tuple[bytes, ...], ...] = (
-    (b'api-version', b'', b'string'),
-    (b'build-state', b'', b'string'),
+EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
-    (b'fmeca.FD0001', b'', b'boolean'),
-    (b'time-synchronised', b'', b'boolean'),
     (b'gui-urls', b'', b'string'),
     (b'products', b'', b'string')
-)
+]
 
 EXPECTED_REQUEST_LIST = [
     'product-configure',
@@ -42,6 +39,7 @@ EXPECTED_REQUEST_LIST = [
     'product-reconfigure',
     'product-list',
     'set-config-override',
+    'sdp-shutdown',
     'capture-done',
     'capture-init',
     'capture-status',
@@ -545,17 +543,20 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request('product-configure', 'product', CONFIG)
-        interface_changed_callback.assert_called_once_with([b'sensor-list'])
+        await asynctest.exhaust_callbacks(self.loop)
+        interface_changed_callback.assert_called_once_with(b'sensor-list')
         # Prepend the subarray product ID to the names
-        expected_interface_sensors = tuple(('product.' + s[0]) + s[1:]
-                                           for s in EXPECTED_INTERFACE_SENSOR_LIST)
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_interface_sensors)
+        expected_product_sensors = [
+            (b'product.' + s[0],) + s[1:]
+            for s in EXPECTED_INTERFACE_SENSOR_LIST + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST]
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors)
         await assert_sensor_value(self.client, 'products', '["product"]')
 
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
         await self.client.request('product-deconfigure', 'product')
-        interface_changed_callback.assert_called_once_with([b'sensor-list'])
+        await self.advance(1)
+        interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
 
