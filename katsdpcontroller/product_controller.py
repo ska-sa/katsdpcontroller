@@ -1098,9 +1098,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
 
         def dead_callback(product):
-            # Don't stop immediately. This gives a bit of time for final
-            # replies and sensor updates to be transmitted.
-            asyncio.get_event_loop().call_later(0.02, self.halt)
+            self.halt(cancel=False)
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching subarray product.")

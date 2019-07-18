@@ -543,7 +543,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
         await self.client.request('product-deconfigure', 'product')
-        await self.advance(1)
+        await asynctest.exhaust_callbacks(self.loop)
         interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
@@ -615,9 +615,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_product_reconfigure(self) -> None:
         await assert_request_fails(self.client, "product-reconfigure", "product")
         await self.client.request("product-configure", "product", CONFIG)
-        # The product controller sleeps a bit before exiting, so we need to advance
-        # time during the request
-        await run_clocked(self, 1, self.client.request("product-reconfigure", "product"))
+        await self.client.request("product-reconfigure", "product")
         await self.client.request("capture-init", "product")
         await assert_request_fails(self.client, "product-reconfigure", "product")
 
@@ -625,9 +623,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """?product-reconfigure must pick up config overrides"""
         await self.client.request("product-configure", "product", CONFIG)
         await self.client.request("set-config-override", "product", '{"config": {"develop": true}}')
-        # The product controller sleeps a bit before exiting, so we need to advance
-        # time during the request
-        await run_clocked(self, 1, self.client.request("product-reconfigure", "product"))
+        await self.client.request("product-reconfigure", "product")
         config = self.server._manager.products['product'].config
         self.assertEqual(config['config'].get('develop'), True)
 
@@ -635,7 +631,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Can run product-reconfigure concurrently with another product-configure"""
         await self.client.request('product-configure', 'product1', CONFIG)
         async with self._product_configure_slow('product2'):
-            await run_clocked(self, 1, self.client.request('product-reconfigure', 'product1'))
+            await self.client.request('product-reconfigure', 'product1')
 
     async def test_product_reconfigure_configure_fails(self) -> None:
         """Tests product-reconfigure when the new graph fails"""
@@ -651,7 +647,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         orig_request = aiokatcp.Client.request
         with mock.patch.object(aiokatcp.Client, 'request', new=request):
             with self.assertRaises(aiokatcp.FailReply):
-                await run_clocked(self, 1, self.client.request('product-reconfigure', 'product'))
+                await self.client.request('product-reconfigure', 'product')
         # Check that the subarray was deconfigured cleanly
         self.assertEqual({}, self.server._manager.products)
 
