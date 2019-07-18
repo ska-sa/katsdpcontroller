@@ -886,7 +886,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             if name not in self._manager.products:
                 return name
         # itertools.count never finishes, but to keep mypy happy:
-        assert False     # pragma: noqa
+        assert False     # pragma: nocover
 
     def _get_katcp(self, subarray_product_id: str) -> aiokatcp.Client:
         """Get the katcp connection to an active subarray product.
