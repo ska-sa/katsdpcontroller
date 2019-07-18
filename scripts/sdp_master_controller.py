@@ -14,7 +14,7 @@ import prometheus_async
 import aiohttp.web
 import katsdpservices
 
-from katsdpcontroller import master_controller
+from katsdpcontroller import master_controller, web
 
 
 async def quiet_prometheus_stats(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -38,7 +38,7 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
 async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
     app = aiohttp.web.Application()
     app.add_routes([aiohttp.web.get('/metrics', quiet_prometheus_stats)])
-    runner = aiohttp.web.AppRunner(app)
+    runner = aiohttp.web.AppRunner(app, access_log_class=web.AccessLogger)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
     await site.start()
