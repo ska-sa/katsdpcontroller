@@ -971,10 +971,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         product_logger.info("?set-config-override called on %s with %s",
                             name, override_dict_json)
         try:
-            odict = load_json_dict(override_dict_json)
+            override = load_json_dict(override_dict_json)
             product_logger.info("Set override for subarray product %s to the following: %s",
-                                name, odict)
-            override = json.loads(override_dict_json)
+                                name, override_dict_json)
             self._override_dicts[name] = override
         except ValueError as exc:
             msg = (f"The supplied override string {override_dict_json} does not appear to "
