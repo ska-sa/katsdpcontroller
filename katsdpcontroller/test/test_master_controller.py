@@ -526,6 +526,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(reply, [b"capturing"])
         await assert_request_fails(self.client, "capture-init", "product")
 
+    async def test_capture_init_while_configuring(self) -> None:
+        async with self._product_configure_slow('product'):
+            await assert_request_fails(self.client, 'capture-init', 'product')
+
     async def test_interface_sensors(self) -> None:
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
@@ -559,16 +563,9 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(reply, [b"0000000001"])
         await assert_request_fails(self.client, "capture-done", "product")
 
-    async def test_product_deconfigure(self) -> None:
-        await assert_request_fails(self.client, "product-configure", "product")
-        await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("capture-init", "product")
-        # should not be able to deconfigure when not in idle state
-        await assert_request_fails(self.client, "product-deconfigure", "product")
-        await self.client.request("capture-done", "product")
-        await self.advance(1)    # interface mode has some sleeps in capture-done
-        await self.client.request("product-deconfigure", "product")
-        await self.advance(1)    # product-deconfigure sleeps a bit before exiting the server
+    async def test_set_config_override_bad(self) -> None:
+        await assert_request_fails(self.client, "set-config-override", "product", "not json")
+        await assert_request_fails(self.client, "set-config-override", "product", "[]")
 
     async def test_product_configure(self) -> None:
         await assert_request_fails(self.client, "product-deconfigure", "product")
@@ -577,8 +574,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         # Cannot configure an already-configured array
         await assert_request_fails(self.client, "product-configure", "product", CONFIG)
 
-        reply, informs = await self.client.request('product-list')
-        self.assertEqual(reply, [b'1'])
+    async def test_product_configure_bad_name(self) -> None:
+        await assert_request_fails(self.client, 'product-configure', '!$@#', CONFIG)
 
     async def test_product_configure_bad_json(self) -> None:
         await assert_request_fails(self.client, 'product-configure', 'product', 'not JSON')
@@ -606,12 +603,28 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             aiokatcp.Client.wait_connected,
             None, cancelled)
 
+    async def test_product_deconfigure(self) -> None:
+        await assert_request_fails(self.client, "product-configure", "product")
+        await self.client.request("product-configure", "product", CONFIG)
+        await self.client.request("capture-init", "product")
+        # should not be able to deconfigure when not in idle state
+        await assert_request_fails(self.client, "product-deconfigure", "product")
+        await self.client.request("capture-done", "product")
+        await self.advance(1)    # interface mode has some sleeps in capture-done
+        await self.client.request("product-deconfigure", "product")
+
     async def test_product_deconfigure_while_configuring_force(self) -> None:
         """Forced product-deconfigure must succeed while in product-configure"""
         async with self._product_configure_slow('product', cancelled=True):
             await self.client.request("product-deconfigure", 'product', True)
         # Verify that it's gone
         self.assertEqual({}, self.server._manager.products)
+
+    async def test_product_deconfigure_capturing_force(self) -> None:
+        """forced product-deconfigure must succeed while capturing"""
+        await self.client.request("product-configure", "product", CONFIG)
+        await self.client.request("capture-init", "product")
+        await self.client.request("product-deconfigure", "product", True)
 
     async def test_product_reconfigure(self) -> None:
         await assert_request_fails(self.client, "product-reconfigure", "product")
@@ -708,8 +721,34 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(reply, [b'idle'])
 
     async def test_capture_status_not_found(self) -> None:
-        """Test capture_status with a subarray_product_id that does not exist"""
+        """Test capture-status with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'capture-status', 'product')
+
+    async def test_product_list_all(self) -> None:
+        """Test product-list without a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product1', CONFIG)
+        await self.client.request('product-configure', 'product2', CONFIG)
+        reply, informs = await self.client.request('product-list')
+        self.assertEqual(reply, [b'2'])
+        # Need to compare just arguments, because the message objects have message IDs
+        inform_args = [tuple(msg.arguments) for msg in informs]
+        self.assertEqual([
+            (b'product1', b'idle'),
+            (b'product2', b'idle')
+        ], inform_args)
+
+    async def test_product_list_one(self) -> None:
+        """Test product-list with a subarray_product_id argument"""
+        await self.client.request('product-configure', 'product', CONFIG)
+        reply, informs = await self.client.request('product-list', 'product')
+        self.assertEqual(reply, [b'1'])
+        # Need to compare just arguments, because the message objects have message IDs
+        inform_args = [tuple(msg.arguments) for msg in informs]
+        self.assertEqual([(b'product', b'idle')], inform_args)
+
+    async def test_product_list_not_found(self) -> None:
+        """Test product-list with a subarray_product_id that does not exist"""
+        await assert_request_fails(self.client, 'product-list', 'product')
 
     async def test_sdp_shutdown(self) -> None:
         """Tests success path of sdp-shutdown"""
