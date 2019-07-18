@@ -285,7 +285,10 @@ class TestSDPController(BaseTestSDPController):
             sensor_proxy_client.wait_synced,
             None, cancelled)
 
-    def _getaddrinfo(self, host: str, *args, **kwargs) -> List[Tuple[int, int, int, str, tuple]]:
+    # The return annotation is deliberately vague because typeshed changed
+    # its annotation at some point and so any more specific annotation will
+    # error out on *some* version of mypy.
+    def _getaddrinfo(self, host: str, *args, **kwargs) -> List[Any]:
         """Mock getaddrinfo that replaces all hosts with a dummy IP address"""
         if host.startswith('host'):
             host = '127.0.0.2'
