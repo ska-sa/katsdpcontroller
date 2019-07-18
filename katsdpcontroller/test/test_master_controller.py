@@ -503,6 +503,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             '--interface-mode',
             '--port', '0',
             '--name', 'sdpmc_test',
+            '--registry', 'registry.invalid:5000',
             '--safe-multicast-cidr', '225.100.0.0/24',
             'unused argument (zk)', 'unused argument (Singularity)'
         ])
@@ -719,6 +720,20 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Test sdp-shutdown when get_master_and_slaves fails"""
         # TODO: adapt the old test
         raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
+
+    async def test_get_multicast_groups(self) -> None:
+        await self.client.request('product-configure', 'product', CONFIG)
+        reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
+        self.assertEqual(reply, [b'225.100.0.1+9'])
+        reply, informs = await self.client.request('get-multicast-groups', 'product', 1)
+        self.assertEqual(reply, [b'225.100.0.11'])
+        await assert_request_fails(self.client, 'get-multicast-groups', 'product', 0)
+        await assert_request_fails(self.client, 'get-multicast-groups', 'wrong-product', 1)
+        await assert_request_fails(self.client, 'get-multicast-groups', 'product', 1000000)
+
+    async def test_image_lookup(self) -> None:
+        reply, informs = await self.client.request('image-lookup', 'foo', 'tag')
+        self.assertEqual(reply, [b'registry.invalid:5000/foo:tag'])
 
 
 class _ParserError(Exception):
