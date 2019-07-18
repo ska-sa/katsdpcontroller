@@ -497,7 +497,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     emulating Singularity and Zookeeper, and allows interaction with a mostly
     real product controller.
     """
-    async def setUp(self):
+    async def setUp(self) -> None:
         self.args = parse_args([
             '--localhost',
             '--interface-mode',
@@ -515,7 +515,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
 
-    async def test_capture_init(self):
+    async def test_capture_init(self) -> None:
         await assert_request_fails(self.client, "capture-init", "product")
         await self.client.request("product-configure", "product", CONFIG)
         reply, informs = await self.client.request("capture-init", "product")
@@ -525,7 +525,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(reply, [b"capturing"])
         await assert_request_fails(self.client, "capture-init", "product")
 
-    async def test_interface_sensors(self):
+    async def test_interface_sensors(self) -> None:
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
         interface_changed_callback = mock.MagicMock()
@@ -548,7 +548,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
 
-    async def test_capture_done(self):
+    async def test_capture_done(self) -> None:
         await assert_request_fails(self.client, "capture-done", "product")
         await self.client.request("product-configure", "product", CONFIG)
         await assert_request_fails(self.client, "capture-done", "product")
@@ -558,7 +558,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.assertEqual(reply, [b"0000000001"])
         await assert_request_fails(self.client, "capture-done", "product")
 
-    async def test_product_deconfigure(self):
+    async def test_product_deconfigure(self) -> None:
         await assert_request_fails(self.client, "product-configure", "product")
         await self.client.request("product-configure", "product", CONFIG)
         await self.client.request("capture-init", "product")
@@ -569,7 +569,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await self.client.request("product-deconfigure", "product")
         await self.advance(1)    # product-deconfigure sleeps a bit before exiting the server
 
-    async def test_product_configure(self):
+    async def test_product_configure(self) -> None:
         await assert_request_fails(self.client, "product-deconfigure", "product")
         await self.client.request("product-list")
         await self.client.request("product-configure", "product", CONFIG)
@@ -579,10 +579,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         reply, informs = await self.client.request('product-list')
         self.assertEqual(reply, [b'1'])
 
-    async def test_product_configure_bad_json(self):
+    async def test_product_configure_bad_json(self) -> None:
         await assert_request_fails(self.client, 'product-configure', 'product', 'not JSON')
 
-    async def test_product_configure_generate_names(self):
+    async def test_product_configure_generate_names(self) -> None:
         """Name with trailing * must generate lowest-numbered name"""
         async def product_configure():
             return (await self.client.request('product-configure', 'prefix_*', CONFIG))[0][0]
@@ -605,14 +605,14 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             aiokatcp.Client.wait_connected,
             None, cancelled)
 
-    async def test_product_deconfigure_while_configuring_force(self):
+    async def test_product_deconfigure_while_configuring_force(self) -> None:
         """Forced product-deconfigure must succeed while in product-configure"""
         async with self._product_configure_slow('product', cancelled=True):
             await self.client.request("product-deconfigure", 'product', True)
         # Verify that it's gone
         self.assertEqual({}, self.server._manager.products)
 
-    async def test_product_reconfigure(self):
+    async def test_product_reconfigure(self) -> None:
         await assert_request_fails(self.client, "product-reconfigure", "product")
         await self.client.request("product-configure", "product", CONFIG)
         # The product controller sleeps a bit before exiting, so we need to advance
@@ -621,7 +621,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await self.client.request("capture-init", "product")
         await assert_request_fails(self.client, "product-reconfigure", "product")
 
-    async def test_product_reconfigure_override(self):
+    async def test_product_reconfigure_override(self) -> None:
         """?product-reconfigure must pick up config overrides"""
         await self.client.request("product-configure", "product", CONFIG)
         await self.client.request("set-config-override", "product", '{"config": {"develop": true}}')
@@ -631,13 +631,13 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         config = self.server._manager.products['product'].config
         self.assertEqual(config['config'].get('develop'), True)
 
-    async def test_product_reconfigure_configure_busy(self):
+    async def test_product_reconfigure_configure_busy(self) -> None:
         """Can run product-reconfigure concurrently with another product-configure"""
         await self.client.request('product-configure', 'product1', CONFIG)
         async with self._product_configure_slow('product2'):
             await run_clocked(self, 1, self.client.request('product-reconfigure', 'product1'))
 
-    async def test_product_reconfigure_configure_fails(self):
+    async def test_product_reconfigure_configure_fails(self) -> None:
         """Tests product-reconfigure when the new graph fails"""
         async def request(self, name: str,
                           *args: Any) -> Tuple[List[bytes], List[aiokatcp.Message]]:
@@ -655,35 +655,35 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         # Check that the subarray was deconfigured cleanly
         self.assertEqual({}, self.server._manager.products)
 
-    async def test_help(self):
+    async def test_help(self) -> None:
         reply, informs = await self.client.request('help')
         requests = [inform.arguments[0].decode('utf-8') for inform in informs]
         self.assertEqual(set(EXPECTED_REQUEST_LIST), set(requests))
 
-    async def test_telstate_endpoint_all(self):
+    async def test_telstate_endpoint_all(self) -> None:
         """Test telstate-endpoint without a subarray_product_id argument"""
         await self.client.request('product-configure', 'product1', CONFIG)
         await self.client.request('product-configure', 'product2', CONFIG)
         reply, informs = await self.client.request('telstate-endpoint')
         self.assertEqual(reply, [b'2'])
         # Need to compare just arguments, because the message objects have message IDs
-        informs = [tuple(msg.arguments) for msg in informs]
+        inform_args = [tuple(msg.arguments) for msg in informs]
         self.assertEqual([
             (b'product1', b''),
             (b'product2', b'')
-        ], informs)
+        ], inform_args)
 
-    async def test_telstate_endpoint_one(self):
+    async def test_telstate_endpoint_one(self) -> None:
         """Test telstate-endpoint with a subarray_product_id argument"""
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('telstate-endpoint', 'product')
         self.assertEqual(reply, [b''])
 
-    async def test_telstate_endpoint_not_found(self):
+    async def test_telstate_endpoint_not_found(self) -> None:
         """Test telstate-endpoint with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'telstate-endpoint', 'product')
 
-    async def test_capture_status_all(self):
+    async def test_capture_status_all(self) -> None:
         """Test capture-status without a subarray_product_id argument"""
         await self.client.request('product-configure', 'product1', CONFIG)
         await self.client.request('product-configure', 'product2', CONFIG)
@@ -691,13 +691,13 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         reply, informs = await self.client.request('capture-status')
         self.assertEqual(reply, [b'2'])
         # Need to compare just arguments, because the message objects have message IDs
-        informs = [tuple(msg.arguments) for msg in informs]
+        inform_args = [tuple(msg.arguments) for msg in informs]
         self.assertEqual([
             (b'product1', b'idle'),
             (b'product2', b'capturing')
-        ], informs)
+        ], inform_args)
 
-    async def test_capture_status_one(self):
+    async def test_capture_status_one(self) -> None:
         """Test capture-status with a subarray_product_id argument"""
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('capture-status', 'product')
@@ -710,16 +710,16 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         reply, informs = await self.client.request('capture-status', 'product')
         self.assertEqual(reply, [b'idle'])
 
-    async def test_capture_status_not_found(self):
+    async def test_capture_status_not_found(self) -> None:
         """Test capture_status with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'capture-status', 'product')
 
-    async def test_sdp_shutdown(self):
+    async def test_sdp_shutdown(self) -> None:
         """Tests success path of sdp-shutdown"""
         # TODO: adapt the old test
         raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
 
-    async def test_sdp_shutdown_slaves_error(self):
+    async def test_sdp_shutdown_slaves_error(self) -> None:
         """Test sdp-shutdown when get_master_and_slaves fails"""
         # TODO: adapt the old test
         raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
