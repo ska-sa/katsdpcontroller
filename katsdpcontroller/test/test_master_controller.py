@@ -6,6 +6,7 @@ import json
 import functools
 import ipaddress
 import os
+import unittest
 from unittest import mock
 from typing import Tuple, Set, List, Mapping, Optional, Any
 
@@ -722,3 +723,82 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Test sdp-shutdown when get_master_and_slaves fails"""
         # TODO: adapt the old test
         raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
+
+
+class _ParserError(Exception):
+    """Exception substituted for parser.error, which normally raises SystemExit"""
+
+
+class TestParseArgs(unittest.TestCase):
+    @staticmethod
+    def _error(message: str) -> None:
+        raise _ParserError(message)
+
+    def setUp(self) -> None:
+        self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
+        create_patch(self, 'argparse.ArgumentParser.error', side_effect=self._error)
+        self.content1 = '''
+            [
+                {
+                    "title": "Logtrail",
+                    "description": "Logtrail (live logs)",
+                    "href": "http://kibana.invalid:5601/app/logtrail/",
+                    "category": "Log"
+                },
+                {
+                    "title": "Kibana",
+                    "description": "Kibana (log exploration)",
+                    "href": "http://kibana.invalid:5601/",
+                    "category": "Log"
+                }
+            ]
+        '''
+        self.content2 = '''
+            [
+                {
+                    "title": "Grafana",
+                    "description": "Grafana dashboard",
+                    "href": "http://grafana.invalid:3000/",
+                    "category": "Dashboard"
+                }
+            ]
+        '''
+
+    def test_gui_urls_file(self) -> None:
+        self.open_mock.set_read_data_for('gui-urls.json', self.content1)
+        args = parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
+        self.assertEqual(args.gui_urls, json.loads(self.content1))
+
+    def test_gui_urls_bad_json(self) -> None:
+        self.open_mock.set_read_data_for('gui-urls.json', 'not json')
+        with self.assertRaisesRegex(_ParserError, 'Invalid JSON'):
+            parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
+
+    def test_gui_urls_not_list(self) -> None:
+        self.open_mock.set_read_data_for('gui-urls.json', '{}')
+        with self.assertRaisesRegex(_ParserError, r'gui-urls\.json does not contain a list'):
+            parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
+
+    def test_gui_urls_missing_file(self) -> None:
+        with self.assertRaisesRegex(_ParserError, r'Cannot read gui-urls\.json: File .* not found'):
+            parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
+
+    def test_gui_urls_dir(self) -> None:
+        self.open_mock.set_read_data_for('./file1.json', self.content1)
+        self.open_mock.set_read_data_for('./file2.json', self.content2)
+        # This is a bit fragile, because open_file_mock doesn't emulate all
+        # the os functions to simulate a filesystem.
+        with mock.patch('os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']), \
+                mock.patch('os.path.isfile', return_value=True):
+            args = parse_args(['--gui-urls=.', '--interface-mode', '', ''])
+        self.assertEqual(args.gui_urls, json.loads(self.content1) + json.loads(self.content2))
+
+    def test_gui_urls_bad_dir(self) -> None:
+        with mock.patch('os.listdir', side_effect=IOError):
+            with self.assertRaisesRegex(_ParserError, r'Cannot read .:'):
+                parse_args(['--gui-urls=.', '--interface-mode', '', ''])
+
+    def test_no_s3_config(self) -> None:
+        # Mostly just to get test coverage
+        with self.assertRaisesRegex(_ParserError, r'--s3-config-file is required'):
+            parse_args(['', ''])
