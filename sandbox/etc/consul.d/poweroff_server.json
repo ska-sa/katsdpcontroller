@@ -1,0 +1,6 @@
+{
+  "service": {
+    "name": "poweroff",
+    "port": 9118
+  }
+}

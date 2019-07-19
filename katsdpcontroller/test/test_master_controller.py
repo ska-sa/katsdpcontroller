@@ -15,13 +15,14 @@ from aiokatcp import Sensor
 import prometheus_client
 import asynctest
 import open_file_mock
-from nose.plugins.skip import SkipTest
+import aioresponses
+import yarl
 
 from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
-                                 DeviceServer, parse_args)
+                                 DeviceServer, parse_args, CONSUL_POWEROFF_URL)
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
@@ -53,6 +54,70 @@ EXPECTED_REQUEST_LIST = [
     # Standard katcp commands
     'client-list', 'halt', 'help', 'log-level', 'sensor-list',
     'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'
+]
+
+# Adapted from an actual query to consul
+CONSUL_POWEROFF_SERVERS = [
+    {
+        "ID": "67aaaddc-6b24-5c93-e114-6b4eb6201843",
+        "Node": "testhost",
+        "Address": "127.0.0.42",
+        "Datacenter": "dc1",
+        "TaggedAddresses": {
+            "lan": "127.0.0.43",
+            "wan": "127.0.0.44"
+        },
+        "NodeMeta": {
+            "consul-network-segment": ""
+        },
+        "ServiceKind": "",
+        "ServiceID": "poweroff",
+        "ServiceName": "poweroff",
+        "ServiceTags": [],
+        "ServiceAddress": "",
+        "ServiceWeights": {
+            "Passing": 1,
+            "Warning": 1
+        },
+        "ServiceMeta": {},
+        "ServicePort": 9118,
+        "ServiceEnableTagOverride": False,
+        "ServiceProxyDestination": "",
+        "ServiceProxy": {},
+        "ServiceConnect": {},
+        "CreateIndex": 7,
+        "ModifyIndex": 7
+    },
+    {
+        "ID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "Node": "testhost2",
+        "Address": "127.0.0.142",
+        "Datacenter": "dc1",
+        "TaggedAddresses": {
+            "lan": "127.0.0.143",
+            "wan": "127.0.0.144"
+        },
+        "NodeMeta": {
+            "consul-network-segment": ""
+        },
+        "ServiceKind": "",
+        "ServiceID": "poweroff",
+        "ServiceName": "poweroff",
+        "ServiceTags": [],
+        "ServiceAddress": "127.0.0.144",
+        "ServiceWeights": {
+            "Passing": 1,
+            "Warning": 1
+        },
+        "ServiceMeta": {},
+        "ServicePort": 9118,
+        "ServiceEnableTagOverride": False,
+        "ServiceProxyDestination": "",
+        "ServiceProxy": {},
+        "ServiceConnect": {},
+        "CreateIndex": 7,
+        "ModifyIndex": 7
+    }
 ]
 
 
@@ -750,16 +815,6 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Test product-list with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'product-list', 'product')
 
-    async def test_sdp_shutdown(self) -> None:
-        """Tests success path of sdp-shutdown"""
-        # TODO: adapt the old test
-        raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
-
-    async def test_sdp_shutdown_slaves_error(self) -> None:
-        """Test sdp-shutdown when get_master_and_slaves fails"""
-        # TODO: adapt the old test
-        raise SkipTest('Skipping sdp-shutdown test because it is not implemented')
-
     async def test_get_multicast_groups(self) -> None:
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
@@ -773,6 +828,51 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_image_lookup(self) -> None:
         reply, informs = await self.client.request('image-lookup', 'foo', 'tag')
         self.assertEqual(reply, [b'registry.invalid:5000/foo:tag'])
+
+    @aioresponses.aioresponses()
+    async def test_sdp_shutdown(self, rmock: aioresponses) -> None:
+        rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
+        poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
+            status=202, payload={"stdout": "", "stderr": ""}))
+        url1 = yarl.URL('http://127.0.0.42:9118/poweroff')
+        url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
+        rmock.post(url1, callback=poweroff_mock)
+        rmock.post(url2, callback=poweroff_mock)
+        await self.client.request('product-configure', 'product', CONFIG)
+        await self.client.request('capture-init', 'product')
+        reply, informs = await self.client.request('sdp-shutdown')
+        self.assertEqual(reply[0], b'127.0.0.144,127.0.0.42')
+        poweroff_mock.assert_any_call(url1, data=None)
+        poweroff_mock.assert_any_call(url2, data=None)
+        # The product should have been forcibly deconfigured
+        self.assertEqual(self.server._manager.products, {})
+
+    @aioresponses.aioresponses()
+    async def test_sdp_shutdown_no_consul(self, rmock: aioresponses) -> None:
+        await self.client.request('product-configure', 'product', CONFIG)
+        await self.client.request('capture-init', 'product')
+        with self.assertRaisesRegex(aiokatcp.FailReply, 'Could not get node list from consul'):
+            await self.client.request('sdp-shutdown')
+        # The product should still have been forcibly deconfigured
+        self.assertEqual(self.server._manager.products, {})
+
+    @aioresponses.aioresponses()
+    async def test_sdp_shutdown_failure(self, rmock: aioresponses) -> None:
+        rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
+        poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
+            status=202, payload={"stdout": "", "stderr": ""}))
+        url1 = yarl.URL('http://127.0.0.42:9118/poweroff')
+        url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
+        rmock.post(url1, callback=poweroff_mock)
+        rmock.post(url2, status=500, payload={"stdout": "", "stderr": "Simulated failure"})
+        await self.client.request('product-configure', 'product', CONFIG)
+        await self.client.request('capture-init', 'product')
+        with self.assertRaisesRegex(aiokatcp.FailReply, r'^127.0.0.42$'):
+            await self.client.request('sdp-shutdown')
+        # Other machine must still have been powered off
+        poweroff_mock.assert_any_call(url1, data=None)
+        # The product should have been forcibly deconfigured
+        self.assertEqual(self.server._manager.products, {})
 
 
 class _ParserError(Exception):

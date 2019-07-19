@@ -21,7 +21,7 @@ import os
 import socket
 from abc import abstractmethod
 from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
-                    Iterable, Mapping, Optional, Callable, Any)
+                    Iterable, Mapping, Sequence, Optional, Callable, Awaitable, Any)
 
 import aiozk
 import aiokatcp
@@ -29,6 +29,7 @@ from aiokatcp import FailReply, Sensor
 import async_timeout
 import jsonschema
 import yarl
+import aiohttp
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import katsdpservices
 
@@ -46,6 +47,7 @@ ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
+CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
 
 
 class NoAddressesError(Exception):
@@ -1303,6 +1305,43 @@ class DeviceServer(aiokatcp.DeviceServer):
         reply, informs = await katcp_conn.request('capture-done')
         return reply[0].decode()
 
+    async def _deconfigure_all(self) -> None:
+        """Forcably deconfigure all products.
+
+        Any errors are simply logged. This is only intended to be used as part
+        of ``sdp-shutdown``.
+        """
+        futures: List[Awaitable[None]] = []
+        names: List[str] = []
+        for product in list(self._manager.products.values()):
+            names.append(product.name)
+            futures.append(self.product_deconfigure(product, force=True))
+        results = await asyncio.gather(*futures, return_exceptions=True)
+        for name, result in zip(names, results):
+            if isinstance(result, BaseException):
+                logger.warning("Failed to deconfigure product %s during master controller exit. "
+                               "Forging ahead...", name, exc_info=result,
+                               extra=dict(subarray_product_id=name))
+
+    async def _poweroff_endpoints(self) -> Sequence[Tuple[str, int]]:
+        """Get URLs for the poweroff service."""
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                async with session.get(CONSUL_POWEROFF_URL) as resp:
+                    nodes = await resp.json()
+        except (OSError, ValueError, aiohttp.ClientError) as exc:
+            logger.exception('Failed to get poweroff node list from consul')
+            raise FailReply(f'Could not get node list from consul: {exc}')
+        endpoints: List[Tuple[str, int]] = []
+        for node in nodes:
+            address: str = node.get('ServiceAddress') or node.get('Address')
+            port: int = node.get('ServicePort')
+            endpoints.append((address, port))
+        # Put the nodes closest to localhost (which likely includes localhost
+        # itself) at the end.
+        endpoints.reverse()
+        return endpoints
+
     @time_request
     async def request_sdp_shutdown(self, ctx) -> str:
         """Shut down the SDP master controller and all controlled nodes.
@@ -1312,9 +1351,34 @@ class DeviceServer(aiokatcp.DeviceServer):
         success : {'ok', 'fail'}
             Whether the shutdown sequence of all other nodes succeeded.
         hosts : str
-            Comma separated lists of hosts that have been shutdown (excl mc host)
+            Comma-separated lists of hosts that have been shutdown
         """
-        raise FailReply('sdp-shutdown is not currently implemented')
+        logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
+        await self._deconfigure_all()
+        endpoints = await self._poweroff_endpoints()
+        urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
+                for (host, port) in endpoints]
+        successful: List[str] = []
+        failed = False
+        async with aiohttp.ClientSession() as session:
+            async def post1(url):
+                async with session.post(url) as resp:
+                    resp.raise_for_status()
+
+            futures = [post1(url) for url in urls]
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for endpoint, result in zip(endpoints, results):
+                if isinstance(result, BaseException):
+                    logger.warning('Shutting down %s:%d failed: %s',
+                                   endpoint[0], endpoint[1], result)
+                    failed = True
+                else:
+                    successful.append(endpoint[0])
+        success_str = ','.join(successful)
+        if failed:
+            raise FailReply(success_str)
+        else:
+            return success_str
 
 
 class _InvalidGuiUrlsError(RuntimeError):
@@ -1325,7 +1389,7 @@ def _load_gui_urls_file(filename: str) -> List[Dict[str, str]]:
     try:
         with open(filename) as gui_urls_file:
             gui_urls = json.load(gui_urls_file)
-    except (IOError, OSError) as error:
+    except OSError as error:
         raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
     except ValueError as error:
         raise _InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
@@ -1341,7 +1405,7 @@ def _load_gui_urls_dir(dirname: str) -> List[Dict[str, str]]:
             filename = os.path.join(dirname, name)
             if filename.endswith('.json') and os.path.isfile(filename):
                 gui_urls.extend(_load_gui_urls_file(filename))
-    except (IOError, OSError) as error:
+    except OSError as error:
         raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
     return gui_urls
 
