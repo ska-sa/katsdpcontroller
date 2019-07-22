@@ -223,7 +223,7 @@ class SensorProxyClient(aiokatcp.Client):
     prometheus_sensors
         Store for Prometheus metrics. If not provided, generated sensors are
         stored in a class-level variable. This is mainly intended to allow
-        tests to by isolated from global state.
+        tests to be isolated from global state.
     args, kwargs
         Passed to the base class
     """
