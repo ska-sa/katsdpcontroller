@@ -1,0 +1,14 @@
+[
+    {
+        "title": "Logtrail",
+        "description": "Logtrail (live logs)",
+        "href": "http://mc1.sdp.mkat.karoo.kat.ac.za:5601/app/logtrail/",
+        "category": "Log"
+    },
+    {
+        "title": "Kibana",
+        "description": "Kibana (log exploration)",
+        "href": "http://mc1.sdp.mkat.karoo.kat.ac.za:5601/app/kibana#/discover/b05b23e0-5367-11e8-8177-73e8ebddcfac",
+        "category": "Log"
+    }
+]
