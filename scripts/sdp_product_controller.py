@@ -83,7 +83,8 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
                         help='port that slaves communicate with [%(default)s]')
     parser.add_argument('--http-url', type=str, metavar='URL',
                         help='URL at which slaves connect to the HTTP port')
-    parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
+    parser.add_argument('--dashboard-port', type=int, default=os.environ.get('PORT4', 5006),
+                        metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--subarray-product-id', default='UNKNOWN',
                         help='Subarray product ID, used to name the framework [%(default)s]')
