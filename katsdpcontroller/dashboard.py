@@ -115,8 +115,6 @@ class Dashboard:
         sdp_controller = self._sdp_controller
         use_event_loop = self._use_event_loop
         app = dash.Dash(__name__)
-        app.css.config.serve_locally = True
-        app.scripts.config.serve_locally = True
         app.title = 'SDP Product Controller'
         app.layout = html.Div([
             dcc.Interval(id='interval', interval=1000),    # 1s updates
@@ -133,7 +131,7 @@ class Dashboard:
                                      {'name': 'Mesos State', 'id': 'mesos-state'},
                                      {'name': 'Host', 'id': 'host'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True),
+                            sort_action=True),
                         html.Div(id='task-details')
                     ])),
                     dcc.Tab(label='Config', children=html.Pre(id='subarray-product-config')),
@@ -143,7 +141,7 @@ class Dashboard:
                             columns=[{'name': 'ID', 'id': 'name'},
                                      {'name': 'State', 'id': 'state'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True)
+                            sort_action=True)
                     ])),
                     dcc.Tab(label='Batch jobs', children=html.Div([
                         dash_table.DataTable(
@@ -155,7 +153,7 @@ class Dashboard:
                                      {'name': 'Host', 'id': 'host'},
                                      {'name': 'Runtime', 'id': 'runtime'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True),
+                            sort_action=True),
                         html.Div(id='batch-details')
                     ]))
                 ])
