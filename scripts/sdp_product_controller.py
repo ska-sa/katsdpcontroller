@@ -14,10 +14,11 @@ import asyncio
 import socket
 import json
 import urllib.parse
-from typing import Tuple
+from typing import Tuple, Optional
 
 import addict
 import jsonschema
+import yarl
 import pymesos
 import aiokatcp
 import aiomonitor
@@ -86,6 +87,8 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.add_argument('--dashboard-port', type=int, default=os.environ.get('PORT4', 5006),
                         metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
+    parser.add_argument('--dashboard-url', type=str, metavar='URL',
+                        help='External URL for the dashboard')
     parser.add_argument('--subarray-product-id', default='UNKNOWN',
                         help='Subarray product ID, used to name the framework [%(default)s]')
     parser.add_argument('--image-tag',
@@ -170,6 +173,12 @@ def main() -> None:
             implicit_acknowledgements=False)
         sched.set_driver(driver)
         driver.start()
+
+    dashboard_url: Optional[str] = args.dashboard_url
+    if not args.interface_mode and args.dashboard_port != 0 and dashboard_url is None:
+        dashboard_url = str(yarl.URL.build(scheme='http', host=args.external_hostname,
+                                           port=args.dashboard_port, path='/'))
+
     server = product_controller.DeviceServer(
         args.host, args.port, master_controller, sched,
         batch_role=args.batch_role,
@@ -177,7 +186,8 @@ def main() -> None:
         localhost=args.localhost,
         image_resolver_factory=image_resolver_factory,
         s3_config=args.s3_config,
-        graph_dir=args.write_graphs)
+        graph_dir=args.write_graphs,
+        dashboard_url=dashboard_url)
     if not args.interface_mode and args.dashboard_port != 0:
         init_dashboard(server, args)
 
