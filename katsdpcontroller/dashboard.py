@@ -116,11 +116,13 @@ class Dashboard:
         use_event_loop = self._use_event_loop
         app = dash.Dash(__name__)
         app.title = 'SDP Product Controller'
-        app.layout = html.Div([
+        app.layout = html.Div(id='root', children=[
             dcc.Interval(id='interval', interval=1000),    # 1s updates
+            html.P('Lost connection to server (product may have been deconfigured)',
+                   id='disconnected'),
             html.P('Waiting for product-configure call ...',
-                   id='no-subarray-product'),
-            html.Div(id='subarray-product-content', children=[
+                   id='no-subarray-product', className='connected'),
+            html.Div(id='subarray-product-content', className='connected', children=[
                 html.P(html.Strong(id='subarray-product-state')),
                 dcc.Tabs(id='subarray-product-tabs', children=[
                     dcc.Tab(label='Tasks', children=html.Div([
@@ -166,7 +168,8 @@ class Dashboard:
                        Output('subarray-product-config', 'children'),
                        Output('task-table', 'data'),
                        Output('capture-block-table', 'data'),
-                       Output('batch-table', 'data')],
+                       Output('batch-table', 'data'),
+                       Output('root', 'data-dummy')],   # Just to set loading state on root
                       [Input('interval', 'n_intervals')])
         @use_event_loop
         async def top_level(n_intervals):
@@ -203,7 +206,7 @@ class Dashboard:
                 } for (capture_block_id, task) in tasks
             ]
             return ({'display': 'none'}, {}, sdp_controller.product.state.name,
-                    config, task_data, capture_block_data, batch_data)
+                    config, task_data, capture_block_data, batch_data, '')
 
         @app.callback(Output('task-details', 'children'),
                       [Input('task-table', 'active_cell'),
