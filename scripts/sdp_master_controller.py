@@ -14,13 +14,13 @@ import prometheus_async
 import aiohttp.web
 import katsdpservices
 
-from katsdpcontroller import master_controller, web
+from katsdpcontroller import master_controller, web_utils
 
 
 async def quiet_prometheus_stats(request: aiohttp.web.Request) -> aiohttp.web.Response:
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
-        # Avoid spamming logs (feeds into web.AccessLogger).
+        # Avoid spamming logs (feeds into web_utils.AccessLogger).
         response.log_level = logging.DEBUG
     return response
 
@@ -38,7 +38,7 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
 async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
     app = aiohttp.web.Application()
     app.add_routes([aiohttp.web.get('/metrics', quiet_prometheus_stats)])
-    runner = aiohttp.web.AppRunner(app, access_log_class=web.AccessLogger)
+    runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
     await site.start()

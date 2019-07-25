@@ -25,7 +25,7 @@ import aiomonitor
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
-from katsdpcontroller import scheduler, schemas, product_controller, web
+from katsdpcontroller import scheduler, schemas, product_controller, web_utils
 from katsdpcontroller.controller import (
     add_shared_options, load_json_dict, make_image_resolver_factory)
 
@@ -167,7 +167,7 @@ def main() -> None:
         sched = None
     else:
         sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
-                                    dict(access_log_class=web.AccessLogger))
+                                    dict(access_log_class=web_utils.AccessLogger))
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)
