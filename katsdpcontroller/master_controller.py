@@ -1472,6 +1472,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
             parser.error(str(exc))
         except Exception as exc:
             parser.error(f'Could not read {args.gui_urls}: {exc}')
+    else:
+        args.gui_urls = []
 
     if args.s3_config_file is None and not args.interface_mode:
         parser.error('--s3-config-file is required (unless --interface-mode is given)')
