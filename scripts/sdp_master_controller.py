@@ -10,19 +10,10 @@ import functools
 import sys
 from typing import List
 
-import prometheus_async
 import aiohttp.web
 import katsdpservices
 
-from katsdpcontroller import master_controller, web_utils
-
-
-async def quiet_prometheus_stats(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    response = await prometheus_async.aio.web.server_stats(request)
-    if response.status == 200:
-        # Avoid spamming logs (feeds into web_utils.AccessLogger).
-        response.log_level = logging.DEBUG
-    return response
+from katsdpcontroller import master_controller, web, web_utils
 
 
 def handle_signal(server: master_controller.DeviceServer) -> None:
@@ -35,9 +26,9 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
     server.halt()
 
 
-async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
-    app = aiohttp.web.Application()
-    app.add_routes([aiohttp.web.get('/metrics', quiet_prometheus_stats)])
+async def setup_web(args: argparse.Namespace,
+                    server: master_controller.DeviceServer) -> aiohttp.web.AppRunner:
+    app = web.make_app(server)
     runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
@@ -47,7 +38,7 @@ async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
 
 async def async_main(server: master_controller.DeviceServer,
                      args: argparse.Namespace) -> None:
-    runner = await setup_web(args)
+    runner = await setup_web(args, server)
     await server.start()
     await server.join()
     await runner.cleanup()

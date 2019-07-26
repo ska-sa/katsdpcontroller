@@ -35,3 +35,26 @@ class AccessLogger(aiohttp.web_log.AccessLogger):
             super().log(request, response, time)
         finally:
             self.logger = orig_logger
+
+
+@aiohttp.web.middleware
+async def cache_control(request, handler):
+    """Middleware that sets cache control headers.
+
+    For resources in /static it allows caching for an hour. For everything
+    else it disables caching.
+    """
+    if request.path.startswith('/static/'):
+        def add_headers(obj):
+            obj.headers['Cache-Control'] = 'max-age=3600'
+    else:
+        def add_headers(obj):
+            obj.headers['Cache-Control'] = 'no-store'
+
+    try:
+        response = await handler(request)
+        add_headers(response)
+        return response
+    except aiohttp.web.HTTPException as exc:
+        add_headers(exc)
+        raise

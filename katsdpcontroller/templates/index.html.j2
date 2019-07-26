@@ -1,18 +1,43 @@
 <!doctype html>
-<html>
-    <head>
-        <title>Available signal displays</title>
-    </head>
-    <body>
-        <h1>Available signal displays</h1>
-{% if servers %}
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="icon" href="static/favicon.ico"/>
+    <link rel="stylesheet" href="static/bootstrap-4.3.1.min.css"/>
+    <title>SDP GUIs</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1>General</h1>
+      {% if general %}
         <ul>
-{% for (array, stream) in servers.keys() %}
-    <li>{{array|e}} <a href="/{{array|e}}/{{stream|e}}/">{{stream|e}}</a></li>
-{% endfor %}
+          {% for gui in general %}
+            <li><a href="{{ gui.href }}">{{ gui.title }}</a></li>
+          {% endfor %}
         </ul>
-{% else %}
-        <p>No signal displays active</p>
-{% endif %}
-    </body>
+      {% else %}
+        <p>There are no general GUIs configured.</p>
+      {% endif %}
+
+      <h1>Product-specific</h1>
+      {% if products %}
+        {% for product_name, product in products.items() %}
+          <h2><tt>{{ product_name }}</tt></h2>
+          {% if product %}
+            <ul>
+              {% for gui in product %}
+                <li><a href="{{ gui.href }}">{{ gui.title }}</a>
+                    {{ '(' + gui.service + ')' if gui.service else '' }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p>There are no GUIs configured for this subarray product.</p>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p>There are no subarray products configured.</p>
+      {% endif %}
+    </div>
+  </body>
 </html>
