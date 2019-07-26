@@ -857,6 +857,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     _manager: ProductManagerBase
     _override_dicts: Dict[str, dict]
     _image_lookup: scheduler.ImageLookup
+    _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(self, args: argparse.Namespace,
                  prometheus_registry: CollectorRegistry = REGISTRY) -> None:
@@ -873,6 +874,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             manager_cls = SingularityProductManager
         self._manager = manager_cls(args, self, image_resolver_factory, prometheus_registry)
         self._override_dicts = {}
+        self._interface_changed_callbacks = []
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the SDP Master Controller",
@@ -889,6 +891,16 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     async def on_stop(self) -> None:
         await self._manager.stop()
+
+    def add_interface_changed_callback(self, callback: Callable[[], None]) -> None:
+        self._interface_changed_callbacks.append(callback)
+
+    def mass_inform(self, name: str, *args: Any) -> None:
+        super().mass_inform(name, *args)
+        # Triggered by SensorProxyClient
+        if name == 'interface-changed':
+            for callback in self._interface_changed_callbacks:
+                callback()
 
     def _unique_name(self, prefix: str) -> str:
         """Find first unused name with the given prefix"""

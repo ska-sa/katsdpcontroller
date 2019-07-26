@@ -11,21 +11,24 @@ sensor of the form :samp:`{product}.{service}.gui-urls` with a GUI titled
 is turned into a canonical form.
 """
 
+import asyncio
 import re
 import json
 import logging
 import textwrap
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import pkg_resources
 import prometheus_async
-from aiohttp import web
+import aiokatcp
+from aiohttp import web, WSMsgType
 import aiohttp_jinja2
 import jinja2
 
 from . import master_controller, web_utils
 
 
+logger = logging.getLogger(__name__)
 GUI_URLS_RE = re.compile(r'^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$')
 HAPROXY_HEADER = textwrap.dedent(r"""
     global
@@ -61,13 +64,13 @@ async def prometheus_handler(request: web.Request) -> web.Response:
     return response
 
 
-@aiohttp_jinja2.template('index.html.j2')
-def index_handler(request: web.Request) -> dict:
-    server = request.app['server']
+def _get_guis(server: master_controller.DeviceServer) -> dict:
     general = json.loads(server.sensors['gui-urls'].value)
     product_names = json.loads(server.sensors['products'].value)
     products: Dict[str, List[dict]] = {name: [] for name in product_names}
     for sensor in server.sensors.values():
+        if sensor.status != aiokatcp.Sensor.Status.NOMINAL:
+            continue
         match = GUI_URLS_RE.match(sensor.name)
         if match and match.group('product') in products:
             guis = json.loads(sensor.value)
@@ -80,14 +83,127 @@ def index_handler(request: web.Request) -> dict:
     return {'general': general, 'products': products}
 
 
+@aiohttp_jinja2.template('rotate_sd.html.j2')
+def rotate_handler(request: web.Request) -> dict:
+    defaults = {'rotate_interval': 5000, 'width': 500, 'height': 500}
+    defaults.update(request.query)
+    return defaults
+
+
+@aiohttp_jinja2.template('index.html.j2')
+def index_handler(request: web.Request) -> dict:
+    return _get_guis(request.app['server'])
+
+
+async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
+    """Run a websocket connection to inform client about GUIs.
+
+    It accepts two commands:
+    - `close`: closes the websocket
+    - `guis`: returns :meth:`_get_guis` (JSON-encoded)
+
+    Additionally, :meth:`_get_guis` is sent unsolicited when the sensors change.
+    """
+    ws = web.WebSocketResponse(timeout=60, autoping=True, heartbeat=30)
+    await ws.prepare(request)
+
+    updater = request.app['updater']
+    updater.add_websocket(ws)
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                if msg.data == 'close':
+                    updater.remove_websocket(ws)
+                    await ws.close()
+                elif msg.data == 'guis':
+                    await updater.update_websocket(ws)
+                else:
+                    logger.warning('unhandled command %r on websocket %s', msg.data, ws)
+            elif msg.type == WSMsgType.ERROR:
+                logger.error('ws connection closed with exception %s', ws.exception())
+            else:
+                logger.error('unhandled non-text data on websocket %s', ws)
+    except asyncio.CancelledError:
+        logger.info("Connection cancelled...")
+    except Exception:
+        logger.exception("Exception in websocket msg handler")
+    finally:
+        updater.remove_websocket(ws)
+        logger.info("Websocket %s closed.", ws)
+    return ws
+
+
+class Updater:
+    def __init__(self, server: master_controller.DeviceServer) -> None:
+        self._server = server
+        self._websockets: Set[web.WebSocketResponse] = set()
+        self._dirty = asyncio.Event()
+        self._guis: dict = {}
+        server.add_interface_changed_callback(self._dirty.set)
+        self._task = asyncio.get_event_loop().create_task(self._update())
+
+    def add_websocket(self, ws: web.WebSocketResponse) -> None:
+        self._websockets.add(ws)
+        ws['last_guis'] = None
+
+    def remove_websocket(self, ws: web.WebSocketResponse) -> None:
+        self._websockets.discard(ws)
+
+    async def _send_update(self, ws: web.WebSocketResponse, gui: dict, force: bool) -> bool:
+        if gui != ws['last_guis'] or force:
+            # If send_json raises we don't know what state the WS client will
+            # have, so just ensure we update it next time.
+            ws['last_guis'] = None
+            await ws.send_json(gui)
+            ws['last_guis'] = gui
+            return True
+        else:
+            return False
+
+    async def update_websocket(self, ws: web.WebSocketResponse) -> None:
+        await self._send_update(ws, _get_guis(self._server), True)
+
+    async def close(self, app: web.Application) -> None:
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        for ws in self._websockets:
+            await ws.close()
+
+    async def _update(self) -> None:
+        while True:
+            await self._dirty.wait()
+            self._dirty.clear()
+            logger.info('Updater woken up and updating state')
+            try:
+                guis = _get_guis(self._server)
+            except Exception:
+                logger.exception('Failed to get GUI list')
+                continue
+            # TODO: haproxy stuff goes here
+
+            sent = 0
+            for ws in self._websockets:
+                try:
+                    sent += int(await self._send_update(ws, guis, False))
+                except Exception:
+                    logger.exception('Failed to send update to %s', ws)
+            if sent:
+                logger.info('Sent new GUIs to %d websocket(s)', sent)
+
+
 def make_app(server: master_controller.DeviceServer) -> web.Application:
     app = web.Application(middlewares=[web_utils.cache_control])
     app['server'] = server
+    app['updater'] = updater = Updater(server)
+    app.on_shutdown.append(updater.close)
     app.add_routes([
         web.get('/', index_handler),
         web.get('/metrics', prometheus_handler),
-        #web.get('/ws', websocket_handler),
-        #web.get('/rotate', rotate_handler),
+        web.get('/ws', websocket_handler),
+        web.get('/rotate', rotate_handler),
         #web.get('/gui/{product}/{service}/{gui}/', missing_gui_handler),
         web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
     ])
