@@ -28,7 +28,7 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
 
 async def setup_web(args: argparse.Namespace,
                     server: master_controller.DeviceServer) -> aiohttp.web.AppRunner:
-    app = web.make_app(server)
+    app = web.make_app(server, True)
     runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
