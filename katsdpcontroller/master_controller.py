@@ -38,6 +38,7 @@ from . import singularity, product_config, product_controller, scheduler, sensor
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
                          add_shared_options, extract_shared_options, make_image_resolver_factory,
+                         gui_label,
                          ProductState, DeviceStatus)
 
 

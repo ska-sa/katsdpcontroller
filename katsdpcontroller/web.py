@@ -30,6 +30,7 @@ import aiohttp_jinja2
 import jinja2
 
 from . import master_controller, web_utils
+from .controller import gui_label
 
 
 logger = logging.getLogger(__name__)
@@ -61,10 +62,6 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
     for product in products.values():
         product.sort(key=lambda gui: (gui['service'], gui['title']))
     return {'general': general, 'products': products}
-
-
-def _gui_label(gui: dict):
-    return re.sub(r'[^a-z0-9_-]', '-', gui['title'].lower())
 
 
 @aiohttp_jinja2.template('rotate_sd.html.j2')
@@ -146,7 +143,7 @@ class Haproxy:
         for product in guis['products'].values():
             for gui in product:
                 gui['href'] = yarl.URL(gui['href'])
-                gui['label'] = _gui_label(gui)
+                gui['label'] = gui_label(gui)
         # TODO: get the proper numbers
         content = self._template.render(proxy_port=8080, fallback_port=5004, guis=guis)
         if content != self._content:
