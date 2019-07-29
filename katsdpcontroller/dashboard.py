@@ -98,9 +98,9 @@ def _make_task_details(product, active_cell):
 
 
 class Dashboard:
-    def __init__(self, sdp_controller):
+    def __init__(self, sdp_controller, **dash_args):
         self._sdp_controller = sdp_controller
-        self._app = self._make_app()
+        self._app = self._make_app(**dash_args)
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
     def _use_event_loop(self, func, *args, **kwargs):
@@ -111,10 +111,10 @@ class Dashboard:
             return future.result()
         return wrapper
 
-    def _make_app(self):
+    def _make_app(self, **dash_args):
         sdp_controller = self._sdp_controller
         use_event_loop = self._use_event_loop
-        app = dash.Dash(__name__)
+        app = dash.Dash(__name__, **dash_args)
         app.title = 'SDP Product Controller'
         app.layout = html.Div(id='root', children=[
             dcc.Interval(id='interval', interval=1000),    # 1s updates
