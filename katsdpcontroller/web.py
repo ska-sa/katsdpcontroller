@@ -16,9 +16,9 @@ import re
 import json
 import logging
 import tempfile
-import copy
 import signal
 import weakref
+import functools
 from typing import Dict, List, Set, Optional
 
 import pkg_resources
@@ -45,6 +45,17 @@ async def prometheus_handler(request: web.Request) -> web.Response:
     return response
 
 
+def _dump_yarl(obj: object) -> str:
+    """Use as a ``default`` function for :func:`json.dumps`.
+
+    It converts :class:`yarl.URL` objects to their string form.
+    """
+    if isinstance(obj, yarl.URL):
+        return str(obj)
+    else:
+        raise TypeError
+
+
 def _get_guis(server: master_controller.DeviceServer) -> dict:
     general = json.loads(server.sensors['gui-urls'].value)
     product_names = json.loads(server.sensors['products'].value)
@@ -55,10 +66,15 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
         match = GUI_URLS_RE.match(sensor.name)
         if match and match.group('product') in products:
             guis = json.loads(sensor.value)
+            orig_guis = json.loads(server.orig_sensors[sensor.name].value)
             product_name = match.group('product')
             service = match.group('service') or ''
-            for gui in guis:
-                products[product_name].append({**gui, 'service': service})
+            for gui, orig_gui in zip(guis, orig_guis):
+                products[product_name].append({**gui,
+                                               'service': service,
+                                               'label': gui_label(gui),
+                                               'href': yarl.URL(gui['href']),
+                                               'orig_href': yarl.URL(orig_gui['href'])})
     for product in products.values():
         product.sort(key=lambda gui: (gui['service'], gui['title']))
     return {'general': general, 'products': products}
@@ -126,26 +142,21 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 class Haproxy:
     """Wraps an haproxy process and updates its config file on the fly."""
 
-    def __init__(self) -> None:
+    def __init__(self, haproxy_port: int) -> None:
         self._cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
         self._pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
         self._content = ''
         self._process: Optional[asyncio.subprocess.Process] = None
+        self.haproxy_port = haproxy_port
         env = jinja2.Environment(loader=jinja2.PackageLoader('katsdpcontroller'),
                                  undefined=jinja2.StrictUndefined,
                                  autoescape=False)   # autoescaping is for HTML
         self._template = env.get_template('haproxy.conf.j2')
 
-    async def update(self, guis: dict) -> None:
-        # Turn all the URLs into yarl.URL objects so that the template can extract
-        # pieces of them, and make an URL-safe label for each.
-        guis = copy.deepcopy(guis)
-        for product in guis['products'].values():
-            for gui in product:
-                gui['href'] = yarl.URL(gui['href'])
-                gui['label'] = gui_label(gui)
-        # TODO: get the proper numbers
-        content = self._template.render(proxy_port=8080, fallback_port=5004, guis=guis)
+    async def update(self, guis: dict, internal_port: int) -> None:
+        content = self._template.render(haproxy_port=self.haproxy_port,
+                                        internal_port=internal_port,
+                                        guis=guis)
         if content != self._content:
             logger.info('Updating haproxy')
             self._cfg.seek(0)
@@ -171,7 +182,8 @@ class Haproxy:
 
 
 class Updater:
-    def __init__(self, server: master_controller.DeviceServer, use_haproxy: bool) -> None:
+    def __init__(self, server: master_controller.DeviceServer,
+                 haproxy_port: Optional[int]) -> None:
         def observer(sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> None:
             dirty.set()
 
@@ -182,10 +194,19 @@ class Updater:
         self._observer = observer
         # Sensors for which we've set the observer
         self._observer_set: weakref.WeakSet[aiokatcp.Sensor] = weakref.WeakSet()
-        self._haproxy: Optional[Haproxy] = Haproxy() if use_haproxy else None
+        self._haproxy: Optional[Haproxy] = Haproxy(haproxy_port) if haproxy_port else None
         server.add_interface_changed_callback(dirty.set)
         self._task = asyncio.get_event_loop().create_task(self._update())
-        dirty.set()     # Run the first update immediately
+        self._internal_port = 0    # Port running the internal web server (set by property later)
+
+    @property
+    def internal_port(self) -> int:
+        return self._internal_port
+
+    @internal_port.setter
+    def internal_port(self, value: int) -> None:
+        self._internal_port = value
+        self._dirty.set()
 
     def add_websocket(self, ws: web.WebSocketResponse) -> None:
         self._websockets.add(ws)
@@ -199,7 +220,7 @@ class Updater:
             # If send_json raises we don't know what state the WS client will
             # have, so just ensure we update it next time.
             ws['last_guis'] = None
-            await ws.send_json(gui)
+            await ws.send_json(gui, dumps=functools.partial(json.dumps, _dump_yarl))
             ws['last_guis'] = gui
             return True
         else:
@@ -224,7 +245,13 @@ class Updater:
     async def _update(self) -> None:
         while True:
             await self._dirty.wait()
+            # May be multiple back-to-back events, and we don't want to wake up
+            # for each of them. So wait a bit to collect them together.
+            await asyncio.sleep(0.1)
             self._dirty.clear()
+            if not self._internal_port and self._haproxy:
+                logger.info('Updater woken but internal port is not yet set')
+                continue
             logger.info('Updater woken up and updating state')
 
             # Ensure we are subscribed to changed in gui-urls sensors
@@ -242,7 +269,7 @@ class Updater:
                 continue
 
             if self._haproxy:
-                await self._haproxy.update(guis)
+                await self._haproxy.update(guis, self._internal_port)
 
             sent = 0
             for ws in self._websockets:
@@ -254,10 +281,19 @@ class Updater:
                 logger.info('Sent new GUIs to %d websocket(s)', sent)
 
 
-def make_app(server: master_controller.DeviceServer, use_haproxy: bool) -> web.Application:
+def make_app(server: master_controller.DeviceServer,
+             haproxy_port: Optional[int]) -> web.Application:
+    """Create the web application.
+
+    If `haproxy_port` is provided, also run an haproxy process on this port
+    which will forward requests either to the web application or to individual
+    dashboards. In this case, the caller must update
+    `app['updater'].internal_port` with the port on which this web application
+    is listening.
+    """
     app = web.Application(middlewares=[web_utils.cache_control])
     app['server'] = server
-    app['updater'] = updater = Updater(server, use_haproxy)
+    app['updater'] = updater = Updater(server, haproxy_port)
     app.on_shutdown.append(updater.close)
     app.add_routes([
         web.get('/', index_handler),

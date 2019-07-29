@@ -8,7 +8,7 @@ defaults
     timeout server 50s
 
 frontend http-in
-    bind *:{{ proxy_port }}
+    bind *:{{ haproxy_port }}
     acl missing_slash path_reg '^/gui/[^/]+/[^/]+/[^/]+$'
     acl has_gui path_reg '^/gui/[^/]+/[^/]+/[^/]+/'
     http-request redirect code 301 prefix / drop-query append-slash if missing_slash
@@ -19,12 +19,14 @@ frontend http-in
     default_backend fallback
 
 backend fallback
-    server fallback_html_server 127.0.0.1:{{ fallback_port }}
+    server fallback_html_server 127.0.0.1:{{ internal_port }}
 
 {% for product_name, product in guis.products.items() %}
 {% for gui in product %}
 backend {{ product_name }}:{{ gui.service or 'product' }}:{{ gui.label }}
-    http-request set-path {{ gui.href.path }}%[path,regsub(^/gui/.*?/.*?/.*?/,)]
-    server {{ product_name }}:{{ gui.service }}:{{ gui.label }}:server {{ gui.href.host }}:{{ gui.href.port }}
+{% if not gui.orig_href.path.startswith('/gui/' + product_name + '/' + gui.service + '/' + gui.label) %}
+    http-request set-path {{ gui.orig_href.path }}%[path,regsub(^/gui/.*?/.*?/.*?/,)]
+{% endif %}
+    server {{ product_name }}:{{ gui.service }}:{{ gui.label }}:server {{ gui.orig_href.host }}:{{ gui.orig_href.port }}
 {% endfor %}
 {% endfor %}

@@ -25,7 +25,7 @@ from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
 
 import aiozk
 import aiokatcp
-from aiokatcp import FailReply, Sensor
+from aiokatcp import FailReply, Sensor, SensorSet
 import async_timeout
 import jsonschema
 import yarl
@@ -134,6 +134,7 @@ class Product:
         self._dead_callbacks: List[Callable[['Product'], None]] = []
 
     def connect(self, server: aiokatcp.DeviceServer, registry: CollectorRegistry,
+                rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
                 host: str, port: int) -> None:
         """Notify product of the location of the katcp interface.
 
@@ -145,7 +146,7 @@ class Product:
         self.katcp_conn = sensor_proxy.SensorProxyClient(
             server, f'{self.name}.', {'subarray_product_id': self.name},
             functools.partial(_prometheus_factory, registry),
-            host=host, port=port)
+            rewrite_gui_urls=rewrite_gui_urls, host=host, port=port)
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
 
@@ -231,7 +232,8 @@ class ProductManagerBase(Generic[_P]):
 
     def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer,
                  image_resolver_factory: scheduler.ImageResolverFactory,
-                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
+                 prometheus_registry: CollectorRegistry = REGISTRY,
+                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
         self._next_multicast_group = self._multicast_network.network_address + 1
@@ -240,6 +242,7 @@ class ProductManagerBase(Generic[_P]):
         self._next_capture_block_id = 1
         self._image_resolver_factory = image_resolver_factory
         self._prometheus_registry = prometheus_registry
+        self._rewrite_gui_urls = rewrite_gui_urls
 
     @abstractmethod
     async def start(self) -> None: pass
@@ -436,7 +439,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         await product.server.start()
         host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
-        product.connect(self._server, self._prometheus_registry, host, port)
+        product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls, host, port)
         return product
 
     async def kill_product(self, product: InternalProduct) -> None:
@@ -472,8 +475,10 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     def __init__(self, args: argparse.Namespace,
                  server: aiokatcp.DeviceServer,
                  image_resolver_factory: scheduler.ImageResolverFactory,
-                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
-        super().__init__(args, server, image_resolver_factory, prometheus_registry)
+                 prometheus_registry: CollectorRegistry = REGISTRY,
+                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
+        super().__init__(args, server, image_resolver_factory,
+                         prometheus_registry, rewrite_gui_urls)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.
@@ -648,7 +653,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                                          for addr in info['multicast_groups']}
                 prod.logger.info('Reconnecting to existing product %s at %s:%d',
                                  prod.name, info['host'], info['port'])
-                prod.connect(self._server, self._prometheus_registry, info['host'], info['port'])
+                prod.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
+                             info['host'], info['port'])
                 products.append(prod)
             self._init_state(products, data['next_capture_block_id'],
                              ipaddress.IPv4Address(data['next_multicast_group']))
@@ -826,7 +832,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             env: Dict[str, str] = {item['name']: item['value'] for item in env_list}
             host = env['TASK_HOST']
             port = int(env['PORT0'])
-            product.connect(self._server, self._prometheus_registry, host, port)
+            product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
+                            host, port)
             success = True
 
         finally:
@@ -861,7 +868,8 @@ class DeviceServer(aiokatcp.DeviceServer):
     _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(self, args: argparse.Namespace,
-                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
+                 prometheus_registry: CollectorRegistry = REGISTRY,
+                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
         else:
@@ -873,9 +881,12 @@ class DeviceServer(aiokatcp.DeviceServer):
             manager_cls = InternalProductManager
         else:
             manager_cls = SingularityProductManager
-        self._manager = manager_cls(args, self, image_resolver_factory, prometheus_registry)
+        self._manager = manager_cls(args, self, image_resolver_factory,
+                                    prometheus_registry,
+                                    self._rewrite_gui_urls if args.haproxy else None)
         self._override_dicts = {}
         self._interface_changed_callbacks = []
+        self._external_url = args.external_url
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the SDP Master Controller",
@@ -885,6 +896,11 @@ class DeviceServer(aiokatcp.DeviceServer):
                                 initial_status=Sensor.Status.NOMINAL))
         self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
                                 default="[]", initial_status=Sensor.Status.NOMINAL))
+
+        # Updated by SensorProxyClient with sensor values prior to gui-url rewriting
+        self.orig_sensors = SensorSet()
+        for sensor in self.sensors.values():
+            self.orig_sensors.add(sensor)
 
     async def start(self) -> None:
         await self._manager.start()
@@ -902,6 +918,33 @@ class DeviceServer(aiokatcp.DeviceServer):
         if name == 'interface-changed':
             for callback in self._interface_changed_callbacks:
                 callback()
+
+    def _rewrite_gui_urls(self, sensor: Sensor) -> bytes:
+        if sensor.status != Sensor.Status.NOMINAL:
+            return sensor.value
+        parts = sensor.name.split('.')
+        product = parts[0]
+        service = '.'.join(parts[1:-1])
+        if service == '':
+            service = 'product'
+        try:
+            value = json.loads(sensor.value)
+            for gui in value:
+                label = gui_label(gui)
+                prefix = f'gui/{product}/{service}/{label}/'
+                orig_path = yarl.URL(gui['href']).path[1:]
+                # If the original URL is already under the right path, we
+                # assume that it has been set up to avoid path rewriting by
+                # haproxy. In that case, anything after the prefix is a path
+                # within the dashboard, rather than its root, and should be
+                # preserved in the rewritten URL.
+                if orig_path.startswith(prefix):
+                    prefix = orig_path
+                gui['href'] = str(self._external_url / prefix)
+            return json.dumps(value).encode()
+        except (TypeError, ValueError, KeyError) as exc:
+            logger.warning('Invalid gui-url in %s: %s', sensor.name, exc)
+            return sensor.value
 
     def _unique_name(self, prefix: str) -> str:
         """Find first unused name with the given prefix"""
@@ -1443,10 +1486,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         help='name to use in Zookeeper and Singularity [%(default)s]')
     parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
                         help='Name by which others connect to this machine [%(default)s]')
-    parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
-                        help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
-                        help='port for Prometheus metrics [%(default)s]')
+                        help='port for the web server [%(default)s]')
+    parser.add_argument('--haproxy', action='store_true',
+                        help='Run haproxy to provide frontend to GUIs [no]')
+    parser.add_argument('--external-url', metavar='URL', type=yarl.URL,
+                        help='External URL for clients to browse the GUI')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
@@ -1487,6 +1532,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
             parser.error(f'Could not read {args.gui_urls}: {exc}')
     else:
         args.gui_urls = []
+
+    if args.external_url is None:
+        args.external_url = yarl.URL.build(
+            scheme='http', host=args.external_hostname, port=args.http_port, path='/')
 
     if args.s3_config_file is None and not args.interface_mode:
         parser.error('--s3-config-file is required (unless --interface-mode is given)')

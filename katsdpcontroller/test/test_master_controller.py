@@ -259,7 +259,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(product.port, 12345)
         self.sensor_proxy_client_mock.assert_called_with(
             self.server, 'foo.', {'subarray_product_id': 'foo'}, mock.ANY,
-            host='slave.invalid', port=12345)
+            rewrite_gui_urls=None, host='slave.invalid', port=12345)
 
         await self.manager.product_active(product)
         self.assertEqual(product.task_state, Product.TaskState.ACTIVE)

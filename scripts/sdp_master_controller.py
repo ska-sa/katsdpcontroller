@@ -28,11 +28,16 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
 
 async def setup_web(args: argparse.Namespace,
                     server: master_controller.DeviceServer) -> aiohttp.web.AppRunner:
-    app = web.make_app(server, True)
+    app = web.make_app(server, args.http_port if args.haproxy else None)
     runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
-    await site.start()
+    if args.haproxy:
+        site = aiohttp.web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        app['updater'].internal_port = runner.addresses[0][1]
+    else:
+        site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
+        await site.start()
     return runner
 
 
