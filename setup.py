@@ -14,8 +14,7 @@ setup(
     include_package_data=True,
     scripts=[
         "scripts/sdp_master_controller.py",
-        "scripts/sdp_product_controller.py",
-        "scripts/haproxy_disp.py"
+        "scripts/sdp_product_controller.py"
         ],
     setup_requires=['katversion'],
     install_requires=[
