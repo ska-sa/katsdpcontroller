@@ -8,8 +8,9 @@ import logging
 import signal
 import functools
 import sys
-from typing import List
+from typing import List, Callable, Optional
 
+import aiokatcp
 import aiohttp.web
 import katsdpservices
 
@@ -62,8 +63,14 @@ def main(argv: List[str]) -> None:
                         "This allows testing of the interface only, "
                         "no actual command logic will be enacted.")
 
+    rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]]
+    if args.haproxy:
+        rewrite_gui_urls = functools.partial(web.rewrite_gui_urls, args.external_url)
+    else:
+        rewrite_gui_urls = None
+
     loop = asyncio.get_event_loop()
-    server = master_controller.DeviceServer(args)
+    server = master_controller.DeviceServer(args, rewrite_gui_urls=rewrite_gui_urls)
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, functools.partial(handle_signal, server))
     with katsdpservices.start_aiomonitor(loop, args, locals()):

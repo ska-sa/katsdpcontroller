@@ -6,7 +6,6 @@ import logging
 import functools
 import json
 import enum
-import re
 from typing import List, Tuple, Callable, Union, Optional, AnyStr
 
 import aiokatcp
@@ -152,7 +151,3 @@ class DeviceStatus(enum.Enum):
 def device_server_sockname(server: aiokatcp.DeviceServer) -> Tuple[str, int]:
     assert server.server and server.server.sockets, "Server is not yet started"
     return server.server.sockets[0].getsockname()[:2]
-
-
-def gui_label(gui: dict) -> str:
-    return re.sub(r'[^a-z0-9_-]', '-', gui['title'].lower())

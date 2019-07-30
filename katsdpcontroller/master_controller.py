@@ -38,7 +38,6 @@ from . import singularity, product_config, product_controller, scheduler, sensor
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
                          add_shared_options, extract_shared_options, make_image_resolver_factory,
-                         gui_label,
                          ProductState, DeviceStatus)
 
 
@@ -883,10 +882,9 @@ class DeviceServer(aiokatcp.DeviceServer):
             manager_cls = SingularityProductManager
         self._manager = manager_cls(args, self, image_resolver_factory,
                                     prometheus_registry,
-                                    self._rewrite_gui_urls if args.haproxy else None)
+                                    rewrite_gui_urls if args.haproxy else None)
         self._override_dicts = {}
         self._interface_changed_callbacks = []
-        self._external_url = args.external_url
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the SDP Master Controller",
@@ -918,33 +916,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         if name == 'interface-changed':
             for callback in self._interface_changed_callbacks:
                 callback()
-
-    def _rewrite_gui_urls(self, sensor: Sensor) -> bytes:
-        if sensor.status != Sensor.Status.NOMINAL:
-            return sensor.value
-        parts = sensor.name.split('.')
-        product = parts[0]
-        service = '.'.join(parts[1:-1])
-        if service == '':
-            service = 'product'
-        try:
-            value = json.loads(sensor.value)
-            for gui in value:
-                label = gui_label(gui)
-                prefix = f'gui/{product}/{service}/{label}/'
-                orig_path = yarl.URL(gui['href']).path[1:]
-                # If the original URL is already under the right path, we
-                # assume that it has been set up to avoid path rewriting by
-                # haproxy. In that case, anything after the prefix is a path
-                # within the dashboard, rather than its root, and should be
-                # preserved in the rewritten URL.
-                if orig_path.startswith(prefix):
-                    prefix = orig_path
-                gui['href'] = str(self._external_url / prefix)
-            return json.dumps(value).encode()
-        except (TypeError, ValueError, KeyError) as exc:
-            logger.warning('Invalid gui-url in %s: %s', sensor.name, exc)
-            return sensor.value
 
     def _unique_name(self, prefix: str) -> str:
         """Find first unused name with the given prefix"""

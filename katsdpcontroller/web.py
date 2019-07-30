@@ -30,7 +30,6 @@ import aiohttp_jinja2
 import jinja2
 
 from . import master_controller, web_utils
-from .controller import gui_label
 
 
 logger = logging.getLogger(__name__)
@@ -279,6 +278,38 @@ class Updater:
                     logger.exception('Failed to send update to %s', ws)
             if sent:
                 logger.info('Sent new GUIs to %d websocket(s)', sent)
+
+
+def gui_label(gui: dict) -> str:
+    return re.sub(r'[^a-z0-9_-]', '-', gui['title'].lower())
+
+
+def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
+    if sensor.status != Sensor.Status.NOMINAL:
+        return sensor.value
+    parts = sensor.name.split('.')
+    product = parts[0]
+    service = '.'.join(parts[1:-1])
+    if service == '':
+        service = 'product'
+    try:
+        value = json.loads(sensor.value)
+        for gui in value:
+            label = gui_label(gui)
+            prefix = f'gui/{product}/{service}/{label}/'
+            orig_path = yarl.URL(gui['href']).path[1:]
+            # If the original URL is already under the right path, we
+            # assume that it has been set up to avoid path rewriting by
+            # haproxy. In that case, anything after the prefix is a path
+            # within the dashboard, rather than its root, and should be
+            # preserved in the rewritten URL.
+            if orig_path.startswith(prefix):
+                prefix = orig_path
+            gui['href'] = str(external_url / prefix)
+        return json.dumps(value).encode()
+    except (TypeError, ValueError, KeyError) as exc:
+        logger.warning('Invalid gui-url in %s: %s', sensor.name, exc)
+        return sensor.value
 
 
 def make_app(server: master_controller.DeviceServer,
