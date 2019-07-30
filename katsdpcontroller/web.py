@@ -106,8 +106,7 @@ async def missing_gui_handler(request: web.Request) -> dict:
 async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """Run a websocket connection to inform client about GUIs.
 
-    It accepts two commands:
-    - `close`: closes the websocket
+    It only accepts one command:
     - `guis`: returns :meth:`_get_guis` (JSON-encoded)
 
     Additionally, :meth:`_get_guis` is sent unsolicited when the sensors change.
@@ -120,10 +119,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                if msg.data == 'close':
-                    updater.remove_websocket(ws)
-                    await ws.close()
-                elif msg.data == 'guis':
+                if msg.data == 'guis':
                     await updater.update_websocket(ws)
                 else:
                     logger.warning('unhandled command %r on websocket %s', msg.data, ws)
