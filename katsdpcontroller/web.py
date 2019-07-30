@@ -23,7 +23,7 @@ from typing import Dict, List, Set, Optional
 
 import pkg_resources
 import prometheus_async
-import aiokatcp
+from aiokatcp import Sensor, Reading
 import yarl
 from aiohttp import web, WSMsgType
 import aiohttp_jinja2
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 GUI_URLS_RE = re.compile(r'^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$')
 
 
-async def prometheus_handler(request: web.Request) -> web.Response:
+async def _prometheus_handler(request: web.Request) -> web.Response:
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
         # Avoid spamming logs (feeds into web_utils.AccessLogger).
@@ -63,7 +63,7 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
     product_names = json.loads(server.sensors['products'].value)
     products: Dict[str, List[dict]] = {name: [] for name in product_names}
     for sensor in server.sensors.values():
-        if sensor.status != aiokatcp.Sensor.Status.NOMINAL:
+        if sensor.status != Sensor.Status.NOMINAL:
             continue
         match = GUI_URLS_RE.match(sensor.name)
         if match and match.group('product') in products:
@@ -83,27 +83,27 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
 
 
 @aiohttp_jinja2.template('rotate_sd.html.j2')
-def rotate_handler(request: web.Request) -> dict:
+def _rotate_handler(request: web.Request) -> dict:
     defaults = {'rotate_interval': 5000, 'width': 500, 'height': 500}
     defaults.update(request.query)
     return defaults
 
 
 @aiohttp_jinja2.template('index.html.j2')
-async def index_handler(request: web.Request) -> dict:
+async def _index_handler(request: web.Request) -> dict:
     return _get_guis(request.app['server'])
 
 
-async def favicon_handler(request: web.Request) -> web.Response:
+async def _favicon_handler(request: web.Request) -> web.Response:
     raise web.HTTPFound(location='static/favicon.ico')
 
 
 @aiohttp_jinja2.template('missing_gui.html.j2', status=404)
-async def missing_gui_handler(request: web.Request) -> dict:
+async def _missing_gui_handler(request: web.Request) -> dict:
     return {}
 
 
-async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
+async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """Run a websocket connection to inform client about GUIs.
 
     It only accepts one command:
@@ -138,7 +138,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-class Haproxy:
+class _Haproxy:
     """Wraps an haproxy process and updates its config file on the fly."""
 
     def __init__(self, haproxy_port: int) -> None:
@@ -180,10 +180,10 @@ class Haproxy:
         self._pidfile.close()
 
 
-class Updater:
+class _Updater:
     def __init__(self, server: master_controller.DeviceServer,
                  haproxy_port: Optional[int]) -> None:
-        def observer(sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> None:
+        def observer(sensor: Sensor, reading: Reading) -> None:
             dirty.set()
 
         self._server = server
@@ -192,8 +192,8 @@ class Updater:
         self._guis: dict = {}
         self._observer = observer
         # Sensors for which we've set the observer
-        self._observer_set: weakref.WeakSet[aiokatcp.Sensor] = weakref.WeakSet()
-        self._haproxy: Optional[Haproxy] = Haproxy(haproxy_port) if haproxy_port else None
+        self._observer_set: weakref.WeakSet[Sensor] = weakref.WeakSet()
+        self._haproxy: Optional[_Haproxy] = _Haproxy(haproxy_port) if haproxy_port else None
         server.add_interface_changed_callback(dirty.set)
         self._task = asyncio.get_event_loop().create_task(self._update())
         self._internal_port = 0    # Port running the internal web server (set by property later)
@@ -324,15 +324,15 @@ def make_app(server: master_controller.DeviceServer,
     """
     app = web.Application(middlewares=[web_utils.cache_control])
     app['server'] = server
-    app['updater'] = updater = Updater(server, haproxy_port)
+    app['updater'] = updater = _Updater(server, haproxy_port)
     app.on_shutdown.append(updater.close)
     app.add_routes([
-        web.get('/', index_handler),
-        web.get('/favicon.ico', favicon_handler),
-        web.get('/metrics', prometheus_handler),
-        web.get('/ws', websocket_handler),
-        web.get('/rotate', rotate_handler),
-        web.get('/gui/{product}/{service}/{gui}/', missing_gui_handler),
+        web.get('/', _index_handler),
+        web.get('/favicon.ico', _favicon_handler),
+        web.get('/metrics', _prometheus_handler),
+        web.get('/ws', _websocket_handler),
+        web.get('/rotate', _rotate_handler),
+        web.get('/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
         web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
     ])
     aiohttp_jinja2.setup(
