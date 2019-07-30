@@ -236,7 +236,7 @@ class Updater:
             await self._task
         except asyncio.CancelledError:
             pass
-        for ws in self._websockets:
+        for ws in list(self._websockets):
             await ws.close()
         if self._haproxy:
             await self._haproxy.close()
