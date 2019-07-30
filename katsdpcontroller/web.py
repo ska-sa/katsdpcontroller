@@ -133,6 +133,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
         logger.exception("Exception in websocket msg handler")
     finally:
         updater.remove_websocket(ws)
+        await ws.close()
         logger.info("Websocket %s closed.", ws)
     return ws
 
