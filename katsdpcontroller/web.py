@@ -56,7 +56,10 @@ def _dump_yarl(obj: object) -> str:
 
 
 def _get_guis(server: master_controller.DeviceServer) -> dict:
-    general = json.loads(server.sensors['gui-urls'].value)
+    if server.sensors['gui-urls'].status == Sensor.Status.NOMINAL:
+        general = json.loads(server.sensors['gui-urls'].value)
+    else:
+        general = []
     product_names = json.loads(server.sensors['products'].value)
     products: Dict[str, List[dict]] = {name: [] for name in product_names}
     for sensor in server.sensors.values():
