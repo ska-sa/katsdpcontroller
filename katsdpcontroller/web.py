@@ -219,7 +219,7 @@ class Updater:
             # If send_json raises we don't know what state the WS client will
             # have, so just ensure we update it next time.
             ws['last_guis'] = None
-            await ws.send_json(gui, dumps=functools.partial(json.dumps, _dump_yarl))
+            await ws.send_json(gui, dumps=functools.partial(json.dumps, default=_dump_yarl))
             ws['last_guis'] = gui
             return True
         else:
