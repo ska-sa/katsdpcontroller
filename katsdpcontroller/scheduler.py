@@ -2426,7 +2426,7 @@ class Scheduler(pymesos.Scheduler):
         self._offers = {}           #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event()
-        self._default_queue = LaunchQueue(default_role)
+        self._default_queue = LaunchQueue(default_role, 'default')
         self._queues = [self._default_queue]
         #: Mesos roles for which we want to (and expect to) receive offers
         self._roles_needed = set()

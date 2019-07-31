@@ -24,7 +24,6 @@ import katsdptelstate
 import katpoint
 
 from ..controller import device_server_sockname
-from .. import product_controller
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
     ProductState, DeviceStatus, _redact_keys)
@@ -329,6 +328,7 @@ class TestSDPController(BaseTestSDPController):
         self.n_batch_tasks = 0
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
+        self.sched.task_stats = scheduler.TaskStats()
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         await self.setup_server(
             host='127.0.0.1', port=0, sched=self.sched,
