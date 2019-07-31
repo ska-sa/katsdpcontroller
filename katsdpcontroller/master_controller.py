@@ -41,7 +41,8 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
                          ProductState, DeviceStatus)
 
 
-_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
+                      r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
 ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
@@ -86,10 +87,15 @@ def _prometheus_factory(registry: CollectorRegistry,
     else:
         logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
         return None
-    service, base = name.rsplit('.', 1)
+    prefix, base = name.rsplit('.', 1)
+    label_names = (match.group('labels') or '').split(',')
+    label_names = [label for label in label_names if label]    # ''.split(',') is [''], want []
+    label_names.insert(0, 'service')
+    label_values = prefix.rsplit('.', len(label_names) - 1)
+    labels = dict(zip(label_names, label_values))
     normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
     return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
-                                       {'service': service}, registry)
+                                       labels, registry)
 
 
 def _load_s3_config(filename: str) -> dict:
