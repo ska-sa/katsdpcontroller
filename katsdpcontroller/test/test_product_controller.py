@@ -24,6 +24,7 @@ import katsdptelstate
 import katpoint
 
 from ..controller import device_server_sockname
+from .. import product_controller
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
     ProductState, DeviceStatus, _redact_keys)
@@ -431,9 +432,9 @@ class TestSDPController(BaseTestSDPController):
         for node in nodes:
             node.set_state(scheduler.TaskState.READY)
             node.set_state(scheduler.TaskState.DEAD)
-        scheduler.BATCH_TASKS_CREATED.inc(len(nodes))
-        scheduler.BATCH_TASKS_STARTED.inc(len(nodes))
-        scheduler.BATCH_TASKS_DONE.inc(len(nodes))
+        product_controller.BATCH_TASKS_CREATED.inc(len(nodes))
+        product_controller.BATCH_TASKS_STARTED.inc(len(nodes))
+        product_controller.BATCH_TASKS_DONE.inc(len(nodes))
 
     async def _kill(self, graph: networkx.MultiDiGraph,
                     nodes: Sequence[scheduler.PhysicalNode] = None,
@@ -762,10 +763,10 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_capture_done(self) -> None:
         """Checks that capture-done succeeds and sets appropriate state"""
-        init_batch_started = get_metric(scheduler.BATCH_TASKS_STARTED)
-        init_batch_done = get_metric(scheduler.BATCH_TASKS_DONE)
-        init_batch_failed = get_metric(scheduler.BATCH_TASKS_FAILED)
-        init_batch_skipped = get_metric(scheduler.BATCH_TASKS_SKIPPED)
+        init_batch_started = get_metric(product_controller.BATCH_TASKS_STARTED)
+        init_batch_done = get_metric(product_controller.BATCH_TASKS_DONE)
+        init_batch_failed = get_metric(product_controller.BATCH_TASKS_FAILED)
+        init_batch_skipped = get_metric(product_controller.BATCH_TASKS_SKIPPED)
 
         await self._configure_subarray(SUBARRAY_PRODUCT)
         await self.client.request("capture-init", CAPTURE_BLOCK)
@@ -789,10 +790,10 @@ class TestSDPController(BaseTestSDPController):
 
         # Check that postprocessing ran and didn't fail
         self.assertEqual(product.capture_blocks, {})
-        started = get_metric(scheduler.BATCH_TASKS_STARTED) - init_batch_started
-        done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
-        failed = get_metric(scheduler.BATCH_TASKS_FAILED) - init_batch_failed
-        skipped = get_metric(scheduler.BATCH_TASKS_SKIPPED) - init_batch_skipped
+        started = get_metric(product_controller.BATCH_TASKS_STARTED) - init_batch_started
+        done = get_metric(product_controller.BATCH_TASKS_DONE) - init_batch_done
+        failed = get_metric(product_controller.BATCH_TASKS_FAILED) - init_batch_failed
+        skipped = get_metric(product_controller.BATCH_TASKS_SKIPPED) - init_batch_skipped
         self.assertEqual(started, 9)    # 3 continuum, 3x2 spectral
         self.assertEqual(done, started)
         self.assertEqual(failed, 0)
@@ -800,7 +801,7 @@ class TestSDPController(BaseTestSDPController):
 
     async def test_capture_done_disable_batch(self) -> None:
         """Checks that capture-init with override takes effect"""
-        init_batch_done = get_metric(scheduler.BATCH_TASKS_DONE)
+        init_batch_done = get_metric(product_controller.BATCH_TASKS_DONE)
         await self._configure_subarray(SUBARRAY_PRODUCT)
         await self.client.request(
             "capture-init", CAPTURE_BLOCK, '{"outputs": {"spectral_image": null}}')
@@ -809,7 +810,7 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request("capture-done")
         cal_sensor.value = b'{}'
         await asynctest.exhaust_callbacks(self.loop)
-        done = get_metric(scheduler.BATCH_TASKS_DONE) - init_batch_done
+        done = get_metric(product_controller.BATCH_TASKS_DONE) - init_batch_done
         self.assertEqual(done, 3)    # 3 continuum, no spectral
 
     async def test_capture_done_busy(self):

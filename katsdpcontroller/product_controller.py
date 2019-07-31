@@ -13,6 +13,7 @@ import jsonschema
 import networkx
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
+import prometheus_client
 import katsdptelstate
 
 import katsdpcontroller
@@ -22,6 +23,25 @@ from .controller import (load_json_dict, log_task_exceptions,
 from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
 
 
+# TODO: these need to become sensors to pass them from product controller to master controller
+TASKS_IN_STATE = prometheus_client.Gauge(
+    'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
+    ['queue', 'state'])
+BATCH_TASKS_CREATED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_created',
+    'Number of batch tasks that have been created')
+BATCH_TASKS_STARTED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_started',
+    'Number of batch tasks that have become ready to start')
+BATCH_TASKS_SKIPPED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_skipped',
+    'Number of batch tasks that were skipped because a dependency failed')
+BATCH_TASKS_DONE = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_done',
+    'Number of completed batch tasks (including failed and skipped)')
+BATCH_TASKS_FAILED = prometheus_client.Counter(
+    'katsdpcontroller_batch_tasks_failed',
+    'Number of batch tasks that failed (after all retries)')
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
 logger = logging.getLogger(__name__)
@@ -117,6 +137,28 @@ class SDPResources:
     async def get_port() -> int:
         """Return an assigned port for a multicast group"""
         return 7148
+
+
+class TaskStats(scheduler.TaskStats):
+    def task_state_changes(self, changes):
+        for queue, deltas in changes.items():
+            for state, delta in deltas.items():
+                TASKS_IN_STATE.labels(queue.name, state.name).inc(delta)
+
+    def batch_tasks_created(self, n_tasks):
+        BATCH_TASKS_CREATED.inc(n_tasks)
+
+    def batch_tasks_started(self, n_tasks):
+        BATCH_TASKS_STARTED.inc(n_tasks)
+
+    def batch_tasks_skipped(self, n_tasks):
+        BATCH_TASKS_SKIPPED.inc(n_tasks)
+
+    def batch_tasks_failed(self, n_tasks):
+        BATCH_TASKS_FAILED.inc(n_tasks)
+
+    def batch_tasks_done(self, n_tasks):
+        BATCH_TASKS_DONE.inc(n_tasks)
 
 
 class CaptureBlock:
