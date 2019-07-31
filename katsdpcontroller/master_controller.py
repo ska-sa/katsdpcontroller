@@ -87,12 +87,18 @@ def _prometheus_factory(registry: CollectorRegistry,
     else:
         logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
         return None
-    prefix, base = name.rsplit('.', 1)
+    parts = name.rsplit('.')
+    base = parts.pop()
     label_names = (match.group('labels') or '').split(',')
     label_names = [label for label in label_names if label]    # ''.split(',') is [''], want []
-    label_names.insert(0, 'service')
-    label_values = prefix.rsplit('.', len(label_names) - 1)
-    labels = dict(zip(label_names, label_values))
+    if len(parts) < len(label_names):
+        logger.warning('Not enough parts in name %s for labels %s', name, label_names)
+        return None
+    service_parts = len(parts) - len(label_names)
+    service = '.'.join(parts[:service_parts])
+    labels = dict(zip(label_names, parts[service_parts:]))
+    if service:
+        labels['service'] = service
     normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
     return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
                                        labels, registry)
