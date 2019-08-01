@@ -21,7 +21,7 @@
             "additionalProperties": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["run_id", "task_id", "host", "port", "multicast_groups"],
+                "required": ["run_id", "task_id", "host", "port", "config", "multicast_groups"],
                 "properties": {
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},

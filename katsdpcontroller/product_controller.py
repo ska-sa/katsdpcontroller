@@ -1158,11 +1158,19 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, config_dict)
 
+    def _get_product(self) -> SDPSubarrayProductBase:
+        """Check that self.product exists (i.e. ?product-configure has been called).
+
+        If it has not, raises a :exc:`FailReply`.
+        """
+        if self.product is None:
+            raise FailReply('?product-configure has not been called yet. '
+                            'It must be called before other requests.')
+        return self.product
+
     async def request_product_deconfigure(self, ctx, force: bool = False) -> None:
         """Deconfigure the product and shut down the server."""
-        if self.product is None:
-            raise FailReply('Have not yet configured')
-        await self.product.deconfigure(force=force)
+        await self._get_product().deconfigure(force=force)
 
     async def request_capture_init(self, ctx, capture_block_id: str,
                                    override_dict_json: str = '{}') -> None:
@@ -1175,8 +1183,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         override_dict_json : str, optional
             Configuration dictionary to merge with the subarray config.
         """
-        if self.product is None:
-            raise FailReply('Have not yet configured')
+        product = self._get_product()
         try:
             overrides = load_json_dict(override_dict_json)
         except ValueError as error:
@@ -1184,7 +1191,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
-        config = product_config.override(self.product.config, overrides)
+        config = product_config.override(product.config, overrides)
         # Re-validate, since the override may have broken it
         try:
             product_config.validate(config)
@@ -1195,13 +1202,13 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         config = product_config.normalise(config)
         try:
-            product_config.validate_capture_block(self.product.config, config)
+            product_config.validate_capture_block(product.config, config)
         except ValueError as error:
             retmsg = f"Invalid config override: {error}"
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
-        await self.product.capture_init(capture_block_id, config)
+        await product.capture_init(capture_block_id, config)
 
     async def request_telstate_endpoint(self, ctx) -> str:
         """Returns the endpoint for the telescope state repository.
@@ -1210,9 +1217,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         -------
         endpoint : str
         """
-        if self.product is None:
-            raise FailReply('Have not yet configured')
-        return self.product.telstate_endpoint
+        return self._get_product().telstate_endpoint
 
     async def request_capture_status(self, ctx) -> ProductState:
         """Returns the status of the subarray product.
@@ -1221,9 +1226,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         -------
         state : str
         """
-        if self.product is None:
-            raise FailReply('Have not yet configured')
-        return self.product.state
+        return self._get_product().state
 
     async def request_capture_done(self, ctx) -> str:
         """Halts the current capture block.
@@ -1233,7 +1236,5 @@ class DeviceServer(aiokatcp.DeviceServer):
         cbid : str
             Capture-block ID that was stopped
         """
-        if self.product is None:
-            raise FailReply('Have not yet configured')
-        cbid = await self.product.capture_done()
+        cbid = await self._get_product().capture_done()
         return cbid

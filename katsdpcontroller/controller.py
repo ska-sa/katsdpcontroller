@@ -62,7 +62,7 @@ def log_task_exceptions(task: asyncio.Future,
             try:
                 task.result()
             except Exception:
-                logger.warning('%s', msg, exc_info=True)
+                logger.exception('%s', msg)
     task.add_done_callback(done_callback)
 
 

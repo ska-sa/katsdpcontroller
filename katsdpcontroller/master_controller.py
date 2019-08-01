@@ -42,6 +42,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)',
                       re.IGNORECASE)
+ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
@@ -81,7 +82,7 @@ def _prometheus_factory(registry: CollectorRegistry,
             except ValueError as exc:
                 logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
     else:
-        logger.warning('Unknown Prometheus metric type %s for %s', type_, sensor.name)
+        logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
         return None
     service, base = name.rsplit('.', 1)
     normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
@@ -89,7 +90,7 @@ def _prometheus_factory(registry: CollectorRegistry,
                                        {'service': service}, registry)
 
 
-def _load_s3_config(filename):
+def _load_s3_config(filename: str) -> dict:
     with open(filename, 'r') as f:
         config = json.load(f)
     return config
@@ -211,6 +212,7 @@ class Product:
         side. This is called if the master controller is shut down, not when
         ``product-deconfigure`` is called.
         """
+        self.logger.info('Disconnecting from product %s during shutdown', self.name)
         if self.katcp_conn is not None:
             self.katcp_conn.remove_inform_callback('disconnect', self._disconnect_callback)
             self.katcp_conn.close()
@@ -276,6 +278,9 @@ class ProductManagerBase(Generic[_P]):
 
         if (next_multicast_group not in self._multicast_network
                 or next_multicast_group == self._multicast_network.network_address):
+            if next_multicast_group != ipaddress.IPv4Address('0.0.0.0'):
+                logger.info('Resetting next multicast group from out-of-range %s to %s',
+                            next_multicast_group, self._multicast_network.network_address + 1)
             next_multicast_group = self._multicast_network.network_address + 1
         self._next_multicast_group = next_multicast_group
 
@@ -613,7 +618,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         """Load existing subarray product state from Zookeeper"""
         async with self._zk_state_lock:
             default = {
-                "version": 1,
+                "version": ZK_STATE_VERSION,
                 "products": {},
                 "next_multicast_group": "0.0.0.0",
                 "next_capture_block_id": 0
@@ -621,7 +626,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             try:
                 payload = (await self._zk.get('/state'))[0]
                 data = json.loads(payload)
-                if data.get('version') != 1:
+                if data.get('version') != ZK_STATE_VERSION:
                     raise ValueError('version mismatch')
                 ZK_STATE.validate(data)
             except aiozk.exc.NoNode:
@@ -638,6 +643,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
+                prod.logger.info('Reconnecting to existing product %s at %s:%d',
+                                 prod.name, info['host'], info['port'])
                 prod.connect(self._server, self._prometheus_registry, info['host'], info['port'])
                 products.append(prod)
             self._init_state(products, data['next_capture_block_id'],
@@ -647,7 +654,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         """Save the current state to Zookeeper"""
         async with self._zk_state_lock:
             data = {
-                'version': 1,
+                'version': ZK_STATE_VERSION,
                 'products': {
                     prod.name: {
                         'config': prod.config,
@@ -680,6 +687,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         expected_run_ids = {product.run_id for product in self.products.values()}
         for request in requests:
             request_id = request['request']['id']
+            if not request_id.startswith(self._request_id_prefix):
+                continue
             data = await self._sing.get_request_tasks(request_id)
             for state, tasks in data.items():
                 if state in {'pending', 'cleaning'}:
@@ -706,7 +715,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         n_died = 0
         for product in list(self.products.values()):
             if product.task_id is not None and product.task_id not in self._task_cache:
-                product.logger.info('Task for %s died', product.name)
+                product.logger.info('Task %s for %s died', product.task_id, product.name)
                 product.died()
                 n_died += 1
         if n_died > 0:
@@ -721,7 +730,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             try:
                 await self._reconcile_once()
             except Exception:
-                logger.warning('Exception in reconciliation', exc_info=True)
+                logger.exception('Exception in reconciliation')
 
     async def start(self) -> None:
         await self._zk.start()
@@ -749,13 +758,14 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         try:
             s3_config = _load_s3_config(self._args.s3_config_file)
         except Exception as exc:
-            raise ProductFailed(f'Could not load {self._args.s3_config_file}: {exc}') from exc
+            raise ProductFailed(
+                f'Could not load S3 credentials from {self._args.s3_config_file}: {exc}') from exc
         args = extract_shared_options(self._args)
         # Causes the image tag file to be loaded
         try:
             image_resolver = self._image_resolver_factory()
         except Exception as exc:
-            raise ProductFailed(f'Could not load image tag: {exc}')
+            raise ProductFailed(f'Could not load image tag file: {exc}')
         port = device_server_sockname(self._server)[1]
         args.extend([
             '--s3-config=' + json.dumps(s3_config),
@@ -815,14 +825,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             port = int(env['PORT0'])
             product.connect(self._server, self._prometheus_registry, host, port)
             success = True
-            await self._save_state()
 
         finally:
             if not success:
                 if task_id is not None:
                     # Make best effort to kill it; it might be dead already though
                     kill_task = loop.create_task(self._try_kill_task(task_id))
-                    log_task_exceptions(kill_task, product.logger, f'kill {task_id}')
+                    log_task_exceptions(kill_task, product.logger, f'kill task {task_id}')
                 product.configure_task = None   # Stops died() from trying to cancel us
                 product.died()
                 # No need for self._save_state, because the product never had a chance to
@@ -991,6 +1000,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         # NB: do not await between _unique_name and create_product below, as
         # doing so would introduce a race condition where the name could get
         # taken before we create it.
+        if name in self._manager.products:
+            raise FailReply(f'Subarray product {name} already exists')
 
         product_logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
         if not re.match(r'^[A-Za-z0-9_]+\*?$', name):
@@ -1008,11 +1019,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         timeout = 300
         try:
             async with async_timeout.timeout(timeout):
-                # This needs to be as close as possible to create_product
-                # (specifically, no intervening awaits) so that other events
-                # can't affect the set of valid names.
-                if name in self._manager.products:
-                    raise FailReply(f'Subarray product {name} already exists')
                 product = await self._manager.create_product(name, config)
                 assert product is not None
                 assert product.katcp_conn is not None
@@ -1103,7 +1109,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         except Exception as exc:
             if not force:
                 raise
-            product.logger.info(f'Graceful kill failed, force-killing: {exc}')
+            product.logger.warning(f'Graceful kill failed, force-killing: {exc}')
             # Mesos will eventually kill the slave tasks when it sees that
             # the framework has disappeared.
             await self._manager.kill_product(product)
@@ -1117,8 +1123,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         subarray_product_id : string
             Subarray product to deconfigure
         force : bool, optional
-            Take down the subarray immediately, even if it is still capturing,
-            and without waiting for completion.
+            Take down the subarray immediately, even if it is still capturing.
+            If it does not complete within 15 seconds it is taken down anyway.
         """
         product = self._manager.products.get(name)
         if product is None:
@@ -1315,7 +1321,7 @@ class _InvalidGuiUrlsError(RuntimeError):
     pass
 
 
-def _load_gui_urls_file(filename):
+def _load_gui_urls_file(filename: str) -> List[Dict[str, str]]:
     try:
         with open(filename) as gui_urls_file:
             gui_urls = json.load(gui_urls_file)
@@ -1328,7 +1334,7 @@ def _load_gui_urls_file(filename):
     return gui_urls
 
 
-def _load_gui_urls_dir(dirname):
+def _load_gui_urls_dir(dirname: str) -> List[Dict[str, str]]:
     try:
         gui_urls = []
         for name in sorted(os.listdir(dirname)):
@@ -1338,6 +1344,13 @@ def _load_gui_urls_dir(dirname):
     except (IOError, OSError) as error:
         raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
     return gui_urls
+
+
+def _load_gui_urls(path: str) -> List[Dict[str, str]]:
+    if os.path.isdir(path):
+        return _load_gui_urls_dir(path)
+    else:
+        return _load_gui_urls_file(path)
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -1390,10 +1403,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
     if args.gui_urls is not None:
         try:
-            if os.path.isdir(args.gui_urls):
-                args.gui_urls = _load_gui_urls_dir(args.gui_urls)
-            else:
-                args.gui_urls = _load_gui_urls_file(args.gui_urls)
+            args.gui_urls = _load_gui_urls(args.gui_urls)
         except _InvalidGuiUrlsError as exc:
             parser.error(str(exc))
         except Exception as exc:
