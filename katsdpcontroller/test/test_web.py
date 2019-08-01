@@ -8,7 +8,7 @@ import functools
 import logging
 import signal
 from unittest import mock
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Tuple, Any, Optional
 
 import yarl
 from aiokatcp import Sensor, SensorSet
@@ -161,7 +161,7 @@ async def dummy_create_subprocess_exec(*args: str) -> DummyHaproxyProcess:
 
 
 class TestWeb(asynctest.ClockedTestCase):
-    haproxy_port: Optional[int] = None
+    haproxy_bind: Optional[Tuple[str, int]] = None
     maxDiff = None
 
     async def setUp(self) -> None:
@@ -186,7 +186,7 @@ class TestWeb(asynctest.ClockedTestCase):
             Sensor(str, 'product2.ingest.1.gui-urls', '', default=json.dumps(PRODUCT2_CAL_GUI_URLS),
                    initial_status=Sensor.Status.UNKNOWN))
         for sensor in self.mc_server.orig_sensors.values():
-            if self.haproxy_port is not None and sensor.name.endswith('.gui-urls'):
+            if self.haproxy_bind is not None and sensor.name.endswith('.gui-urls'):
                 new_value = web.rewrite_gui_urls(EXTERNAL_URL, sensor)
                 new_sensor = Sensor(sensor.stype, sensor.name, sensor.description, sensor.units)
                 new_sensor.set_value(new_value, timestamp=sensor.timestamp, status=sensor.status)
@@ -194,7 +194,7 @@ class TestWeb(asynctest.ClockedTestCase):
             else:
                 self.mc_server.sensors.add(sensor)
 
-        self.app = web.make_app(self.mc_server, self.haproxy_port)
+        self.app = web.make_app(self.mc_server, self.haproxy_bind)
         self.server = TestServer(self.app)
         self.client = TestClient(self.server)
         await self.client.start_server()
@@ -206,7 +206,7 @@ class TestWeb(asynctest.ClockedTestCase):
 
     async def test_get_guis(self) -> None:
         guis = web._get_guis(self.mc_server)
-        haproxy = self.haproxy_port is not None
+        haproxy = self.haproxy_bind is not None
         expected = {
             "general": ROOT_GUI_URLS,
             "products": {
@@ -264,7 +264,7 @@ class TestWeb(asynctest.ClockedTestCase):
                 self.assertIn('product3', text)
 
     async def test_websocket(self) -> None:
-        haproxy = self.haproxy_port is not None
+        haproxy = self.haproxy_bind is not None
         expected = {
             "general": ROOT_GUI_URLS,
             "products": {
@@ -293,7 +293,7 @@ class TestWeb(asynctest.ClockedTestCase):
 
 
 class TestWebHaproxy(TestWeb):
-    haproxy_port = 80
+    haproxy_bind = ('localhost.invalid', 80)
 
     async def setUp(self) -> None:
         create_patch(self, 'asyncio.create_subprocess_exec',

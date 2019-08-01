@@ -19,7 +19,7 @@ import tempfile
 import signal
 import weakref
 import functools
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Tuple, Optional
 
 import pkg_resources
 import prometheus_async
@@ -141,19 +141,19 @@ async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
 class _Haproxy:
     """Wraps an haproxy process and updates its config file on the fly."""
 
-    def __init__(self, haproxy_port: int) -> None:
+    def __init__(self, haproxy_bind: Tuple[str, int]) -> None:
         self._cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
         self._pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
         self._content = ''
         self._process: Optional[asyncio.subprocess.Process] = None
-        self.haproxy_port = haproxy_port
+        self.haproxy_bind = haproxy_bind
         env = jinja2.Environment(loader=jinja2.PackageLoader('katsdpcontroller'),
                                  undefined=jinja2.StrictUndefined,
                                  autoescape=False)   # autoescaping is for HTML
         self._template = env.get_template('haproxy.conf.j2')
 
     async def update(self, guis: dict, internal_port: int) -> None:
-        content = self._template.render(haproxy_port=self.haproxy_port,
+        content = self._template.render(haproxy_bind=self.haproxy_bind,
                                         internal_port=internal_port,
                                         guis=guis)
         if content != self._content:
@@ -182,7 +182,7 @@ class _Haproxy:
 
 class _Updater:
     def __init__(self, server: master_controller.DeviceServer,
-                 haproxy_port: Optional[int]) -> None:
+                 haproxy_bind: Optional[Tuple[str, int]]) -> None:
         def observer(sensor: Sensor, reading: Reading) -> None:
             dirty.set()
 
@@ -193,7 +193,7 @@ class _Updater:
         self._observer = observer
         # Sensors for which we've set the observer
         self._observer_set: weakref.WeakSet[Sensor] = weakref.WeakSet()
-        self._haproxy: Optional[_Haproxy] = _Haproxy(haproxy_port) if haproxy_port else None
+        self._haproxy: Optional[_Haproxy] = _Haproxy(haproxy_bind) if haproxy_bind else None
         server.add_interface_changed_callback(dirty.set)
         self._task = asyncio.get_event_loop().create_task(self._update())
         self._internal_port = 0    # Port running the internal web server (set by property later)
@@ -313,10 +313,10 @@ def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
 
 
 def make_app(server: master_controller.DeviceServer,
-             haproxy_port: Optional[int]) -> web.Application:
+             haproxy_bind: Optional[Tuple[str, int]]) -> web.Application:
     """Create the web application.
 
-    If `haproxy_port` is provided, also run an haproxy process on this port
+    If `haproxy_bind` is provided, also run an haproxy process on this host:port
     which will forward requests either to the web application or to individual
     dashboards. In this case, the caller must update
     `app['updater'].internal_port` with the port on which this web application
@@ -324,7 +324,7 @@ def make_app(server: master_controller.DeviceServer,
     """
     app = web.Application(middlewares=[web_utils.cache_control])
     app['server'] = server
-    app['updater'] = updater = _Updater(server, haproxy_port)
+    app['updater'] = updater = _Updater(server, haproxy_bind)
     app.on_shutdown.append(updater.close)
     app.add_routes([
         web.get('/', _index_handler),

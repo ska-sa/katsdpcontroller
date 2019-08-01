@@ -230,6 +230,6 @@ class Dashboard:
 
     def start(self, host, port):
         thread = threading.Thread(target=self._app.run_server,
-                                  kwargs={'port': port, 'host': host})
+                                  kwargs={'port': port, 'host': '0.0.0.0' if not host else host})
         thread.daemon = True
         thread.start()

@@ -8,7 +8,7 @@ defaults
     timeout server 50s
 
 frontend http-in
-    bind *:{{ haproxy_port }}
+    bind {{ haproxy_bind[0] or '*' }}:{{ haproxy_bind[1] }}
     acl missing_slash path_reg '^/gui/[^/]+/[^/]+/[^/]+$'
     acl has_gui path_reg '^/gui/[^/]+/[^/]+/[^/]+/'
     http-request redirect code 301 prefix / drop-query append-slash if missing_slash

@@ -29,7 +29,7 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
 
 async def setup_web(args: argparse.Namespace,
                     server: master_controller.DeviceServer) -> aiohttp.web.AppRunner:
-    app = web.make_app(server, args.http_port if args.haproxy else None)
+    app = web.make_app(server, (args.host, args.http_port) if args.haproxy else None)
     runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
     if args.haproxy:
