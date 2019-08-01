@@ -1021,7 +1021,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         cal.gui_urls = [{
             'title': 'Cal diagnostics',
             'description': 'Dask diagnostics for {0.name}',
-            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix,
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix + '/status',
             'category': 'Plot'
         }]
         cal.transitions = CAPTURE_TRANSITIONS
