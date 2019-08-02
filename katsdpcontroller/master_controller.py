@@ -797,19 +797,19 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
 
         product = SingularityProduct(name, config, asyncio.Task.current_task())
         self._add_product(product)
-        request_id = await self._ensure_request(name)
-        # Creates a temporary ImageResolver so that we throw away the cache immediately.
-        image = await self._image_resolver_factory()('katsdpcontroller')
-        await self._ensure_deploy(name, image)
-        await self._sing.create_run(request_id, {
-            "runId": product.run_id,
-            "commandLineArgs": args
-        })
-        # Wait until the task is running or dead
-        task_id: Optional[str] = None
         success = False
-        loop = asyncio.get_event_loop()
+        task_id: Optional[str] = None
         try:
+            # Creates a temporary ImageResolver so that we throw away the cache immediately.
+            image = await self._image_resolver_factory()('katsdpcontroller')
+            request_id = await self._ensure_request(name)
+            await self._ensure_deploy(name, image)
+            await self._sing.create_run(request_id, {
+                "runId": product.run_id,
+                "commandLineArgs": args
+            })
+            # Wait until the task is running or dead
+            loop = asyncio.get_event_loop()
             while True:
                 logger.debug('Checking if task is running yet')
                 try:
@@ -846,7 +846,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
                             host, port)
             success = True
-
+        except (scheduler.ImageError, aiohttp.ClientError, singularity.SingularityError) as exc:
+            raise ProductFailed(f'Failed to start product controller: {exc}') from exc
         finally:
             if not success:
                 if task_id is not None:

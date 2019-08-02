@@ -14,6 +14,7 @@ import aiokatcp
 from aiokatcp import Sensor
 import prometheus_client
 import asynctest
+import aiohttp.client
 import open_file_mock
 import aioresponses
 import yarl
@@ -315,6 +316,15 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
     async def test_create_product_dies_after_task_id_poll(self) -> None:
         """Task dies immediately after we learn its task ID during polling"""
         await self._test_create_product_dies_after_task_id(self.manager.new_task_poll_interval)
+
+    async def test_singularity_down(self) -> None:
+        await self.start_manager()
+        with asynctest.patch('aiohttp.ClientSession._request',
+                             side_effect=aiohttp.client.ClientConnectionError):
+            with self.assertRaises(ProductFailed):
+                await run_clocked(self, 10, self.manager.create_product('foo', {}))
+        # Product must be cleared
+        self.assertEqual(self.manager.products, {})
 
     async def start_product(
             self, name: str = 'foo',
