@@ -1206,9 +1206,8 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         Note: This command is used to prepare the SDP for reception of data as
         specified by the subarray product provided. It is necessary to call this
-        command before issuing a start command to the CBF. Essentially the SDP
-        will, once this command has returned 'OK', be in a wait state until
-        reception of the stream control start packet.
+        command before issuing a start command to the CBF. Once this command
+        has returned `OK`, SDP is ready to receive data from CBF.
 
         Upon capture-init the subarray product starts a new capture block which
         lasts until the next capture-done command. This corresponds to the
