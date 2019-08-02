@@ -84,7 +84,7 @@ def _get_task_config(product, task):
 def _make_task_details(product, active_cell):
     if active_cell is None:
         return []
-    row = active_cell[0]
+    row = active_cell['row']
     tasks = _get_tasks(product)
     if not 0 <= row < len(tasks):
         return []
