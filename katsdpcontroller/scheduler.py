@@ -600,7 +600,6 @@ class RangeResource(Resource):
             if use_random is True:
                 use_random = random
             for i in range(amount):
-
                 # Determine the size of each range so that we can pick a random
                 # range and have each item be equally likely.
                 weights = [r.end - r.begin + 1 for r in resource.ranges.range]
