@@ -1319,7 +1319,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         results = await asyncio.gather(*futures, return_exceptions=True)
         for name, result in zip(names, results):
             if isinstance(result, BaseException):
-                logger.warning("Failed to deconfigure product %s during master controller exit. "
+                logger.warning("Failed to deconfigure product %s during sdp-shutdown. "
                                "Forging ahead...", name, exc_info=result,
                                extra=dict(subarray_product_id=name))
 
@@ -1330,8 +1330,10 @@ class DeviceServer(aiokatcp.DeviceServer):
                 async with session.get(CONSUL_POWEROFF_URL) as resp:
                     nodes = await resp.json()
         except (OSError, ValueError, aiohttp.ClientError) as exc:
-            logger.exception('Failed to get poweroff node list from consul')
-            raise FailReply(f'Could not get node list from consul: {exc}')
+            msg = ('Could not retrieve list of nodes running poweroff service from consul. '
+                   'No nodes will be powered off.')
+            logger.exception(msg)
+            raise FailReply(f'{msg} {exc}')
         endpoints: List[Tuple[str, int]] = []
         for node in nodes:
             address: str = node.get('ServiceAddress') or node.get('Address')
@@ -1353,7 +1355,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         hosts : str
             Comma-separated lists of hosts that have been shutdown
         """
-        logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
+        logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
+                       "deconfiguring existing products.")
         await self._deconfigure_all()
         endpoints = await self._poweroff_endpoints()
         urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')

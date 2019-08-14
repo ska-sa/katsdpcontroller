@@ -851,7 +851,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_sdp_shutdown_no_consul(self, rmock: aioresponses) -> None:
         await self.client.request('product-configure', 'product', CONFIG)
         await self.client.request('capture-init', 'product')
-        with self.assertRaisesRegex(aiokatcp.FailReply, 'Could not get node list from consul'):
+        with self.assertRaisesRegex(aiokatcp.FailReply,
+                                    'Could not retrieve list of nodes running poweroff service'):
             await self.client.request('sdp-shutdown')
         # The product should still have been forcibly deconfigured
         self.assertEqual(self.server._manager.products, {})
