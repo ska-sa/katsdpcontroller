@@ -609,7 +609,7 @@ class RangeResource(Resource):
                 r = resource.ranges.range[pos]
                 item = use_random.randint(r.begin, r.end)
                 items.append(item)
-                # Update the range to remove the port
+                # Update the range to remove the item
                 if r.begin == r.end:
                     del resource.ranges.range[pos]
                 elif item == r.begin:
