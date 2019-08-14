@@ -1306,7 +1306,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         return reply[0].decode()
 
     async def _deconfigure_all(self) -> None:
-        """Forcably deconfigure all products.
+        """Forcibly deconfigure all products.
 
         Any errors are simply logged. This is only intended to be used as part
         of ``sdp-shutdown``.
