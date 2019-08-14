@@ -2350,15 +2350,15 @@ class TaskStats:
         pass
 
     def batch_tasks_created(self, n_tasks):
-        """`n_tasks` batch tasks have been created"""
+        """`n_tasks` batch tasks have been created."""
         pass
 
     def batch_tasks_started(self, n_tasks):
-        """`n_tasks` batch tasks have become ready to start"""
+        """`n_tasks` batch tasks have become ready to start."""
         pass
 
     def batch_tasks_skipped(self, n_tasks):
-        """`n_tasks` batch tasks were skipped because a dependency failed"""
+        """`n_tasks` batch tasks were skipped because a dependency failed."""
         pass
 
     def batch_tasks_failed(self, n_tasks):
@@ -2366,7 +2366,7 @@ class TaskStats:
         pass
 
     def batch_tasks_done(self, n_tasks):
-        """`n_tasks` batch tasks completed (including failed or skipped)"""
+        """`n_tasks` batch tasks completed (including failed or skipped)."""
         pass
 
 
