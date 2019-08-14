@@ -81,14 +81,14 @@ def _get_task_config(product, task):
     return conf
 
 
-def _make_task_details(product, active_cell):
-    if active_cell is None:
+def _make_task_details(product, tasks, active_cell):
+    if active_cell is None or 'row_id' not in active_cell:
         return []
-    row = active_cell['row']
-    tasks = _get_tasks(product)
-    if not 0 <= row < len(tasks):
+    task_name = active_cell['row_id']
+    tasks = [task for task in tasks if task.name == task_name]
+    if len(tasks) != 1:
         return []
-    task = tasks[row]
+    task = tasks[0]
     # TODO: once the template has stabilised, load it at startup.
     # For now it's very convenient to be able to edit it without
     # restarting the master controller.
@@ -180,6 +180,7 @@ class Dashboard:
             tasks = _get_tasks(sdp_controller.product)
             task_data = [
                 {
+                    'id': task.name,
                     'name': task.logical_node.name,
                     'state': task.state.name,
                     'mesos-state': task.status.state if task.status else '-',
@@ -195,6 +196,7 @@ class Dashboard:
             now = time.time()
             batch_data = [
                 {
+                    'id': task.name,
                     'capture_block_id': capture_block_id,
                     'name': task.logical_node.name,
                     'state': task.state.name,
@@ -215,7 +217,8 @@ class Dashboard:
         async def make_task_details(active_cell, n_intervals):
             if sdp_controller.product is None:
                 return []
-            return _make_task_details(sdp_controller.product, active_cell)
+            return _make_task_details(sdp_controller.product,
+                                      _get_tasks(sdp_controller.product), active_cell)
 
         @app.callback(Output('batch-details', 'children'),
                       [Input('batch-table', 'active_cell'),
@@ -224,7 +227,8 @@ class Dashboard:
         async def make_batch_details(active_cell, n_intervals):
             if sdp_controller.product is None:
                 return []
-            return _make_task_details(sdp_controller.product, active_cell)
+            tasks = [task for (cbid, task) in _get_batch_tasks(sdp_controller.product)]
+            return _make_task_details(sdp_controller.product, tasks, active_cell)
 
         return app
 
