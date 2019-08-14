@@ -465,6 +465,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     # the clocked unit tests so that it's possible to control which event
     # happens next.
     new_task_poll_interval = 0.3
+    assert (reconciliation_interval + 1e-6) % new_task_poll_interval > 1e-5, \
+        "reconciliation_interval must not be a multiple of new_task_poll_interval"
 
     def __init__(self, args: argparse.Namespace,
                  server: aiokatcp.DeviceServer,
