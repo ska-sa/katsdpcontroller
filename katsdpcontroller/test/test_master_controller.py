@@ -22,7 +22,7 @@ from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
-                                 DeviceServer, parse_args, CONSUL_POWEROFF_URL)
+                                 DeviceServer, parse_args)
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
@@ -119,6 +119,7 @@ CONSUL_POWEROFF_SERVERS = [
         "ModifyIndex": 7
     }
 ]
+CONSUL_POWEROFF_URL = 'http://localhost:8500/v1/catalog/service/poweroff?near=_agent'
 
 
 class DummyServer(aiokatcp.DeviceServer):

@@ -47,7 +47,7 @@ ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
-CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
+CONSUL_POWEROFF_PATH = 'v1/catalog/service/poweroff'
 
 
 class NoAddressesError(Exception):
@@ -872,6 +872,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         else:
             manager_cls = SingularityProductManager
         self._manager = manager_cls(args, self, image_resolver_factory, prometheus_registry)
+        self._consul_url = args.consul_url
         self._override_dicts = {}
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
@@ -1323,11 +1324,13 @@ class DeviceServer(aiokatcp.DeviceServer):
                                "Forging ahead...", name, exc_info=result,
                                extra=dict(subarray_product_id=name))
 
-    async def _poweroff_endpoints(self) -> Sequence[Tuple[str, int]]:
+    @staticmethod
+    async def _poweroff_endpoints(consul_url: yarl.URL) -> Sequence[Tuple[str, int]]:
         """Get URLs for the poweroff service."""
+        url = (consul_url / CONSUL_POWEROFF_PATH).with_query(near='_agent')
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as session:
-                async with session.get(CONSUL_POWEROFF_URL) as resp:
+                async with session.get(url) as resp:
                     nodes = await resp.json()
         except (OSError, ValueError, aiohttp.ClientError) as exc:
             msg = ('Could not retrieve list of nodes running poweroff service from consul. '
@@ -1358,7 +1361,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
                        "deconfiguring existing products.")
         await self._deconfigure_all()
-        endpoints = await self._poweroff_endpoints()
+        endpoints = await self._poweroff_endpoints(self._consul_url)
         urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
                 for (host, port) in endpoints]
         successful: List[str] = []
@@ -1432,34 +1435,36 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument('--name', default='sdpmc',
                         help='name to use in Zookeeper and Singularity [%(default)s]')
     parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
-                        help='Name by which others connect to this machine [%(default)s]')
+                        help='name by which others connect to this machine [%(default)s]')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
                         help='port for Prometheus metrics [%(default)s]')
+    parser.add_argument('--consul-url', type=yarl.URL, default='http://localhost:8500/',
+                        help='base URL for local consul agent [%(default)s]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
                         metavar='FILE',
-                        help='Configuration for connecting services to S3 '
+                        help='configuration for connecting services to S3 '
                              '(loaded on each configure)')
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR',
-                        help='Block of multicast addresses from which to draw internal allocation. '
+                        help='block of multicast addresses from which to draw internal allocation. '
                              'Needs to be at least /16. [%(default)s]')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='File containing JSON describing related GUIs, '
+                        help='file containing JSON describing related GUIs, '
                              'or directory with .json files [none]')
     parser.add_argument('--registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                         help='registry from which to pull images [%(default)s]')
     parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
+                        help='skip pulling images from the registry if already present')
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble
     parser.add_argument('zk',
-                        help='Endpoint for Zookeeper server e.g. server.domain:2181')
+                        help='endpoint for Zookeeper server e.g. server.domain:2181')
     parser.add_argument('singularity',
                         help='URL for Singularity server')
     args = parser.parse_args(argv)
