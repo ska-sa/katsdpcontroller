@@ -190,7 +190,8 @@ S3_CONFIG = '''
 }'''
 
 EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail')
+    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
+    (b'gui-urls', b'', b'string')
 ]
 
 EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [

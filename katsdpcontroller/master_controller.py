@@ -586,7 +586,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 128,
-                "numPorts": 4         # katcp, http, aiomonitor and aioconsole
+                "numPorts": 5         # katcp, http, aiomonitor, aioconsole, dashboard
             }
         }
 
@@ -1483,6 +1483,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
             parser.error(str(exc))
         except Exception as exc:
             parser.error(f'Could not read {args.gui_urls}: {exc}')
+    else:
+        args.gui_urls = []
 
     if args.s3_config_file is None and not args.interface_mode:
         parser.error('--s3-config-file is required (unless --interface-mode is given)')

@@ -1,0 +1,14 @@
+[
+    {
+        "title": "Grafana",
+        "description": "Grafana dashboard",
+        "href": "http://mc1.sdp.mkat.karoo.kat.ac.za:3000/",
+        "category": "Dashboard"
+    },
+    {
+        "title": "Prometheus",
+        "description": "Low-level interface to query metrics",
+        "href": "http://mc1.sdp.mkat.karoo.kat.ac.za:9090/",
+        "category": "Link"
+    }
+]

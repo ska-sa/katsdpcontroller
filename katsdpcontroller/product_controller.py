@@ -1042,7 +1042,8 @@ class DeviceServer(aiokatcp.DeviceServer):
                  localhost: bool,
                  image_resolver_factory: scheduler.ImageResolverFactory,
                  s3_config: dict,
-                 graph_dir: str = None) -> None:
+                 graph_dir: str = None,
+                 dashboard_url: str = None) -> None:
         self.sched = sched
         self.batch_role = batch_role
         self.interface_mode = interface_mode
@@ -1058,6 +1059,17 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the subarray product controller",
                                 default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+        gui_urls: List[Dict[str, str]] = []
+        if dashboard_url is not None:
+            gui_urls.append({
+                "title": "Dashboard",
+                "description": "Product controller dashboard",
+                "category": "Dashboard",
+                "href": dashboard_url
+            })
+        self.sensors.add(Sensor(str, 'gui-urls', 'URLs for product-wide GUIs',
+                                default=json.dumps(gui_urls),
+                                initial_status=Sensor.Status.NOMINAL))
 
     async def start(self) -> None:
         await self.master_controller.wait_connected()

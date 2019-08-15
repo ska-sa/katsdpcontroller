@@ -115,17 +115,16 @@ class Dashboard:
         sdp_controller = self._sdp_controller
         use_event_loop = self._use_event_loop
         app = dash.Dash(__name__)
-        app.css.config.serve_locally = True
-        app.scripts.config.serve_locally = True
-        app.title = 'SDP Master Controller'
-        app.layout = html.Div([
+        app.title = 'SDP Product Controller'
+        app.layout = html.Div(id='root', children=[
             dcc.Interval(id='interval', interval=1000),    # 1s updates
-            html.P('There are no subarray products currently configured',
-                   id='no-subarray-products'),
-            dcc.Tabs(id='subarray-product-tabs'),
-            html.Div(id='subarray-product-content', children=[
+            html.P('Lost connection to server (product may have been deconfigured)',
+                   id='disconnected'),
+            html.P('Waiting for product-configure call ...',
+                   id='no-subarray-product', className='connected'),
+            html.Div(id='subarray-product-content', className='connected', children=[
                 html.P(html.Strong(id='subarray-product-state')),
-                dcc.Tabs(id='subarray-product-subtabs', children=[
+                dcc.Tabs(id='subarray-product-tabs', children=[
                     dcc.Tab(label='Tasks', children=html.Div([
                         dash_table.DataTable(
                             id='task-table',
@@ -134,7 +133,7 @@ class Dashboard:
                                      {'name': 'Mesos State', 'id': 'mesos-state'},
                                      {'name': 'Host', 'id': 'host'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True),
+                            sort_action=True),
                         html.Div(id='task-details')
                     ])),
                     dcc.Tab(label='Config', children=html.Pre(id='subarray-product-config')),
@@ -144,7 +143,7 @@ class Dashboard:
                             columns=[{'name': 'ID', 'id': 'name'},
                                      {'name': 'State', 'id': 'state'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True)
+                            sort_action=True)
                     ])),
                     dcc.Tab(label='Batch jobs', children=html.Div([
                         dash_table.DataTable(
@@ -156,61 +155,30 @@ class Dashboard:
                                      {'name': 'Host', 'id': 'host'},
                                      {'name': 'Runtime', 'id': 'runtime'}],
                             style_cell={'textAlign': 'left'},
-                            sorting=True),
+                            sort_action=True),
                         html.Div(id='batch-details')
                     ]))
                 ])
             ])
         ])
 
-        @app.callback(Output('no-subarray-products', 'style'),
+        @app.callback([Output('no-subarray-product', 'style'),
+                       Output('subarray-product-content', 'style'),
+                       Output('subarray-product-state', 'children'),
+                       Output('subarray-product-config', 'children'),
+                       Output('task-table', 'data'),
+                       Output('capture-block-table', 'data'),
+                       Output('batch-table', 'data'),
+                       Output('root', 'data-dummy')],   # Just to set loading state on root
                       [Input('interval', 'n_intervals')])
         @use_event_loop
-        async def hide_no_subarray_products(n_intervals):
-            """Hide the "no subarray products" message when not applicable"""
-            if sdp_controller.subarray_products:
-                return {'display': 'none'}
-            else:
-                return {}
+        async def top_level(n_intervals):
+            if sdp_controller.product is None:
+                return {}, {'display': 'none'}, '', '', [], [], []
+            config = json.dumps(sdp_controller.product.config, indent=2, sort_keys=True)
 
-        # Hide the subarray-product-content div when nothing selected
-        @app.callback(Output('subarray-product-content', 'style'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def hide_subarray_product_content(product_name, n_intervals):
-            if sdp_controller.subarray_products.get(product_name) is None:
-                return {'display': 'none'}
-            else:
-                return {}
-
-        @app.callback(Output('subarray-product-tabs', 'children'),
-                      [Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_tabs(n_intervals):
-            return [dcc.Tab(label=product, value=product)
-                    for product in sorted(sdp_controller.subarray_products.keys())]
-
-        @app.callback(Output('subarray-product-state', 'children'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_subarray_product_state(product_name, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return ''
-            return product.state.name
-
-        @app.callback(Output('task-table', 'data'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_task_table(product_name, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return {}
-            tasks = _get_tasks(product)
-            data = [
+            tasks = _get_tasks(sdp_controller.product)
+            task_data = [
                 {
                     'name': task.logical_node.name,
                     'state': task.state.name,
@@ -218,51 +186,14 @@ class Dashboard:
                     'host': task.agent.host if task.agent else '-'
                 } for task in tasks
             ]
-            return data
 
-        @app.callback(Output('task-details', 'children'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('task-table', 'active_cell'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_task_details(product_name, active_cell, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return []
-            return _make_task_details(product, active_cell)
+            capture_blocks = sdp_controller.product.capture_blocks
+            capture_block_data = [{'name': name, 'state': capture_block.state.name}
+                                  for name, capture_block in sorted(capture_blocks.items())]
 
-        @app.callback(Output('subarray-product-config', 'children'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_subarray_product_config(product_name, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return ''
-            return json.dumps(product.config, indent=2, sort_keys=True)
-
-        @app.callback(Output('capture-block-table', 'data'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_capture_block_table(product_name, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return []
-            return [{'name': name, 'state': capture_block.state.name}
-                    for name, capture_block in sorted(product.capture_blocks.items())]
-
-        @app.callback(Output('batch-table', 'data'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('interval', 'n_intervals')])
-        @use_event_loop
-        async def make_batch_table(product_name, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
-                return []
-            tasks = _get_batch_tasks(product)
+            tasks = _get_batch_tasks(sdp_controller.product)
             now = time.time()
-            data = [
+            batch_data = [
                 {
                     'capture_block_id': capture_block_id,
                     'name': task.logical_node.name,
@@ -274,18 +205,26 @@ class Dashboard:
                         if task.start_time is not None else '-'
                 } for (capture_block_id, task) in tasks
             ]
-            return data
+            return ({'display': 'none'}, {}, sdp_controller.product.state.name,
+                    config, task_data, capture_block_data, batch_data, '')
 
-        @app.callback(Output('batch-details', 'children'),
-                      [Input('subarray-product-tabs', 'value'),
-                       Input('batch-table', 'active_cell'),
+        @app.callback(Output('task-details', 'children'),
+                      [Input('task-table', 'active_cell'),
                        Input('interval', 'n_intervals')])
         @use_event_loop
-        async def make_batch_details(product_name, active_cell, n_intervals):
-            product = sdp_controller.subarray_products.get(product_name)
-            if product is None:
+        async def make_task_details(active_cell, n_intervals):
+            if sdp_controller.product is None:
                 return []
-            return _make_task_details(product, active_cell)
+            return _make_task_details(sdp_controller.product, active_cell)
+
+        @app.callback(Output('batch-details', 'children'),
+                      [Input('batch-table', 'active_cell'),
+                       Input('interval', 'n_intervals')])
+        @use_event_loop
+        async def make_batch_details(active_cell, n_intervals):
+            if sdp_controller.product is None:
+                return []
+            return _make_task_details(sdp_controller.product, active_cell)
 
         return app
 
