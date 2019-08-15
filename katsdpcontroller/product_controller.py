@@ -6,7 +6,7 @@ import json
 import time
 import os
 from ipaddress import IPv4Address
-from typing import Dict, Set, List, Callable, Sequence, Optional, Type
+from typing import Dict, Set, List, Callable, Sequence, Optional, Type, Mapping
 
 import addict
 import jsonschema
@@ -117,6 +117,61 @@ class SDPResources:
     async def get_port() -> int:
         """Return an assigned port for a multicast group"""
         return 7148
+
+
+class TaskStats(scheduler.TaskStats):
+    def __init__(self) -> None:
+        def add_sensor(name: str, description: str) -> None:
+            self.sensors.add(aiokatcp.Sensor(int, name, description,
+                                             initial_status=aiokatcp.Sensor.Status.NOMINAL))
+
+        def add_counter(name: str, description: str) -> None:
+            add_sensor(name, description + ' (prometheus: counter)')
+
+        self.sensors = aiokatcp.SensorSet()
+        for queue in ['default', 'batch']:
+            for state in scheduler.TaskState:
+                name = state.name.lower()
+                add_sensor(
+                    f'{queue}.{name}.tasks-in-state',
+                    f'Number of tasks in queue {queue} and state {state.name} '
+                    '(prometheus: gauge labels: queue,state)')
+        add_counter('batch-tasks-created',
+                    'Number of batch tasks that have been created')
+        add_counter('batch-tasks-started',
+                    'Number of batch tasks that have become ready to start')
+        add_counter('batch-tasks-skipped',
+                    'Number of batch tasks that were skipped because a dependency failed')
+        add_counter('batch-tasks-done',
+                    'Number of completed batch tasks (including failed and skipped)')
+        add_counter('batch-tasks-failed',
+                    'Number of batch tasks that failed (after all retries)')
+
+    def task_state_changes(self, changes: Mapping[scheduler.LaunchQueue,
+                                                  Mapping[scheduler.TaskState, int]]) -> None:
+        now = time.time()
+        for queue, deltas in changes.items():
+            for state, delta in deltas.items():
+                state_name = state.name.lower()
+                sensor_name = f'{queue.name}.{state_name}.tasks-in-state'
+                sensor = self.sensors.get(sensor_name)
+                if sensor:
+                    sensor.set_value(sensor.value + delta, timestamp=now)
+
+    def batch_tasks_created(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-created'].value += n_tasks
+
+    def batch_tasks_started(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-started'].value += n_tasks
+
+    def batch_tasks_skipped(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-skipped'].value += n_tasks
+
+    def batch_tasks_failed(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-failed'].value += n_tasks
+
+    def batch_tasks_done(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-done'].value += n_tasks
 
 
 class CaptureBlock:
@@ -733,7 +788,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         super().__init__(sched, config, resolver, subarray_product_id, sdp_controller)
         # Priority is lower (higher number) than the default queue
         self.batch_queue = scheduler.LaunchQueue(
-            sdp_controller.batch_role, subarray_product_id, priority=BATCH_PRIORITY)
+            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
         sched.add_queue(self.batch_queue)
         # generate physical nodes
         self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
@@ -1070,6 +1125,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(str, 'gui-urls', 'URLs for product-wide GUIs',
                                 default=json.dumps(gui_urls),
                                 initial_status=Sensor.Status.NOMINAL))
+        if sched is not None:
+            task_stats = sched.task_stats
+            if isinstance(task_stats, TaskStats):
+                for sensor in task_stats.sensors.values():
+                    self.sensors.add(sensor)
 
     async def start(self) -> None:
         await self.master_controller.wait_connected()

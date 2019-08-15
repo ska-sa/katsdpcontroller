@@ -181,7 +181,6 @@ import jsonschema
 from decorator import decorator
 from addict import Dict
 import pymesos
-import prometheus_client
 
 import aiohttp.web
 
@@ -189,26 +188,6 @@ from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
 
-
-# TODO: these need to become sensors to pass them from product controller to master controller
-TASKS_IN_STATE = prometheus_client.Gauge(
-    'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
-    ['queue', 'state'])
-BATCH_TASKS_CREATED = prometheus_client.Counter(
-    'katsdpcontroller_batch_tasks_created',
-    'Number of batch tasks that have been created')
-BATCH_TASKS_STARTED = prometheus_client.Counter(
-    'katsdpcontroller_batch_tasks_started',
-    'Number of batch tasks that have become ready to start')
-BATCH_TASKS_SKIPPED = prometheus_client.Counter(
-    'katsdpcontroller_batch_tasks_skipped',
-    'Number of batch tasks that were skipped because a dependency failed')
-BATCH_TASKS_DONE = prometheus_client.Counter(
-    'katsdpcontroller_batch_tasks_done',
-    'Number of completed batch tasks (including failed and skipped)')
-BATCH_TASKS_FAILED = prometheus_client.Counter(
-    'katsdpcontroller_batch_tasks_failed',
-    'Number of batch tasks that failed (after all retries)')
 
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
@@ -1937,6 +1916,9 @@ class PhysicalTask(PhysicalNode):
         Slave ID of the agent on which this task is running
     queue : :class:`LaunchQueue`
         The queue on which this task was (most recently) launched
+    task_stats : :class:`TaskStats`
+        Statistics collector of the scheduler. It is only set when
+        the task is being launched.
     """
     def __init__(self, logical_task):
         super().__init__(logical_task)
@@ -1947,6 +1929,7 @@ class PhysicalTask(PhysicalNode):
         self.status = None
         self.start_time = None
         self._queue = None
+        self.task_stats = None
         for name, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
                 setattr(self, name, {})
@@ -2145,13 +2128,12 @@ class PhysicalTask(PhysicalNode):
         return args
 
     def set_state(self, state):
-        if self._queue is not None:
-            self._queue.state_gauges[self.state].dec()
+        old_state = self.state
         try:
             super().set_state(state)
         finally:
-            if self._queue is not None:
-                self._queue.state_gauges[self.state].inc()
+            if self.task_stats is not None and self._queue is not None and self.state != old_state:
+                self.task_stats.task_state_changes({self._queue: {old_state: -1, self.state: 1}})
 
     def set_status(self, status):
         self.status = status
@@ -2171,19 +2153,24 @@ class PhysicalTask(PhysicalNode):
 
     @queue.setter
     def queue(self, queue):
-        if self._queue is not None:
-            self._queue.state_gauges[self.state].dec()
+        old_queue = self._queue
         self._queue = queue
-        if self._queue is not None:
-            self._queue.state_gauges[self.state].inc()
+        # Once a task has reached STARTED, the queue only changes due to __del__,
+        # and in that case we don't subtract it as we want to count dead tasks
+        # even after they're garbage collected.
+        if (self.task_stats is not None and queue is not old_queue
+                and self.state < TaskState.STARTED):
+            changes = {}
+            if old_queue is not None:
+                changes[old_queue] = {self.state: -1}
+            if queue is not None:
+                changes[queue] = {self.state: 1}
+            self.task_stats.task_state_changes(changes)
 
     def __del__(self):
-        # Avoid racking up counts if a launch is cancelled. However, once
-        # a task gets going (and presumably eventually gets to DEAD), leave
-        # it so that we can see how many tasks ran in total.
-        # The hasattr check is in case we somehow fail early in __init__.
-        if hasattr(self, '_queue') and self._queue is not None and self.state >= TaskState.STARTED:
-            self._queue.state_gauges[self.state].dec()
+        # hasattr is to protect against failure early in __init__
+        if hasattr(self, '_queue'):
+            self.queue = None
 
 
 def instantiate(logical_graph):
@@ -2259,9 +2246,6 @@ class LaunchQueue:
         self.name = name
         self.priority = priority
         self._groups = deque()
-        self.state_gauges = {
-            state: TASKS_IN_STATE.labels(name, state.name) for state in TaskState
-        }
 
     def _clear_cancelled(self):
         while self._groups and self._groups[0].future.cancelled():
@@ -2279,10 +2263,11 @@ class LaunchQueue:
     def remove(self, group):
         self._groups.remove(group)
 
-    def add(self, group):
+    def add(self, group, task_stats):
         self._groups.append(group)
         for node in group.nodes:
             if isinstance(node, PhysicalTask):
+                node.task_stats = task_stats
                 node.queue = self
 
     def __iter__(self):
@@ -2349,6 +2334,42 @@ def subgraph(graph, edge_filter, nodes=None):
     return out
 
 
+class TaskStats:
+    """Base class for plugging in listeners that keep track of the number of tasks.
+
+    Users should subclass this and override the methods that they are
+    interested in receiving.
+    """
+    def task_state_changes(self, changes):
+        """Changes to number of tasks in each state of each queue.
+
+        changes : Mapping[LaunchQueue, Mapping[TaskState`, int]]
+            Delta in number of tasks of each queue and state. Queues and states
+            with no change will not necessarily be listed.
+        """
+        pass
+
+    def batch_tasks_created(self, n_tasks):
+        """`n_tasks` batch tasks have been created."""
+        pass
+
+    def batch_tasks_started(self, n_tasks):
+        """`n_tasks` batch tasks have become ready to start."""
+        pass
+
+    def batch_tasks_skipped(self, n_tasks):
+        """`n_tasks` batch tasks were skipped because a dependency failed."""
+        pass
+
+    def batch_tasks_failed(self, n_tasks):
+        """`n_tasks` batch tasks failed after all retries."""
+        pass
+
+    def batch_tasks_done(self, n_tasks):
+        """`n_tasks` batch tasks completed (including failed or skipped)."""
+        pass
+
+
 class Scheduler(pymesos.Scheduler):
     """Top-level scheduler implementing the Mesos Scheduler API.
 
@@ -2374,6 +2395,8 @@ class Scheduler(pymesos.Scheduler):
     http_url : str, optional
         URL at which agent nodes can reach the HTTP server. If not specified,
         tries to deduce it from the host's FQDN.
+    task_stats : :class:`TaskStats`, optional
+        Set of callbacks for tracking statistics about tasks.
     runner_kwargs : dict, optional
         Extra arguments to pass to construct the :class:`aiohttp.web.AppRunner`
 
@@ -2393,14 +2416,17 @@ class Scheduler(pymesos.Scheduler):
         Actual external URL to use for the HTTP server (after :meth:`start`)
     http_runner : :class:`aiohttp.web.AppRunner`
         Runner for the HTTP app
+    task_stats : :class:`TaskStats`
+        Statistics collector passed to constructor
     """
-    def __init__(self, default_role, http_host, http_port, http_url=None, runner_kwargs=None):
+    def __init__(self, default_role, http_host, http_port, http_url=None,
+                 *, task_stats=None, runner_kwargs=None):
         self._loop = asyncio.get_event_loop()
         self._driver = None
         self._offers = {}           #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event()
-        self._default_queue = LaunchQueue(default_role)
+        self._default_queue = LaunchQueue(default_role, 'default')
         self._queues = [self._default_queue]
         #: Mesos roles for which we want to (and expect to) receive offers
         self._roles_needed = set()
@@ -2413,6 +2439,7 @@ class Scheduler(pymesos.Scheduler):
         self.http_host = http_host
         self.http_port = http_port
         self.http_url = http_url
+        self.task_stats = task_stats if task_stats is not None else TaskStats()
         self._launcher_task = self._loop.create_task(self._launcher())
 
         # Configure the web app
@@ -2970,7 +2997,7 @@ class Scheduler(pymesos.Scheduler):
             deadline = math.inf
         pending = _LaunchGroup(graph, remaining, resolver, deadline)
         empty = not queue
-        queue.add(pending)
+        queue.add(pending, self.task_stats)
         if empty:
             self._wakeup_launcher.set()
         try:
@@ -3156,20 +3183,20 @@ class Scheduler(pymesos.Scheduler):
                             else:
                                 desc = node.name + ' (and {} others)'.format(len(node_set) - 1)
                             logger.info('Skipping %s because %s failed', desc, dep.name)
-                            BATCH_TASKS_SKIPPED.inc(len(node_set))
+                            self.task_stats.batch_tasks_skipped(len(node_set))
                             raise TaskSkipped(node) from None
 
-                BATCH_TASKS_STARTED.inc(len(node_set))
+                self.task_stats.batch_tasks_started(len(node_set))
                 try:
                     await self._batch_run_retry(
                         graph, resolver, node_set, queue=queue,
                         resources_timeout=resources_timeout, attempts=attempts)
                 except Exception:
                     logger.exception('Batch task %s failed', node.name)
-                    BATCH_TASKS_FAILED.inc()
+                    self.task_stats.batch_tasks_failed(1)
                     raise
             finally:
-                BATCH_TASKS_DONE.inc(len(node_set))
+                self.task_stats.batch_tasks_done(len(node_set))
 
         n_nodes = 0
         future_list = []
@@ -3182,7 +3209,7 @@ class Scheduler(pymesos.Scheduler):
             for node in node_set:
                 futures[node] = future
 
-        BATCH_TASKS_CREATED.inc(n_nodes)
+        self.task_stats.batch_tasks_created(n_nodes)
         await asyncio.gather(*future_list, return_exceptions=True)
         return {node: future.exception() for (node, future) in futures.items()}
 

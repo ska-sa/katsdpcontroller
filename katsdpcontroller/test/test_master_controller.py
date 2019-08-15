@@ -147,6 +147,9 @@ class DummyProductController(aiokatcp.DeviceServer):
             float, 'foo.gauge', '(prometheus: gauge)', default=1.5,
             initial_status=aiokatcp.Sensor.Status.NOMINAL))
         self.sensors.add(aiokatcp.Sensor(
+            float, 'foo.cheese.labelled-gauge', '(prometheus: gauge labels: type)', default=1,
+            initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        self.sensors.add(aiokatcp.Sensor(
             int, 'foo.histogram', '(prometheus: histogram(1, 10, 100))'))
         self.requests: List[aiokatcp.Message] = []
 
@@ -545,6 +548,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
                          42)
         check_prom('input_bytes_total', 'ingest.sdp_l0.1', 'counter', 42)
         check_prom('gauge', 'foo', 'gauge', 1.5)
+        check_prom('labelled_gauge', 'foo', 'gauge', 1, extra_labels={'type': 'cheese'})
         check_prom('histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
 
         # Have the remote katcp server tell us it is going away. This also

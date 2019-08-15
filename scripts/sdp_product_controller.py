@@ -167,7 +167,8 @@ def main() -> None:
         sched = None
     else:
         sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
-                                    dict(access_log_class=web_utils.AccessLogger))
+                                    task_stats=product_controller.TaskStats(),
+                                    runner_kwargs=dict(access_log_class=web_utils.AccessLogger))
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)

@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 import time
 from decimal import Decimal
+from collections import Counter
 
 from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
                         assert_is, assert_is_not, assert_is_none, assert_is_instance,
@@ -47,6 +48,41 @@ class AnyOrderList(list):
         if isinstance(other, list):
             return not (self == other)
         return NotImplemented
+
+
+class SimpleTaskStats(scheduler.TaskStats):
+    def __init__(self):
+        self.batch_created = 0
+        self.batch_started = 0
+        self.batch_done = 0
+        self.batch_failed = 0
+        self.batch_skipped = 0
+        self._state_counts = Counter()
+
+    def task_state_changes(self, changes):
+        for deltas in changes.values():
+            for state, delta in deltas.items():
+                self._state_counts[state] += delta
+
+    def batch_tasks_created(self, n_tasks):
+        self.batch_created += n_tasks
+
+    def batch_tasks_started(self, n_tasks):
+        self.batch_started += n_tasks
+
+    def batch_tasks_done(self, n_tasks):
+        self.batch_done += n_tasks
+
+    def batch_tasks_failed(self, n_tasks):
+        self.batch_failed += n_tasks
+
+    def batch_tasks_skipped(self, n_tasks):
+        self.batch_skipped += n_tasks
+
+    @property
+    def state_counts(self):
+        """Return state counts as a normal dict with zero counts omitted"""
+        return {key: value for (key, value) in self._state_counts.items() if value != 0}
 
 
 class TestScalarResource:
@@ -1255,7 +1291,9 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.numa_attr
         ]
         self._make_physical()
-        self.sched = scheduler.Scheduler('default', '127.0.0.1', 0, 'http://scheduler/')
+        self.task_stats = SimpleTaskStats()
+        self.sched = scheduler.Scheduler('default', '127.0.0.1', 0, 'http://scheduler/',
+                                         task_stats=self.task_stats)
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
                                            self.sched.http_url)
         self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
@@ -1398,6 +1436,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
+        assert_equal({TaskState.STARTING: 2}, self.task_stats.state_counts)
         assert_equal([mock.call.reviveOffers({'default'})], self.driver.mock_calls)
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
@@ -1434,6 +1473,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             mock.call.suppressOffers({'default'})
         ]), self.driver.mock_calls)
         self.driver.reset_mock()
+        assert_equal({TaskState.STARTED: 2}, self.task_stats.state_counts)
 
         # Tell scheduler that node1 is now running. It should go to RUNNING
         # but not READY, because node0 isn't ready yet.
@@ -1444,6 +1484,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal([mock.call.acknowledgeStatusUpdate(status)],
                      self.driver.mock_calls)
         self.driver.reset_mock()
+        assert_equal({TaskState.STARTED: 1, TaskState.RUNNING: 1}, self.task_stats.state_counts)
 
         # A real node1 would issue an HTTP request back to the scheduler. Fake
         # it instead, to check the timing.
@@ -1464,6 +1505,7 @@ class TestScheduler(asynctest.ClockedTestCase):
                          self.driver.mock_calls)
             self.driver.reset_mock()
             poll_ports.assert_called_once_with('agenthost0', [30000])
+        assert_equal({TaskState.RUNNING: 2}, self.task_stats.state_counts)
 
         # Make poll_ports ready. Node 0 should now become ready, which will
         # make node 1 ready too.
@@ -1473,6 +1515,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await wait_request
         assert_equal(TaskState.READY, self.nodes[1].state)
         assert_true(launch.done())
+        assert_equal({TaskState.READY: 2}, self.task_stats.state_counts)
         await launch
 
     async def test_launch_slow_resolve(self):
@@ -1606,7 +1649,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch, kill = await self._transition_node0(target_state)
         assert_false(launch.done())
         # Now cancel and check that nodes go back to NOT_READY if they were
-        # in STARTED, otherwise keep their state.
+        # in STARTING, otherwise keep their state.
         launch.cancel()
         await asynctest.exhaust_callbacks(self.loop)
         if target_state == TaskState.STARTING:
@@ -1735,6 +1778,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
             await asynctest.exhaust_callbacks(self.loop)
             assert_is(status, self.nodes[0].status)
+            assert_equal({TaskState.DEAD: 1}, self.task_stats.state_counts)
         assert_equal(TaskState.DEAD, self.nodes[0].state)
         await launch
         await kill
@@ -1843,6 +1887,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         await self._transition_batch_run(self.batch_nodes[0], TaskState.DEAD)
         results = await task
         assert_equal(results, {self.batch_nodes[0]: None})
+        assert_equal(self.task_stats.batch_created, 1)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_failed, 0)
+        assert_equal(self.task_stats.batch_skipped, 0)
 
     async def test_batch_run_failure(self):
         """batch_run with a failing task"""
@@ -1854,6 +1903,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         results = await task
         with assert_raises(scheduler.TaskError):
             raise next(iter(results.values()))
+        assert_equal(self.task_stats.batch_created, 1)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_failed, 1)
+        assert_equal(self.task_stats.batch_skipped, 0)
 
     async def test_batch_run_timeout(self):
         """batch_run with a task that doesn't finish in time"""
@@ -1867,6 +1921,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         results = await task
         with assert_raises(asyncio.TimeoutError):
             raise next(iter(results.values()))
+        assert_equal(self.task_stats.batch_created, 1)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_failed, 1)
+        assert_equal(self.task_stats.batch_skipped, 0)
 
     async def test_batch_run_resources_timeout(self):
         """batch_run with a task that doesn't get resources in time"""
@@ -1876,6 +1935,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         results = await task
         with assert_raises(scheduler.TaskInsufficientResourcesError):
             raise next(iter(results.values()))
+        assert_equal(self.task_stats.batch_created, 1)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_failed, 1)
+        assert_equal(self.task_stats.batch_skipped, 0)
 
     async def test_batch_run_retry(self):
         """batch_run where first attempt fails, later attempt succeeds"""
@@ -1891,6 +1955,11 @@ class TestScheduler(asynctest.ClockedTestCase):
                                    if node.name == 'batch0')
         await self._transition_batch_run(self.batch_nodes[0], TaskState.DEAD)
         await task
+        assert_equal(self.task_stats.batch_created, 1)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_failed, 0)
+        assert_equal(self.task_stats.batch_skipped, 0)
 
     async def test_batch_run_depends(self):
         """Batch launch with one task depending on another"""
@@ -1923,6 +1992,11 @@ class TestScheduler(asynctest.ClockedTestCase):
             raise results[self.batch_nodes[0]]
         with assert_raises(scheduler.TaskSkipped):
             raise results[self.batch_nodes[1]]
+        assert_equal(self.task_stats.batch_created, 2)
+        assert_equal(self.task_stats.batch_started, 1)
+        assert_equal(self.task_stats.batch_done, 2)
+        assert_equal(self.task_stats.batch_failed, 1)
+        assert_equal(self.task_stats.batch_skipped, 1)
 
     async def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
