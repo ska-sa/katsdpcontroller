@@ -1356,7 +1356,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         success : {'ok', 'fail'}
             Whether the shutdown sequence of all other nodes succeeded.
         hosts : str
-            Comma-separated lists of hosts that have been shutdown
+            On success, a comma-separated lists of hosts that have been shutdown; on
+            failure a human-readable message listing success and failure machines.
         """
         logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
                        "deconfiguring existing products.")
@@ -1365,7 +1366,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
                 for (host, port) in endpoints]
         successful: List[str] = []
-        failed = False
+        failed: List[str] = []
         async with aiohttp.ClientSession() as session:
             async def post1(url):
                 async with session.post(url) as resp:
@@ -1377,12 +1378,13 @@ class DeviceServer(aiokatcp.DeviceServer):
                 if isinstance(result, BaseException):
                     logger.warning('Shutting down %s:%d failed: %s',
                                    endpoint[0], endpoint[1], result)
-                    failed = True
+                    failed.append(endpoint[0])
                 else:
                     successful.append(endpoint[0])
         success_str = ','.join(successful)
         if failed:
-            raise FailReply(success_str)
+            failed_str = ','.join(failed)
+            raise FailReply(f'Success: {success_str} Failed: {failed_str}')
         else:
             return success_str
 

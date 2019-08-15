@@ -869,7 +869,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         rmock.post(url2, status=500, payload={"stdout": "", "stderr": "Simulated failure"})
         await self.client.request('product-configure', 'product', CONFIG)
         await self.client.request('capture-init', 'product')
-        with self.assertRaisesRegex(aiokatcp.FailReply, r'^127.0.0.42$'):
+        with self.assertRaisesRegex(aiokatcp.FailReply,
+                                    r'^Success: 127\.0\.0\.42 Failed: 127.0.0.144$'):
             await self.client.request('sdp-shutdown')
         # Other machine must still have been powered off
         poweroff_mock.assert_any_call(url1, data=None)
