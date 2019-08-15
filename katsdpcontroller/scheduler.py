@@ -170,6 +170,7 @@ from decimal import Decimal
 import time
 import io
 from abc import abstractmethod
+import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
 from typing import Optional, Mapping, Union, ClassVar, Type
@@ -544,7 +545,16 @@ class ScalarResource(Resource):
 
 
 class RangeResource(Resource):
-    """Resource model for Mesos range resources"""
+    """Resource model for Mesos range resources
+
+    Allocation takes an optional keyword argument ``use_random``. If false (the
+    default), resources are allocated sequentially (which typically means
+    starting from the smallest number of the most specific role). If it is
+    true, the items are selected uniformly at random from the last (most
+    specific) role until it is exhausted before moving on to the next role.
+    It can also be an instance of :class:`random.Random` to use a specific
+    random generator.
+    """
 
     REQUEST_CLASS = RangeResourceRequest
 
@@ -559,46 +569,58 @@ class RangeResource(Resource):
     def _untransform(self, resource):
         return self._transform(resource)
 
-    def _available(self, resource, *, minimum=None):
+    def _available(self, resource, *, use_random=False):
         total = 0
         for r in resource.ranges.range:
-            if minimum is None:
-                total += r.end - r.begin + 1
-            elif minimum <= r.end:
-                total += r.end - max(r.begin, minimum) + 1
+            total += r.end - r.begin + 1
         return total
 
     def _value_str(self, resource):
         return '[' + ','.join('{}-{}'.format(r.begin, r.end) for r in resource.ranges.range) + ']'
 
-    def _allocate(self, resource, amount, *, minimum=None):
+    def _allocate(self, resource, amount, *, use_random=False):
         out = copy.deepcopy(resource)
         out.ranges.range.clear()
-        pos = len(resource.ranges.range) - 1
-        while amount > 0:
-            r = resource.ranges.range[pos]
-            use = 0
-            if minimum is None or minimum <= r.begin:
+        if not use_random:
+            pos = len(resource.ranges.range) - 1
+            while amount > 0:
+                r = resource.ranges.range[pos]
                 use = min(amount, r.end - r.begin + 1)
+                # TODO: use_random
                 out.ranges.range.append(Dict({'begin': r.begin, 'end': r.begin + use - 1}))
                 r.begin += use
-            elif minimum <= r.end:
-                use = min(amount, r.end - minimum + 1)
-                out.ranges.range.append(Dict({'begin': minimum, 'end': minimum + use - 1}))
-                if minimum + use <= r.end:
-                    # Note: this will cause the empty check lower down to check
-                    # this range, instead of r. That's harmless, since we only
-                    # get here if both are non-empty.
-                    resource.ranges.range.insert(
-                        pos,
-                        Dict({'begin': minimum + use, 'end': r.end}))
-                r.end = minimum - 1
-            if r.begin > r.end:
-                del resource.ranges.range[pos]
-            amount -= use
-            pos -= 1
-        # Put into transformed form
-        out.ranges.range.reverse()
+                if r.begin > r.end:
+                    del resource.ranges.range[pos]
+                amount -= use
+                pos -= 1
+            # Put into transformed form
+            out.ranges.range.reverse()
+        else:
+            items = []
+            if use_random is True:
+                use_random = random
+            for i in range(amount):
+                # Determine the size of each range so that we can pick a random
+                # range and have each item be equally likely.
+                weights = [r.end - r.begin + 1 for r in resource.ranges.range]
+                (pos,) = use_random.choices(range(len(resource.ranges.range)), weights)
+                # Pick random element of the range
+                r = resource.ranges.range[pos]
+                item = use_random.randint(r.begin, r.end)
+                items.append(item)
+                # Update the range to remove the item
+                if r.begin == r.end:
+                    del resource.ranges.range[pos]
+                elif item == r.begin:
+                    r.begin += 1
+                elif item == r.end:
+                    r.end -= 1
+                else:
+                    resource.ranges.range.insert(pos, Dict({'begin': item + 1, 'end': r.end}))
+                    r.end = item - 1
+            items.sort(reverse=True)
+            for item in items:
+                out.ranges.range.append(Dict({'begin': item, 'end': item}))
         return out
 
     def _subset_part(self, part, group):
@@ -1417,11 +1439,13 @@ class Agent:
     ----------
     offers : list
         List of Mesos offer dicts
-    min_port : int
-        A soft lower bound on port numbers to allocate. If higher numbers are
-        exhausted, this will be ignored.
     """
-    def __init__(self, offers, min_port=0):
+
+    # Internally used random generator for port assignment. It's used instead
+    # of the default one to make it easier to mock out.
+    _random = random.Random()
+
+    def __init__(self, offers):
         if not offers:
             raise ValueError('At least one offer must be specified')
         self.offers = offers
@@ -1436,7 +1460,6 @@ class Agent:
         self.numa = []
         self.priority = None
         self.nvidia_container_runtime = False
-        self._min_port = min_port
         for attribute in offers[0].attributes:
             try:
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
@@ -1602,10 +1625,7 @@ class Agent:
             if name == 'cores':
                 res = cores.allocate(request.amount)
             elif name == 'ports':
-                try:
-                    res = self.resources[name].allocate(request.amount, minimum=self._min_port)
-                except ValueError:
-                    res = self.resources[name].allocate(request.amount)
+                res = self.resources[name].allocate(request.amount, use_random=self._random)
             else:
                 res = self.resources[name].allocate(request.amount)
             alloc.resources[name] = res
@@ -2433,7 +2453,6 @@ class Scheduler(pymesos.Scheduler):
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
-        self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
         self.http_host = http_host
@@ -2769,7 +2788,7 @@ class Scheduler(pymesos.Scheduler):
                 # the state of the tasks since they were put onto the
                 # pending list (e.g. by killing them). Filter those out.
                 nodes = [node for node in nodes if node.state == TaskState.STARTING]
-                agents = [Agent(list(offers.values()), self._min_ports.get(agent_id, 0))
+                agents = [Agent(list(offers.values()))
                           for agent_id, offers in self._offers.get(role, {}).items()]
                 # Back up the original agents so that if allocation fails we can
                 # diagnose it.
@@ -2825,15 +2844,10 @@ class Scheduler(pymesos.Scheduler):
                         # No need to set _wakeup_launcher, because the cancellation did so.
                         continue
                     # Launch the tasks
-                    new_min_ports = {}
                     taskinfos = {agent: [] for agent in agents}
                     for (node, allocation) in allocations:
                         taskinfos[node.agent].append(node.taskinfo)
-                        for port in list(allocation.resources['ports']):
-                            prev = new_min_ports.get(node.agent_id, 0)
-                            new_min_ports[node.agent_id] = max(prev, port + 1)
                         self._active[node.taskinfo.task_id.value] = (node, group.graph)
-                    self._min_ports.update(new_min_ports)
                     for agent in agents:
                         offer_ids = [offer.id for offer in agent.offers]
                         # TODO: does this need to use run_in_executor? Is it

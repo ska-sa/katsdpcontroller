@@ -13,7 +13,7 @@ from collections import Counter
 
 from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
                         assert_is, assert_is_not, assert_is_none, assert_is_instance,
-                        assert_count_equal)
+                        assert_count_equal, assert_not_equal)
 import networkx
 import pymesos
 from addict import Dict
@@ -216,42 +216,22 @@ class TestRangeResource:
             [self._make_part('*', [(11, 12), (30, 30)])],
             self.resource.info())
 
-    def test_allocate_minimum(self):
+    def test_allocate_random(self):
         for part in self.parts:
             self.resource.add(part)
-        alloced = self.resource.allocate(6, minimum=11)
-        assert_equal(6, alloced.available)
+        alloced = self.resource.allocate(5, use_random=True)
+        assert_equal(5, alloced.available)
+        # It should have allocated exactly the foo resources
         assert_count_equal(
             [
-                self._make_part('foo', [(20, 22)]),
-                self._make_part('*', [(11, 12), (30, 30)])
+                self._make_part('foo', [(5, 5), (6, 6), (20, 20), (21, 21), (22, 22)]),
             ], alloced.info())
-        assert_equal([20, 21, 22, 11, 12, 30], list(alloced))
-        assert_equal(3, self.resource.available)
+        assert_equal([5, 6, 20, 21, 22], list(alloced))
+        assert_equal(4, self.resource.available)
         assert_count_equal(
             [
-                self._make_part('foo', [(5, 6)]),
-                self._make_part('*', [(10, 10)])
+                self._make_part('*', [(10, 12), (30, 30)])
             ], self.resource.info())
-
-    def test_allocate_minimum_middle(self):
-        self.resource.add(self.parts[1])
-        alloced = self.resource.allocate(1, minimum=11)
-        assert_equal(1, alloced.available)
-        assert_count_equal(
-            [self._make_part('*', [(11, 11)])],
-            alloced.info())
-        assert_equal([11], list(alloced))
-        assert_equal(3, self.resource.available)
-        assert_count_equal(
-            [self._make_part('*', [(10, 10), (12, 12), (30, 30)])],
-            self.resource.info())
-
-    def test_over_allocate_minimum(self):
-        for part in self.parts:
-            self.resource.add(part)
-        with assert_raises(ValueError):
-            self.resource.allocate(6, minimum=21)
 
     def test_subset(self):
         for part in self.parts:
@@ -891,7 +871,10 @@ class TestPhysicalTask:
         assert_equal(ipaddress.IPv4Address('192.168.2.1'),
                      physical_task.interfaces['net1'].ipv4_address)
         assert_equal({}, physical_task.endpoints)
-        assert_equal({'port1': 30000, 'port2': 30001}, physical_task.ports)
+        assert_equal({'port1': mock.ANY, 'port2': mock.ANY}, physical_task.ports)
+        assert_in(physical_task.ports['port1'], range(30000, 31001))
+        assert_in(physical_task.ports['port2'], range(30000, 31001))
+        assert_not_equal(physical_task.ports['port1'], physical_task.ports['port2'])
         assert_equal({'core1': 2, 'core2': 4, 'core3': 6}, physical_task.cores)
 
 
@@ -1220,6 +1203,10 @@ class TestScheduler(asynctest.ClockedTestCase):
                 resp.raise_for_status()
                 await resp.read()
 
+    @staticmethod
+    def _dummy_random():
+        return 0.0
+
     async def setUp(self):
         self.framework_id = 'frameworkid'
         # Normally TaskIDAllocator's constructor returns a singleton to keep
@@ -1300,6 +1287,9 @@ class TestScheduler(asynctest.ClockedTestCase):
                                            spec_set=True, instance=True)
         self.sched.set_driver(self.driver)
         self.sched.registered(self.driver, 'framework', mock.sentinel.master_info)
+        # Mock out the random generator so that port allocations will be
+        # predictable.
+        create_patch(self, 'katsdpcontroller.scheduler.Agent._random.random', self._dummy_random)
         await self.sched.start()
 
     async def test_initial_offers(self):
@@ -1630,20 +1620,6 @@ class TestScheduler(asynctest.ClockedTestCase):
             await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.READY, self.nodes[0].state)
         assert_true(launch0.done())
-
-    async def test_launch_port_recycle(self):
-        """Tests that ports are recycled only when necessary"""
-        ports = [(30000, 30002)]
-        await self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
-        assert_equal(30000, self.nodes[0].ports['port'])
-        # Build a new physical graph
-        self._make_physical()
-        await self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
-        assert_equal(30001, self.nodes[0].ports['port'])
-        # Do it again, check that it cycles back to the start
-        self._make_physical()
-        await self._transition_node0(TaskState.DEAD, [self.nodes[0]], ports=ports)
-        assert_equal(30000, self.nodes[0].ports['port'])
 
     async def _test_launch_cancel(self, target_state):
         launch, kill = await self._transition_node0(target_state)
