@@ -109,5 +109,18 @@ services:
     ports:
       - "127.0.0.1:12201:12201/udp"    # GELF
 
+  consul:
+    network_mode: host
+    image: consul:1.5.2
+    command: consul agent -dev -bind=127.0.0.1 -client=127.0.0.1 -config-dir=/etc/consul.d
+    volumes:
+      - ./etc/consul.d:/etc/consul.d:ro
+
+  poweroff:
+    image: sdp-docker-registry.kat.ac.za:5000/poweroff_server
+    command: "--dry-run"
+    ports:
+      - "127.0.0.1:9118:8080"
+
 volumes:
   prometheus_data: {}

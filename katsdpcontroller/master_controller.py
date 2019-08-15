@@ -21,7 +21,7 @@ import os
 import socket
 from abc import abstractmethod
 from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
-                    Iterable, Mapping, Optional, Callable, Any)
+                    Iterable, Mapping, Sequence, Optional, Callable, Awaitable, Any)
 
 import aiozk
 import aiokatcp
@@ -29,6 +29,7 @@ from aiokatcp import FailReply, Sensor
 import async_timeout
 import jsonschema
 import yarl
+import aiohttp
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import katsdpservices
 
@@ -46,6 +47,7 @@ ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
+CONSUL_POWEROFF_PATH = 'v1/catalog/service/poweroff'
 
 
 class NoAddressesError(Exception):
@@ -872,6 +874,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         else:
             manager_cls = SingularityProductManager
         self._manager = manager_cls(args, self, image_resolver_factory, prometheus_registry)
+        self._consul_url = args.consul_url
         self._override_dicts = {}
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
@@ -1304,6 +1307,47 @@ class DeviceServer(aiokatcp.DeviceServer):
         reply, informs = await katcp_conn.request('capture-done')
         return reply[0].decode()
 
+    async def _deconfigure_all(self) -> None:
+        """Forcibly deconfigure all products.
+
+        Any errors are simply logged. This is only intended to be used as part
+        of ``sdp-shutdown``.
+        """
+        futures: List[Awaitable[None]] = []
+        names: List[str] = []
+        for product in list(self._manager.products.values()):
+            names.append(product.name)
+            futures.append(self.product_deconfigure(product, force=True))
+        results = await asyncio.gather(*futures, return_exceptions=True)
+        for name, result in zip(names, results):
+            if isinstance(result, BaseException):
+                logger.warning("Failed to deconfigure product %s during sdp-shutdown. "
+                               "Forging ahead...", name, exc_info=result,
+                               extra=dict(subarray_product_id=name))
+
+    @staticmethod
+    async def _poweroff_endpoints(consul_url: yarl.URL) -> Sequence[Tuple[str, int]]:
+        """Get URLs for the poweroff service."""
+        url = (consul_url / CONSUL_POWEROFF_PATH).with_query(near='_agent')
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                async with session.get(url) as resp:
+                    nodes = await resp.json()
+        except (OSError, ValueError, aiohttp.ClientError) as exc:
+            msg = ('Could not retrieve list of nodes running poweroff service from consul. '
+                   'No nodes will be powered off.')
+            logger.exception(msg)
+            raise FailReply(f'{msg} {exc}')
+        endpoints: List[Tuple[str, int]] = []
+        for node in nodes:
+            address: str = node.get('ServiceAddress') or node.get('Address')
+            port: int = node.get('ServicePort')
+            endpoints.append((address, port))
+        # Put the nodes closest to localhost (which likely includes localhost
+        # itself) at the end.
+        endpoints.reverse()
+        return endpoints
+
     @time_request
     async def request_sdp_shutdown(self, ctx) -> str:
         """Shut down the SDP master controller and all controlled nodes.
@@ -1313,9 +1357,37 @@ class DeviceServer(aiokatcp.DeviceServer):
         success : {'ok', 'fail'}
             Whether the shutdown sequence of all other nodes succeeded.
         hosts : str
-            Comma separated lists of hosts that have been shutdown (excl mc host)
+            On success, a comma-separated lists of hosts that have been shutdown; on
+            failure a human-readable message listing success and failure machines.
         """
-        raise FailReply('sdp-shutdown is not currently implemented')
+        logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
+                       "deconfiguring existing products (may lead to data loss!).")
+        await self._deconfigure_all()
+        endpoints = await self._poweroff_endpoints(self._consul_url)
+        urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
+                for (host, port) in endpoints]
+        successful: List[str] = []
+        failed: List[str] = []
+        async with aiohttp.ClientSession() as session:
+            async def post1(url):
+                async with session.post(url) as resp:
+                    resp.raise_for_status()
+
+            futures = [post1(url) for url in urls]
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for endpoint, result in zip(endpoints, results):
+                if isinstance(result, BaseException):
+                    logger.warning('Shutting down %s:%d failed: %s',
+                                   endpoint[0], endpoint[1], result)
+                    failed.append(endpoint[0])
+                else:
+                    successful.append(endpoint[0])
+        success_str = ','.join(successful)
+        if failed:
+            failed_str = ','.join(failed)
+            raise FailReply(f'Success: {success_str} Failed: {failed_str}')
+        else:
+            return success_str
 
 
 class _InvalidGuiUrlsError(RuntimeError):
@@ -1326,7 +1398,7 @@ def _load_gui_urls_file(filename: str) -> List[Dict[str, str]]:
     try:
         with open(filename) as gui_urls_file:
             gui_urls = json.load(gui_urls_file)
-    except (IOError, OSError) as error:
+    except OSError as error:
         raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
     except ValueError as error:
         raise _InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
@@ -1342,7 +1414,7 @@ def _load_gui_urls_dir(dirname: str) -> List[Dict[str, str]]:
             filename = os.path.join(dirname, name)
             if filename.endswith('.json') and os.path.isfile(filename):
                 gui_urls.extend(_load_gui_urls_file(filename))
-    except (IOError, OSError) as error:
+    except OSError as error:
         raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
     return gui_urls
 
@@ -1366,34 +1438,36 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument('--name', default='sdpmc',
                         help='name to use in Zookeeper and Singularity [%(default)s]')
     parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
-                        help='Name by which others connect to this machine [%(default)s]')
+                        help='name by which others connect to this machine [%(default)s]')
     parser.add_argument('--dashboard-port', type=int, default=5006, metavar='PORT',
                         help='port for the Dash backend for the GUI [%(default)s]')
     parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
                         help='port for Prometheus metrics [%(default)s]')
+    parser.add_argument('--consul-url', type=yarl.URL, default='http://localhost:8500/',
+                        help='base URL for local consul agent [%(default)s]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
                         metavar='FILE',
-                        help='Configuration for connecting services to S3 '
+                        help='configuration for connecting services to S3 '
                              '(loaded on each configure)')
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR',
-                        help='Block of multicast addresses from which to draw internal allocation. '
+                        help='block of multicast addresses from which to draw internal allocation. '
                              'Needs to be at least /16. [%(default)s]')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='File containing JSON describing related GUIs, '
+                        help='file containing JSON describing related GUIs, '
                              'or directory with .json files [none]')
     parser.add_argument('--registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                         help='registry from which to pull images [%(default)s]')
     parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
+                        help='skip pulling images from the registry if already present')
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble
     parser.add_argument('zk',
-                        help='Endpoint for Zookeeper server e.g. server.domain:2181')
+                        help='endpoint for Zookeeper server e.g. server.domain:2181')
     parser.add_argument('singularity',
                         help='URL for Singularity server')
     args = parser.parse_args(argv)
