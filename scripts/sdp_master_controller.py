@@ -8,21 +8,13 @@ import logging
 import signal
 import functools
 import sys
-from typing import List
+from typing import List, Callable, Optional
 
-import prometheus_async
+import aiokatcp
 import aiohttp.web
 import katsdpservices
 
-from katsdpcontroller import master_controller, web
-
-
-async def quiet_prometheus_stats(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    response = await prometheus_async.aio.web.server_stats(request)
-    if response.status == 200:
-        # Avoid spamming logs (feeds into web.AccessLogger).
-        response.log_level = logging.DEBUG
-    return response
+from katsdpcontroller import master_controller, web, web_utils
 
 
 def handle_signal(server: master_controller.DeviceServer) -> None:
@@ -35,19 +27,24 @@ def handle_signal(server: master_controller.DeviceServer) -> None:
     server.halt()
 
 
-async def setup_web(args: argparse.Namespace) -> aiohttp.web.AppRunner:
-    app = aiohttp.web.Application()
-    app.add_routes([aiohttp.web.get('/metrics', quiet_prometheus_stats)])
-    runner = aiohttp.web.AppRunner(app, access_log_class=web.AccessLogger)
+async def setup_web(args: argparse.Namespace,
+                    server: master_controller.DeviceServer) -> aiohttp.web.AppRunner:
+    app = web.make_app(server, (args.host, args.http_port) if args.haproxy else None)
+    runner = aiohttp.web.AppRunner(app, access_log_class=web_utils.AccessLogger)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
-    await site.start()
+    if args.haproxy:
+        site = aiohttp.web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        app['updater'].internal_port = runner.addresses[0][1]
+    else:
+        site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
+        await site.start()
     return runner
 
 
 async def async_main(server: master_controller.DeviceServer,
                      args: argparse.Namespace) -> None:
-    runner = await setup_web(args)
+    runner = await setup_web(args, server)
     await server.start()
     await server.join()
     await runner.cleanup()
@@ -66,8 +63,14 @@ def main(argv: List[str]) -> None:
                         "This allows testing of the interface only, "
                         "no actual command logic will be enacted.")
 
+    rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]]
+    if args.haproxy:
+        rewrite_gui_urls = functools.partial(web.rewrite_gui_urls, args.external_url)
+    else:
+        rewrite_gui_urls = None
+
     loop = asyncio.get_event_loop()
-    server = master_controller.DeviceServer(args)
+    server = master_controller.DeviceServer(args, rewrite_gui_urls=rewrite_gui_urls)
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, functools.partial(handle_signal, server))
     with katsdpservices.start_aiomonitor(loop, args, locals()):

@@ -12,7 +12,7 @@ RUN install-requirements.py --default-versions ~/docker-base/base-requirements.t
 COPY --chown=kat:kat . /tmp/install/katsdpcontroller
 WORKDIR /tmp/install/katsdpcontroller
 RUN python ./setup.py clean
-RUN pip install --no-deps ".[haproxy_disp]"
+RUN pip install --no-deps .
 RUN pip check
 
 #######################################################################
@@ -25,7 +25,7 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
-# Install haproxy for haproxy_disp and graphviz for --write-graphs support
+# Install haproxy for --haproxy support and graphviz for --write-graphs support
 USER root
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install haproxy graphviz && \

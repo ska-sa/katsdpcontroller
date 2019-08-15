@@ -25,7 +25,7 @@ import aiomonitor
 import katsdpservices
 from katsdptelstate.endpoint import endpoint_parser
 
-from katsdpcontroller import scheduler, schemas, product_controller, web
+from katsdpcontroller import scheduler, schemas, product_controller, web_utils
 from katsdpcontroller.controller import (
     add_shared_options, load_json_dict, make_image_resolver_factory)
 
@@ -47,10 +47,10 @@ async def run(sched, server):
     await server.join()
 
 
-def init_dashboard(controller, opts):
+def init_dashboard(controller, opts, dashboard_path):
     from katsdpcontroller.dashboard import Dashboard
 
-    dashboard = Dashboard(controller)
+    dashboard = Dashboard(controller, routes_pathname_prefix=dashboard_path)
     dashboard.start(opts.host, opts.dashboard_port)
 
 
@@ -167,17 +167,18 @@ def main() -> None:
         sched = None
     else:
         sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
-                                    dict(access_log_class=web.AccessLogger))
+                                    dict(access_log_class=web_utils.AccessLogger))
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)
         sched.set_driver(driver)
         driver.start()
 
+    dashboard_path = f'/gui/{args.subarray_product_id}/product/dashboard/'
     dashboard_url: Optional[str] = args.dashboard_url
     if not args.interface_mode and args.dashboard_port != 0 and dashboard_url is None:
         dashboard_url = str(yarl.URL.build(scheme='http', host=args.external_hostname,
-                                           port=args.dashboard_port, path='/'))
+                                           port=args.dashboard_port, path=dashboard_path))
 
     server = product_controller.DeviceServer(
         args.host, args.port, master_controller, sched,
@@ -189,7 +190,7 @@ def main() -> None:
         graph_dir=args.write_graphs,
         dashboard_url=dashboard_url)
     if not args.interface_mode and args.dashboard_port != 0:
-        init_dashboard(server, args)
+        init_dashboard(server, args, dashboard_path)
 
     with katsdpservices.start_aiomonitor(loop, args, locals()):
         loop.run_until_complete(run(sched, server))

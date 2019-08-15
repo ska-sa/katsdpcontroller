@@ -1004,6 +1004,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         g.add_node(flags_multicast)
         g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
 
+    dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(name, i))
         cal.image = 'katsdpcal'
@@ -1020,7 +1021,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         cal.gui_urls = [{
             'title': 'Cal diagnostics',
             'description': 'Dask diagnostics for {0.name}',
-            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}/status',
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix,
             'category': 'Plot'
         }]
         cal.transitions = CAPTURE_TRANSITIONS
@@ -1031,6 +1032,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
                 'dask_diagnostics': ('', task.ports['dask_diagnostics']),
+                'dask_prefix': dask_prefix.format(task),
                 'flags_streams': copy.deepcopy(flags_streams_base)
             }
             for flags_stream in cal_config['flags_streams']:

@@ -117,10 +117,19 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                  prefix: str,
                  prometheus_labels: Mapping[str, str] = None,
                  prometheus_factory: _Factory = None,
-                 prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None) -> None:
+                 prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
+                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None) -> None:
         super().__init__(client)
         self.prefix = prefix
         self.server = server
+        # We keep track of the sensors after name rewriting but prior to gui-url rewriting
+        self.orig_sensors: aiokatcp.SensorSet
+        try:
+            self.orig_sensors = self.server.orig_sensors  # type: ignore
+        except AttributeError:
+            self.orig_sensors = aiokatcp.SensorSet()
+
+        self.rewrite_gui_urls = rewrite_gui_urls
         if prometheus_labels is not None:
             self.prometheus_labels = prometheus_labels
         else:
@@ -166,6 +175,12 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         """Add a new or replaced sensor with unqualified name `name`."""
         super().sensor_added(name, description, units, type_name, *args)
         sensor = self.sensors[self.rewrite_name(name)]
+        self.orig_sensors.add(sensor)
+        if (self.rewrite_gui_urls is not None
+                and sensor.name.endswith('.gui-urls') and sensor.stype is bytes):
+            new_value = self.rewrite_gui_urls(sensor)
+            sensor = aiokatcp.Sensor(sensor.stype, sensor.name, sensor.description,
+                                     sensor.units, new_value, sensor.status)
         self.server.sensors.add(sensor)
         old_observer = self._observers.get(name)
         if old_observer is not None:
@@ -176,6 +191,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the prefixed name"""
         self.server.sensors.pop(name, None)
+        self.orig_sensors.pop(name, None)
         observer = self._observers.pop(name, None)
         if observer is not None:
             observer.close()
@@ -185,6 +201,16 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         super().sensor_removed(name)
         rewritten = self.rewrite_name(name)
         self._sensor_removed(rewritten)
+
+    def sensor_updated(self, name: str, value: bytes, status: aiokatcp.Sensor.Status,
+                       timestamp: float) -> None:
+        super().sensor_updated(name, value, status, timestamp)
+        rewritten_name = self.rewrite_name(name)
+        sensor = self.sensors[rewritten_name]
+        if (self.rewrite_gui_urls is not None
+                and rewritten_name.endswith('.gui-urls') and sensor.stype is bytes):
+            value = self.rewrite_gui_urls(sensor)
+            self.server.sensors[rewritten_name].set_value(value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
@@ -224,6 +250,10 @@ class SensorProxyClient(aiokatcp.Client):
         Store for Prometheus metrics. If not provided, generated sensors are
         stored in a class-level variable. This is mainly intended to allow
         tests to be isolated from global state.
+    rewrite_gui_urls
+        If given, a function that is given a ``.gui-urls`` sensor and returns a
+        replacement value. Note that the function is responsible for decoding
+        and encoding between JSON and :class:`bytes`.
     args, kwargs
         Passed to the base class
     """
@@ -232,10 +262,12 @@ class SensorProxyClient(aiokatcp.Client):
                  prometheus_labels: Mapping[str, str] = None,
                  prometheus_factory: _Factory = None,
                  prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
-                 *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+                 **kwargs) -> None:
+        super().__init__(**kwargs)
         watcher = SensorWatcher(self, server, prefix,
-                                prometheus_labels, prometheus_factory, prometheus_sensors)
+                                prometheus_labels, prometheus_factory, prometheus_sensors,
+                                rewrite_gui_urls)
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
 
