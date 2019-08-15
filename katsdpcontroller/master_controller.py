@@ -1360,7 +1360,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             failure a human-readable message listing success and failure machines.
         """
         logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
-                       "deconfiguring existing products.")
+                       "deconfiguring existing products (may lead to data loss!).")
         await self._deconfigure_all()
         endpoints = await self._poweroff_endpoints(self._consul_url)
         urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
