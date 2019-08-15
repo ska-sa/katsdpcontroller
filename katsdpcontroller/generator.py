@@ -91,11 +91,19 @@ class TelstateTask(SDPPhysicalTask):
         await super().resolve(resolver, graph)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
-        portmap = addict.Dict()
-        portmap.host_port = self.ports['telstate']
-        portmap.container_port = 6379
-        portmap.protocol = 'tcp'
-        self.taskinfo.container.docker.port_mappings = [portmap]
+        host_port = self.ports['telstate']
+        if not resolver.localhost:
+            portmap = addict.Dict()
+            portmap.host_port = host_port
+            portmap.container_port = 6379
+            portmap.protocol = 'tcp'
+            self.taskinfo.container.docker.port_mappings = [portmap]
+        else:
+            # Mesos doesn't provide a way to specify a port mapping with a
+            # host-side binding, so we have to provide docker parameters
+            # directly.
+            parameters = self.taskinfo.container.docker.setdefault('parameters', [])
+            parameters.append({'key': 'publish', 'value': f'127.0.0.1:{host_port}:6379'})
 
 
 class IngestTask(SDPPhysicalTask):
@@ -592,6 +600,7 @@ def _make_timeplot(g, name, description,
     timeplot.critical = False
 
     g.add_node(timeplot, config=lambda task, resolver: dict({
+        'html_host': 'localhost' if resolver.localhost else '',
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'spead_interface': task.interfaces['sdp_10g'].name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
@@ -1021,7 +1030,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         cal.gui_urls = [{
             'title': 'Cal diagnostics',
             'description': 'Dask diagnostics for {0.name}',
-            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix,
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix + '/status',
             'category': 'Plot'
         }]
         cal.transitions = CAPTURE_TRANSITIONS
@@ -1031,7 +1040,8 @@ def _make_cal(g, config, name, l0_name, flags_names):
             cal_config = {
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
-                'dask_diagnostics': ('', task.ports['dask_diagnostics']),
+                'dask_diagnostics': ('127.0.0.1' if resolver.localhost else '',
+                                     task.ports['dask_diagnostics']),
                 'dask_prefix': dask_prefix.format(task),
                 'flags_streams': copy.deepcopy(flags_streams_base)
             }
@@ -1389,11 +1399,11 @@ def build_logical_graph(config):
     # Immutable keys to add to telstate on startup. There is no telstate yet
     # on which to call telstate.join, so nested keys must be expressed as
     # tuples which are joined later.
-    init_telstate = {'sdp_archived_streams': archived_streams}
+    init_telstate = {'sdp_archived_streams': archived_streams, 'sdp_config': config}
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
-        config=lambda resolver: init_telstate
+        config=lambda resolver: ({'host': '127.0.0.1'} if resolver.localhost else {})
     )
 
     # telstate node

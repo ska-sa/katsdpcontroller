@@ -5,6 +5,7 @@ import logging
 import json
 import time
 import os
+import copy
 from ipaddress import IPv4Address
 from typing import Dict, Set, List, Callable, Sequence, Optional, Type, Mapping
 
@@ -93,12 +94,14 @@ class Resolver(scheduler.Resolver):
                  task_id_allocator: scheduler.TaskIDAllocator,
                  http_url: Optional[str],
                  service_overrides: dict,
-                 s3_config: dict) -> None:
+                 s3_config: dict,
+                 localhost: bool) -> None:
         super().__init__(image_resolver, task_id_allocator, http_url)
         self.service_overrides = service_overrides
         self.s3_config = s3_config
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.resources: Optional[SDPResources] = None
+        self.localhost = localhost
 
 
 class SDPResources:
@@ -932,12 +935,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         """Make sure the telstate node is launched"""
         boot = [self.telstate_node]
 
-        base_params = self.physical_graph.graph.get(
+        init_telstate = copy.deepcopy(self.physical_graph.graph.get('init_telstate', {}))
+        init_telstate['subarray_product_id'] = self.subarray_product_id
+        init_telstate['config'] = self.physical_graph.graph.get(
             'config', lambda resolver: {})(self.resolver)
-        base_params['subarray_product_id'] = self.subarray_product_id
-        base_params['sdp_config'] = self.config
-        if self.sdp_controller.localhost:
-            base_params.setdefault('config', {})['host'] = '127.0.0.1'
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
@@ -945,9 +946,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if stream['type'].startswith('cbf.'):
                 for suffix in ['src_streams', 'instrument_dev_name']:
                     if suffix in stream:
-                        base_params[(name, suffix)] = stream[suffix]
+                        init_telstate[(name, suffix)] = stream[suffix]
 
-        logger.debug("Launching telstate. Base parameters %s", base_params)
+        logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
@@ -955,9 +956,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
         self.resolver.telstate = self.telstate
 
-        logger.debug("base params: %s", base_params)
         # set the configuration
-        for k, v in base_params.items():
+        for k, v in init_telstate.items():
             key = self.telstate.join(*k) if isinstance(k, tuple) else k
             self.telstate[key] = v
 
@@ -1185,7 +1185,8 @@ class DeviceServer(aiokatcp.DeviceServer):
             scheduler.TaskIDAllocator(name + '-'),
             self.sched.http_url if self.sched else '',
             config['config'].get('service_overrides', {}),
-            self.s3_config)
+            self.s3_config,
+            self.localhost)
 
         # create graph object and build physical graph from specified resources
         product_cls: Type[SDPSubarrayProductBase]
