@@ -21,8 +21,9 @@ import aioresponses
 import open_file_mock
 import aiohttp
 
-from katsdpcontroller import scheduler
-from katsdpcontroller.scheduler import TaskState
+from .. import scheduler
+from ..scheduler import TaskState
+from .utils import create_patch
 
 
 class AnyOrderList(list):
@@ -245,19 +246,17 @@ class TestPollPorts(asynctest.TestCase):
         self.port = self.sock.getsockname()[1]
 
     async def test_normal(self):
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], self.loop),
-                                       loop=self.loop)
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
         # Sleep for while, give poll_ports time to poll a few times
-        await asyncio.sleep(1, loop=self.loop)
+        await asyncio.sleep(1)
         assert_false(future.done())
         self.sock.listen(1)
-        await asyncio.wait_for(future, timeout=5, loop=self.loop)
+        await asyncio.wait_for(future, timeout=5)
 
     async def test_cancel(self):
         """poll_ports must be able to be cancelled gracefully"""
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port], self.loop),
-                                       loop=self.loop)
-        await asyncio.sleep(0.2, loop=self.loop)
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
+        await asyncio.sleep(0.2)
         future.cancel()
         with assert_raises(asyncio.CancelledError):
             await future
@@ -267,23 +266,22 @@ class TestPollPorts(asynctest.TestCase):
         with mock.patch.object(self.loop, 'getaddrinfo', autospec=True) as getaddrinfo:
             test_address = socket.getaddrinfo('127.0.0.1', self.port)
             # create a legitimate return future for getaddrinfo
-            legit_future = asyncio.Future(loop=self.loop)
+            legit_future = asyncio.Future()
             legit_future.set_result(test_address)
 
             # sequential calls to getaddrinfo produce failure and success
             getaddrinfo.side_effect = [socket.gaierror("Failed to resolve"), legit_future]
 
             self.sock.listen(1)
-            future = asyncio.ensure_future(
-                scheduler.poll_ports('127.0.0.1', [self.port], self.loop), loop=self.loop)
-            await asyncio.sleep(1, loop=self.loop)
+            future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
+            await asyncio.sleep(1)
             # temporary DNS failure
             assert_false(future.done())
             # wait for retry loop (currently 5s)
             # Note: it's tempting to try asynctest.ClockedTestCase, but that
             # only works if ALL interactions with the outside world are mocked
             # to be instantaneous.
-            await asyncio.sleep(6, loop=self.loop)
+            await asyncio.sleep(6)
             assert_true(future.done())
 
 
@@ -322,32 +320,15 @@ class TestTaskState:
             TaskState.RUNNING >= 3
 
 
-class TestImageResolver(asynctest.TestCase):
-    """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
-    def setUp(self):
-        patcher = mock.patch('builtins.open', new_callable=open_file_mock.MockOpen)
-        self._open_mock = patcher.start()
-        self.addCleanup(patcher.stop)
+class TestSimpleImageLookup(asynctest.TestCase):
+    async def test(self) -> None:
+        lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+        assert_equal('registry.invalid:5000/foo:latest', await lookup('foo', 'latest'))
 
-    async def test_simple(self):
-        """Test the base case"""
-        resolver = scheduler.ImageResolver()
-        resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('sdp/test1:latest', (await resolver('test1', self.loop)))
-        assert_equal('sdp/test1:tagged', (await resolver('test1:tagged', self.loop)))
-        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', self.loop))))
 
-    async def test_private_registry(self):
-        """Test with a private registry"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000', use_digests=False)
-        resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:latest', (await resolver('test1', self.loop)))
-        assert_equal('my-registry:5000/test1:tagged', (await resolver('test1:tagged', self.loop)))
-        assert_equal('my-registry:5000/bar:custom', (await(resolver('foo', self.loop))))
-
+class TestHTTPImageLookup(asynctest.TestCase):
     @mock.patch('docker.auth.load_config', autospec=True)
-    async def test_private_registry_digests(self, load_config_mock):
-        """Test with a private registry, looking up a digest"""
+    async def test(self, load_config_mock) -> None:
         digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
         # Response headers are modelled on an actual registry response
         with aioresponses.aioresponses() as rmock:
@@ -371,31 +352,44 @@ class TestImageResolver(asynctest.TestCase):
                     'serveraddress': 'registry.invalid:5000'
                 }
             }
-            resolver = scheduler.ImageResolver(private_registry='registry.invalid:5000')
-            image = await resolver('myimage', self.loop)
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            image = await lookup('myimage', 'latest')
         assert_equal('registry.invalid:5000/myimage@' + digest, image)
 
-    async def test_tag_file(self):
+
+class TestImageResolver(asynctest.TestCase):
+    """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
+    def setUp(self) -> None:
+        self._open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
+        self.lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+
+    async def test_simple(self) -> None:
+        """Test the base case"""
+        resolver = scheduler.ImageResolver(self.lookup)
+        resolver.override('foo', 'my-registry:5000/bar:custom')
+        assert_equal('registry.invalid:5000/test1:latest', await resolver('test1'))
+        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', await(resolver('foo')))
+
+    async def test_tag_file(self) -> None:
         """Test with a tag file"""
         self._open_mock.set_read_data_for('tag_file', 'tag1\n')
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', use_digests=False)
+        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
-        assert_equal('my-registry:5000/test1:tag1', await resolver('test1', self.loop))
-        assert_equal('my-registry:5000/test1:tagged', await resolver('test1:tagged', self.loop))
-        assert_equal('my-registry:5000/bar:custom', await resolver('foo', self.loop))
+        assert_equal('registry.invalid:5000/test1:tag1', await resolver('test1'))
+        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
+        assert_equal('my-registry:5000/bar:custom', await resolver('foo'))
 
-    async def test_bad_tag_file(self):
+    async def test_bad_tag_file(self) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
         self._open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
         with assert_raises(ValueError):
-            scheduler.ImageResolver(private_registry='my-registry:5000', tag_file='tag_file')
+            scheduler.ImageResolver(self.lookup, tag_file='tag_file')
 
-    async def test_tag(self):
+    async def test_tag(self) -> None:
         """Test with an explicit tag"""
-        resolver = scheduler.ImageResolver(private_registry='my-registry:5000',
-                                           tag_file='tag_file', tag='mytag', use_digests=False)
-        assert_equal('my-registry:5000/test1:mytag', await resolver('test1', self.loop))
+        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file', tag='mytag')
+        assert_equal('registry.invalid:5000/test1:mytag', await resolver('test1'))
 
 
 class TestTaskIDAllocator:
@@ -834,7 +828,7 @@ class TestPhysicalTask:
 
     def test_properties_init(self):
         """Resolved properties are ``None`` on construction"""
-        physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
+        physical_task = scheduler.PhysicalTask(self.logical_task)
         assert_is_none(physical_task.agent)
         assert_is_none(physical_task.host)
         assert_is_none(physical_task.agent_id)
@@ -846,7 +840,7 @@ class TestPhysicalTask:
         assert_equal({}, physical_task.cores)
 
     def test_allocate(self):
-        physical_task = scheduler.PhysicalTask(self.logical_task, mock.sentinel.loop)
+        physical_task = scheduler.PhysicalTask(self.logical_task)
         physical_task.allocate(self.allocation)
         assert_is(self.allocation.agent, physical_task.agent)
         assert_equal('agenthost', physical_task.host)
@@ -925,11 +919,9 @@ class TestDiagnoseInsufficient(unittest.TestCase):
             [volume_attr])])
         # Create a template logical and physical task
         self.logical_task = scheduler.LogicalTask('logical')
-        self.physical_task = self.logical_task.physical_factory(
-            self.logical_task, mock.sentinel.loop)
+        self.physical_task = self.logical_task.physical_factory(self.logical_task)
         self.logical_task2 = scheduler.LogicalTask('logical2')
-        self.physical_task2 = self.logical_task2.physical_factory(
-            self.logical_task2, mock.sentinel.loop)
+        self.physical_task2 = self.logical_task2.physical_factory(self.logical_task2)
 
     def test_task_insufficient_scalar_resource(self):
         """A task requests more of a scalar resource than any agent has"""
@@ -1172,8 +1164,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         return status
 
     def _make_physical(self):
-        self.physical_graph = scheduler.instantiate(self.logical_graph, self.loop)
-        self.physical_batch_graph = scheduler.instantiate(self.logical_batch_graph, self.loop)
+        self.physical_graph = scheduler.instantiate(self.logical_graph)
+        self.physical_batch_graph = scheduler.instantiate(self.logical_batch_graph)
         self.nodes = []
         for i in range(3):
             self.nodes.append(next(node for node in self.physical_graph
@@ -1186,7 +1178,7 @@ class TestScheduler(asynctest.ClockedTestCase):
                                          if node.name == 'batch{}'.format(i)))
 
     async def _wait_request(self, task_id):
-        async with aiohttp.ClientSession(loop=self.loop) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.get('http://localhost:{}/tasks/{}/wait_start'.format(
                     self.sched.http_port, task_id)) as resp:
                 resp.raise_for_status()
@@ -1197,7 +1189,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Normally TaskIDAllocator's constructor returns a singleton to keep
         # IDs globally unique, but we want the test to be isolated. Bypass its
         # __new__.
-        self.image_resolver = scheduler.ImageResolver()
+        self.image_resolver = scheduler.ImageResolver(scheduler.SimpleImageLookup('sdp'))
         self.task_id_allocator = object.__new__(scheduler.TaskIDAllocator)
         self.task_id_allocator._prefix = 'test-'
         self.task_id_allocator._next_id = 0
@@ -1263,7 +1255,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.numa_attr
         ]
         self._make_physical()
-        self.sched = scheduler.Scheduler(self.loop, 'default', 0, 'http://scheduler/')
+        self.sched = scheduler.Scheduler('default', '127.0.0.1', 0, 'http://scheduler/')
         self.resolver = scheduler.Resolver(self.image_resolver, self.task_id_allocator,
                                            self.sched.http_url)
         self.driver = mock.create_autospec(pymesos.MesosSchedulerDriver,
@@ -1296,7 +1288,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         logical_graph.add_edge(nodes[1], nodes[2], depends_ready=True)
         logical_graph.add_edge(nodes[2], nodes[3], depends_ready=True)
         logical_graph.add_edge(nodes[3], nodes[1], depends_ready=True)
-        physical_graph = scheduler.instantiate(logical_graph, self.loop)
+        physical_graph = scheduler.instantiate(logical_graph)
         with assert_raises(scheduler.CycleError):
             await self.sched.launch(physical_graph, self.resolver)
 
@@ -1308,7 +1300,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
         logical_graph.add_edge(nodes[1], nodes[0], depends_resources=True)
-        physical_graph = scheduler.instantiate(logical_graph, self.loop)
+        physical_graph = scheduler.instantiate(logical_graph)
         target = [node for node in physical_graph if node.name == 'node1']
         with assert_raises(scheduler.DependencyError):
             await self.sched.launch(physical_graph, self.resolver, target)
@@ -1335,7 +1327,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         with assert_raises(asyncio.InvalidStateError):
             # Timeout is just to ensure the test won't hang
             await asyncio.wait_for(self.sched.launch(self.physical_graph, self.resolver),
-                                   timeout=1, loop=self.loop)
+                                   timeout=1)
 
     async def test_launch_serial(self):
         """Test launch on the success path, with no concurrent calls."""
@@ -1398,7 +1390,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         expected_taskinfo1.discovery.ports.ports = []
 
         launch = asyncio.ensure_future(self.sched.launch(
-            self.physical_graph, self.resolver), loop=self.loop)
+            self.physical_graph, self.resolver))
         await asynctest.exhaust_callbacks(self.loop)
         # The tasks must be in state STARTING, but not yet RUNNING because
         # there are no offers.
@@ -1462,7 +1454,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future(loop=self.loop)
+            poll_future = asyncio.Future()
             poll_ports.return_value = poll_future
             status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
@@ -1471,7 +1463,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_equal([mock.call.acknowledgeStatusUpdate(status)],
                          self.driver.mock_calls)
             self.driver.reset_mock()
-            poll_ports.assert_called_once_with('agenthost0', [30000], self.loop)
+            poll_ports.assert_called_once_with('agenthost0', [30000])
 
         # Make poll_ports ready. Node 0 should now become ready, which will
         # make node 1 ready too.
@@ -1489,9 +1481,9 @@ class TestScheduler(asynctest.ClockedTestCase):
         This is a regression test for SR-1093.
         """
         class SlowResolve(scheduler.PhysicalTask):
-            async def resolve(self, resolver, graph, loop):
-                await asyncio.sleep(30, loop=loop)
-                await super().resolve(resolver, graph, loop)
+            async def resolve(self, resolver, graph):
+                await asyncio.sleep(30)
+                await super().resolve(resolver, graph)
 
         for node in self.logical_graph.nodes():
             if node.name == 'node0':
@@ -1518,13 +1510,13 @@ class TestScheduler(asynctest.ClockedTestCase):
         """
         assert target_state > TaskState.NOT_READY
         offers = self._make_offers(ports)
-        launch = asyncio.ensure_future(self.sched.launch(self.physical_graph, self.resolver, nodes),
-                                       loop=self.loop)
+        launch = asyncio.ensure_future(
+            self.sched.launch(self.physical_graph, self.resolver, nodes))
         kill = None
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future(loop=self.loop)
+            poll_future = asyncio.Future()
             poll_ports.return_value = poll_future
             if target_state > TaskState.STARTING:
                 self.sched.resourceOffers(self.driver, offers)
@@ -1540,8 +1532,8 @@ class TestScheduler(asynctest.ClockedTestCase):
                         await asynctest.exhaust_callbacks(self.loop)
                         assert_equal(TaskState.READY, self.nodes[0].state)
                         if target_state > TaskState.READY:
-                            kill = asyncio.ensure_future(self.sched.kill(
-                                self.physical_graph, nodes), loop=self.loop)
+                            kill = asyncio.ensure_future(
+                                self.sched.kill(self.physical_graph, nodes))
                             await asynctest.exhaust_callbacks(self.loop)
                             assert_equal(TaskState.KILLING, self.nodes[0].state)
                             if target_state > TaskState.KILLING:
@@ -1572,8 +1564,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch0, kill0 = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
         launch1 = asyncio.ensure_future(
             self.sched.launch(self.physical_graph, self.resolver,
-                              self.nodes[1:], queue=queue),
-            loop=self.loop)
+                              self.nodes[1:], queue=queue))
         # Make an offer so that node1 can start
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, [offers[1]])
@@ -1589,7 +1580,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future(loop=self.loop)
+            poll_future = asyncio.Future()
             poll_ports.return_value = poll_future
             poll_future.set_result(None)   # Mark ports as ready
             self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
@@ -1666,7 +1657,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             await launch
 
     async def test_launch_resolve_raises(self):
-        async def resolve_raise(resolver, graph, loop):
+        async def resolve_raise(resolver, graph):
             raise ValueError('Testing')
 
         self.nodes[0].resolve = resolve_raise
@@ -1737,8 +1728,7 @@ class TestScheduler(asynctest.ClockedTestCase):
     async def _test_kill_in_state(self, state):
         """Test killing a node while it is in the given state"""
         launch, kill = await self._transition_node0(state, [self.nodes[0]])
-        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, [self.nodes[0]]),
-                                     loop=self.loop)
+        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, [self.nodes[0]]))
         await asynctest.exhaust_callbacks(self.loop)
         if state > TaskState.STARTING:
             assert_equal(TaskState.KILLING, self.nodes[0].state)
@@ -1796,7 +1786,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         """Kill must respect dependency ordering"""
         await self._ready_graph()
         # Now kill it. node1 must be dead before node0, node2 get killed
-        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph), loop=self.loop)
+        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph))
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
                      self.driver.mock_calls)
@@ -1938,18 +1928,17 @@ class TestScheduler(asynctest.ClockedTestCase):
         """Close must kill off all remaining tasks and abort any pending launches"""
         await self._ready_graph()
         # Start launching a second graph, but do not give it resources
-        physical_graph2 = scheduler.instantiate(self.logical_graph, self.loop)
-        launch = asyncio.ensure_future(self.sched.launch(physical_graph2, self.resolver),
-                                       loop=self.loop)
+        physical_graph2 = scheduler.instantiate(self.logical_graph)
+        launch = asyncio.ensure_future(self.sched.launch(physical_graph2, self.resolver))
         await asynctest.exhaust_callbacks(self.loop)
-        close = asyncio.ensure_future(self.sched.close(), loop=self.loop)
+        close = asyncio.ensure_future(self.sched.close())
         await asynctest.exhaust_callbacks(self.loop)
         status1 = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         await asynctest.exhaust_callbacks(self.loop)
         status0 = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         # defer is insufficient here, because close() uses run_in_executor to
         # join the driver thread. Wait up to 5 seconds for that to happen.
-        await asyncio.wait_for(close, 5, loop=self.loop)
+        await asyncio.wait_for(close, 5)
         for node in self.physical_graph:
             assert_equal(TaskState.DEAD, node.state)
         for node in physical_graph2:

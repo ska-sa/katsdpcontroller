@@ -2,8 +2,9 @@ addict==2.1.1
 aioconsole                 # via aiomonitor
 aiohttp==3.5.4
 aiohttp-jinja2==1.1.0
-aiokatcp
+aiokatcp==0.6.0            # TODO: unpin once katsdpdockerbase provides it
 aiomonitor
+aiozk==0.14.0
 async-timeout==3.0.1
 attrs==18.1.0              # via prometheus_async
 certifi                    # via requests

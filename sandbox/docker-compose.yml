@@ -10,7 +10,10 @@ services:
   mesos-master:
     network_mode: host
     image: mesosphere/mesos-master:1.5.0
+    depends_on:
+      - exhibitor
     environment:
+      MESOS_IP: 127.0.0.1
       MESOS_PORT: 5050
       MESOS_ZK: zk://127.0.0.1:2181/mesos
       MESOS_QUORUM: 1
@@ -22,6 +25,8 @@ services:
     network_mode: host
     pid: host
     image: mesosphere/mesos-slave:1.5.0
+    depends_on:
+      - exhibitor
     environment:
       MESOS_IP: 127.0.0.1
       MESOS_PORT: 5051
@@ -32,17 +37,29 @@ services:
       MESOS_WORK_DIR: /var/tmp/mesos
       MESOS_SYSTEMD_ENABLE_SUPPORT: "false"
     volumes:
-      - "${HOME}/.docker/config.json:/etc/mesos/config.json"
+      - "${HOME}/.docker/config.json:/etc/mesos/config.json:ro"
       - /var/run/docker.sock:/var/run/docker.sock
       - /sys:/sys
       - /usr/bin/docker:/usr/local/bin/docker
       - ./etc/mesos-slave:/etc/mesos-slave:ro
+      # /var/tmp/mesos needs to be the same on the host and the container,
+      # because mesos-slave writes to the sandbox and then tells the host
+      # Docker to bind-mount it into the newly started container.
       - /var/tmp/mesos:/var/tmp/mesos
       - ./etc/passwd:/etc/passwd:ro
       - ./etc/group:/etc/group:ro
     entrypoint:
       - /usr/bin/mesos-init-wrapper
       - slave
+
+  singularity:
+    network_mode: host
+    image: hubspot/singularityservice:0.22.0
+    depends_on:
+      - mesos-master
+      - exhibitor
+    volumes:
+      - ./etc/singularity/singularity.yaml:/etc/singularity/singularity.yaml:ro
 
   minio:
     network_mode: host
@@ -80,6 +97,17 @@ services:
     volumes:
       - ./etc/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./etc/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash-oss:7.2.0
+    command: logstash -w 1 -f /etc/logstash.conf
+    environment:
+      - LS_HEAP_SIZE=2048m
+    volumes:
+      - ./etc/logstash.conf:/etc/logstash.conf:ro
+      - ./logs:/logstash-logs
+    ports:
+      - "127.0.0.1:12201:12201/udp"    # GELF
 
 volumes:
   prometheus_data: {}

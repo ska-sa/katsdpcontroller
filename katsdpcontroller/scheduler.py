@@ -169,6 +169,10 @@ import decimal
 from decimal import Decimal
 import time
 import io
+from abc import abstractmethod
+import typing
+# Note: don't include Dict here, because it conflicts with addict.Dict.
+from typing import Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -186,6 +190,7 @@ from katsdptelstate.endpoint import Endpoint
 from . import schemas
 
 
+# TODO: these need to become sensors to pass them from product controller to master controller
 TASKS_IN_STATE = prometheus_client.Gauge(
     'katsdpcontroller_tasks_in_state', 'Number of physical tasks in each state, per queue',
     ['queue', 'state'])
@@ -275,7 +280,7 @@ class OrderedEnum(Enum):
         return NotImplemented
 
 
-async def poll_ports(host, ports, loop):
+async def poll_ports(host, ports):
     """Waits until a set of TCP ports are accepting connections on a host.
 
     It repeatedly tries to connect to each port until a connection is
@@ -289,8 +294,6 @@ async def poll_ports(host, ports, loop):
         Hostname or IP address
     ports : list
         Port numbers to connect to
-    loop : :class:`asyncio.AbstractEventLoop`
-        The event loop used for socket operations
 
     Raises
     ------
@@ -300,6 +303,7 @@ async def poll_ports(host, ports, loop):
     # protect against temporary name resolution failure.
     # in the case of permanent DNS failure this will block
     # indefinitely and higher level timeouts will be needed
+    loop = asyncio.get_event_loop()
     while True:
         try:
             addrs = await (loop.getaddrinfo(
@@ -310,7 +314,7 @@ async def poll_ports(host, ports, loop):
         except socket.gaierror as error:
             logger.error('Failure to resolve address for %s (%s). Waiting 5s to retry.',
                          host, error)
-            await asyncio.sleep(5, loop=loop)
+            await asyncio.sleep(5)
         else:
             break
 
@@ -421,7 +425,7 @@ class Resource:
         only be accessed by subclasses.
     """
 
-    ZERO = 0
+    ZERO: ClassVar[Union[int, Decimal]] = 0
     REQUEST_CLASS = ResourceRequest
 
     def __init__(self, name):
@@ -686,7 +690,7 @@ class ResourceRequestsContainer(metaclass=ResourceRequestsContainerMeta):
     Subclasses must provide a RESOURCE_REQUESTS class member dictionary listing
     the supported requests.
     """
-    RESOURCE_REQUESTS = {}
+    RESOURCE_REQUESTS: Mapping[str, Type[Resource]] = {}
 
     def __init__(self):
         self.requests = {name: cls.empty_request() for name, cls in self.RESOURCE_REQUESTS.items()}
@@ -861,31 +865,90 @@ class ResourceAllocation:
         self.volumes = []
 
 
+class ImageLookup:
+    """Abstract base class to get a full image name from a repo and tag."""
+    @abstractmethod
+    async def __call__(self, repo: str, tag: str) -> str: pass
+
+
+class SimpleImageLookup(ImageLookup):
+    """Resolver that simply concatenates registry, repo and tag."""
+    def __init__(self, private_registry: str) -> None:
+        self._private_registry = private_registry
+
+    async def __call__(self, repo: str, tag: str) -> str:
+        return f'{self._private_registry}/{repo}:{tag}'
+
+
+class HTTPImageLookup(ImageLookup):
+    """Resolve digests from tags by directly contacting registry."""
+    _private_registry: str
+    _auth: Optional[aiohttp.BasicAuth]
+
+    def __init__(self, private_registry: str) -> None:
+        self._private_registry = private_registry
+        authconfig = docker.auth.load_config()
+        authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
+        if authdata is None:
+            self._auth = None
+        else:
+            self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
+
+    async def __call__(self, repo: str, tag: str) -> str:
+        # TODO: see if it's possible to do some connection pooling
+        # here. That probably requires the caller to initiate a
+        # Session and close it when done.
+        url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
+        if not url.startswith('http'):
+            # If no scheme is specified, assume https
+            url = 'https://' + url
+        cafile = '/etc/ssl/certs/ca-certificates.crt'
+        ssl_context: Optional[ssl.SSLContext]
+        if os.path.exists(cafile):
+            ssl_context = ssl.create_default_context(cafile=cafile)
+        else:
+            ssl_context = None
+        async with aiohttp.ClientSession(
+                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
+                auth=self._auth) as session:
+            try:
+                # Use a lowish timeout, so that we don't wedge the entire launch if
+                # there is a connection problem.
+                async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
+                    response.raise_for_status()
+                    digest = response.headers['Docker-Content-Digest']
+            except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+                raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
+                    from error
+            except KeyError:
+                raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+        return f'{self._private_registry}/{repo}@{digest}'
+
+
 class ImageResolver:
     """Class to map an abstract Docker image name to a fully-qualified name.
     If no private registry is specified, it looks up names in the `sdp/`
     namespace, otherwise in the private registry. One can also override
     individual entries.
 
+    This wraps an instance of :class:`ImageLookup` to do the actual lookups,
+    and handles the generic logic like caching, overrides etc.
+
     Parameters
     ----------
-    private_registry : str, optional
-        Address (hostname and port) for a private registry
+    lookup : :class:`ImageLookup`
+        Low-level image lookup.
     tag_file : str, optional
         If specified, the file will be read to determine the image tag to use.
         It does not affect overrides, to allow them to specify their own tags.
     tag : str, optional
         If specified, `tag_file` is ignored and this tag is used.
-    use_digests : bool, optional
-        Whether to look up the latest digests from the `registry`. If this is
-        not specified, old versions of images on the agents could be used.
     """
-    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
+    def __init__(self, lookup: ImageLookup, tag_file: str = None, tag: str = None) -> None:
+        self._lookup = lookup
         self._tag_file = tag_file
-        self._private_registry = private_registry
-        self._overrides = {}
-        self._cache = {}
-        self._use_digests = use_digests
+        self._overrides: typing.Dict[str, str] = {}
+        self._cache: typing.Dict[str, str] = {}
         if tag is not None:
             self._tag = tag
             self._tag_file = None
@@ -901,28 +964,19 @@ class ImageResolver:
                 # longer enforces it.
                 if not re.match(r'^[\w][\w.-]{0,127}$', self._tag):
                     raise ValueError('Invalid tag {} in {}'.format(repr(self._tag), self._tag_file))
-        if use_digests and private_registry is not None:
-            authconfig = docker.auth.load_config()
-            authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
-            if authdata is None:
-                self._auth = None
-            else:
-                self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
-        else:
-            self._auth = None
 
     @property
-    def tag(self):
+    def tag(self) -> str:
         return self._tag
 
     @property
-    def overrides(self):
+    def overrides(self) -> Mapping[str, str]:
         return dict(self._overrides)
 
-    def override(self, name, path):
+    def override(self, name: str, path: str):
         self._overrides[name] = path
 
-    async def __call__(self, name, loop):
+    async def __call__(self, name: str) -> str:
         if name in self._overrides:
             return self._overrides[name]
         elif name in self._cache:
@@ -938,39 +992,7 @@ class ImageResolver:
             tag = self._tag
             repo = name
 
-        if self._private_registry is None:
-            resolved = 'sdp/{}:{}'.format(repo, tag)
-        elif self._use_digests:
-            # TODO: see if it's possible to do some connection pooling
-            # here. That probably requires the caller to initiate a
-            # Session and close it when done.
-            url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
-            if not url.startswith('http'):
-                # If no scheme is specified, assume https
-                url = 'https://' + url
-            kwargs = dict(
-                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
-                auth=self._auth)
-            cafile = '/etc/ssl/certs/ca-certificates.crt'
-            if os.path.exists(cafile):
-                ssl_context = ssl.create_default_context(cafile=cafile)
-            else:
-                ssl_context = None
-            async with aiohttp.ClientSession(loop=loop, **kwargs) as session:
-                try:
-                    # Use a lowish timeout, so that we don't wedge the entire launch if
-                    # there is a connection problem.
-                    async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
-                        response.raise_for_status()
-                        digest = response.headers['Docker-Content-Digest']
-                except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-                    raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
-                        from error
-                except KeyError:
-                    raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-            resolved = '{}/{}@{}'.format(self._private_registry, repo, digest)
-        else:
-            resolved = '{}/{}:{}'.format(self._private_registry, repo, tag)
+        resolved = await self._lookup(repo, tag)
         if name in self._cache:
             # Another asynchronous caller beat us to it. Use the value
             # that caller put in the cache so that calls with the same
@@ -991,9 +1013,8 @@ class ImageResolverFactory:
     See :class:`ImageResolver` for an explanation of the constructor
     arguments and :meth:`~ImageResolver.override`.
     """
-    def __init__(self, private_registry=None, tag_file=None, tag=None, use_digests=True):
-        self._args = dict(private_registry=private_registry,
-                          tag_file=tag_file, tag=tag, use_digests=use_digests)
+    def __init__(self, lookup, tag_file=None, tag=None):
+        self._args = dict(lookup=lookup, tag_file=tag_file, tag=tag)
         self._overrides = {}
 
     def override(self, name, path):
@@ -1014,7 +1035,7 @@ class TaskIDAllocator:
     Because IDs must be globally unique (within the framework), the
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
-    _by_prefix = {}
+    _by_prefix: ClassVar[typing.Dict[str, 'TaskIDAllocator']] = {}
 
     def __init__(self, prefix=''):
         pass   # Initialised by new
@@ -1235,7 +1256,7 @@ class LogicalNode:
         ready. If set to `None`, defaults to `ports`.
     physical_factory : callable
         Creates the physical task (must return :class:`PhysicalNode`
-        or subclass). It is passed the logical task and the event loop.
+        or subclass). It is passed the logical task.
     """
     def __init__(self, name):
         self.name = name
@@ -1701,15 +1722,11 @@ class PhysicalNode:
     ----------
     logical_node : :class:`LogicalNode`
         The logical node from which this physical node is constructed
-    loop : :class:`asyncio.AbstractEventLoop`
-        The event loop used for constructing futures etc
 
     Attributes
     ----------
     logical_node : :class:`LogicalNode`
         The logical node passed to the constructor
-    loop : :class:`asyncio.AbstractEventLoop`
-        The event loop used for constructing futures etc
     host : str
         Host on which this node is operating (if any).
     ports : dict
@@ -1736,7 +1753,7 @@ class PhysicalNode:
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
     """
-    def __init__(self, logical_node, loop):
+    def __init__(self, logical_node):
         self.logical_node = logical_node
         self.name = logical_node.name
         # In PhysicalTask it is a property and cannot be set
@@ -1746,15 +1763,14 @@ class PhysicalNode:
             pass
         self.ports = {}
         self.state = TaskState.NOT_READY
-        self.ready_event = asyncio.Event(loop=loop)
-        self.dead_event = asyncio.Event(loop=loop)
-        self.loop = loop
+        self.ready_event = asyncio.Event()
+        self.dead_event = asyncio.Event()
         self.depends_ready = []
         self.death_expected = False
         self._ready_waiter = None
         self.generation = 0
 
-    async def resolve(self, resolver, graph, loop):
+    async def resolve(self, resolver, graph):
         """Make final preparations immediately before starting.
 
         Parameters
@@ -1763,8 +1779,6 @@ class PhysicalNode:
             Resolver for images etc.
         graph : :class:`networkx.MultiDiGraph`
             Physical graph containing the task
-        loop : :class:`asyncio.AbstractEventLoop`
-            Current event loop
         """
         self.depends_ready = []
         for _src, trg, attr in graph.out_edges([self], data=True):
@@ -1784,7 +1798,7 @@ class PhysicalNode:
         else:
             wait_ports = list(self.ports.values())
         if wait_ports:
-            await poll_ports(self.host, wait_ports, self.loop)
+            await poll_ports(self.host, wait_ports)
 
     def _ready_callback(self, future):
         """This callback is called when the waiter is either finished or
@@ -1827,7 +1841,7 @@ class PhysicalNode:
         elif state == TaskState.READY:
             self.ready_event.set()
         elif state == TaskState.RUNNING and self._ready_waiter is None:
-            self._ready_waiter = asyncio.ensure_future(self.wait_ready(), loop=self.loop)
+            self._ready_waiter = asyncio.ensure_future(self.wait_ready())
             self._ready_waiter.add_done_callback(self._ready_callback)
         if state > TaskState.READY and self._ready_waiter is not None:
             self._ready_waiter.cancel()
@@ -1857,7 +1871,7 @@ class PhysicalNode:
         The duplicate is in state :const:`TaskState.NOT_READY` and is
         unresolved.
         """
-        clone = self.logical_node.physical_factory(self.logical_node, self.loop)
+        clone = self.logical_node.physical_factory(self.logical_node)
         clone.generation = self.generation + 1
         return clone
 
@@ -1894,8 +1908,6 @@ class PhysicalTask(PhysicalNode):
     ----------
     logical_task : :class:`LogicalTask`
         Logical task forming the template for this physical task
-    loop : :class:`asyncio.AbstractEventLoop`
-        The event loop used for constructing futures etc
 
     Attributes
     ----------
@@ -1926,8 +1938,8 @@ class PhysicalTask(PhysicalNode):
     queue : :class:`LaunchQueue`
         The queue on which this task was (most recently) launched
     """
-    def __init__(self, logical_task, loop):
-        super().__init__(logical_task, loop)
+    def __init__(self, logical_task):
+        super().__init__(logical_task)
         self.interfaces = {}
         self.endpoints = {}
         self.taskinfo = None
@@ -1977,7 +1989,7 @@ class PhysicalTask(PhysicalNode):
                         d[name] = value
                 setattr(self, resource.name, d)
 
-    async def resolve(self, resolver, graph, loop):
+    async def resolve(self, resolver, graph):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
@@ -1987,10 +1999,8 @@ class PhysicalTask(PhysicalNode):
             Resolver to allocate resources like task IDs
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
-        loop : :class:`asyncio.AbstractEventLoop`
-            Current event loop
         """
-        await super().resolve(resolver, graph, loop)
+        await super().resolve(resolver, graph)
         for _src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
@@ -2028,7 +2038,7 @@ class PhysicalTask(PhysicalNode):
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
-        image_path = await resolver.image_resolver(self.logical_node.image, loop)
+        image_path = await resolver.image_resolver(self.logical_node.image)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
@@ -2176,7 +2186,7 @@ class PhysicalTask(PhysicalNode):
             self._queue.state_gauges[self.state].dec()
 
 
-def instantiate(logical_graph, loop):
+def instantiate(logical_graph):
     """Create a physical graph from a logical one. Each physical node is
     created by calling :attr:`LogicalNode.physical_factory` on the
     corresponding logical node. Edges, and graph, node and edge attributes are
@@ -2186,11 +2196,9 @@ def instantiate(logical_graph, loop):
     ----------
     logical_graph : :class:`networkx.MultiDiGraph`
         Logical graph to instantiate
-    loop : :class:`asyncio.AbstractEventLoop`
-        Event loop used to create futures
     """
     # Create physical nodes
-    mapping = {logical: logical.physical_factory(logical, loop)
+    mapping = {logical: logical.physical_factory(logical)
                for logical in logical_graph}
     return networkx.relabel_nodes(logical_graph, mapping)
 
@@ -2223,12 +2231,12 @@ class _LaunchGroup:
         currently approximate (i.e. the actual timeout may occur at a slightly
         different time) and is used only for sorting.
     """
-    def __init__(self, graph, nodes, resolver, deadline, loop):
+    def __init__(self, graph, nodes, resolver, deadline):
         self.nodes = nodes
         self.graph = graph
         self.resolver = resolver
-        self.resources_future = asyncio.Future(loop=loop)
-        self.future = asyncio.Future(loop=loop)
+        self.resources_future = asyncio.Future()
+        self.future = asyncio.Future()
         self.deadline = deadline
         self.last_insufficient = InsufficientResourcesError('No resource offers received')
 
@@ -2357,10 +2365,10 @@ class Scheduler(pymesos.Scheduler):
 
     Parameters
     ----------
-    loop : :class:`asyncio.AbstractEventLoop`
-        Event loop
     default_role : str
         Mesos role used by the default queue
+    http_host : str
+        Hostname to bind for the embedded HTTP server (defaults to all interfaces)
     http_port : int
         Port for the embedded HTTP server, or 0 to assign a free one
     http_url : str, optional
@@ -2377,6 +2385,8 @@ class Scheduler(pymesos.Scheduler):
     app : :class:`aiohttp.web.Application`
         Web application used internally for scheduling. Prior to calling
         :meth:`start` it can be modified e.g. to add additional endpoints.
+    http_host : str
+        Actual host binding for the HTTP server (after :meth:`start`)
     http_port : int
         Actual HTTP port used for the HTTP server (after :meth:`start`)
     http_url : str
@@ -2384,12 +2394,12 @@ class Scheduler(pymesos.Scheduler):
     http_runner : :class:`aiohttp.web.AppRunner`
         Runner for the HTTP app
     """
-    def __init__(self, loop, default_role, http_port, http_url=None, runner_kwargs=None):
-        self._loop = loop
+    def __init__(self, default_role, http_host, http_port, http_url=None, runner_kwargs=None):
+        self._loop = asyncio.get_event_loop()
         self._driver = None
         self._offers = {}           #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
-        self._wakeup_launcher = asyncio.Event(loop=self._loop)
+        self._wakeup_launcher = asyncio.Event()
         self._default_queue = LaunchQueue(default_role)
         self._queues = [self._default_queue]
         #: Mesos roles for which we want to (and expect to) receive offers
@@ -2400,12 +2410,13 @@ class Scheduler(pymesos.Scheduler):
         self._min_ports = {}        #: next preferred port for each agent (keyed by ID)
         # If offers come at 5s intervals, then 11s gives two chances.
         self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
+        self.http_host = http_host
         self.http_port = http_port
         self.http_url = http_url
-        self._launcher_task = loop.create_task(self._launcher())
+        self._launcher_task = self._loop.create_task(self._launcher())
 
         # Configure the web app
-        app = aiohttp.web.Application(loop=self._loop)
+        app = aiohttp.web.Application()
         app['katsdpcontroller_scheduler'] = self
         app.router.add_get('/tasks/{id}/wait_start', wait_start_handler)
         app.router.add_static('/static',
@@ -2423,18 +2434,9 @@ class Scheduler(pymesos.Scheduler):
         if self.http_runner.sites:
             raise RuntimeError('Already started')
         await self.http_runner.setup()
-        # We want a single port serving both IPv4 and IPv6. Using TCPSite
-        # will create a separate socket for each, and if http_port is 0 (used
-        # by unit tests) they end up with different ports.
-        # See https://stackoverflow.com/questions/45907833 for more details.
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('::', self.http_port))
-
-        site = aiohttp.web.SockSite(self.http_runner, sock)
+        site = aiohttp.web.TCPSite(self.http_runner, self.http_host, self.http_port)
         await site.start()
-        if not self.http_port:
-            self.http_port = self.http_runner.addresses[0][1]
+        self.http_host, self.http_port = self.http_runner.addresses[0][:2]
         if not self.http_url:
             self.http_url = site.name
         logger.info('Internal HTTP server at %s', self.http_url)
@@ -2789,7 +2791,7 @@ class Scheduler(pymesos.Scheduler):
                     for node in networkx.lexicographical_topological_sort(order_graph.reverse(),
                                                                           key=lambda x: x.name):
                         logger.debug('Resolving %s', node.name)
-                        await node.resolve(group.resolver, group.graph, self._loop)
+                        await node.resolve(group.resolver, group.graph)
                     # Last chance for the group to be cancelled. After this point, we must
                     # not await anything.
                     if group.future.cancelled():
@@ -2966,7 +2968,7 @@ class Scheduler(pymesos.Scheduler):
             deadline = self._loop.time() + resources_timeout
         else:
             deadline = math.inf
-        pending = _LaunchGroup(graph, remaining, resolver, deadline, self._loop)
+        pending = _LaunchGroup(graph, remaining, resolver, deadline)
         empty = not queue
         queue.add(pending)
         if empty:
@@ -2991,7 +2993,7 @@ class Scheduler(pymesos.Scheduler):
             else:
                 raise
         ready_futures = [node.ready_event.wait() for node in nodes]
-        await asyncio.gather(*ready_futures, loop=self._loop)
+        await asyncio.gather(*ready_futures)
 
     async def _batch_run_once(self, graph, resolver, nodes, *,
                               queue, resources_timeout):
@@ -3010,7 +3012,7 @@ class Scheduler(pymesos.Scheduler):
             if isinstance(node, PhysicalTask):
                 futures.append(self._loop.create_task(wait_one(node)))
         try:
-            done, pending = await asyncio.wait(futures, loop=self._loop,
+            done, pending = await asyncio.wait(futures,
                                                return_when=asyncio.FIRST_EXCEPTION)
             # Raise the TaskError if any
             for future in done:
@@ -3181,7 +3183,7 @@ class Scheduler(pymesos.Scheduler):
                 futures[node] = future
 
         BATCH_TASKS_CREATED.inc(n_nodes)
-        await asyncio.gather(*future_list, return_exceptions=True, loop=self._loop)
+        await asyncio.gather(*future_list, return_exceptions=True)
         return {node: future.exception() for (node, future) in futures.items()}
 
     async def kill(self, graph, nodes=None, **kwargs):
@@ -3229,8 +3231,8 @@ class Scheduler(pymesos.Scheduler):
             raise CycleError('cycle between depends_kill dependencies')
         futures = []
         for node in kill_graph:
-            futures.append(asyncio.ensure_future(kill_one(node, kill_graph), loop=self._loop))
-        await asyncio.gather(*futures, loop=self._loop)
+            futures.append(asyncio.ensure_future(kill_one(node, kill_graph)))
+        await asyncio.gather(*futures)
 
     async def close(self):
         """Shut down the scheduler. This is a coroutine that kills any graphs
