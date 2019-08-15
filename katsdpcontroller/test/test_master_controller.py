@@ -22,7 +22,7 @@ from .. import master_controller, scheduler
 from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
-                                 DeviceServer, parse_args, CONSUL_POWEROFF_URL)
+                                 DeviceServer, parse_args)
 from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
@@ -119,6 +119,7 @@ CONSUL_POWEROFF_SERVERS = [
         "ModifyIndex": 7
     }
 ]
+CONSUL_POWEROFF_URL = 'http://localhost:8500/v1/catalog/service/poweroff?near=_agent'
 
 
 class DummyServer(aiokatcp.DeviceServer):
@@ -851,7 +852,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_sdp_shutdown_no_consul(self, rmock: aioresponses) -> None:
         await self.client.request('product-configure', 'product', CONFIG)
         await self.client.request('capture-init', 'product')
-        with self.assertRaisesRegex(aiokatcp.FailReply, 'Could not get node list from consul'):
+        with self.assertRaisesRegex(aiokatcp.FailReply,
+                                    'Could not retrieve list of nodes running poweroff service'):
             await self.client.request('sdp-shutdown')
         # The product should still have been forcibly deconfigured
         self.assertEqual(self.server._manager.products, {})
@@ -867,7 +869,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         rmock.post(url2, status=500, payload={"stdout": "", "stderr": "Simulated failure"})
         await self.client.request('product-configure', 'product', CONFIG)
         await self.client.request('capture-init', 'product')
-        with self.assertRaisesRegex(aiokatcp.FailReply, r'^127.0.0.42$'):
+        with self.assertRaisesRegex(aiokatcp.FailReply,
+                                    r'^Success: 127\.0\.0\.42 Failed: 127.0.0.144$'):
             await self.client.request('sdp-shutdown')
         # Other machine must still have been powered off
         poweroff_mock.assert_any_call(url1, data=None)

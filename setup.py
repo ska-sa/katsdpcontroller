@@ -21,6 +21,7 @@ setup(
         'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
         'addict!=2.0.*',
         'aiohttp~=3.5',
+        'aiohttp-jinja2',
         'aiomonitor',
         'async_timeout',
         'decorator',

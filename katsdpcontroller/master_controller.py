@@ -47,7 +47,7 @@ ZK_STATE_VERSION = 1
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
-CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
+CONSUL_POWEROFF_PATH = 'v1/catalog/service/poweroff'
 
 
 class NoAddressesError(Exception):
@@ -470,6 +470,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     # the clocked unit tests so that it's possible to control which event
     # happens next.
     new_task_poll_interval = 0.3
+    assert (reconciliation_interval + 1e-6) % new_task_poll_interval > 1e-5, \
+        "reconciliation_interval must not be a multiple of new_task_poll_interval"
 
     def __init__(self, args: argparse.Namespace,
                  server: aiokatcp.DeviceServer,
@@ -883,6 +885,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._manager = manager_cls(args, self, image_resolver_factory,
                                     prometheus_registry,
                                     rewrite_gui_urls if args.haproxy else None)
+        self._consul_url = args.consul_url
         self._override_dicts = {}
         self._interface_changed_callbacks = []
         super().__init__(args.host, args.port)
@@ -1235,9 +1238,8 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         Note: This command is used to prepare the SDP for reception of data as
         specified by the subarray product provided. It is necessary to call this
-        command before issuing a start command to the CBF. Essentially the SDP
-        will, once this command has returned 'OK', be in a wait state until
-        reception of the stream control start packet.
+        command before issuing a start command to the CBF. Once this command
+        has returned `OK`, SDP is ready to receive data from CBF.
 
         Upon capture-init the subarray product starts a new capture block which
         lasts until the next capture-done command. This corresponds to the
@@ -1333,7 +1335,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         return reply[0].decode()
 
     async def _deconfigure_all(self) -> None:
-        """Forcably deconfigure all products.
+        """Forcibly deconfigure all products.
 
         Any errors are simply logged. This is only intended to be used as part
         of ``sdp-shutdown``.
@@ -1346,19 +1348,23 @@ class DeviceServer(aiokatcp.DeviceServer):
         results = await asyncio.gather(*futures, return_exceptions=True)
         for name, result in zip(names, results):
             if isinstance(result, BaseException):
-                logger.warning("Failed to deconfigure product %s during master controller exit. "
+                logger.warning("Failed to deconfigure product %s during sdp-shutdown. "
                                "Forging ahead...", name, exc_info=result,
                                extra=dict(subarray_product_id=name))
 
-    async def _poweroff_endpoints(self) -> Sequence[Tuple[str, int]]:
+    @staticmethod
+    async def _poweroff_endpoints(consul_url: yarl.URL) -> Sequence[Tuple[str, int]]:
         """Get URLs for the poweroff service."""
+        url = (consul_url / CONSUL_POWEROFF_PATH).with_query(near='_agent')
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as session:
-                async with session.get(CONSUL_POWEROFF_URL) as resp:
+                async with session.get(url) as resp:
                     nodes = await resp.json()
         except (OSError, ValueError, aiohttp.ClientError) as exc:
-            logger.exception('Failed to get poweroff node list from consul')
-            raise FailReply(f'Could not get node list from consul: {exc}')
+            msg = ('Could not retrieve list of nodes running poweroff service from consul. '
+                   'No nodes will be powered off.')
+            logger.exception(msg)
+            raise FailReply(f'{msg} {exc}')
         endpoints: List[Tuple[str, int]] = []
         for node in nodes:
             address: str = node.get('ServiceAddress') or node.get('Address')
@@ -1378,15 +1384,17 @@ class DeviceServer(aiokatcp.DeviceServer):
         success : {'ok', 'fail'}
             Whether the shutdown sequence of all other nodes succeeded.
         hosts : str
-            Comma-separated lists of hosts that have been shutdown
+            On success, a comma-separated lists of hosts that have been shutdown; on
+            failure a human-readable message listing success and failure machines.
         """
-        logger.warning("SDP Master Controller interrupted - deconfiguring existing products.")
+        logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
+                       "deconfiguring existing products (may lead to data loss!).")
         await self._deconfigure_all()
-        endpoints = await self._poweroff_endpoints()
+        endpoints = await self._poweroff_endpoints(self._consul_url)
         urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
                 for (host, port) in endpoints]
         successful: List[str] = []
-        failed = False
+        failed: List[str] = []
         async with aiohttp.ClientSession() as session:
             async def post1(url):
                 async with session.post(url) as resp:
@@ -1398,12 +1406,13 @@ class DeviceServer(aiokatcp.DeviceServer):
                 if isinstance(result, BaseException):
                     logger.warning('Shutting down %s:%d failed: %s',
                                    endpoint[0], endpoint[1], result)
-                    failed = True
+                    failed.append(endpoint[0])
                 else:
                     successful.append(endpoint[0])
         success_str = ','.join(successful)
         if failed:
-            raise FailReply(success_str)
+            failed_str = ','.join(failed)
+            raise FailReply(f'Success: {success_str} Failed: {failed_str}')
         else:
             return success_str
 
@@ -1463,29 +1472,31 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         help='Run haproxy to provide frontend to GUIs [no]')
     parser.add_argument('--external-url', metavar='URL', type=yarl.URL,
                         help='External URL for clients to browse the GUI')
+    parser.add_argument('--consul-url', type=yarl.URL, default='http://localhost:8500/',
+                        help='base URL for local consul agent [%(default)s]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')
     parser.add_argument('--s3-config-file',
                         metavar='FILE',
-                        help='Configuration for connecting services to S3 '
+                        help='configuration for connecting services to S3 '
                              '(loaded on each configure)')
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR',
-                        help='Block of multicast addresses from which to draw internal allocation. '
+                        help='block of multicast addresses from which to draw internal allocation. '
                              'Needs to be at least /16. [%(default)s]')
     parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='File containing JSON describing related GUIs, '
+                        help='file containing JSON describing related GUIs, '
                              'or directory with .json files [none]')
     parser.add_argument('--registry',
                         default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
                         help='registry from which to pull images [%(default)s]')
     parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='Skip pulling images from the registry if already present')
+                        help='skip pulling images from the registry if already present')
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble
     parser.add_argument('zk',
-                        help='Endpoint for Zookeeper server e.g. server.domain:2181')
+                        help='endpoint for Zookeeper server e.g. server.domain:2181')
     parser.add_argument('singularity',
                         help='URL for Singularity server')
     args = parser.parse_args(argv)
