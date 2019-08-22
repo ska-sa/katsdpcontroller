@@ -1,3 +1,19 @@
+{% macro validate_version() %}
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "required": ["version"],
+    "properties": {
+        "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2
+        }
+    }
+}
+{% endmacro %}
+
+{% macro validate(version) %}
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
     "type": "object",
@@ -5,8 +21,7 @@
     "required": ["version", "next_capture_block_id", "next_multicast_group", "products"],
     "properties": {
         "version": {
-            "type": "integer",
-            "enum": [1]
+            "type": "integer"
         },
         "next_capture_block_id": {
             "type": "integer",
@@ -21,8 +36,16 @@
             "additionalProperties": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["run_id", "task_id", "host", "port", "config", "multicast_groups"],
+                "required": [
+{% if version >= 2 %}
+                    "start_time",
+{% endif %}
+                    "run_id", "task_id", "host", "port", "config", "multicast_groups"
+                ],
                 "properties": {
+{% if version >= 2 %}
+                    "start_time": {"type": "number"},
+{% endif %}
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},
                     "host": {"type": "string"},
@@ -37,3 +60,4 @@
         }
     }
 }
+{% endmacro %}

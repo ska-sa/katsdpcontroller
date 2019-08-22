@@ -361,6 +361,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(product.multicast_groups, product2.multicast_groups)
         self.assertEqual(product.host, product2.host)
         self.assertEqual(product.port, product2.port)
+        self.assertEqual(product.start_time, product2.start_time)
         self.assertIsNotNone(product2.katcp_conn)
         self.assertIsNot(product, product2)   # Must be reconstituted from state
 
@@ -804,27 +805,31 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Test capture-status with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'capture-status', 'product')
 
-    async def test_product_list_all(self) -> None:
+    @asynctest.patch('time.time')
+    async def test_product_list_all(self, time_mock) -> None:
         """Test product-list without a subarray_product_id argument"""
+        time_mock.return_value = 1122334455.123
         await self.client.request('product-configure', 'product1', CONFIG)
+        time_mock.return_value = 1234567890.987
         await self.client.request('product-configure', 'product2', CONFIG)
         reply, informs = await self.client.request('product-list')
         self.assertEqual(reply, [b'2'])
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
         self.assertEqual([
-            (b'product1', b'idle'),
-            (b'product2', b'idle')
+            (b'product1', b'idle, started at 2005-07-25T23:34:15Z'),
+            (b'product2', b'idle, started at 2009-02-13T23:31:30Z')
         ], inform_args)
 
-    async def test_product_list_one(self) -> None:
+    @asynctest.patch('time.time', return_value=1122334455.123)
+    async def test_product_list_one(self, time_mock) -> None:
         """Test product-list with a subarray_product_id argument"""
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('product-list', 'product')
         self.assertEqual(reply, [b'1'])
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        self.assertEqual([(b'product', b'idle')], inform_args)
+        self.assertEqual([(b'product', b'idle, started at 2005-07-25T23:34:15Z')], inform_args)
 
     async def test_product_list_not_found(self) -> None:
         """Test product-list with a subarray_product_id that does not exist"""

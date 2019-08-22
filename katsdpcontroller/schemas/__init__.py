@@ -23,22 +23,33 @@ class MultiVersionValidator(object):
     """Validation wrapper that supports a versioned schema.
 
     The schema must have a top-level `version` key. It is defined by a Jinja2
-    template which takes a version parameter. It must define an argument-less
-    macro called ``validate_version`` that returns a mini version of the schema
-    that validates only the version number.
+    template that contains two macros:
+
+    - ``validate_version()`` returns a mini version of the schema that only
+      validates the version.
+    - ``validate(version)`` returns a schema for the given version.
+
+    If the version is a string, then it is converted to a
+    :class:`~distutils.version.StrictVersion` before being passed to
+    `validate`. The template can thus compare it against strings and get
+    sensible version ordering.
     """
 
     def __init__(self, name):
         self._template = _env.get_template(name)
         # Load the mini-schema that just validates the version
-        module = self._template.make_module(vars={"version": ""})
-        schema = json.loads(module.validate_version())
+        schema = json.loads(self._template.module.validate_version())
         self._version_validator = _make_validator(schema)
+
+    @staticmethod
+    def _get_version(doc):
+        version = doc["version"]
+        return StrictVersion(version) if isinstance(version, str) else version
 
     def validate(self, doc):
         self._version_validator.validate(doc)
-        version = StrictVersion(doc["version"])
-        schema = json.loads(self._template.render(version=version))
+        version = self._get_version(doc)
+        schema = json.loads(self._template.module.validate(version=version))
         validator = _make_validator(schema)
         validator.validate(doc)
 
@@ -48,8 +59,8 @@ class MultiVersionValidator(object):
         except jsonschema.ValidationError:
             return self._version_validator.iter_errors(doc)
         else:
-            version = StrictVersion(doc["version"])
-            schema = json.loads(self._template.render(version=version))
+            version = self._get_version(doc)
+            schema = json.loads(self._template.module.validate(version=version))
             validator = _make_validator(schema)
             return validator.iter_errors(doc)
 

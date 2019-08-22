@@ -11,6 +11,8 @@
     }
 }
 {% endmacro %}
+
+{% macro validate(version) %}
 {% if version >= "2.0" %}
 {%     set sdp_vis = "sdp.vis" %}
 {% else %}
@@ -514,3 +516,4 @@
         }
     }
 }
+{% endmacro %}
