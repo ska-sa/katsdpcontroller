@@ -19,7 +19,7 @@ import katsdptelstate
 import katsdpcontroller
 from . import scheduler, product_config, generator, tasks
 from .controller import (load_json_dict, log_task_exceptions,
-                         DeviceStatus, ProductState)
+                         DeviceStatus, device_status_to_sensor_status, ProductState)
 from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
 
 
@@ -273,6 +273,8 @@ class SDPSubarrayProductBase:
             ProductState, "state",
             "State of the subarray product state machine",
             status_func=_error_on_error)
+        self._device_status_sensor = sdp_controller.sensors['device-status']
+
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.add_sensor(self._capture_block_sensor)
         self.add_sensor(self._state_sensor)
@@ -289,8 +291,11 @@ class SDPSubarrayProductBase:
         if (self._state == ProductState.ERROR
                 and value not in (ProductState.DECONFIGURING, ProductState.DEAD)):
             return      # Never leave error state other than by deconfiguring
+        now = time.time()
+        if value == ProductState.ERROR and self._state != value:
+            self._device_status_sensor.set_value(DeviceStatus.FAIL, timestamp=now)
         self._state = value
-        self._state_sensor.value = value
+        self._state_sensor.set_value(value, timestamp=now)
 
     def add_sensor(self, sensor: Sensor) -> None:
         """Add the supplied sensor to the top-level device and track it locally."""
@@ -1110,10 +1115,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.product: Optional[SDPSubarrayProductBase] = None
 
         super().__init__(host, port)
-        # setup sensors
+        # setup sensors (note: SDPProductController adds other sensors)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the subarray product controller",
-                                default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+                                default=DeviceStatus.OK,
+                                status_func=device_status_to_sensor_status))
         gui_urls: List[Dict[str, str]] = []
         if dashboard_url is not None:
             gui_urls.append({
