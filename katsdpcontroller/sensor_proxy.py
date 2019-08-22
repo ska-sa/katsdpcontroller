@@ -1,7 +1,8 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import logging
-from typing import Tuple, Dict, Callable, Mapping, Iterable, Union, Optional
+import enum
+from typing import Tuple, Dict, Callable, Type, Mapping, Iterable, Sequence, Union, Optional
 
 import aiokatcp
 import prometheus_client       # noqa: F401
@@ -118,8 +119,9 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                  prometheus_labels: Mapping[str, str] = None,
                  prometheus_factory: _Factory = None,
                  prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
-                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None) -> None:
-        super().__init__(client)
+                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+                 enum_types: Sequence[Type[enum.Enum]] = ()) -> None:
+        super().__init__(client, enum_types)
         self.prefix = prefix
         self.server = server
         # We keep track of the sensors after name rewriting but prior to gui-url rewriting
@@ -263,6 +265,7 @@ class SensorProxyClient(aiokatcp.Client):
                  prometheus_factory: _Factory = None,
                  prometheus_sensors: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
                  rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+                 enum_types: Sequence[Type[enum.Enum]] = (),
                  **kwargs) -> None:
         super().__init__(**kwargs)
         watcher = SensorWatcher(self, server, prefix,
