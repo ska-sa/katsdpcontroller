@@ -17,6 +17,7 @@ import itertools
 import functools
 import re
 import time
+from datetime import datetime
 import os
 import socket
 from abc import abstractmethod
@@ -44,7 +45,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
-ZK_STATE_VERSION = 1
+ZK_STATE_VERSION = 2
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
@@ -143,6 +144,7 @@ class Product:
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
         self.dead_event = asyncio.Event()
         self._dead_callbacks: List[Callable[['Product'], None]] = []
+        self.start_time = time.time()
 
     def connect(self, server: aiokatcp.DeviceServer, registry: CollectorRegistry,
                 rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
@@ -233,6 +235,12 @@ class Product:
             self.katcp_conn.close()
             await self.katcp_conn.wait_closed()
             self.katcp_conn.close()
+
+    async def description(self) -> str:
+        start_dt = datetime.utcfromtimestamp(self.start_time)
+        start_str = start_dt.isoformat(timespec='seconds')
+        state = (await self.get_state()).name.lower()
+        return f'{state}, started at {start_str}Z'
 
 
 class ProductManagerBase(Generic[_P]):
@@ -647,8 +655,6 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             try:
                 payload = (await self._zk.get('/state'))[0]
                 data = json.loads(payload)
-                if data.get('version') != ZK_STATE_VERSION:
-                    raise ValueError('version mismatch')
                 ZK_STATE.validate(data)
             except aiozk.exc.NoNode:
                 logger.info('No existing state found')
@@ -661,6 +667,10 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
+                try:
+                    prod.start_time = info['start_time']
+                except KeyError:
+                    pass     # Version 1 didn't have start_time
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
@@ -684,7 +694,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'task_id': prod.task_id,
                         'host': prod.host,
                         'port': prod.port,
-                        'multicast_groups': [str(group) for group in prod.multicast_groups]
+                        'multicast_groups': [str(group) for group in prod.multicast_groups],
+                        'start_time': prod.start_time
                     } for prod in self.products.values()
                     if prod.task_state == Product.TaskState.ACTIVE
                 },
@@ -1242,7 +1253,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             products = [self._manager.products[name]]
         else:
             raise FailReply("This product id has no current configuration.")
-        ctx.informs([(s.name, await s.get_state()) for s in products])
+        ctx.informs([(s.name, await s.description()) for s in products])
 
     @time_request
     async def request_capture_init(self, ctx, subarray_product_id: str,
@@ -1322,12 +1333,14 @@ class DeviceServer(aiokatcp.DeviceServer):
         state : str
         """
         if subarray_product_id is None:
-            return await self.request_product_list(ctx, None)
-
-        product = self._manager.products.get(subarray_product_id)
-        if product is None:
-            raise FailReply('No existing subarray product configuration with this id found')
-        return await product.get_state()
+            products = list(self._manager.products.values())
+            ctx.informs([(s.name, await s.get_state()) for s in products])
+            return None     # ctx.informs sends the reply
+        else:
+            product = self._manager.products.get(subarray_product_id)
+            if product is None:
+                raise FailReply('No existing subarray product configuration with this id found')
+            return await product.get_state()
 
     @time_request
     async def request_capture_done(self, ctx, subarray_product_id: str) -> str:
