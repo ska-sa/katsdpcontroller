@@ -316,6 +316,11 @@ class ProductManagerBase(Generic[_P]):
         task = asyncio.get_event_loop().create_task(self._save_state())
         log_task_exceptions(task, logger, '_save_state')
 
+    def valid_multicast_group(self, group: ipaddress.IPv4Address) -> bool:
+        return (group in self._multicast_network
+                and group != self._multicast_network.network_address
+                and group != self._multicast_network.broadcast_address)
+
     def _init_state(self, products: Iterable[_P], next_capture_block_id: int,
                     next_multicast_group: ipaddress.IPv4Address) -> None:
         """Set the initial state from persistent storage. This is intended to
@@ -335,6 +340,10 @@ class ProductManagerBase(Generic[_P]):
         """
         assert not self._products
         for product in products:
+            if any(not self.valid_multicast_group(group) for group in product.multicast_groups):
+                product.logger.warning(
+                    'Product %r contains multicast group(s) outside the defined range %s',
+                    product.name, self._multicast_network)
             self._add_product(product)
         self._next_capture_block_id = next_capture_block_id
 

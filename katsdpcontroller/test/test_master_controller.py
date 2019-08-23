@@ -513,6 +513,15 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(self.manager._next_multicast_group,
                          ipaddress.IPv4Address('225.100.0.106'))
 
+    async def test_multicast_group_out_of_range(self) -> None:
+        await self.test_get_multicast_groups()
+        self.args.safe_multicast_cidr = '225.101.0.0/24'
+        with self.assertLogs('katsdpcontroller.master_controller', 'WARNING') as cm:
+            await self.reset_manager()
+        self.assertEqual(cm.output, [
+            "WARNING:katsdpcontroller.master_controller:Product 'product1' contains "
+            "multicast group(s) outside the defined range 225.101.0.0/24"])
+
     async def test_get_multicast_groups_negative(self) -> None:
         await self.start_manager()
         product = await self.start_product()
