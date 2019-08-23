@@ -7,7 +7,7 @@
         "version": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 2
+            "maximum": 3
         }
     }
 }
@@ -40,16 +40,29 @@
 {% if version >= 2 %}
                     "start_time",
 {% endif %}
-                    "run_id", "task_id", "host", "port", "config", "multicast_groups"
+{% if version >= 3 %}
+                    "ports",
+{% else %}
+                    "port",
+{% endif %}
+                    "run_id", "task_id", "host", "config", "multicast_groups"
                 ],
                 "properties": {
 {% if version >= 2 %}
                     "start_time": {"type": "number"},
 {% endif %}
+{% if version >= 3 %}
+                    "ports": {
+                        "type": "object",
+                        "required": ["katcp"],
+                        "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 65535}
+                    },
+{% else %}
+                    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+{% endif %}
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},
                     "host": {"type": "string"},
-                    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
                     "config": {"type": "object"},
                     "multicast_groups": {
                         "type": "array",
