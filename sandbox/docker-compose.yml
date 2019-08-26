@@ -54,7 +54,7 @@ services:
 
   singularity:
     network_mode: host
-    image: hubspot/singularityservice:0.22.0
+    image: hubspot/singularityservice:1.0.0
     depends_on:
       - mesos-master
       - exhibitor
