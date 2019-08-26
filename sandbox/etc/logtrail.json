@@ -1,0 +1,34 @@
+{
+  "version" : 1,
+  "index_patterns": [
+    {
+      "es": {
+        "default_index": "logstash-*"
+      },
+      "tail_interval_in_seconds": 2,
+      "es_index_time_offset_in_seconds": 0,
+      "display_timezone": "Etc/UTC",
+      "display_timestamp_format": "Y-MM-DD HH:mm:ss.SSS",
+      "max_buckets": 500,
+      "default_time_range_in_days": 14,
+      "max_hosts": 100,
+      "max_events_to_keep_in_viewer": 5000,
+      "fields" : {
+        "mapping" : {
+            "timestamp": "@timestamp",
+            "hostname": "host",
+            "program": "task",
+            "message": "message"
+        },
+        "message_format": "{{{subarray_product_id}}} {{{capture_block_id}}} {{{message}}}"
+      },
+      "color_mapping": {
+        "field": "level_name",
+        "mapping": {
+          "ERROR": "#ff3232",
+          "WARNING": "#ff7f24"
+        }
+      }
+    }
+  ]
+}

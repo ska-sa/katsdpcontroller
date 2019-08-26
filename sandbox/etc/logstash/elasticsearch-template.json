@@ -1,0 +1,57 @@
+{
+  "template" : "logstash-*",
+  "version" : 60001,
+  "settings" : {
+    "index.refresh_interval" : "2s",
+    "index.number_of_shards": 1,
+    "index.default_pipeline": "timestamp_precise"
+  },
+  "mappings" : {
+    "dynamic_templates" : [ {
+      "message_field" : {
+	"match_pattern": "regex",
+	"path_match" : "^(message|short_message|full_message)$",
+	"match_mapping_type" : "string",
+	"mapping" : {
+	  "type" : "text",
+	  "norms" : false
+	}
+      }
+    }, {
+      "string_fields" : {
+	"match" : "*",
+	"match_mapping_type" : "string",
+	"mapping" : {
+	  "type" : "text", "norms" : false,
+	  "fields" : {
+	    "keyword" : { "type": "keyword", "ignore_above": 256 }
+	  }
+	}
+      }
+    } ],
+    "properties" : {
+      "@timestamp": { "type": "date_nanos"},
+      "@version": { "type": "keyword"},
+      "level_name": { "type": "keyword" },
+      "level": {"type": "short"},
+      "line": {"type": "integer"},
+      "docker": {
+	"dynamic": true,
+	"properties": {
+	  "id": { "type": "keyword" },
+	  "image": { "type": "keyword" }
+	}
+      },
+      "geoip" : {
+	"dynamic": true,
+	"properties" : {
+	  "ip": { "type": "ip" },
+	  "location" : { "type" : "geo_point" },
+	  "latitude" : { "type" : "half_float" },
+	  "longitude" : { "type" : "half_float" }
+	}
+      },
+      "seq": { "type": "long" }
+    }
+  }
+}
