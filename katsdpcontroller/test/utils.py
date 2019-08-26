@@ -219,10 +219,13 @@ async def assert_request_fails(client: aiokatcp.Client, name: str, *args: Any) -
         await client.request(name, *args)
 
 
-async def assert_sensor_value(client: aiokatcp.Client, name: str, value: Any) -> None:
+async def assert_sensor_value(
+        client: aiokatcp.Client, name: str, value: Any,
+        status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL) -> None:
     encoded = aiokatcp.encode(value)
     reply, informs = await client.request("sensor-value", name)
     assert_equal(informs[0].arguments[4], encoded)
+    assert_equal(informs[0].arguments[3], aiokatcp.encode(status))
 
 
 async def assert_sensors(client: aiokatcp.Client,

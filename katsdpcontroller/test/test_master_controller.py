@@ -11,7 +11,7 @@ from unittest import mock
 from typing import Tuple, Set, List, Mapping, Optional, Any
 
 import aiokatcp
-from aiokatcp import Sensor
+from aiokatcp import Sensor, Client
 import prometheus_client
 import asynctest
 import aiohttp.client
@@ -20,11 +20,11 @@ import aioresponses
 import yarl
 
 from .. import master_controller, scheduler
-from ..controller import ProductState, device_server_sockname, make_image_resolver_factory
+from ..controller import (DeviceStatus, ProductState, device_server_sockname,
+                          make_image_resolver_factory, device_status_to_sensor_status)
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  SingularityProductManager, NoAddressesError,
                                  DeviceServer, parse_args)
-from ..sensor_proxy import SensorProxyClient
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
                     DelayedManager, Background, run_clocked,
@@ -131,6 +131,10 @@ class DummyServer(aiokatcp.DeviceServer):
         super().__init__(host, port)
         self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
                                 default="[]", initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(DeviceStatus, "device-status",
+                                "Devices status of the SDP Master Controller",
+                                default=DeviceStatus.OK,
+                                status_func=device_status_to_sensor_status))
 
 
 class DummyProductController(aiokatcp.DeviceServer):
@@ -228,8 +232,9 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             self.manager = SingularityProductManager(self.args, self.server,
                                                      self.image_resolver_factory,
                                                      self.prometheus_registry)
-        self.sensor_proxy_client_mock = \
-            create_patch(self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
+        self.client_mock = create_patch(self, 'aiokatcp.Client', autospec=True)
+        self.client_mock.return_value.loop = self.loop
+        self.client_mock.return_value.logger = mock.MagicMock()
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
         self.open_mock.set_read_data_for('sdp_image_tag', 'a_tag')
@@ -262,9 +267,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(product.task_state, Product.TaskState.STARTING)
         self.assertEqual(product.host, 'slave.invalid')
         self.assertEqual(product.port, 12345)
-        self.sensor_proxy_client_mock.assert_called_with(
-            self.server, 'foo.', {'subarray_product_id': 'foo'}, mock.ANY,
-            rewrite_gui_urls=None, host='slave.invalid', port=12345)
+        self.client_mock.assert_called_with('slave.invalid', 12345)
 
         await self.manager.product_active(product)
         self.assertEqual(product.task_state, Product.TaskState.ACTIVE)
@@ -544,7 +547,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
         await self.start_manager()
         # Disable the mocking by making the real version the side effect
-        self.sensor_proxy_client_mock.side_effect = SensorProxyClient
+        create_patch(self, 'aiokatcp.Client', Client)
         self.singularity_server.lifecycles.append(katcp_server_lifecycle)
         product = await run_clocked(self, 100, self.manager.create_product('product1', {}))
 
@@ -626,6 +629,14 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors)
         await assert_sensor_value(self.client, 'products', '["product"]')
 
+        # Change the product's device-status to FAIL and check that the top-level sensor
+        # is updated.
+        product = self.server._manager.products['product']
+        product.server.sensors['device-status'].value = DeviceStatus.FAIL
+        # Do a round trip to the product server to give time for the change to propagate
+        await self.client.request('capture-status', 'product')
+        await assert_sensor_value(self.client, 'device-status', 'fail', Sensor.Status.ERROR)
+
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
         await self.client.request('product-deconfigure', 'product')
@@ -633,6 +644,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
+        # With the product gone, the device status must go back to OK
+        await assert_sensor_value(self.client, 'device-status', 'ok')
 
     async def test_capture_done(self) -> None:
         await assert_request_fails(self.client, "capture-done", "product")

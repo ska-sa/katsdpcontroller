@@ -674,6 +674,9 @@ class TestSDPController(BaseTestSDPController):
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
         self.assertEqual(ProductState.ERROR, product.state)
+        self.assertEqual(ProductState.ERROR, self.server.sensors['state'].value)
+        self.assertEqual(DeviceStatus.FAIL, self.server.sensors['device-status'].value)
+        self.assertEqual(Sensor.Status.ERROR, self.server.sensors['device-status'].status)
         self.assertEqual({}, product.capture_blocks)
         # check that the subarray can be safely deconfigured, and that it
         # goes via DECONFIGURING state. Rather than trying to directly

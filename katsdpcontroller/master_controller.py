@@ -39,7 +39,7 @@ from . import singularity, product_config, product_controller, scheduler, sensor
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
                          add_shared_options, extract_shared_options, make_image_resolver_factory,
-                         ProductState, DeviceStatus)
+                         ProductState, DeviceStatus, device_status_to_sensor_status)
 
 
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
@@ -111,6 +111,18 @@ def _load_s3_config(filename: str) -> dict:
     return config
 
 
+class DeviceStatusWatcher(aiokatcp.AbstractSensorWatcher):
+    """Call a callback whenever the client's device-status sensor changes."""
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self.callback = callback
+
+    def sensor_updated(self, name: str, value: bytes, status: aiokatcp.Sensor.Status,
+                       timestamp: float) -> None:
+        if name == 'device-status':
+            self.callback()
+
+
 class Product:
     """A single subarray product
 
@@ -156,10 +168,12 @@ class Product:
         """
         self.host = host
         self.port = port
-        self.katcp_conn = sensor_proxy.SensorProxyClient(
-            server, f'{self.name}.', {'subarray_product_id': self.name},
+        self.katcp_conn = aiokatcp.Client(host, port)
+        self.katcp_conn.add_sensor_watcher(sensor_proxy.SensorWatcher(
+            self.katcp_conn, server, f'{self.name}.', {'subarray_product_id': self.name},
             functools.partial(_prometheus_factory, registry),
-            rewrite_gui_urls=rewrite_gui_urls, host=host, port=port)
+            rewrite_gui_urls=rewrite_gui_urls,
+            enum_types=(DeviceStatus,)))
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
 
@@ -329,8 +343,18 @@ class ProductManagerBase(Generic[_P]):
         :meth:`add_product`.
         """
 
+    def _update_device_status(self) -> None:
+        """Recompute the top-level device-status from the per-product device-status sensors."""
+        status = DeviceStatus.OK
+        for name in self.products.keys():
+            sensor = self._server.sensors.get(f'{name}.device-status')
+            if sensor is not None and sensor.status.valid_value() and sensor.value > status:
+                status = sensor.value
+        self._server.sensors['device-status'].value = status
+
     def _update_products_sensor(self) -> None:
         self._server.sensors['products'].value = json.dumps(sorted(self._products.keys()))
+        self._update_device_status()
 
     def _add_product(self, product: _P) -> None:
         """Used by subclasses to add a newly-created product."""
@@ -414,6 +438,17 @@ class ProductManagerBase(Generic[_P]):
     def _gen_capture_block_id(self, minimum: int) -> int:
         """Create a new capture block ID that must be at least `minimum`"""
 
+    def _connect(self, product: _P, host: str, port: int) -> None:
+        """Establish a connection to a product's katcp server.
+
+        Subclasses should always call this method rather than directly using
+        ``product.connect``.
+        """
+        product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
+                        host, port)
+        assert product.katcp_conn is not None
+        product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
+
     async def get_capture_block_id(self) -> str:
         """Generate a unique capture block ID"""
         cbid = self._gen_capture_block_id(self._next_capture_block_id)
@@ -458,7 +493,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         await product.server.start()
         host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
-        product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls, host, port)
+        self._connect(product, host, port)
         return product
 
     async def kill_product(self, product: InternalProduct) -> None:
@@ -676,8 +711,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                                          for addr in info['multicast_groups']}
                 prod.logger.info('Reconnecting to existing product %s at %s:%d',
                                  prod.name, info['host'], info['port'])
-                prod.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
-                             info['host'], info['port'])
+                self._connect(prod, info['host'], info['port'])
                 products.append(prod)
             self._init_state(products, data['next_capture_block_id'],
                              ipaddress.IPv4Address(data['next_multicast_group']))
@@ -856,8 +890,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             env: Dict[str, str] = {item['name']: item['value'] for item in env_list}
             host = env['TASK_HOST']
             port = int(env['PORT0'])
-            product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
-                            host, port)
+            self._connect(product, host, port)
             success = True
         except (scheduler.ImageError, aiohttp.ClientError, singularity.SingularityError) as exc:
             raise ProductFailed(f'Failed to start product controller: {exc}') from exc
@@ -914,8 +947,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._interface_changed_callbacks = []
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
-                                "Devices status of the SDP Master Controller",
-                                default=DeviceStatus.OK, initial_status=Sensor.Status.NOMINAL))
+                                "Combined (worst) status of all subarray product controllers",
+                                default=DeviceStatus.OK,
+                                status_func=device_status_to_sensor_status))
         self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
                                 default=json.dumps(args.gui_urls),
                                 initial_status=Sensor.Status.NOMINAL))
@@ -939,7 +973,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def mass_inform(self, name: str, *args: Any) -> None:
         super().mass_inform(name, *args)
-        # Triggered by SensorProxyClient
+        # Triggered by SensorWatcher
         if name == 'interface-changed':
             for callback in self._interface_changed_callbacks:
                 callback()

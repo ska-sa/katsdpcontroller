@@ -5,7 +5,6 @@ import argparse
 import logging
 import functools
 import json
-import enum
 from typing import List, Tuple, Callable, Union, Optional, AnyStr
 
 import aiokatcp
@@ -142,10 +141,19 @@ class ProductState(scheduler.OrderedEnum):
     ERROR = 5
 
 
-class DeviceStatus(enum.Enum):
+class DeviceStatus(scheduler.OrderedEnum):
     OK = 1
     DEGRADED = 2
     FAIL = 3
+
+
+def device_status_to_sensor_status(status: DeviceStatus) -> aiokatcp.Sensor.Status:
+    mapping = {
+        DeviceStatus.OK: aiokatcp.Sensor.Status.NOMINAL,
+        DeviceStatus.DEGRADED: aiokatcp.Sensor.Status.WARN,
+        DeviceStatus.FAIL: aiokatcp.Sensor.Status.ERROR
+    }
+    return mapping[status]
 
 
 def device_server_sockname(server: aiokatcp.DeviceServer) -> Tuple[str, int]:
