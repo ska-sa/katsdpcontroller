@@ -99,15 +99,14 @@ services:
       - ./etc/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   logstash:
-    image: docker.elastic.co/logstash/logstash-oss:7.2.0
-    command: logstash -w 1 -f /etc/logstash.conf
+    network_mode: host
+    image: docker.elastic.co/logstash/logstash-oss:7.3.0
+    command: logstash -w 1 -f /etc/logstash.conf --http.host 127.0.0.1
     environment:
       - LS_HEAP_SIZE=2048m
     volumes:
       - ./etc/logstash.conf:/etc/logstash.conf:ro
       - ./logs:/logstash-logs
-    ports:
-      - "127.0.0.1:12201:12201/udp"    # GELF
 
   consul:
     network_mode: host
