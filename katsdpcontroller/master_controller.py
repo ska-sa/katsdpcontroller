@@ -947,7 +947,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._interface_changed_callbacks = []
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
-                                "Devices status of the SDP Master Controller",
+                                "Combined (worst) status of all subarray product controllers",
                                 default=DeviceStatus.OK,
                                 status_func=device_status_to_sensor_status))
         self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
