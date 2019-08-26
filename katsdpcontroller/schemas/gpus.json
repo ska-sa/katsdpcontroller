@@ -37,6 +37,6 @@
                 "minimum": 0
             }
         },
-        "required": ["devices", "driver_version", "name", "compute_capability", "device_attributes"]
+        "required": ["devices", "name", "compute_capability", "device_attributes", "uuid"]
     }
 }
