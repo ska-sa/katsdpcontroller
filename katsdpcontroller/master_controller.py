@@ -21,12 +21,12 @@ from datetime import datetime
 import os
 import socket
 from abc import abstractmethod
-from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List,
+from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List, Union,
                     Iterable, Mapping, Sequence, Optional, Callable, Awaitable, Any)
 
 import aiozk
 import aiokatcp
-from aiokatcp import FailReply, Sensor, SensorSet
+from aiokatcp import FailReply, Sensor, SensorSet, Address
 import async_timeout
 import jsonschema
 import yarl
@@ -45,10 +45,11 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
-ZK_STATE_VERSION = 2
+ZK_STATE_VERSION = 3
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
+_IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 CONSUL_POWEROFF_PATH = 'v1/catalog/service/poweroff'
 
 
@@ -111,6 +112,19 @@ def _load_s3_config(filename: str) -> dict:
     return config
 
 
+async def _resolve_host(host: str) -> _IPAddress:
+    """Resolve host name or address to an IP address if necessary.
+
+    If the address is already an IP address, this will not block.
+    """
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        addrs = await asyncio.get_event_loop().getaddrinfo(
+            host, 0, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+        return ipaddress.ip_address(addrs[0][4][0])
+
+
 class DeviceStatusWatcher(aiokatcp.AbstractSensorWatcher):
     """Call a callback whenever the client's device-status sensor changes."""
 
@@ -150,25 +164,34 @@ class Product:
         self.configure_task = configure_task
         self.katcp_conn: Optional[aiokatcp.Client] = None
         self.task_state = Product.TaskState.CREATED
-        self.host: Optional[str] = None
-        self.port: Optional[int] = None
+        self.host: Optional[_IPAddress] = None
+        self.ports: Dict[str, int] = {}
         self.multicast_groups: Set[ipaddress.IPv4Address] = set()
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
         self.dead_event = asyncio.Event()
         self._dead_callbacks: List[Callable[['Product'], None]] = []
         self.start_time = time.time()
+        self.sensors = SensorSet()     # Sensors created internally - not proxied
+        self.sensors.add(Sensor(Address, f'{self.name}.katcp-address',
+                                'Address of the katcp server for the product controller'))
 
     def connect(self, server: aiokatcp.DeviceServer, registry: CollectorRegistry,
                 rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
-                host: str, port: int) -> None:
+                host: _IPAddress, ports: Dict[str, int]) -> None:
         """Notify product of the location of the katcp interface.
 
-        After calling this, :attr:`host`, :attr:`port` and :attr:`katcp_conn`
+        After calling this, :attr:`host`, :attr:`ports` and :attr:`katcp_conn`
         are all ready to use.
         """
         self.host = host
-        self.port = port
-        self.katcp_conn = aiokatcp.Client(host, port)
+        self.ports = ports
+        for (port_name, port_value) in ports.items():
+            sensor_name = f'{self.name}.{port_name}-address'
+            try:
+                self.sensors[sensor_name].value = Address(host, port_value)
+            except KeyError:
+                self.logger.warning('Sensor %s does not exist', sensor_name)
+        self.katcp_conn = aiokatcp.Client(str(host), ports['katcp'])
         self.katcp_conn.add_sensor_watcher(sensor_proxy.SensorWatcher(
             self.katcp_conn, server, f'{self.name}.', {'subarray_product_id': self.name},
             functools.partial(_prometheus_factory, registry),
@@ -361,6 +384,16 @@ class ProductManagerBase(Generic[_P]):
         assert product.name not in self._products
         self._products[product.name] = product
         product.add_dead_callback(self._product_died)
+        for sensor in product.sensors.values():
+            self._server.sensors.add(sensor)
+        self._update_products_sensor()
+
+    def _remove_product(self, product: Product) -> None:
+        """Removes a product. Should not be used by subclasses."""
+        assert self._products.get(product.name) is product
+        del self._products[product.name]
+        for sensor in product.sensors.values():
+            self._server.sensors.remove(sensor)
         self._update_products_sensor()
 
     async def product_active(self, product: _P) -> None:
@@ -375,15 +408,13 @@ class ProductManagerBase(Generic[_P]):
         Subclasses should override this to actually kill off the product.
         """
         if self._products.get(product.name) is product:
-            del self._products[product.name]
-            self._update_products_sensor()
+            self._remove_product(product)
             await self._save_state()
 
     def _product_died(self, product: Product) -> None:
         """Called by product.died"""
         if self._products.get(product.name) is product:
-            del self._products[product.name]
-            self._update_products_sensor()
+            self._remove_product(product)
             self._save_state_bg()
 
     async def get_multicast_groups(self, product: _P, n_addresses: int) -> str:
@@ -438,14 +469,17 @@ class ProductManagerBase(Generic[_P]):
     def _gen_capture_block_id(self, minimum: int) -> int:
         """Create a new capture block ID that must be at least `minimum`"""
 
-    def _connect(self, product: _P, host: str, port: int) -> None:
+    def _connect(self, product: _P, host: _IPAddress, ports: Dict[str, int]) -> None:
         """Establish a connection to a product's katcp server.
 
         Subclasses should always call this method rather than directly using
         ``product.connect``.
+
+        `ports` must contain at least ``katcp``, but subclasses may include
+        additional ports.
         """
         product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
-                        host, port)
+                        host, ports)
         assert product.katcp_conn is not None
         product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
@@ -493,7 +527,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         await product.server.start()
         host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
-        self._connect(product, host, port)
+        self._connect(product, ipaddress.ip_address(host), {'katcp': port})
         return product
 
     async def kill_product(self, product: InternalProduct) -> None:
@@ -512,6 +546,18 @@ class SingularityProduct(Product):
         super().__init__(name, config, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
+        self.sensors.add(Sensor(
+            Address, f'{name}.http-address',
+            'Address of internal HTTP server (which is NOT the dashboard)'))
+        self.sensors.add(Sensor(
+            Address, f'{name}.aiomonitor-address',
+            'Address of aiomonitor debugging port (only accessible from the host)'))
+        self.sensors.add(Sensor(
+            Address, f'{name}.aioconsole-address',
+            'Address of aioconsole debugging port (only accessible from the host)'))
+        self.sensors.add(Sensor(
+            Address, f'{name}.dashboard-address',
+            'Address of product controller dashboard'))
 
 
 class SingularityProductManager(ProductManagerBase[SingularityProduct]):
@@ -706,12 +752,17 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                     prod.start_time = info['start_time']
                 except KeyError:
                     pass     # Version 1 didn't have start_time
+                try:
+                    ports = info['ports']
+                except KeyError:
+                    # Version 2 only had the katcp port
+                    ports = {'katcp': info['port']}
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
                 prod.logger.info('Reconnecting to existing product %s at %s:%d',
-                                 prod.name, info['host'], info['port'])
-                self._connect(prod, info['host'], info['port'])
+                                 prod.name, info['host'], ports['katcp'])
+                self._connect(prod, await _resolve_host(info['host']), ports)
                 products.append(prod)
             self._init_state(products, data['next_capture_block_id'],
                              ipaddress.IPv4Address(data['next_multicast_group']))
@@ -726,8 +777,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'config': prod.config,
                         'run_id': prod.run_id,
                         'task_id': prod.task_id,
-                        'host': prod.host,
-                        'port': prod.port,
+                        'host': str(prod.host),
+                        'ports': prod.ports,
                         'multicast_groups': [str(group) for group in prod.multicast_groups],
                         'start_time': prod.start_time
                     } for prod in self.products.values()
@@ -888,9 +939,15 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             # From this point, reconciliation will kill the product if the task dies
             env_list = task_info['mesosTask']['command']['environment']['variables']
             env: Dict[str, str] = {item['name']: item['value'] for item in env_list}
-            host = env['TASK_HOST']
-            port = int(env['PORT0'])
-            self._connect(product, host, port)
+            host = await _resolve_host(env['TASK_HOST'])
+            ports = {
+                'katcp': int(env['PORT0']),
+                'http': int(env['PORT1']),
+                'aiomonitor': int(env['PORT2']),
+                'aioconsole': int(env['PORT3']),
+                'dashboard': int(env['PORT4'])
+            }
+            self._connect(product, host, ports)
             success = True
         except (scheduler.ImageError, aiohttp.ClientError, singularity.SingularityError) as exc:
             raise ProductFailed(f'Failed to start product controller: {exc}') from exc
@@ -1112,7 +1169,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 product = await self._manager.create_product(name, config)
                 assert product is not None
                 assert product.katcp_conn is not None
-                assert product.host is not None and product.port is not None
+                assert product.host is not None and product.ports
 
                 await product.katcp_conn.wait_connected()
                 await product.katcp_conn.request('product-configure', name,
@@ -1179,8 +1236,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         except ValueError as exc:
             raise FailReply(f'Config is not valid JSON: {exc}') from None
         product = await self.product_configure(name, config_dict)
-        assert product.host is not None and product.port is not None
-        return product.name, product.host, product.port
+        assert product.host is not None and product.ports
+        return product.name, str(product.host), product.ports['katcp']
 
     async def product_deconfigure(self, product: Product, force: bool = False) -> None:
         """Implementation of meth:`request_product_deconfigure`."""

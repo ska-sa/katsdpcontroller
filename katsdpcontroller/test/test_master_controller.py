@@ -6,6 +6,7 @@ import json
 import functools
 import ipaddress
 import os
+import socket
 import unittest
 from unittest import mock
 from typing import Tuple, Set, List, Mapping, Optional, Any
@@ -36,6 +37,11 @@ EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
     (b'gui-urls', b'', b'string'),
     (b'products', b'', b'string')
+]
+
+# Sensors created per-product by the master controller
+EXPECTED_PRODUCT_SENSOR_LIST: List[Tuple[bytes, ...]] = [
+    (b'katcp-address', b'', b'address')
 ]
 
 EXPECTED_REQUEST_LIST = [
@@ -238,6 +244,9 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
         self.open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
         self.open_mock.set_read_data_for('sdp_image_tag', 'a_tag')
+        create_patch(self, 'socket.getaddrinfo',
+                     return_value=[(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '',
+                                    ('192.0.2.0', 0))])
 
     async def start_manager(self) -> None:
         """Start the manager and arrange for it to be stopped"""
@@ -265,9 +274,13 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.start_manager()
         product = await run_clocked(self, 100, self.manager.create_product('foo', {}))
         self.assertEqual(product.task_state, Product.TaskState.STARTING)
-        self.assertEqual(product.host, 'slave.invalid')
-        self.assertEqual(product.port, 12345)
-        self.client_mock.assert_called_with('slave.invalid', 12345)
+        self.assertEqual(product.host, ipaddress.ip_address('192.0.2.0'))
+        self.assertEqual(product.ports['katcp'], 12345)
+        self.assertEqual(product.ports['http'], 12346)
+        self.assertEqual(product.ports['aiomonitor'], 12347)
+        self.assertEqual(product.ports['aioconsole'], 12348)
+        self.assertEqual(product.ports['dashboard'], 12349)
+        self.client_mock.assert_called_with('192.0.2.0', 12345)
 
         await self.manager.product_active(product)
         self.assertEqual(product.task_state, Product.TaskState.ACTIVE)
@@ -363,7 +376,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertEqual(product.task_id, product2.task_id)
         self.assertEqual(product.multicast_groups, product2.multicast_groups)
         self.assertEqual(product.host, product2.host)
-        self.assertEqual(product.port, product2.port)
+        self.assertEqual(product.ports, product2.ports)
         self.assertEqual(product.start_time, product2.start_time)
         self.assertIsNotNone(product2.katcp_conn)
         self.assertIsNot(product, product2)   # Must be reconstituted from state
@@ -625,13 +638,17 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         # Prepend the subarray product ID to the names
         expected_product_sensors = [
             (b'product.' + s[0],) + s[1:]
-            for s in EXPECTED_INTERFACE_SENSOR_LIST + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST]
+            for s in (EXPECTED_INTERFACE_SENSOR_LIST
+                      + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
+                      + EXPECTED_PRODUCT_SENSOR_LIST)]
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors)
         await assert_sensor_value(self.client, 'products', '["product"]')
+        product = self.server._manager.products['product']
+        await assert_sensor_value(
+            self.client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
 
         # Change the product's device-status to FAIL and check that the top-level sensor
         # is updated.
-        product = self.server._manager.products['product']
         product.server.sensors['device-status'].value = DeviceStatus.FAIL
         # Do a round trip to the product server to give time for the change to propagate
         await self.client.request('capture-status', 'product')
