@@ -713,7 +713,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             if old_id == current_id:
                 deploy['id'] = current_id
                 if deploy == old_deploy:
-                    logger.info('Reusing deploy ID %s', current_id)
+                    timestamp = datetime.utcfromtimestamp(stat.modified / 1000.0)
+                    timestamp_str = timestamp.isoformat(timespec='seconds')
+                    logger.info('Reusing deploy ID %s, created at %sZ', current_id, timestamp_str)
                     return current_id
         except (aiozk.exc.NoNode, KeyError, TypeError, ValueError):
             logger.debug('Cannot reuse deploy', exc_info=True)
