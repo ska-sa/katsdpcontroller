@@ -6,17 +6,22 @@ local versions of much of the infrastructure present on a production system.
 ## Requirements
 
 Hardware-wise, you will need an NVIDIA GPU. Lots of RAM and a beefy CPU are
-also recommended for simulating more than a few antennas.
+also recommended for simulating more than a few antennas, and AVX2 is required
+for the continuum imager.
 
 Software-wise, you will need:
+- Python 3 (see [setup.py](../setup.py) for specific minimum version)
 - docker
 - nvidia-container-runtime
 - curl
 - haproxy (optional)
 - [docker-compose](https://docs.docker.com/compose/)
 - [kattelmod](https://github.com/ska-sa/kattelmod)
-- [katsdpingest](https://github.com/ska-sa/katsdpingest) checked out, but it doesn't need to be installed
-- [katsdpcontroller](https://github.com/ska-sa/katsdpcontroller) checked out, but it doesn't need to be installed (unless you want to run your local copy instead of the Docker image)
+- [katsdpingest](https://github.com/ska-sa/katsdpingest) checked out, but it
+  doesn't need to be installed
+- [katsdpcontroller](https://github.com/ska-sa/katsdpcontroller) checked out,
+  but it doesn't need to be installed (unless you want to run your local copy
+  instead of the Docker image)
 - Python packages `netifaces`, `psutil`, `py3nvml` and `pycuda`.
 
 You'll also need certain ports to be available on your machine:
@@ -34,6 +39,14 @@ You'll also need certain ports to be available on your machine:
 Prometheus, Grafana, Elasticsearch, Logstash and Kibana are all just for
 monitoring, so you could disable them in `docker-compose.yml` if they are
 causing problems.
+
+You'll also usually need access to the SDP docker registry at
+sdp-docker-registry.kat.ac.za, with the credentials stored (unencrypted) in
+your `~/.docker/config.json`. Note that on some systems, `docker login` stores
+credentials in a key store, which will not work with the Mesos agent. If your
+images are stored in a different registry, use the `--registry` option when
+starting the master controller, and substitute it in any example commands
+below.
 
 ## Starting up the sandbox
 
@@ -122,6 +135,7 @@ python kattelmod/test/basic_track.py --config=sim_16ant_local.cfg 'Zenith, azel,
 ```
 or
 ```sh
+trg="PKS 0408-65, radec target, 4:08:20.38, -65:45:09.1, (800.0 8400.0 -3.708 3.807 -0.7202)"
 python ./scripts/image.py -t 900 "$trg" -m 1000 --config sim-local-spectral8.cfg
 ```
 
@@ -147,3 +161,7 @@ versions of images to run, which means that locally-built images will be
 ignored. Use `--no-pull` when starting the container to always use the
 local copy of the image if it exists. Note that this can easily lead to using
 very old copies of images.
+
+For overriding individual images, one can use `--image-override NAME:IMAGE` to
+specify the specific image to use for NAME. This will not be force-pulled, so a
+locally-build image will be used.
