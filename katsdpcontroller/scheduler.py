@@ -1391,7 +1391,6 @@ class AgentGPU(GPUResources):
         super().__init__(index)
         self.devices = spec['devices']
         self.uuid = spec.get('uuid')
-        self.driver_version = spec['driver_version']
         self.name = spec['name']
         self.compute_capability = tuple(spec['compute_capability'])
         self.device_attributes = spec['device_attributes']
@@ -1459,7 +1458,6 @@ class Agent:
         self.gpus = []
         self.numa = []
         self.priority = None
-        self.nvidia_container_runtime = False
         for attribute in offers[0].attributes:
             try:
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
@@ -1489,11 +1487,6 @@ class Agent:
                     value = _decode_json_base64(attribute.text.value)
                     schemas.INFINIBAND_DEVICES.validate(value)
                     self.infiniband_devices = value
-                elif (attribute.name == 'katsdpcontroller.nvidia_container_runtime'
-                      and attribute.type == 'TEXT'):
-                    value = _decode_json_base64(attribute.text.value)
-                    schemas.NVIDIA_CONTAINER_RUNTIME.validate(value)
-                    self.nvidia_container_runtime = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
@@ -2073,29 +2066,16 @@ class PhysicalTask(PhysicalNode):
                 for interface in self.agent.interfaces:
                     docker_devices.update(interface.infiniband_devices)
 
-        gpu_driver_version = None
         # UUIDs for GPUs to be handled by nvidia-container-runtime
         gpu_uuids = []
         for gpu_alloc in self.allocation.gpus:
             for resource in gpu_alloc.resources.values():
                 taskinfo.resources.extend(resource.info())
             gpu = self.agent.gpus[gpu_alloc.index]
-            if self.agent.nvidia_container_runtime and gpu.uuid:
-                gpu_uuids.append(gpu.uuid)
-            else:
-                docker_devices.update(gpu.devices)
-                # We assume all GPUs on an agent have the same driver version.
-                # This is reflected in the NVML API, so should be safe.
-                gpu_driver_version = gpu.driver_version
-        if gpu_driver_version is not None:
-            volume = Dict()
-            volume.mode = 'RO'
-            volume.container_path = '/usr/local/nvidia'
-            volume.source.type = 'DOCKER_VOLUME'
-            volume.source.docker_volume.driver = 'nvidia-docker'
-            volume.source.docker_volume.name = 'nvidia_driver_' + gpu_driver_version
-            taskinfo.container.setdefault('volumes', []).append(volume)
+            gpu_uuids.append(gpu.uuid)
         if gpu_uuids:
+            # TODO: once we've upgraded to Docker 19.03 everywhere we can use its
+            # built-in GPU support.
             docker_parameters.append({'key': 'runtime', 'value': 'nvidia'})
             env = taskinfo.command.environment.setdefault('variables', [])
             env.append({

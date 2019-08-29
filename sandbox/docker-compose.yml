@@ -54,7 +54,7 @@ services:
 
   singularity:
     network_mode: host
-    image: hubspot/singularityservice:0.22.0
+    image: hubspot/singularityservice:1.0.0
     depends_on:
       - mesos-master
       - exhibitor
@@ -99,15 +99,35 @@ services:
       - ./etc/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   logstash:
-    image: docker.elastic.co/logstash/logstash-oss:7.2.0
-    command: logstash -w 1 -f /etc/logstash.conf
+    network_mode: host
+    image: docker.elastic.co/logstash/logstash-oss:7.3.1
+    command: logstash -w 1 -f /etc/logstash.conf --http.host 127.0.0.1
     environment:
       - LS_HEAP_SIZE=2048m
     volumes:
       - ./etc/logstash.conf:/etc/logstash.conf:ro
+      - ./etc/logstash:/etc/logstash:ro
       - ./logs:/logstash-logs
-    ports:
-      - "127.0.0.1:12201:12201/udp"    # GELF
+
+  elasticsearch:
+    network_mode: host
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.1
+    environment:
+      - discovery.type=single-node
+      - network.host=127.0.0.1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+  kibana:
+    network_mode: host
+    build:
+      context: etc/elk
+      dockerfile: Dockerfile.kibana-logtrail
+    environment:
+      - ELASTICSEARCH_HOSTS=http://127.0.0.1:9200
+      - SERVER_HOST=127.0.0.1
+    volumes:
+      - ./etc/logtrail.json:/usr/share/kibana/plugins/logtrail/logtrail.json
 
   consul:
     network_mode: host
@@ -124,3 +144,4 @@ services:
 
 volumes:
   prometheus_data: {}
+  elasticsearch_data: {}

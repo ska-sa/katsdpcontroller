@@ -1,0 +1,28 @@
+{
+   "attributes": {
+      "version": 1,
+      "hits": 0,
+      "title": "SDP Messages",
+      "kibanaSavedObjectMeta": {
+         "searchSourceJSON": "{\"highlightAll\":true,\"version\":true,\"query\":{\"query\":\"(subarray_product_id:* OR task.keyword:sdpmc) AND NOT task.keyword:telstate\",\"language\":\"kuery\"},\"filter\":[],\"indexRefName\":\"kibanaSavedObjectMeta.searchSourceJSON.index\"}"
+      },
+      "columns": [
+         "task",
+         "subarray_product_id",
+         "level_name",
+         "message"
+      ],
+      "description": "",
+      "sort": [
+         "@timestamp",
+         "desc"
+      ]
+   },
+   "references": [
+      {
+         "type": "index-pattern",
+         "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+         "id": "logstash"
+      }
+   ]
+}

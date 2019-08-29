@@ -504,11 +504,11 @@ class TestAgent(unittest.TestCase):
         self.gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
             [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
-              'compute_capability': (5, 2), 'numa_node': 1},
+              'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 1, 'uuid': 'GPU-123'},
              {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
-              'compute_capability': (5, 2), 'numa_node': 0}])
+              'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 0, 'uuid': 'GPU-456'}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.priority_attr = Dict()
@@ -895,8 +895,8 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
             [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'driver_version': '123.45', 'name': 'Dummy GPU', 'device_attributes': {},
-              'compute_capability': (5, 2), 'numa_node': 1}])
+              'name': 'Dummy GPU', 'device_attributes': {},
+              'compute_capability': (5, 2), 'numa_node': 1, 'uuid': 'GPU-123'}])
         interface_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
             [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
@@ -1259,12 +1259,10 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.agent0_attrs = [
             _make_json_attr('katsdpcontroller.gpus', [
-                {'driver_version': '123.45',
-                 'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+                {'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
                  'uuid': 'GPU-123',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
-                {'driver_version': '123.45',
-                 'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
+                {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
                  'uuid': 'GPU-456',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
             ]),
@@ -1274,7 +1272,6 @@ class TestScheduler(asynctest.ClockedTestCase):
             _make_json_attr('katsdpcontroller.interfaces', [
                 {'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
                  'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
-            _make_json_attr('katsdpcontroller.nvidia_container_runtime', True),
             self.numa_attr
         ]
         self._make_physical()
