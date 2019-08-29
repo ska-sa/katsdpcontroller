@@ -164,4 +164,4 @@ very old copies of images.
 
 For overriding individual images, one can use `--image-override NAME:IMAGE` to
 specify the specific image to use for NAME. This will not be force-pulled, so a
-locally-build image will be used.
+locally-built image will be used.
