@@ -36,6 +36,7 @@ itsdangerous==1.1.0        # via flask
 jinja2==2.10               # via aiohttp-jinja2
 jsonschema==2.6.0
 jupyter-core==4.4.0        # via nbformat
+katportalclient
 katversion
 kazoo==2.4.0
 llvmlite                   # via numba
@@ -80,4 +81,3 @@ katpoint @ git+https://github.com/ska-sa/katpoint
 katdal @ git+https://github.com/ska-sa/katdal
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
 katsdpservices @ git+ssh://git@github.com/ska-sa/katsdpservices
-katportalclient @ git+https://github.com/ska-sa/katportalclient
