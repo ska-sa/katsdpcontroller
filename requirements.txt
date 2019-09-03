@@ -49,7 +49,7 @@ numba                      # via katdal
 netifaces
 networkx==2.0
 numpy
-omnijson==0.1.2            # via katportalclient
+omnijson                   # via katportalclient
 pkginfo
 plotly==3.5.0              # via plotly
 prometheus_async==18.1.0
@@ -70,7 +70,7 @@ toolz                      # via katdal
 tornado==6.0.2             # via katportalclient
 traitlets==4.3.2           # via nbformat
 typing-extensions==3.7.2   # via aiohttp
-ujson==1.35                # via katportalclient
+ujson                      # via katportalclient
 urllib3==1.22              # via requests
 websocket-client==0.45.0   # via docker
 werkzeug==0.14.1           # via flask
