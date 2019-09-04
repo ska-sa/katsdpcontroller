@@ -1588,11 +1588,12 @@ def _stream_url(capture_block_id, stream_name):
     return url
 
 
-def _sky_model_url(capture_block_id, continuum_telstate_name, target):
-    url = 'redis://{endpoints[telstate_telstate]}/'
-    url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
-    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_telstate_name))
+def _sky_model_url(data_url, continuum_name, target):
+    # data_url must have been returned by stream_url
+    url = data_url
+    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_name))
     url += '&target={}'.format(urllib.parse.quote_plus(target.description))
+    url += '&format=katdal'
     return url
 
 
@@ -1802,7 +1803,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 '{}_{}_{}'.format(capture_block_id, name, target_name)
             ]
             if continuum_telstate_name is not None:
-                sky_model_url = _sky_model_url(capture_block_id, continuum_telstate_name, target)
+                sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
                 imager.command += ['--subtract', sky_model_url]
 
             imager.katsdpservices_config = False
