@@ -71,9 +71,9 @@ tornado==6.0.2             # via katportalclient
 traitlets==4.3.2           # via nbformat
 typing-extensions==3.7.2   # via aiohttp
 ujson                      # via katportalclient
-urllib3==1.22              # via requests
+urllib3                    # via requests
 websocket-client==0.45.0   # via docker
-werkzeug==0.14.1           # via flask
+werkzeug==0.15.5           # via flask
 wrapt==1.10.11             # via prometheus_async
 yarl                       # via aiohttp
 
