@@ -80,4 +80,4 @@ yarl                       # via aiohttp
 katpoint @ git+https://github.com/ska-sa/katpoint
 katdal @ git+https://github.com/ska-sa/katdal
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
-katsdpservices @ git+ssh://git@github.com/ska-sa/katsdpservices
+katsdpservices @ git+https://git@github.com/ska-sa/katsdpservices
