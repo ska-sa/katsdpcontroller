@@ -34,9 +34,10 @@ idna-ssl                   # via aiohttp
 ipaddress                  # via katsdptelstate
 ipython-genutils==0.2.0    # via nbformat
 itsdangerous==1.1.0        # via flask
-jinja2==2.10.1             # via aiohttp-jinja2, flask
+jinja2                     # via aiohttp-jinja2
 jsonschema==2.6.0
 jupyter-core==4.4.0        # via nbformat
+katportalclient
 katversion
 kazoo==2.4.0
 llvmlite                   # via numba
@@ -49,7 +50,7 @@ numba                      # via katdal
 netifaces
 networkx==2.0
 numpy
-omnijson==0.1.2            # via katportalclient
+omnijson                   # via katportalclient
 pkginfo
 plotly==4.0.0              # via plotly
 prometheus_async==18.1.0
@@ -71,8 +72,8 @@ toolz                      # via katdal
 tornado==6.0.2             # via katportalclient
 traitlets==4.3.2           # via nbformat
 typing-extensions==3.7.2   # via aiohttp
-ujson==1.35                # via katportalclient
-urllib3==1.22              # via requests
+ujson                      # via katportalclient
+urllib3                    # via requests
 websocket-client==0.45.0   # via docker
 werkzeug==0.15.5           # via flask
 wrapt==1.10.11             # via prometheus_async
@@ -81,5 +82,4 @@ yarl                       # via aiohttp
 katpoint @ git+https://github.com/ska-sa/katpoint
 katdal @ git+https://github.com/ska-sa/katdal
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
-katsdpservices @ git+ssh://git@github.com/ska-sa/katsdpservices
-katportalclient @ git+https://github.com/ska-sa/katportalclient
+katsdpservices @ git+https://github.com/ska-sa/katsdpservices

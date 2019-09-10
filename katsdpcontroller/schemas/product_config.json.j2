@@ -50,8 +50,9 @@
         "continuum_parameters": {
             "type": "object",
             "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_]*$": {"type": "object"}
-            }
+                "^[A-Za-z_][A-Za-z0-9_]*$": {}
+            },
+            "additionalProperties": false
         },
         "singleton": {
             "type": "array",

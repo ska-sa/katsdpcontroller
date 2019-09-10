@@ -1812,6 +1812,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                 sky_model_url = _sky_model_url(capture_block_id, continuum_telstate_name, target)
                 imager.command += ['--subtract', sky_model_url]
 
+            imager.katsdpservices_config = False
             g.add_node(imager)
             if continuum is not None:
                 g.add_edge(imager, continuum, depends_finished=True)
