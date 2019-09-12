@@ -44,8 +44,8 @@ HAPROXY_HEADER = textwrap.dedent(r"""
 
     frontend http-in
         bind *:8080
-        acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9]+/[^/]+$'
-        acl has_array_stream path_reg '^/array_\d+_[a-zA-Z0-9]+/[^/]+/'
+        acl missing_slash path_reg '^/array_\d+_[a-zA-Z0-9_]+/[^/]+$'
+        acl has_array_stream path_reg '^/array_\d+_[a-zA-Z0-9_]+/[^/]+/'
         http-request redirect code 301 prefix / drop-query append-slash if missing_slash
         http-request set-var(req.array) path,field(2,/) if has_array_stream
         http-request set-var(req.stream) path,field(3,/) if has_array_stream
@@ -101,7 +101,7 @@ class Server:
 async def get_servers(client):
     servers = defaultdict(Server)
     if client.is_connected:
-        sensor_regex = r'^(array_\d+_[A-Za-z0-9]+)\.timeplot\.([^.]*)\.html_port$'
+        sensor_regex = r'^(array_\d+_[A-Za-z0-9_]+)\.timeplot\.([^.]*)\.html_port$'
         with async_timeout.timeout(30):
             reply, informs = await client.request('sensor-value', '/' + sensor_regex + '/')
         for inform in informs:
