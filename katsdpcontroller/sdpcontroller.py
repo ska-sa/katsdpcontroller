@@ -1435,10 +1435,14 @@ class SDPControllerServer(DeviceServer):
             product_config.validate(config_dict)
             config_dict = await product_config.update_from_sensors(config_dict)
             config_dict = product_config.normalise(config_dict)
-        except (ValueError, product_config.SensorFailure, jsonschema.ValidationError) as error:
+        except product_config.SensorFailure as error:
+            retmsg = "CAM error: {}".format(error)
+            product_logger.error(retmsg)
+            raise FailReply(retmsg) from error
+        except (ValueError, jsonschema.ValidationError) as error:
             retmsg = "Failed to process config: {}".format(error)
             product_logger.error(retmsg)
-            raise FailReply(retmsg)
+            raise FailReply(retmsg) from error
 
         subarray_product_id = await self.configure_product(ctx, subarray_product_id, config_dict)
         return subarray_product_id
