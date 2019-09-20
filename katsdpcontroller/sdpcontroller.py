@@ -1436,7 +1436,7 @@ class SDPControllerServer(DeviceServer):
             config_dict = await product_config.update_from_sensors(config_dict)
             config_dict = product_config.normalise(config_dict)
         except product_config.SensorFailure as error:
-            retmsg = "Erorr retrieving sensor data from CAM: {}".format(error)
+            retmsg = "Error retrieving sensor data from CAM: {}".format(error)
             product_logger.error(retmsg)
             raise FailReply(retmsg) from error
         except (ValueError, jsonschema.ValidationError) as error:
