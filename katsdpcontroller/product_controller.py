@@ -1233,11 +1233,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         except product_config.SensorFailure as exc:
             retmsg = f"Error retrieving sensor data from CAM: {exc}"
             logger.error(retmsg)
-            raise FailReply(retmsg) from error
+            raise FailReply(retmsg) from exc
         except (ValueError, jsonschema.ValidationError) as exc:
             retmsg = f"Failed to process config: {exc}"
             logger.error(retmsg)
-            raise FailReply(retmsg) from error
+            raise FailReply(retmsg) from exc
 
         await self.configure_product(name, config_dict)
 
