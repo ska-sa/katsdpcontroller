@@ -616,7 +616,9 @@ def _make_timeplot_correlator(g, config, spectral_name):
 
     # Exact requirement not known (also depends on number of users). Give it
     # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
-    cpus = 2 * min(1.0, spectral_info.n_vis / _N16_32)
+    # Lower bound (from inspection) to cater for fixed overheads.
+    cpus = max(2 * min(1.0, spectral_info.n_vis / _N16_32), 0.3)
+
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
