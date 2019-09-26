@@ -43,6 +43,14 @@ IMAGES = frozenset([
     'katsdpmetawriter',
     'katsdptelstate'
 ])
+#: Number of bytes per complex visibility
+BYTES_PER_VIS = 8
+#: Number of bytes per per-visibility flag mask
+BYTES_PER_FLAG = 1
+#: Number of bytes per per-visibility weight
+BYTES_PER_WEIGHT = 1
+#: Number of bytes per vis-flags-weights combination
+BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
@@ -302,11 +310,11 @@ class L0Info(VisInfo):
     def size(self):
         """Size of single frame in bytes"""
         # complex64 for vis, uint8 for weights and flags, float32 for weights_channel
-        return self.n_vis * 10 + self.n_channels * 4
+        return self.n_vis * BYTES_PER_VFW + self.n_channels * 4
 
     @property
     def flag_size(self):
-        return self.n_vis
+        return self.n_vis * BYTES_PER_FLAG
 
     @property
     def net_bandwidth(self, ratio=1.05, overhead=128):
@@ -659,11 +667,14 @@ def _correlator_timeplot_frame_size(spectral_info, n_cont_channels, n_ingest):
     n_spec_channels = spectral_info.n_channels // n_ingest
     n_cont_channels //= n_ingest
     n_bls = spectral_info.n_baselines
-    ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * 9  # sd_data + sd_flags
+    # sd_data + sd_flags
+    ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
     ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
-    ans += n_cont_channels * n_bls * 9              # sd_blmxdata + sd_blmxflags
-    ans += n_bls * 12                               # sd_timeseries + sd_timeseriesabs
-    ans += n_spec_channels * n_perc_signals * 5     # sd_percspectrum + sd_percspectrumflags
+    # sd_blmxdata + sd_blmxflags
+    ans += n_cont_channels * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
+    ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // 2)    # sd_timeseries + sd_timeseriesabs
+    # sd_percspectrum + sd_percspectrumflags
+    ans += n_spec_channels * n_perc_signals * (BYTES_PER_VIS // 2 + BYTES_PER_FLAG)
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
     ans += n_bls * 10                               # bls_ordering
     ans += n_bls * 8 * 4                            # sd_flag_fraction
@@ -1131,7 +1142,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
     workers = 4
-    max_accum_dumps = _writer_max_accum_dumps(config, name, 10, max_channels)
+    max_accum_dumps = _writer_max_accum_dumps(config, name, BYTES_PER_VFW, max_channels)
     # Buffer enough data for 45 seconds. We've seen the disk system throw a fit
     # and hang for 30 seconds at a time, and this should allow us to ride that
     # out.
@@ -1198,7 +1209,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 4
-    max_accum_dumps = _writer_max_accum_dumps(config, l0_name, 1, max_channels)
+    max_accum_dumps = _writer_max_accum_dumps(config, l0_name, BYTES_PER_FLAG, max_channels)
     # Buffer enough data for 45 seconds of real time. We've seen the disk
     # system throw a fit and hang for 30 seconds at a time, and this should
     # allow us to ride that out.
