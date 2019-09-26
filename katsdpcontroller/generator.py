@@ -1090,16 +1090,25 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps, max
     return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 256
 
 
-def _writer_max_accum_dumps(config, name):
-    """Compute value of --obj-max-dumps for data writers"""
+def _writer_max_accum_dumps(config, name, bytes_per_vis, max_channels):
+    """Compute value of --obj-max-dumps for data writers.
+
+    If `max_channels` is not ``None``, it indicates the maximum number of
+    channels per chunk.
+    """
     info = L0Info(config, name)
-    # Allow time accumulation up to 5 minutes (to bound data loss) or 4GB (to
-    # bound memory usage).
-    limit = min(300.0 / info.int_time, 4 * 1024**3 / info.size)
+    # Allow time accumulation up to 5 minutes (to bound data loss) or 32GB
+    # (to bound memory usage).
+    limit = min(300.0 / info.int_time, 32 * 1024**3 / (info.n_vis * bytes_per_vis))
     # Compute how many are needed to allow weights/flags to achieve the target
     # object size. The scaling by n_ingest_nodes is because this is also the
     # number of substreams, and katsdpdatawriter doesn't weld substreams.
-    needed = WRITER_OBJECT_SIZE / info.flag_size * n_ingest_nodes(config, name)
+    n_ingest = n_ingest_nodes(config, name)
+    n_channels = info.n_channels // n_ingest
+    if max_channels is not None and max_channels < n_channels:
+        n_channels = max_channels
+    flag_size = info.n_baselines * n_channels
+    needed = WRITER_OBJECT_SIZE / flag_size
     # katsdpdatawriter only uses powers of two. While it would be legal to
     # pass a non-power-of-two as the max, we would be wasting memory.
     max_accum_dumps = 1
@@ -1122,7 +1131,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
     workers = 4
-    max_accum_dumps = _writer_max_accum_dumps(config, name)
+    max_accum_dumps = _writer_max_accum_dumps(config, name, 10, max_channels)
     # Buffer enough data for 45 seconds. We've seen the disk system throw a fit
     # and hang for 30 seconds at a time, and this should allow us to ride that
     # out.
@@ -1189,7 +1198,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
     flags_src = find_node(g, 'multicast.' + name)
     n_substreams = flags_src.n_addresses
     workers = 4
-    max_accum_dumps = _writer_max_accum_dumps(config, l0_name)
+    max_accum_dumps = _writer_max_accum_dumps(config, l0_name, 1, max_channels)
     # Buffer enough data for 45 seconds of real time. We've seen the disk
     # system throw a fit and hang for 30 seconds at a time, and this should
     # allow us to ride that out.
