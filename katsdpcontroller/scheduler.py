@@ -2350,10 +2350,10 @@ class Scheduler(pymesos.Scheduler):
 
     The following invariants are maintained at each yield point:
     - each dictionary within :attr:`_offers` is non-empty
-    - every role in :attr:`_roles_wanted` is non-suppressed (there may be
+    - every role in :attr:`_roles_needed` is non-suppressed (there may be
       additional non-suppressed roles, but they will be suppressed when an
       offer arrives)
-    - every role in :attr:`_offers` also appears in :attr:`_roles_wanted`
+    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
 
     Parameters
     ----------
