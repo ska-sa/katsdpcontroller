@@ -1793,7 +1793,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                                    extra=dict(capture_block_id=capture_block_id))
                     continue
 
-            imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
+            imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 name, first_channel, last_channel, target_name))
             imager.cpus = _spectral_imager_cpus(config)
             # TODO: these resources are very rough estimates
