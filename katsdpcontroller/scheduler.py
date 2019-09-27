@@ -2806,12 +2806,18 @@ class Scheduler(pymesos.Scheduler):
                         self._active[node.taskinfo.task_id.value] = (node, group.graph)
                     self._min_ports.update(new_min_ports)
                     for agent in agents:
+                        if not taskinfos[agent]:
+                            # Leave the offers in place: they might be useful
+                            # for the next item in the queue, and if they're
+                            # not needed then the next call to _update_roles
+                            # will remove them.
+                            continue
                         offer_ids = [offer.id for offer in agent.offers]
                         # TODO: does this need to use run_in_executor? Is it
                         # thread-safe to do so?
                         # TODO: if there are more pending in the queue then we
-                        # should use a filter to be re-offered resources more
-                        # quickly.
+                        # should use a filter to be re-offered remaining
+                        # resources of this agent more quickly.
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
                             self._remove_offer(role, agent.agent_id, offer_id.value)
