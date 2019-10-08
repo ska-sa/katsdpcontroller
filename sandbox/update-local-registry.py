@@ -93,6 +93,8 @@ def parse_args() -> argparse.Namespace:
                         help='comma-separated list of images to update [all]')
     parser.add_argument('--exclude', type=comma_split, default=[],
                         help='comma-separated list of images to skip [none]')
+    parser.add_argument('--http-mirror', default='',
+                        help='Local mirror for fetching large files [none]')
     args = parser.parse_args()
     args.include = expand_special(args.include)
     args.exclude = expand_special(args.exclude)
@@ -148,7 +150,7 @@ def build_image(name: str, args: argparse.Namespace) -> None:
                 f'--label=org.label-schema.vcs-ref={git_rev}',
                 f'--label=org.label-schema.vcs-url={url}',
                 '--build-arg', f'KATSDPDOCKERBASE_REGISTRY={args.downstream}',
-                '--build-arg', f'KATSDPDOCKERBASE_MIRROR=',
+                '--build-arg', f'KATSDPDOCKERBASE_MIRROR={args.http_mirror}',
                 '--pull=true',
                 '-t', downstream_image, '.'
             ], stdin=subprocess.DEVNULL, check=True, cwd=workdir)
