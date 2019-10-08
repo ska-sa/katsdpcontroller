@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 import enum
+import csv
 import subprocess
 import argparse
 import tempfile
 import shutil
 import os
 import logging
-from typing import List, Set, Iterable, Optional
+from typing import List, Set, Dict, Iterable, Optional
 
 import katsdpcontroller.generator
 
@@ -43,7 +44,7 @@ IMAGE_INFO = {
     'katsdpcontim': ImageInfo(action=Action.BUILD, repo='katsdppipelines'),
     'katsdpingest_titanx': ImageInfo(action=Action.TUNE, repo='katsdpingest'),
     'katsdpingest': ImageInfo(action=Action.BUILD),
-    'katsdpimager': ImageInfo(action=Action.BUILD, branch='more-packaging'),
+    'katsdpimager': ImageInfo(action=Action.BUILD),
     'katcbfsim': ImageInfo(action=Action.BUILD),
     # Will go away after merge
     'katsdpcontroller': ImageInfo(action=Action.BUILD, branch='image-builder')
@@ -113,25 +114,33 @@ def docker_cmd(*args: str) -> None:
     subprocess.run(['docker'] + list(args), stdin=subprocess.DEVNULL, check=True)
 
 
+def git_clone(workdir: str, url: str, branch: str) -> None:
+    subprocess.run(
+        [
+            'git', 'clone',
+            '--branch', branch,
+            '--recurse-submodules',
+            '--depth=1', '--shallow-submodules',
+            url, '.'
+        ], stdin=subprocess.DEVNULL, check=True, cwd=workdir,
+        env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+
+
+def repo_url(repo: str) -> str:
+    return f'https://github.com/ska-sa/{repo}'
+
+
 def build_image(name: str, args: argparse.Namespace) -> None:
     info = image_info(name)
     tmpdir = tempfile.mkdtemp()
     try:
         repo = info.repo or name
-        url = f'https://github.com/ska-sa/{repo}'
+        url = repo_url(repo)
         branch = info.branch
         logging.info('Checking out %s branch %s to build %s', url, branch, repo)
         # GIT_TERMINAL_PROMPT=0 prevents Git from asking for credentials,
         # which could happen if a typo meant the repository did not exist.
-        subprocess.run(
-            [
-                'git', 'clone',
-                '--branch', branch,
-                '--recurse-submodules',
-                '--depth=1', '--shallow-submodules',
-                url, '.'
-            ], stdin=subprocess.DEVNULL, check=True, cwd=tmpdir,
-            env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+        git_clone(tmpdir, url, branch)
         git_rev = subprocess.run(
             ['git', 'rev-parse', 'HEAD'],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, check=True, cwd=tmpdir,
@@ -173,6 +182,45 @@ def copy_image(name: str, args: argparse.Namespace) -> None:
     logging.info('%s pushed', downstream_image)
 
 
+def tune_image(name: str, args: argparse.Namespace) -> None:
+    assert name.startswith('katsdpingest_')
+    lines = subprocess.run(
+        ['nvidia-smi', '--query-gpu=name,uuid', '--format=csv,noheader'],
+        stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+        check=True, encoding='utf-8').stdout.splitlines()
+    reader = csv.reader(lines)
+    gpus: Dict[str, str] = {}        # Maps name to UUID
+    for row in reader:
+        gpus[row[0]] = row[1].strip()
+    if not gpus:
+        logging.warning('No NVIDIA GPUs detected - skipping autotuning for %s', name)
+    for gpu_name, uuid in gpus.items():
+        logging.info('Running autotuning for %s', gpu_name)
+        tmpdir = tempfile.mkdtemp()
+        try:
+            git_clone(tmpdir, repo_url('katsdpingest'), 'master')
+            upstream_image = downstream_path('katsdpingest', args)
+            mangled_name = katsdpcontroller.generator.normalise_gpu_name(gpu_name)
+            downstream_image = downstream_path('katsdpingest_' + mangled_name, args)
+
+            logging.info('Pulling %s', upstream_image)
+            docker_cmd('pull', upstream_image)
+            logging.info('Autotuning %s -> %s', upstream_image, downstream_image)
+            subprocess.run(
+                [
+                    os.path.join(tmpdir, 'scripts', 'autotune_mkimage.py'),
+                    downstream_image,
+                    upstream_image
+                ],
+                stdin=subprocess.DEVNULL, check=True,
+                env={**os.environ, 'NVIDIA_VISIBLE_DEVICES': uuid})
+        finally:
+            shutil.rmtree(tmpdir)
+        logging.info('Pushing %s', downstream_image)
+        docker_cmd('push', downstream_image)
+        logging.info('%s pushed', downstream_image)
+
+
 def main() -> None:
     logging.basicConfig(level='INFO')
     args = parse_args()
@@ -182,7 +230,7 @@ def main() -> None:
             continue
         info = image_info(name)
         if info.action == Action.TUNE:
-            logging.warning('Autotuning not implemented yet (%s)', name)
+            tune_image(name, args)
         elif info.action == Action.BUILD or args.build_all:
             build_image(name, args)
         else:
