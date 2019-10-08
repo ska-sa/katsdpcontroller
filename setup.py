@@ -8,7 +8,7 @@ setup(
     description="Service providing control and monitoring services for the "
                 "MeerKAT Science Data Processor",
     author="MeerKAT SDP Team",
-    author_email="sdpdev+katsdpcontroller@ska.ac.za"
+    author_email="sdpdev+katsdpcontroller@ska.ac.za",
     packages=find_packages(),
     package_data={'katsdpcontroller': ['static/*', 'schemas/*', 'templates/*', 'assets/*']},
     include_package_data=True,
