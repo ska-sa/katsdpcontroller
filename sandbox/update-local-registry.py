@@ -32,7 +32,7 @@ class ImageInfo:
 # Order is important here: images are built in order
 EXTRA_IMAGES = ['docker-base-runtime', 'docker-base-build',
                 'docker-base-gpu-build', 'docker-base-gpu-runtime',
-                'katsdpingest']
+                'katsdpingest', 'katsdpcontroller']
 IMAGES = EXTRA_IMAGES + list(katsdpcontroller.generator.IMAGES)
 
 IMAGE_INFO = {
