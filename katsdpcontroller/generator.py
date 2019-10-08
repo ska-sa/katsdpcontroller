@@ -128,18 +128,16 @@ def normalise_gpu_name(name):
 
 
 class IngestTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph):
-        await super().resolve(resolver, graph)
+    async def resolve(self, resolver, graph, image_path=None):
         # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image. If it is the standard GPU, don't try to override
-        # anything, but otherwise synthesize an image name by mangling the
-        # GPU name.
-        gpu = self.agent.gpus[self.allocation.gpus[0].index]
-        if gpu.name != INGEST_GPU_NAME:
+        # matching image.
+        if image_path is None:
+            gpu = self.agent.gpus[self.allocation.gpus[0].index]
             gpu_name = normalise_gpu_name(gpu.name)
             image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
-            self.taskinfo.container.docker.image = image_path
-            logger.info('Develop mode: using %s for ingest', image_path)
+            if gpu != INGEST_GPU_NAME:
+                logger.info('Develop mode: using %s for ingest', image_path)
+        await super().resolve(resolver, graph, image_path)
 
 
 def is_develop(config):

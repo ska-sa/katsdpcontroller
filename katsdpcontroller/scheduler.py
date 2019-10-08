@@ -1762,7 +1762,7 @@ class PhysicalNode:
         self._ready_waiter = None
         self.generation = 0
 
-    async def resolve(self, resolver, graph):
+    async def resolve(self, resolver, graph, image_path=None):
         """Make final preparations immediately before starting.
 
         Parameters
@@ -1771,6 +1771,8 @@ class PhysicalNode:
             Resolver for images etc.
         graph : :class:`networkx.MultiDiGraph`
             Physical graph containing the task
+        image_path : str, optional
+            Full path to image to use, bypassing the `resolver`
         """
         self.depends_ready = []
         for _src, trg, attr in graph.out_edges([self], data=True):
@@ -1985,7 +1987,7 @@ class PhysicalTask(PhysicalNode):
                         d[name] = value
                 setattr(self, resource.name, d)
 
-    async def resolve(self, resolver, graph):
+    async def resolve(self, resolver, graph, image_path=None):
         """Do final preparation before moving to :const:`TaskState.STAGING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
@@ -1995,6 +1997,8 @@ class PhysicalTask(PhysicalNode):
             Resolver to allocate resources like task IDs
         graph : :class:`networkx.MultiDiGraph`
             Physical graph
+        image_path : str, optional
+            Full path to image to use, bypassing the `resolver`
         """
         await super().resolve(resolver, graph)
         for _src, trg, attr in graph.out_edges([self], data=True):
@@ -2034,7 +2038,8 @@ class PhysicalTask(PhysicalNode):
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
-        image_path = await resolver.image_resolver(self.logical_node.image)
+        if image_path is None:
+            image_path = await resolver.image_resolver(self.logical_node.image)
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []
