@@ -139,9 +139,9 @@ developing the master controller itself). **Note: even when running the
 master controller from source, the product controller is still run from a
 Docker image.**
 
-In either case, add `--registry localhost:5000` if you are using a local
-registry rather than the SARAO SDP registry, and omit the `--haproxy` option
-if you do not have haproxy installed.
+In either case, add `--registry http://localhost:5000` if you are using a
+local registry rather than the SARAO SDP registry, and omit the `--haproxy`
+option if you do not have haproxy installed.
 
 ### Docker image
 

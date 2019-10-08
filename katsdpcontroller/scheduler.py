@@ -866,6 +866,14 @@ class ResourceAllocation:
         self.volumes = []
 
 
+def _strip_scheme(image: str) -> str:
+    """Remove optional http:// or https:// prefix.
+
+    Docker doesn't like these on image paths.
+    """
+    return re.sub(r'^https?://', '', image)
+
+
 class ImageLookup:
     """Abstract base class to get a full image name from a repo and tag."""
     @abstractmethod
@@ -878,7 +886,7 @@ class SimpleImageLookup(ImageLookup):
         self._private_registry = private_registry
 
     async def __call__(self, repo: str, tag: str) -> str:
-        return f'{self._private_registry}/{repo}:{tag}'
+        return _strip_scheme(f'{self._private_registry}/{repo}:{tag}')
 
 
 class HTTPImageLookup(ImageLookup):
@@ -923,7 +931,7 @@ class HTTPImageLookup(ImageLookup):
                     from error
             except KeyError:
                 raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-        return f'{self._private_registry}/{repo}@{digest}'
+        return _strip_scheme(f'{self._private_registry}/{repo}@{digest}')
 
 
 class ImageResolver:
