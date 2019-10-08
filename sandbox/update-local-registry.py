@@ -85,15 +85,17 @@ def comma_split(x: str) -> List[str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--upstream', default='quay.io/ska-sa',
-                        help='upstream registry from which to pull pre-built images [%(default)s]')
+                        help='Upstream registry from which to pull pre-built images [%(default)s]')
     parser.add_argument('--downstream', default='localhost:5000',
-                        help='registry to push images into [%(default)s]')
+                        help='Registry to push images into [%(default)s]')
+    parser.add_argument('--downstream-tag', default='latest',
+                        help='Docker tag for built images [%(default)s]')
     parser.add_argument('--build-all', action='store_true',
                         help='Build all images rather than copying from upstream')
     parser.add_argument('--include', type=comma_split, default=['all'],
-                        help='comma-separated list of images to update [all]')
+                        help='Comma-separated list of images to update [all]')
     parser.add_argument('--exclude', type=comma_split, default=[],
-                        help='comma-separated list of images to skip [none]')
+                        help='Comma-separated list of images to skip [none]')
     parser.add_argument('--http-mirror', default='',
                         help='Local mirror for fetching large files [none]')
     args = parser.parse_args()
@@ -107,7 +109,7 @@ def upstream_path(name: str, args: argparse.Namespace) -> str:
 
 
 def downstream_path(name: str, args: argparse.Namespace) -> str:
-    return f'{args.downstream}/{name}:latest'
+    return f'{args.downstream}/{name}:{args.downstream_tag}'
 
 
 def docker_cmd(*args: str) -> None:
