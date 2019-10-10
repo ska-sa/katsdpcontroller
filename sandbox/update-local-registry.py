@@ -7,6 +7,7 @@ import argparse
 import tempfile
 import shutil
 import os
+import sys
 import logging
 from typing import List, Set, Dict, Iterable, Optional
 
@@ -197,7 +198,8 @@ def tune_image(name: str, args: argparse.Namespace) -> None:
     for row in reader:
         gpus[row[0]] = row[1].strip()
     if not gpus:
-        logging.warning('No NVIDIA GPUs detected - skipping autotuning for %s', name)
+        logging.error('No NVIDIA GPUs detected - cannot autotune %s', name)
+        sys.exit(1)
     for gpu_name, uuid in gpus.items():
         logging.info('Running autotuning for %s', gpu_name)
         tmpdir = tempfile.mkdtemp()
