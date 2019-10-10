@@ -4,7 +4,7 @@ This is a docker-compose environment for testing on a local machine. It runs
 local versions of much of the infrastructure present on a production system.
 
 It can be used either inside or outside the SARAO firewall, but in the latter
-case some extra steps are needed to create your own Docker registry with build
+case some extra steps are needed to create your own Docker registry with built
 images.
 
 ## Requirements
@@ -55,7 +55,7 @@ which will not work with the Mesos agent.
 If you don't have access to sdp-docker-registry.kat.ac.za (outside the SARAO firewall)
 or want to be independent of it, you can create your own registry. The steps to
 do this, starting at the root of katsdpcontroller, and with a Python 3.6+
-virtual environment:
+virtual environment, are:
 
 ```sh
 pip install -e .
@@ -69,7 +69,8 @@ The script has some command-line options. In particular, you can use
 `--include` and `--exclude` to control which images are built, and you can use
 `--downstream` to use a different registry for the built images (for example, a
 registry shared between multiple people). Note that some of the built images
-might not be suitable for public redistribution due to licensing restrictions.
+(for example, those bundling CUDA) might not be suitable for public
+redistribution due to licensing restrictions.
 
 ## Starting up the sandbox
 

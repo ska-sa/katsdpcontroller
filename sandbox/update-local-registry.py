@@ -41,6 +41,7 @@ IMAGE_INFO = {
     'docker-base-gpu-build': ImageInfo(action=Action.BUILD, repo='katsdpdockerbase'),
     'docker-base-gpu-runtime': ImageInfo(action=Action.BUILD, repo='katsdpdockerbase'),
     'katsdpcal': ImageInfo(action=Action.BUILD, repo='katsdppipelines'),
+    'katsdpcontim': ImageInfo(action=Action.BUILD),
     'katsdpingest_titanx': ImageInfo(action=Action.TUNE, repo='katsdpingest'),
     'katsdpingest': ImageInfo(action=Action.BUILD),
     'katsdpimager': ImageInfo(action=Action.BUILD),
@@ -83,19 +84,21 @@ def comma_split(x: str) -> List[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--upstream', default='quay.io/ska-sa',
+    parser.add_argument('--upstream', default='quay.io/ska-sa', metavar='REGISTRY',
                         help='Upstream registry from which to pull pre-built images [%(default)s]')
-    parser.add_argument('--downstream', default='localhost:5000',
+    parser.add_argument('--downstream', default='localhost:5000', metavar='REGISTRY',
                         help='Registry to push images into [%(default)s]')
-    parser.add_argument('--downstream-tag', default='latest',
+    parser.add_argument('--downstream-tag', default='latest', metavar='TAG',
                         help='Docker tag for built images [%(default)s]')
     parser.add_argument('--build-all', action='store_true',
                         help='Build all images rather than copying from upstream')
     parser.add_argument('--include', type=comma_split, default=['all'],
-                        help='Comma-separated list of images to update [all]')
+                        help=('Comma-separated list of images to update, and/or special '
+                              'values "copy", "build", "tune", "none", "all" [all]'))
     parser.add_argument('--exclude', type=comma_split, default=[],
-                        help='Comma-separated list of images to skip [none]')
-    parser.add_argument('--http-mirror', default='',
+                        help=('Comma-separated list of images to exclude, and/or special '
+                              'values "copy", "build", "tune", "none", "all" [all]'))
+    parser.add_argument('--http-mirror', default='', metavar='URL',
                         help='Local mirror for fetching large files [none]')
     args = parser.parse_args()
     args.include = expand_special(args.include)
@@ -226,7 +229,8 @@ def main() -> None:
     logging.basicConfig(level='INFO')
     args = parse_args()
 
-    for name in IMAGES:
+    images = sorted(IMAGES, key=lambda image: image_info(image).action.value)
+    for name in images:
         if name not in args.include or name in args.exclude:
             continue
         info = image_info(name)
