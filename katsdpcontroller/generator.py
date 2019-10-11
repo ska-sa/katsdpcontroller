@@ -21,6 +21,7 @@ from katsdpcontroller.tasks import (
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
+INGEST_GPU_SHORTNAME = 'titanx'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
@@ -38,7 +39,7 @@ IMAGES = frozenset([
     'katsdpcontim',
     'katsdpdisp',
     'katsdpimager',
-    'katsdpingest_titanx',
+    'katsdpingest_' + INGEST_GPU_SHORTNAME,
     'katsdpdatawriter',
     'katsdpmetawriter',
     'katsdptelstate'
@@ -114,23 +115,29 @@ class TelstateTask(SDPPhysicalTask):
             parameters.append({'key': 'publish', 'value': f'127.0.0.1:{host_port}:6379'})
 
 
+def normalise_gpu_name(name):
+    if name == INGEST_GPU_NAME:
+        return INGEST_GPU_SHORTNAME
+    else:
+        # Turn spaces and dashes into underscores, remove anything that isn't
+        # alphanumeric or underscore, and lowercase (because Docker doesn't
+        # allow uppercase in image names).
+        mangled = re.sub('[- ]', '_', name.lower())
+        mangled = re.sub('[^a-z0-9_]', '', mangled)
+        return mangled
+
+
 class IngestTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph):
-        await super().resolve(resolver, graph)
+    async def resolve(self, resolver, graph, image_path=None):
         # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image. If it is the standard GPU, don't try to override
-        # anything, but otherwise synthesize an image name by mangling the
-        # GPU name.
-        gpu = self.agent.gpus[self.allocation.gpus[0].index]
-        if gpu.name != INGEST_GPU_NAME:
-            # Turn spaces and dashes into underscores, remove anything that isn't
-            # alphanumeric or underscore, and lowercase (because Docker doesn't
-            # allow uppercase in image names).
-            mangled = re.sub('[- ]', '_', gpu.name.lower())
-            mangled = re.sub('[^a-z0-9_]', '', mangled)
-            image_path = await resolver.image_resolver('katsdpingest_' + mangled)
-            self.taskinfo.container.docker.image = image_path
-            logger.info('Develop mode: using %s for ingest', image_path)
+        # matching image.
+        if image_path is None:
+            gpu = self.agent.gpus[self.allocation.gpus[0].index]
+            gpu_name = normalise_gpu_name(gpu.name)
+            image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
+            if gpu != INGEST_GPU_NAME:
+                logger.info('Develop mode: using %s for ingest', image_path)
+        await super().resolve(resolver, graph, image_path)
 
 
 def is_develop(config):
@@ -851,7 +858,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
-        ingest.image = 'katsdpingest_titanx'
+        ingest.image = 'katsdpingest_' + INGEST_GPU_SHORTNAME
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']

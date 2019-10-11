@@ -87,8 +87,8 @@ class SDPConfigMixin:
     def _graph_config(self, resolver, graph):
         return graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
-    async def resolve(self, resolver, graph):
-        await super().resolve(resolver, graph)
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
         if not self.logical_node.katsdpservices_config:
             if self._graph_config(resolver, graph):
                 logger.warning('Graph node %s has explicit config but katsdpservices_config=False',
@@ -384,8 +384,8 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             self._disconnect()
             super().kill(driver, **kwargs)
 
-    async def resolve(self, resolver, graph):
-        await super().resolve(resolver, graph)
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
 
         self.gui_urls = gui_urls = []
         for entry in self.logical_node.gui_urls:

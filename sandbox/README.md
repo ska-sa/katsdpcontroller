@@ -3,6 +3,10 @@
 This is a docker-compose environment for testing on a local machine. It runs
 local versions of much of the infrastructure present on a production system.
 
+It can be used either inside or outside the SARAO firewall, but in the latter
+case some extra steps are needed to create your own Docker registry with built
+images.
+
 ## Requirements
 
 Hardware-wise, you will need an NVIDIA GPU. Lots of RAM and a beefy CPU are
@@ -35,18 +39,38 @@ You'll also need certain ports to be available on your machine:
 - Prometheus: 9090
 - Grafana: 3000
 - Master controller: 5001, 8080
+- Docker registry: 5000
 
 Prometheus, Grafana, Elasticsearch, Logstash and Kibana are all just for
 monitoring, so you could disable them in `docker-compose.yml` if they are
 causing problems.
 
-You'll also usually need access to the SDP docker registry at
-sdp-docker-registry.kat.ac.za, with the credentials stored (unencrypted) in
-your `~/.docker/config.json`. Note that on some systems, `docker login` stores
-credentials in a key store, which will not work with the Mesos agent. If your
-images are stored in a different registry, use the `--registry` option when
-starting the master controller, and substitute it in any example commands
-below.
+To use the SDP Docker registry at sdp-docker-registry.kat.ac.za, you'll need
+read-access credentials stored (unencrypted) in your `~/.docker/config.json`.
+Note that on some systems, `docker login` stores credentials in a key store,
+which will not work with the Mesos agent.
+
+## Populating a local Docker registry
+
+If you don't have access to sdp-docker-registry.kat.ac.za (outside the SARAO firewall)
+or want to be independent of it, you can create your own registry. The steps to
+do this, starting at the root of katsdpcontroller, and with a Python 3.6+
+virtual environment, are:
+
+```sh
+pip install -e .
+pip install docker
+cd sandbox
+docker-compose up -d registry
+./update-local-registry.py
+```
+
+The script has some command-line options. In particular, you can use
+`--include` and `--exclude` to control which images are built, and you can use
+`--downstream` to use a different registry for the built images (for example, a
+registry shared between multiple people). Note that some of the built images
+(for example, those bundling CUDA) might not be suitable for public
+redistribution due to licensing restrictions.
 
 ## Starting up the sandbox
 
@@ -66,7 +90,13 @@ below.
    minute for the services to start up and try again. This step is only
    needed once, unless you destroy the Docker volumes from the sandbox.
 
+4. Sometimes Singularity doesn't realise that it should be the master if it is
+   started too soon after Zookeeper. To be on the safe side, run
+   `docker-compose restart singularity` to get it going.
+
 ## Preparing an image tag
+
+*This step is only applicable when using the SARAO SDP registry.*
 
 If you just want to run the master branch of all the SDP code you can skip
 this step. Otherwise, use
@@ -79,6 +109,9 @@ whatever you want, as long as you remember to use the actual name when copying
 and pasting examples below).
 
 ## Creating an auto-tuned ingest container
+
+*If you're using `update-local-registry.py` to populate your own registry it
+will take care of this step for you.*
 
 The ingest container needs to be pre-tuned for your specific GPU. Unless you
 have one of the GPUs that is pre-tuned, you will need to run the following
@@ -102,10 +135,14 @@ much faster.
 ## Starting the master controller
 
 There are two ways to do this, depending on whether you want to use a
-pre-build container or run it directly on the host (which is useful when
+pre-built container or run it directly on the host (which is useful when
 developing the master controller itself). **Note: even when running the
 master controller from source, the product controller is still run from a
 Docker image.**
+
+In either case, add `--registry http://localhost:5000` if you are using a
+local registry rather than the SARAO SDP registry, and omit the `--haproxy`
+option if you do not have haproxy installed.
 
 ### Docker image
 
@@ -118,8 +155,6 @@ docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127
 ```sh
 KATSDP_LOG_GELF_ADDRESS=127.0.0.1 scripts/sdp_master_controller.py --gui-urls sandbox/gui-urls/ --localhost --image-tag-file sandbox/sdp_image_tag --s3-config-file sandbox/s3_config.json --no-pull --haproxy localhost:2181 http://localhost:7099/singularity
 ```
-
-If you do not have haproxy installed, omit the `--haproxy` option.
 
 ## Running kattelmod
 
