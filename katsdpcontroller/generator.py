@@ -1330,7 +1330,16 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         # space in the ramdisk. This is only used for lab testing, so
         # we just hardcode a number.
         bf_ingest.ram = 220 * 1024
-    bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=not develop)]
+    # In general we want it on the same interface as the NIC, because
+    # otherwise there is a tendency to drop packets. But for ramdisk capture
+    # this won't cut it because the machine for this is dual-socket and we
+    # can't have affinity to both the (single) NIC and to both memory
+    # regions.
+    bf_ingest.interfaces = [
+        scheduler.InterfaceRequest('cbf',
+                                   infiniband=not develop,
+                                   affinity=timeplot or not ram)
+    ]
     # XXX Even when there is enough bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
     # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
