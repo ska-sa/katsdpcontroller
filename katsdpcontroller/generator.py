@@ -1344,7 +1344,16 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
         # space in the ramdisk. This is only used for lab testing, so
         # we just hardcode a number.
         bf_ingest.ram = 220 * 1024
-    bf_ingest.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=not develop)]
+    # In general we want it on the same interface as the NIC, because
+    # otherwise there is a tendency to drop packets. But for ramdisk capture
+    # this won't cut it because the machine for this is dual-socket and we
+    # can't have affinity to both the (single) NIC and to both memory
+    # regions.
+    bf_ingest.interfaces = [
+        scheduler.InterfaceRequest('cbf',
+                                   infiniband=not develop,
+                                   affinity=timeplot or not ram)
+    ]
     # XXX Even when there is enough bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
     # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
@@ -1807,7 +1816,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
                                    extra=dict(capture_block_id=capture_block_id))
                     continue
 
-            imager = SDPLogicalTask('spectral_image.{}.{}-{}.{}'.format(
+            imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 name, first_channel, last_channel, target_name))
             imager.cpus = _spectral_imager_cpus(config)
             # TODO: these resources are very rough estimates

@@ -2392,10 +2392,10 @@ class Scheduler(pymesos.Scheduler):
 
     The following invariants are maintained at each yield point:
     - each dictionary within :attr:`_offers` is non-empty
-    - every role in :attr:`_roles_wanted` is non-suppressed (there may be
+    - every role in :attr:`_roles_needed` is non-suppressed (there may be
       additional non-suppressed roles, but they will be suppressed when an
       offer arrives)
-    - every role in :attr:`_offers` also appears in :attr:`_roles_wanted`
+    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
 
     Parameters
     ----------
@@ -2842,12 +2842,18 @@ class Scheduler(pymesos.Scheduler):
                         taskinfos[node.agent].append(node.taskinfo)
                         self._active[node.taskinfo.task_id.value] = (node, group.graph)
                     for agent in agents:
+                        if not taskinfos[agent]:
+                            # Leave the offers in place: they might be useful
+                            # for the next item in the queue, and if they're
+                            # not needed then the next call to _update_roles
+                            # will remove them.
+                            continue
                         offer_ids = [offer.id for offer in agent.offers]
                         # TODO: does this need to use run_in_executor? Is it
                         # thread-safe to do so?
                         # TODO: if there are more pending in the queue then we
-                        # should use a filter to be re-offered resources more
-                        # quickly.
+                        # should use a filter to be re-offered remaining
+                        # resources of this agent more quickly.
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
                             self._remove_offer(role, agent.agent_id, offer_id.value)
