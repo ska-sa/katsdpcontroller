@@ -103,6 +103,19 @@ async def _missing_gui_handler(request: web.Request) -> dict:
     return {}
 
 
+async def _block_dashboard(request: web.Request) -> web.Response:
+    """Make dashboard wait for a response.
+
+    This seems to be the easiest way to trick it into thinking it's not
+    connected. We just need to put it to sleep for longer than the
+    refresh interval.
+    """
+    await asyncio.sleep(2)
+    response = web.json_response({}, status=404)
+    response.log_level = logging.DEBUG   # Avoid spamming the logs many times a second
+    return response
+
+
 async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """Run a websocket connection to inform client about GUIs.
 
@@ -332,6 +345,7 @@ def make_app(server: master_controller.DeviceServer,
         web.get('/metrics', _prometheus_handler),
         web.get('/ws', _websocket_handler),
         web.get('/rotate', _rotate_handler),
+        web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
         web.get('/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
         web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
     ])
