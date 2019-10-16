@@ -40,7 +40,7 @@ async def _prometheus_handler(request: web.Request) -> web.Response:
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
         # Avoid spamming logs (feeds into web_utils.AccessLogger).
-        response.log_level = logging.DEBUG
+        response['log_level'] = logging.DEBUG
     return response
 
 
@@ -112,7 +112,8 @@ async def _block_dashboard(request: web.Request) -> web.Response:
     """
     await asyncio.sleep(2)
     response = web.json_response({}, status=404)
-    response.log_level = logging.DEBUG   # Avoid spamming the logs many times a second
+    # Avoid spamming the logs many times a second
+    response['log_level'] = logging.DEBUG
     return response
 
 
