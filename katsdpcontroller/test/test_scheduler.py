@@ -503,11 +503,9 @@ class TestAgent(unittest.TestCase):
              {'name': 'vol2', 'host_path': '/host2', 'numa_node': 1}])
         self.gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
-            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'name': 'Dummy GPU', 'device_attributes': {},
+            [{'name': 'Dummy GPU', 'device_attributes': {},
               'compute_capability': (5, 2), 'numa_node': 1, 'uuid': 'GPU-123'},
-             {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'name': 'Dummy GPU', 'device_attributes': {},
+             {'name': 'Dummy GPU', 'device_attributes': {},
               'compute_capability': (5, 2), 'numa_node': 0, 'uuid': 'GPU-456'}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
@@ -894,8 +892,7 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         gpu_attr = _make_json_attr(
             'katsdpcontroller.gpus',
-            [{'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-              'name': 'Dummy GPU', 'device_attributes': {},
+            [{'name': 'Dummy GPU', 'device_attributes': {},
               'compute_capability': (5, 2), 'numa_node': 1, 'uuid': 'GPU-123'}])
         interface_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
@@ -1259,11 +1256,9 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.numa_attr = _make_json_attr('katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
         self.agent0_attrs = [
             _make_json_attr('katsdpcontroller.gpus', [
-                {'devices': ['/dev/nvidia0', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-                 'uuid': 'GPU-123',
+                {'uuid': 'GPU-123',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)},
-                {'devices': ['/dev/nvidia1', '/dev/nvidiactl', '/dev/nvidia-uvm'],
-                 'uuid': 'GPU-456',
+                {'uuid': 'GPU-456',
                  'name': 'Dummy GPU', 'device_attributes': {}, 'compute_capability': (5, 2)}
             ]),
             _make_json_attr('katsdpcontroller.volumes', [
