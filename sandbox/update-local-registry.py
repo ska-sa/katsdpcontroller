@@ -46,9 +46,7 @@ IMAGE_INFO = {
     'katsdpingest_titanx': ImageInfo(action=Action.TUNE, repo='katsdpingest'),
     'katsdpingest': ImageInfo(action=Action.BUILD),
     'katsdpimager': ImageInfo(action=Action.BUILD),
-    'katcbfsim': ImageInfo(action=Action.BUILD),
-    # Will go away after merge
-    'katsdpcontroller': ImageInfo(action=Action.BUILD, branch='image-builder')
+    'katcbfsim': ImageInfo(action=Action.BUILD)
 }
 
 
