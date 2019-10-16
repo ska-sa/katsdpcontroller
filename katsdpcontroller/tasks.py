@@ -425,7 +425,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
             for (key, value) in labels.items()])
 
-        # Set extra fields for SDP services to log to logspout
+        # Set extra fields for SDP services to log to logstash
         if self.logical_node.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
             extras = {
                 **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
