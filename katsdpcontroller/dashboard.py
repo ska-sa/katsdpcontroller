@@ -203,7 +203,7 @@ class Dashboard:
                     'mesos-state': task.status.state if task.status else '-',
                     'host': task.agent.host if task.agent else '-',
                     'runtime':
-                        humanfriendly.format_timespan(now - task.start_time)
+                        humanfriendly.format_timespan((task.end_time or now) - task.start_time)
                         if task.start_time is not None else '-'
                 } for (capture_block_id, task) in tasks
             ]

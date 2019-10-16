@@ -1928,7 +1928,9 @@ class PhysicalTask(PhysicalNode):
         then it might not. If :attr:`state` is :const:`TaskState.DEAD` then it
         is guaranteed to be in sync.
     start_time : float
-        Timestamp at which status became TASK_RUNNING
+        Timestamp at which status became TASK_RUNNING (or ``None`` if it hasn't)
+    end_time : float
+        Timestamp at which status became TASK_DEAD (or ``None`` if it hasn't)
     ports : dict
         Maps port names given in the logical task to port numbers.
     cores : dict
@@ -1951,6 +1953,7 @@ class PhysicalTask(PhysicalNode):
         self.allocation = None
         self.status = None
         self.start_time = None
+        self.end_time = None
         self._queue = None
         self.task_stats = None
         for name, cls in GLOBAL_RESOURCES.items():
@@ -2152,6 +2155,8 @@ class PhysicalTask(PhysicalNode):
         self.status = status
         if status.state == 'TASK_RUNNING':
             self.start_time = status.timestamp
+        elif status.state in TERMINAL_STATUSES:
+            self.end_time = status.timestamp
 
     def kill(self, driver, **kwargs):
         # TODO: according to the Mesos docs, killing a task is not reliable,
