@@ -675,7 +675,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             Singularity deploy ID
         """
         request_id = self._request_id_prefix + product_name
-        environ = {}
+        environ = {'LOGSPOUT': 'ignore'}
         for key in ['KATSDP_LOG_ONELINE', 'KATSDP_LOG_LEVEL', 'KATSDP_LOG_GELF_ADDRESS']:
             if key in os.environ:
                 environ[key] = os.environ[key]
