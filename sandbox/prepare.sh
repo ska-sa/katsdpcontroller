@@ -13,4 +13,4 @@ dir="$(realpath $(dirname $0))"
     --volume "bf_ram0:$dir/data" \
     --volume "bf_ram1:$dir/data" \
     --volume "config:$dir/config"
-chmod a+w "$dir/data" "$dir/config"
+chmod a+w "$dir/data" "$dir/config" "$dir/logs"

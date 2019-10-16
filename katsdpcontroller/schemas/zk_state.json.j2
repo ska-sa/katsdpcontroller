@@ -1,0 +1,76 @@
+{% macro validate_version() %}
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "required": ["version"],
+    "properties": {
+        "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+        }
+    }
+}
+{% endmacro %}
+
+{% macro validate(version) %}
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["version", "next_capture_block_id", "next_multicast_group", "products"],
+    "properties": {
+        "version": {
+            "type": "integer"
+        },
+        "next_capture_block_id": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "next_multicast_group": {
+            "type": "string",
+            "format": "ipv4"
+        },
+        "products": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+{% if version >= 2 %}
+                    "start_time",
+{% endif %}
+{% if version >= 3 %}
+                    "ports",
+{% else %}
+                    "port",
+{% endif %}
+                    "run_id", "task_id", "host", "config", "multicast_groups"
+                ],
+                "properties": {
+{% if version >= 2 %}
+                    "start_time": {"type": "number"},
+{% endif %}
+{% if version >= 3 %}
+                    "ports": {
+                        "type": "object",
+                        "required": ["katcp"],
+                        "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 65535}
+                    },
+{% else %}
+                    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+{% endif %}
+                    "run_id": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "host": {"type": "string"},
+                    "config": {"type": "object"},
+                    "multicast_groups": {
+                        "type": "array",
+                        "items": {"type": "string", "format": "ipv4"}
+                    }
+                }
+            }
+        }
+    }
+}
+{% endmacro %}

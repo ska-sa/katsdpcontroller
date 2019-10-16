@@ -4,12 +4,11 @@
          <title>Signal Display Rotation</title>
     </head>
     <body>
-         <iframe id='rotate_frame' style='border: 0; width: {{ args.width }}px; height: {{ args.height}}px;'></iframe>
+         <iframe id='rotate_frame' style='border: 0; width: {{ width }}px; height: {{ height}}px;'></iframe>
     </body>
     <script>
-     var url_id = 0;
-     var array_streams = [];
-     var urls = {};
+     var url_id = 0;   // Index in guis to show
+     var guis = [];    // List of gui-url objects
      var rotater = null;
      var ws = null;
      var ws_url = null;
@@ -30,12 +29,12 @@
 
      function rotate()
      {
-      if (array_streams.length == 0) { set_content(no_content); return; }
-      if (array_streams.length == 1 && rotate_frame.src.startsWith(urls[array_streams[0]])) { return; }
+      if (guis.length == 0) { set_content(no_content); return; }
+      if (guis.length == 1 && rotate_frame.src.startsWith(guis[0].href)) { return; }
        // don't rotate if we have only one to display and are currently showing it
        // or none to dispay
 
-      url = urls[array_streams[url_id]];
+      url = guis[url_id].href;
 
       conn = new XMLHttpRequest();
       conn.timeout = 1000;
@@ -50,8 +49,8 @@
         // check to see if this URL is available yet, and if not let the user
         // know that we will retry.
        }
-       url_id = (url_id + 1) % array_streams.length;
-       rotater = setInterval(rotate, {{args.rotate_interval}});
+       url_id = (url_id + 1) % guis.length;
+       rotater = setInterval(rotate, {{rotate_interval}});
       }
       clearInterval(rotater);
       console.log("Checking validity of URL: " + url);
@@ -84,8 +83,8 @@
       ws = new WebSocket(ws_url);
 
       ws.onopen = function(msg) {
-       console.log("Websocket connected. Requesting active servers...");
-       ws.send('servers');
+       console.log("Websocket connected. Requesting active signal displays...");
+       ws.send('guis');
        retry_count = 0;
       }
 
@@ -108,14 +107,19 @@
        clearInterval(rotater);
        rotater = null;
        try {
-        urls = JSON.parse(msg.data);
-        array_streams = Object.keys(urls);
-        rotater = setInterval(rotate, {{args.rotate_interval}});
+        new_guis = [];
+        products = JSON.parse(msg.data).products;
+        for (var product_name of Object.keys(products))
+         for (var gui of products[product_name])
+          if (gui.service.startsWith("timeplot."))
+           new_guis.push(gui);
+        guis = new_guis;
+        rotater = setInterval(rotate, {{rotate_interval}});
          // waiting the interval gives time for the time_plot endpoint to startup
        } catch (err) {
-        console.log("Failed to parse WS message: " + msg.data);
+        console.log("Failed to parse WS message: " + err);
        }
-       if (array_streams.length == 0) { set_content(no_content); }
+       if (guis.length == 0) { set_content(no_content); }
       }
      } // end of ws_connect
 

@@ -11,9 +11,8 @@ except ImportError:
 
 def find_images():
     images = set(katsdpcontroller.generator.IMAGES)
-    # Add some repositories that do not form part of the graph
+    # Add self to the image list
     images.add('katsdpcontroller')
-    images.add('docker-base-runtime')
     return images
 
 

@@ -1,5 +1,6 @@
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-build as build
-MAINTAINER Simon Ratcliffe "simonr@ska.ac.za"
+ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
+
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
 
 # Switch to Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -12,20 +13,20 @@ RUN install-requirements.py --default-versions ~/docker-base/base-requirements.t
 COPY --chown=kat:kat . /tmp/install/katsdpcontroller
 WORKDIR /tmp/install/katsdpcontroller
 RUN python ./setup.py clean
-RUN pip install --no-deps ".[haproxy_disp]"
+RUN pip install --no-deps .
 RUN pip check
 
 #######################################################################
 
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-runtime
-MAINTAINER Simon Ratcliffe "simonr@ska.ac.za"
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+LABEL maintainer="sdpdev+katsdpcontroller@ska.ac.za"
 
 # Label the image with a list of images it uses
 ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
-# Install haproxy for haproxy_disp and graphviz for --write-graphs support
+# Install haproxy for --haproxy support and graphviz for --write-graphs support
 USER root
 RUN apt-get -y update && \
     apt-get -y --no-install-recommends install haproxy graphviz && \

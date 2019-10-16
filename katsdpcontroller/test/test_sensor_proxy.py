@@ -9,7 +9,10 @@ Still TODO:
 """
 
 import enum
+import asyncio
+import functools
 from unittest import mock
+from typing import Dict, Mapping, Any, Optional
 
 import aiokatcp
 from aiokatcp import Sensor, Address
@@ -18,7 +21,8 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 import asynctest
 
-from katsdpcontroller.sensor_proxy import SensorProxyClient
+from ..sensor_proxy import SensorProxyClient, PrometheusInfo
+from ..controller import device_server_sockname
 
 
 class MyEnum(enum.Enum):
@@ -33,7 +37,7 @@ class DummyServer(aiokatcp.DeviceServer):
     VERSION = '1.0'
     BUILD_STATE = '1.0'
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.sensors.add(Sensor(int, 'int-sensor', 'Integer sensor', 'frogs'))
         self.sensors.add(Sensor(float, 'float-sensor', 'Float sensor',
@@ -45,65 +49,60 @@ class DummyServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(bool, 'bool-sensor', 'Boolean sensor'))
         self.sensors.add(Sensor(Address, 'address-sensor', 'Address sensor'))
         self.sensors.add(Sensor(MyEnum, 'enum-sensor', 'Enum sensor'))
-        self.sensors.add(Sensor(float, 'dynamic-sensor', 'Test for prometheus_factory'))
         self.sensors['enum-sensor'].set_value(MyEnum.NO, timestamp=123456789)
 
-    def add_sensor(self, sensor):
+    def add_sensor(self, sensor: aiokatcp.Sensor) -> None:
         self.sensors.add(sensor)
         self.mass_inform('#interface-changed', 'sensor-list')
 
-    def remove_sensor(self, sensor_name):
+    def remove_sensor(self, sensor_name: str) -> None:
         del self.sensors[sensor_name]
         self.mass_inform('#interface-changed', 'sensor-list')
 
 
 class FutureObserver:
-    def __init__(self, loop):
-        self.future = loop.create_future()
+    def __init__(self) -> None:
+        self.future = asyncio.get_event_loop().create_future()
 
-    def __call__(self, sensor, reading):
+    def __call__(self, sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> None:
         self.future.set_result(reading)
 
 
 @timelimit
 class TestSensorProxyClient(asynctest.TestCase):
-    def _make_prom_sensor(self, name, description, class_, *args, **kwargs):
-        return (
-            class_('test_' + name, description, ['label1'], *args,
-                   registry=self.registry, **kwargs),
-            Gauge('test_' + name + '_status',
-                  'Status of katcp sensor ' + name, ['label1'], registry=self.registry))
-
-    async def setUp(self):
+    async def setUp(self) -> None:
         # Create a custom registry, to avoid polluting the global one
         self.registry = CollectorRegistry()
-        prom_sensors = {
-            'int_sensor': self._make_prom_sensor('int_sensor', 'A counter', Counter),
-            'float_sensor': self._make_prom_sensor('float_sensor', 'A gauge', Gauge),
-            'histogram_sensor': self._make_prom_sensor('histogram_sensor', 'A histogram', Histogram,
-                                                       buckets=(1, 10))
-        }
+        # Custom metric cache, to avoid polluting the global one
+        prom_sensors: Dict[str, Any] = {}
 
-        def prom_factory(name, sensor):
-            if sensor.name == 'prefix-dynamic-sensor':
-                self.assertEqual(name, 'dynamic_sensor')
-                return self._make_prom_sensor('dynamic_sensor', sensor.description, Counter)
-            return None, None
+        def prom_factory(name: str, sensor: aiokatcp.Sensor) -> Optional[PrometheusInfo]:
+            if name == 'int-sensor':
+                return PrometheusInfo(Counter, 'test_int_sensor', 'A counter', {}, self.registry)
+            elif name == 'float-sensor':
+                return PrometheusInfo(Gauge, 'test_float_sensor', 'A gauge', {}, self.registry)
+            elif name == 'histogram-sensor':
+                return PrometheusInfo(functools.partial(Histogram, buckets=(1, 10)),
+                                      'test_histogram_sensor', 'A histogram', {}, self.registry)
+            else:
+                return None
 
         self.mirror = mock.create_autospec(aiokatcp.DeviceServer, instance=True)
         self.mirror.sensors = aiokatcp.SensorSet()
         self.server = DummyServer('127.0.0.1', 0)
         await self.server.start()
         self.addCleanup(self.server.stop)
-        port = self.server.server.sockets[0].getsockname()[1]
+        assert self.server.server is not None
+        assert self.server.server.sockets is not None
+        port = device_server_sockname(self.server)[1]
         self.client = SensorProxyClient(self.mirror, 'prefix-',
-                                        prom_sensors, ['labelvalue1'], prom_factory,
-                                        '127.0.0.1', port)
+                                        {'label1': 'labelvalue1'}, prom_factory, prom_sensors,
+                                        host='127.0.0.1', port=port)
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
         await self.client.wait_synced()
 
-    def _check_sensors(self):
+    def _check_sensors(self) -> None:
         """Compare the upstream sensors against the mirror"""
         for sensor in self.server.sensors.values():
             qualname = 'prefix-' + sensor.name
@@ -124,22 +123,22 @@ class TestSensorProxyClient(asynctest.TestCase):
             base_name = sensor2.name[7:]
             self.assertIn(base_name, self.server.sensors)
 
-    async def test_init(self):
+    async def test_init(self) -> None:
         self._check_sensors()
 
-    async def _set(self, name, value, **kwargs):
+    async def _set(self, name: str, value: Any, **kwargs) -> None:
         """Set a sensor on the server and wait for the mirror to observe it"""
-        observer = FutureObserver(self.loop)
+        observer = FutureObserver()
         self.mirror.sensors['prefix-' + name].attach(observer)
         self.server.sensors[name].set_value(value, **kwargs)
         await observer.future
         self.mirror.sensors['prefix-' + name].detach(observer)
 
-    async def test_set_value(self):
+    async def test_set_value(self) -> None:
         await self._set('int-sensor', 2, timestamp=123456790.0)
         self._check_sensors()
 
-    async def test_add_sensor(self):
+    async def test_add_sensor(self) -> None:
         self.server.sensors.add(Sensor(int, 'another', 'another sensor', '', 234))
         # Rather than having server send an interface-changed inform, we invoke
         # it directly on the client so that we don't need to worry about timing.
@@ -148,21 +147,21 @@ class TestSensorProxyClient(asynctest.TestCase):
         await self.client.wait_synced()
         self._check_sensors()
 
-    async def test_remove_sensor(self):
+    async def test_remove_sensor(self) -> None:
         del self.server.sensors['int-sensor']
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
         self.client.handle_inform(changed)
         await self.client.wait_synced()
         self._check_sensors()
 
-    async def test_replace_sensor(self):
+    async def test_replace_sensor(self) -> None:
         self.server.sensors.add(Sensor(bool, 'int-sensor', 'Replaced by bool'))
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
         self.client.handle_inform(changed)
         await self.client.wait_synced()
         self._check_sensors()
 
-    async def test_reconnect(self):
+    async def test_reconnect(self) -> None:
         # Cheat: the client will disconnect if given a #disconnect inform, and
         # we don't actually need to kill the server.
         self.client.inform_disconnect('Test')
@@ -170,7 +169,9 @@ class TestSensorProxyClient(asynctest.TestCase):
         await self.client.wait_synced()
         self._check_sensors()
 
-    def _check_prom(self, name, value, status=Sensor.Status.NOMINAL, suffix='', extra_labels=None):
+    def _check_prom(self, name: str, value: float,
+                    status: Sensor.Status = Sensor.Status.NOMINAL,
+                    suffix: str = '', extra_labels: Mapping[str, str] = None):
         labels = {'label1': 'labelvalue1'}
         value_labels = dict(labels)
         if extra_labels is not None:
@@ -180,7 +181,7 @@ class TestSensorProxyClient(asynctest.TestCase):
         self.assertEqual(value, actual_value)
         self.assertEqual(status.value, actual_status)
 
-    async def test_gauge(self):
+    async def test_gauge(self) -> None:
         await self._set('float-sensor', 2.5)
         self._check_prom('test_float_sensor', 2.5)
         # Change to an status where the value is not valid. The prometheus
@@ -188,7 +189,7 @@ class TestSensorProxyClient(asynctest.TestCase):
         await self._set('float-sensor', 1.0, status=Sensor.Status.FAILURE)
         self._check_prom('test_float_sensor', 2.5, Sensor.Status.FAILURE)
 
-    async def test_histogram(self):
+    async def test_histogram(self) -> None:
         # Record some values, check the counts
         await self._set('histogram-sensor', 4.0)
         await self._set('histogram-sensor', 5.0)
@@ -205,7 +206,7 @@ class TestSensorProxyClient(asynctest.TestCase):
         self._check_prom('test_histogram_sensor', 4, Sensor.Status.FAILURE,
                          suffix='_bucket', extra_labels={'le': '+Inf'})
 
-    async def test_counter(self):
+    async def test_counter(self) -> None:
         await self._set('int-sensor', 4)
         self._check_prom('test_int_sensor', 4)
         # Increase the value
@@ -221,7 +222,3 @@ class TestSensorProxyClient(asynctest.TestCase):
         # Set back to a valid status
         await self._set('int-sensor', 8)
         self._check_prom('test_int_sensor', 18)
-
-    async def test_prometheus_factory(self):
-        await self._set('dynamic-sensor', 3.5)
-        self._check_prom('test_dynamic_sensor', 3.5)

@@ -1,0 +1,29 @@
+/* Reveal the disconnected element and hide the .connected elements if the root
+ * has the data-dash-is-loading attribute for 3 seconds. The attribute is set
+ * whenever the browser requests state from the server and cleared when the
+ * reply comes back. If the server is down/unreachable for 3s, then the CSS
+ * transition will trigger.
+ */
+
+#disconnected {
+    transition-property: visibility;
+    transition-delay: 0s;
+    visibility: hidden;
+    position: absolute;
+}
+
+#root[data-dash-is-loading="true"] #disconnected {
+    visibility: visible;
+    transition-delay: 3s;
+}
+
+.connected {
+    transition-property: visibility;
+    transition-delay: 0s;
+    visibility: visible;
+}
+
+#root[data-dash-is-loading="true"] .connected {
+    visibility: hidden;
+    transition-delay: 3s;
+}

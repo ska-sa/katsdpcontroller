@@ -21,6 +21,7 @@ from katsdpcontroller.tasks import (
 
 
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
+INGEST_GPU_SHORTNAME = 'titanx'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
@@ -38,7 +39,7 @@ IMAGES = frozenset([
     'katsdpcontim',
     'katsdpdisp',
     'katsdpimager',
-    'katsdpingest_titanx',
+    'katsdpingest_' + INGEST_GPU_SHORTNAME,
     'katsdpdatawriter',
     'katsdpmetawriter',
     'katsdptelstate'
@@ -84,45 +85,59 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {'spead': self.logical_node.endpoint.port}
         else:
-            self.host = resolver.resources.get_multicast_ip(self.logical_node.n_addresses)
-            self.ports = {'spead': resolver.resources.get_port()}
+            self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
+            self.ports = {'spead': await resolver.resources.get_port()}
 
 
 class TelstateTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph):
+        await super().resolve(resolver, graph)
         # Add a port mapping
         self.taskinfo.container.docker.network = 'BRIDGE'
-        portmap = addict.Dict()
-        portmap.host_port = self.ports['telstate']
-        portmap.container_port = 6379
-        portmap.protocol = 'tcp'
-        self.taskinfo.container.docker.port_mappings = [portmap]
+        host_port = self.ports['telstate']
+        if not resolver.localhost:
+            portmap = addict.Dict()
+            portmap.host_port = host_port
+            portmap.container_port = 6379
+            portmap.protocol = 'tcp'
+            self.taskinfo.container.docker.port_mappings = [portmap]
+        else:
+            # Mesos doesn't provide a way to specify a port mapping with a
+            # host-side binding, so we have to provide docker parameters
+            # directly.
+            parameters = self.taskinfo.container.docker.setdefault('parameters', [])
+            parameters.append({'key': 'publish', 'value': f'127.0.0.1:{host_port}:6379'})
+
+
+def normalise_gpu_name(name):
+    if name == INGEST_GPU_NAME:
+        return INGEST_GPU_SHORTNAME
+    else:
+        # Turn spaces and dashes into underscores, remove anything that isn't
+        # alphanumeric or underscore, and lowercase (because Docker doesn't
+        # allow uppercase in image names).
+        mangled = re.sub('[- ]', '_', name.lower())
+        mangled = re.sub('[^a-z0-9_]', '', mangled)
+        return mangled
 
 
 class IngestTask(SDPPhysicalTask):
-    async def resolve(self, resolver, graph, loop):
-        await super().resolve(resolver, graph, loop)
+    async def resolve(self, resolver, graph, image_path=None):
         # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image. If it is the standard GPU, don't try to override
-        # anything, but otherwise synthesize an image name by mangling the
-        # GPU name.
-        gpu = self.agent.gpus[self.allocation.gpus[0].index]
-        if gpu.name != INGEST_GPU_NAME:
-            # Turn spaces and dashes into underscores, remove anything that isn't
-            # alphanumeric or underscore, and lowercase (because Docker doesn't
-            # allow uppercase in image names).
-            mangled = re.sub('[- ]', '_', gpu.name.lower())
-            mangled = re.sub('[^a-z0-9_]', '', mangled)
-            image_path = await resolver.image_resolver('katsdpingest_' + mangled, loop)
-            self.taskinfo.container.docker.image = image_path
-            logger.info('Develop mode: using %s for ingest', image_path)
+        # matching image.
+        if image_path is None:
+            gpu = self.agent.gpus[self.allocation.gpus[0].index]
+            gpu_name = normalise_gpu_name(gpu.name)
+            image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
+            if gpu != INGEST_GPU_NAME:
+                logger.info('Develop mode: using %s for ingest', image_path)
+        await super().resolve(resolver, graph, image_path)
 
 
 def is_develop(config):
@@ -238,7 +253,6 @@ class BaselineCorrelationProductsInfo(VisInfo, CBFStreamInfo):
         """Size of frame in bytes"""
         return self.n_vis * 8     # size of complex64
 
-    @property
     def net_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
 
@@ -264,7 +278,6 @@ class TiedArrayChannelisedVoltageInfo(CBFStreamInfo):
         """Interval between heaps, in seconds"""
         return self.raw['spectra_per_heap'] * self.n_samples_between_spectra / self.adc_sample_rate
 
-    @property
     def net_bandwidth(self, ratio=1.05, overhead=128):
         """Network bandwidth in bits per second"""
         heap_size = self.size / self.n_substreams
@@ -316,11 +329,9 @@ class L0Info(VisInfo):
     def flag_size(self):
         return self.n_vis * BYTES_PER_FLAG
 
-    @property
     def net_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.size, self.int_time, ratio, overhead)
 
-    @property
     def flag_bandwidth(self, ratio=1.05, overhead=128):
         return _bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
@@ -363,7 +374,6 @@ class BeamformerInfo:
     def n_substreams(self):
         return self.n_channels // self.src_info.n_channels_per_substream
 
-    @property
     def net_bandwidth(self, ratio=1.05, overhead=128):
         """Network bandwidth in bits per second"""
         heap_size = self.size / self.n_substreams
@@ -558,7 +568,7 @@ def _make_cbf_simulator(g, config, name):
             # 1024.
             sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
-        sim.interfaces[0].bandwidth_out = info.net_bandwidth
+        sim.interfaces[0].bandwidth_out = info.net_bandwidth()
         sim.transitions = {
             CaptureBlockState.CAPTURING: [
                 KatcpTransition('capture-start', name, settings.get('start_time', '{time}'),
@@ -605,6 +615,7 @@ def _make_timeplot(g, name, description,
     timeplot.critical = False
 
     g.add_node(timeplot, config=lambda task, resolver: dict({
+        'html_host': 'localhost' if resolver.localhost else '',
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'spead_interface': task.interfaces['sdp_10g'].name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
@@ -847,7 +858,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
-        ingest.image = 'katsdpingest_titanx'
+        ingest.image = 'katsdpingest_' + INGEST_GPU_SHORTNAME
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']
@@ -875,12 +886,12 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         ingest.interfaces = [
             scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
             scheduler.InterfaceRequest('sdp_10g')]
-        ingest.interfaces[0].bandwidth_in = src_info.net_bandwidth / n_ingest
+        ingest.interfaces[0].bandwidth_in = src_info.net_bandwidth() / n_ingest
         net_bandwidth = 0.0
         if spectral_name:
-            net_bandwidth += spectral_info.net_bandwidth + sd_spead_rate * n_ingest
+            net_bandwidth += spectral_info.net_bandwidth() + sd_spead_rate * n_ingest
         if continuum_name:
-            net_bandwidth += continuum_info.net_bandwidth
+            net_bandwidth += continuum_info.net_bandwidth()
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
 
         def make_ingest_config(task, resolver, server_id=i):
@@ -1022,6 +1033,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
         g.add_node(flags_multicast)
         g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
 
+    dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(name, i))
         cal.image = 'katsdpcal'
@@ -1031,14 +1043,14 @@ def _make_cal(g, config, name, l0_name, flags_names):
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         # Note: these scale the fixed overheads too, so is not strictly accurate.
-        cal.interfaces[0].bandwidth_in = info.net_bandwidth / n_cal
-        cal.interfaces[0].bandwidth_out = info.flag_bandwidth * FLAGS_RATE_RATIO / n_cal
+        cal.interfaces[0].bandwidth_in = info.net_bandwidth() / n_cal
+        cal.interfaces[0].bandwidth_out = info.flag_bandwidth() * FLAGS_RATE_RATIO / n_cal
         cal.ports = ['port', 'dask_diagnostics', 'aiomonitor_port', 'aioconsole_port']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
             'title': 'Cal diagnostics',
             'description': 'Dask diagnostics for {0.name}',
-            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}/status',
+            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix + '/status',
             'category': 'Plot'
         }]
         cal.transitions = CAPTURE_TRANSITIONS
@@ -1048,7 +1060,9 @@ def _make_cal(g, config, name, l0_name, flags_names):
             cal_config = {
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
-                'dask_diagnostics': ('', task.ports['dask_diagnostics']),
+                'dask_diagnostics': ('127.0.0.1' if resolver.localhost else '',
+                                     task.ports['dask_diagnostics']),
+                'dask_prefix': dask_prefix.format(task),
                 'flags_streams': copy.deepcopy(flags_streams_base)
             }
             for flags_stream in cal_config['flags_streams']:
@@ -1157,11 +1171,11 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth
+    vis_writer.interfaces[0].bandwidth_in = info.net_bandwidth()
     if local:
         vis_writer.volumes = [OBJ_DATA_VOL]
     else:
-        vis_writer.interfaces[0].backwidth_out = info.net_bandwidth
+        vis_writer.interfaces[0].backwidth_out = info.net_bandwidth()
         # Creds are passed on the command-line so that they are redacted from telstate.
         vis_writer.command.extend([
             '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
@@ -1223,7 +1237,7 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth * FLAGS_RATE_RATIO
+    flag_writer.interfaces[0].bandwidth_in = info.flag_bandwidth() * FLAGS_RATE_RATIO
     if local:
         flag_writer.volumes = [OBJ_DATA_VOL]
     else:
@@ -1343,7 +1357,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     # XXX Even when there is enough bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
     # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
-    bf_ingest.interfaces[0].bandwidth_in = max(info.net_bandwidth, 20e9)
+    bf_ingest.interfaces[0].bandwidth_in = max(info.net_bandwidth(), 20e9)
     if timeplot:
         bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
         bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(info)
@@ -1423,11 +1437,11 @@ def build_logical_graph(config):
     # Immutable keys to add to telstate on startup. There is no telstate yet
     # on which to call telstate.join, so nested keys must be expressed as
     # tuples which are joined later.
-    init_telstate = {'sdp_archived_streams': archived_streams}
+    init_telstate = {'sdp_archived_streams': archived_streams, 'sdp_config': config}
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
-        config=lambda resolver: init_telstate
+        config=lambda resolver: ({'host': '127.0.0.1'} if resolver.localhost else {})
     )
 
     # telstate node
