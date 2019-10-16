@@ -64,9 +64,7 @@ class GPU(object):
             node = None
         self.node = node
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
-        self.minor = pynvml.nvmlDeviceGetMinorNumber(handle)
         self.name = pynvml.nvmlDeviceGetName(handle)
-        self.driver_version = pynvml.nvmlSystemGetDriverVersion()
         # NVML doesn't report compute capability, so we need CUDA
         pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
         # In Python 3 pci_bus_id is bytes but pycuda wants str
@@ -176,15 +174,6 @@ def collapse_ranges(values):
     return '[' + ','.join(out) + ']'
 
 
-def has_nvidia_container_runtime():
-    output = subprocess.check_output(['docker', 'info', '--format={{json .}}'])
-    data = json.loads(output.decode('utf-8'))
-    try:
-        return 'nvidia' in data['Runtimes']
-    except KeyError:
-        return False
-
-
 def attributes_resources(args):
     hwloc = HWLocParser()
     attributes = OrderedDict()
@@ -259,16 +248,11 @@ def attributes_resources(args):
     gpus = []
     for i, gpu in enumerate(hwloc.gpus()):
         config = {
-            'devices': ['/dev/nvidia{}'.format(gpu.minor)],
-            'driver_version': gpu.driver_version,
             'name': gpu.name,
             'compute_capability': gpu.compute_capability,
             'device_attributes': gpu.device_attributes,
             'uuid': gpu.uuid
         }
-        for dev in ['/dev/nvidiactl', '/dev/nvidia-uvm', '/dev/nvidia-uvm-tools']:
-            if os.path.exists(dev):
-                config['devices'].append(dev)
         if gpu.node is not None:
             config['numa_node'] = gpu.node
         gpus.append(config)
@@ -281,7 +265,6 @@ def attributes_resources(args):
         attributes['katsdpcontroller.priority'] = args.priority
 
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
-    attributes['katsdpcontroller.nvidia_container_runtime'] = has_nvidia_container_runtime()
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     # Mesos sees "cpus" and "mem" in our custom resource names, and skips the
     # automatic detection. We have to recreate its logic.
