@@ -1397,7 +1397,6 @@ class AgentGPU(GPUResources):
     """A single GPU on an agent machine, tracking both attributes and free resources."""
     def __init__(self, spec, index):
         super().__init__(index)
-        self.devices = spec['devices']
         self.uuid = spec.get('uuid')
         self.name = spec['name']
         self.compute_capability = tuple(spec['compute_capability'])
