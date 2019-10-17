@@ -40,7 +40,7 @@ async def _prometheus_handler(request: web.Request) -> web.Response:
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
         # Avoid spamming logs (feeds into web_utils.AccessLogger).
-        response.log_level = logging.DEBUG
+        response['log_level'] = logging.DEBUG
     return response
 
 
@@ -101,6 +101,20 @@ async def _favicon_handler(request: web.Request) -> web.Response:
 @aiohttp_jinja2.template('missing_gui.html.j2', status=404)
 async def _missing_gui_handler(request: web.Request) -> dict:
     return {}
+
+
+async def _block_dashboard(request: web.Request) -> web.Response:
+    """Make dashboard wait for a response.
+
+    This seems to be the easiest way to trick it into thinking it's not
+    connected. We just need to put it to sleep for longer than the
+    refresh interval.
+    """
+    await asyncio.sleep(2)
+    response = web.json_response({}, status=404)
+    # Avoid spamming the logs many times a second
+    response['log_level'] = logging.DEBUG
+    return response
 
 
 async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
@@ -332,6 +346,7 @@ def make_app(server: master_controller.DeviceServer,
         web.get('/metrics', _prometheus_handler),
         web.get('/ws', _websocket_handler),
         web.get('/rotate', _rotate_handler),
+        web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
         web.get('/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
         web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
     ])

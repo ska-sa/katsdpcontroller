@@ -25,7 +25,7 @@ class AccessLogger(aiohttp.web_log.AccessLogger):
     response to specify the log level. If not set, it defaults to INFO.
     """
     def log(self, request, response, time):
-        level = getattr(response, 'log_level', logging.INFO)
+        level = response.get('log_level', logging.INFO)
         # Callee calls self.logger.info. We temporarily swap out the logger
         # to override the log level. It's not thread-safe, but aiohttp runs
         # on the event loop anyway.
