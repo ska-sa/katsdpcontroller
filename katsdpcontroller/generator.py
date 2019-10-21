@@ -20,8 +20,16 @@ from katsdpcontroller.tasks import (
     CaptureBlockState, KatcpTransition)
 
 
+def normalise_gpu_name(name):
+    # Turn spaces and dashes into underscores, remove anything that isn't
+    # alphanumeric or underscore, and lowercase (because Docker doesn't
+    # allow uppercase in image names).
+    mangled = re.sub('[- ]', '_', name.lower())
+    mangled = re.sub('[^a-z0-9_]', '', mangled)
+    return mangled
+
+
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
-INGEST_GPU_SHORTNAME = 'titanx'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
@@ -39,7 +47,7 @@ IMAGES = frozenset([
     'katsdpcontim',
     'katsdpdisp',
     'katsdpimager',
-    'katsdpingest_' + INGEST_GPU_SHORTNAME,
+    'katsdpingest_' + normalise_gpu_name(INGEST_GPU_NAME),
     'katsdpdatawriter',
     'katsdpmetawriter',
     'katsdptelstate'
@@ -113,18 +121,6 @@ class TelstateTask(SDPPhysicalTask):
             # directly.
             parameters = self.taskinfo.container.docker.setdefault('parameters', [])
             parameters.append({'key': 'publish', 'value': f'127.0.0.1:{host_port}:6379'})
-
-
-def normalise_gpu_name(name):
-    if name == INGEST_GPU_NAME:
-        return INGEST_GPU_SHORTNAME
-    else:
-        # Turn spaces and dashes into underscores, remove anything that isn't
-        # alphanumeric or underscore, and lowercase (because Docker doesn't
-        # allow uppercase in image names).
-        mangled = re.sub('[- ]', '_', name.lower())
-        mangled = re.sub('[^a-z0-9_]', '', mangled)
-        return mangled
 
 
 class IngestTask(SDPPhysicalTask):
@@ -858,7 +854,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
-        ingest.image = 'katsdpingest_' + INGEST_GPU_SHORTNAME
+        ingest.image = 'katsdpingest_' + normalise_gpu_name(INGEST_GPU_NAME)
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']
