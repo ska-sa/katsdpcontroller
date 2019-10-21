@@ -13,6 +13,7 @@ from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
 import asynctest
 from nose.tools import assert_raises
+import numpy as np
 from addict import Dict
 import aiokatcp
 from aiokatcp import Message, FailReply, Sensor
@@ -83,6 +84,43 @@ class DummyMasterController(aiokatcp.DeviceServer):
             ans += '+{}'.format(n_addresses - 1)
         self._next += n_addresses
         return ans
+
+
+class DummyDataSet:
+    """Stub replacement for :class:`katdal.DataSet`."""
+
+    def __init__(self):
+        catalogue = katpoint.Catalogue()
+        catalogue.add('PKS 1934-63, radec target, 19:39:25.03, -63:42:45.7')
+        catalogue.add('3C286, radec, 13:31:08.29, +30:30:33.0,(800.0 43200.0 0.956 0.584 -0.1644)')
+        # Two targets with the same name, to check disambiguation
+        catalogue.add('My Target, radec target, 0:00:00.00, -10:00:00.0')
+        catalogue.add('My Target, radec target, 0:00:00.00, -20:00:00.0')
+        # Target that is only observed for 20 minutes: will produce continuum
+        # but not spectral image.
+        catalogue.add('Continuum, radec target, 0:00:00.00, -30:00:00.0')
+        # Target that is set but never tracked
+        catalogue.add('notrack, radec target, 0:00:00.00, -30:00:00.0')
+
+        self.catalogue = catalogue
+        self.dump_period = 8.0
+        scan_state = []
+        target_index = []
+        for i in range(4):
+            for j in range(1000):
+                scan_state.append('track')
+                target_index.append(i)
+        for i in range(150):
+            scan_state.append('track')
+            target_index.append(4)
+        for i in range(4, 6):
+            for j in range(1000):
+                scan_state.append('scan')
+                target_index.append(i)
+        self.sensor = {
+            'Observation/scan_state': np.array(scan_state),
+            'Observation/target_index': np.array(target_index)
+        }
 
 
 def get_metric(metric):
@@ -354,13 +392,8 @@ class TestSDPController(BaseTestSDPController):
         self.fail_requests: Set[str] = set()
 
         # Mock out use of katdal to get the targets
-        catalogue = katpoint.Catalogue()
-        catalogue.add('PKS 1934-63, radec target, 19:39:25.03, -63:42:45.7')
-        catalogue.add('3C286, radec, 13:31:08.29, +30:30:33.0,(800.0 43200.0 0.956 0.584 -0.1644)')
-        # Two targets with the same name, to check disambiguation
-        catalogue.add('My Target, radec target, 0:00:00.00, -10:00:00.0')
-        catalogue.add('My Target, radec target, 0:00:00.00, -20:00:00.0')
-        create_patch(self, 'katsdpcontroller.generator._get_targets', return_value=catalogue)
+        create_patch(self, 'katsdpcontroller.generator._get_data_set',
+                     return_value=DummyDataSet())
 
     async def _launch(self, graph: networkx.MultiDiGraph,
                       resolver: scheduler.Resolver,
@@ -787,7 +820,7 @@ class TestSDPController(BaseTestSDPController):
 
         # Check that postprocessing ran and didn't fail
         self.assertEqual(product.capture_blocks, {})
-        self.assertEqual(self.n_batch_tasks, 9)    # 3 continuum, 3x2 spectral
+        self.assertEqual(self.n_batch_tasks, 10)    # 4 continuum, 3x2 spectral
 
     async def test_capture_done_disable_batch(self) -> None:
         """Checks that capture-init with override takes effect"""
@@ -799,7 +832,7 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request("capture-done")
         cal_sensor.value = b'{}'
         await asynctest.exhaust_callbacks(self.loop)
-        self.assertEqual(self.n_batch_tasks, 3)    # 3 continuum, no spectral
+        self.assertEqual(self.n_batch_tasks, 4)    # 4 continuum, no spectral
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
