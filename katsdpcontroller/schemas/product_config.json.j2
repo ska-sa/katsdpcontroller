@@ -444,7 +444,7 @@
                                         "uvblavg_parameters": {"$ref": "#/definitions/continuum_parameters"},
                                         "mfimage_parameters": {"$ref": "#/definitions/continuum_parameters"},
 {% if version >= "2.5" %}
-                                        "min_time": {"$ref": "#/definitions/nonneg_number"},
+                                        "min_time": {"$ref": "#/definitions/positive_number"},
 {% endif %}
                                         "max_realtime": {"$ref": "#/definitions/nonneg_number"}
                                     },
@@ -474,7 +474,7 @@
                                             "maxItems": 2
                                         },
 {% if version >= "2.5" %}
-                                        "min_time": {"$ref": "#/definitions/nonneg_number"},
+                                        "min_time": {"$ref": "#/definitions/positive_number"},
 {% endif %}
                                         "output_channels": {"$ref": "#/definitions/channel_range"}
                                     },
