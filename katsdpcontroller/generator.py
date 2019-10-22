@@ -72,6 +72,10 @@ CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 WRITER_OBJECT_SIZE = 20e6    # 20 MB
 #: Maximum channels per chunk for spectral imager
 SPECTRAL_OBJECT_CHANNELS = 64
+#: Minimum observation time for continuum imager (seconds)
+DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
+#: Minimum observation time for spectral imager (seconds)
+DEFAULT_SPECTRAL_MIN_TIME = 2 * 3600     # hours
 
 logger = logging.getLogger(__name__)
 
@@ -1745,8 +1749,8 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
     l0_stream = name + '.' + l0_name
     data_url = _stream_url(capture_block_id, l0_stream)
     cpus = _continuum_imager_cpus(config)
-    # Image targets observed for at least 15 minutes
-    targets = _get_targets(config, capture_block_id, name, telstate, 15 * 60)
+    min_time = output.get('min_time', DEFAULT_CONTINUUM_MIN_TIME)
+    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
     for target in targets:
         target_name = target_mapper(target)
@@ -1802,8 +1806,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     l0_info = L0Info(config, l0_name)
     output_channels = output['output_channels']
     data_url = _stream_url(capture_block_id, name + '.' + l0_name)
-    # Image targets observed for at least 2 hours
-    targets = _get_targets(config, capture_block_id, name, telstate, 2 * 3600)
+    min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
+    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
     for target in targets:
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):

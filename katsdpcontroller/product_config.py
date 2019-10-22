@@ -533,10 +533,10 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
-    # Update to 2.4
-    if config['version'] in ['2.0', '2.1', '2.2', '2.3']:
-        # 2.4 is fully backwards-compatible to 2.0
-        config['version'] = '2.4'
+    # Update to 2.5
+    if config['version'] in ['2.0', '2.1', '2.2', '2.3', '2.4']:
+        # 2.5 is fully backwards-compatible to 2.0
+        config['version'] = '2.5'
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
