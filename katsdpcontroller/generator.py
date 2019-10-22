@@ -1748,19 +1748,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
     # Image targets observed for at least 15 minutes
     targets = _get_targets(config, capture_block_id, name, telstate, 15 * 60)
 
-    # katdal doesn't support selection by target description, and selection by
-    # name can be ambiguous (if there are multiple targets with the same
-    # name), so we select by index.
-    catalogue = _get_data_set(telstate, capture_block_id, l0_stream).catalogue
-
     for target in targets:
-        try:
-            target_index = catalogue.targets.index(target)
-        except ValueError:
-            logger.error('Target %s not found in catalogue for %s',
-                         target.name, name, extra=dict(capture_block_id=capture_block_id))
-            continue
-
         target_name = target_mapper(target)
         imager = SDPLogicalTask('continuum_image.{}.{}'.format(name, target_name))
         imager.cpus = cpus
@@ -1782,7 +1770,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
             '--telstate', '{endpoints[telstate_telstate]}',
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
             '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
-            '--select', 'scans="track"; corrprods="cross"; targets=[{}]'.format(target_index),
+            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]'
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
