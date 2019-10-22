@@ -75,7 +75,7 @@ SPECTRAL_OBJECT_CHANNELS = 64
 #: Minimum observation time for continuum imager (seconds)
 DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
 #: Minimum observation time for spectral imager (seconds)
-DEFAULT_SPECTRAL_MIN_TIME = 2 * 3600     # hours
+DEFAULT_SPECTRAL_MIN_TIME = 2 * 3600     # 2 hours
 
 logger = logging.getLogger(__name__)
 
