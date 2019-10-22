@@ -685,6 +685,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             'docker.image': image
         }
         environ['KATSDP_LOG_GELF_EXTRA'] = json.dumps(extra)
+        labels = {
+            'za.ac.kat.sdp.katsdpcontroller.task': 'product_controller',
+            'za.ac.kat.sdp.katsdpcontroller.subarray_product_id': product_name
+        }
+        docker_parameters = [
+            {'key': 'label', 'value': f'{key}={value}'} for (key, value) in labels.items()
+        ]
         deploy = {
             "requestId": request_id,
             "command": "sdp_product_controller.py",
@@ -695,7 +702,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 "docker": {
                     "image": image,
                     "forcePullImage": False,
-                    "network": "HOST"
+                    "network": "HOST",
+                    "dockerParameters": docker_parameters
                 }
             },
             "resources": {
