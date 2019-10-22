@@ -137,7 +137,7 @@ services:
       - ./etc/consul.d:/etc/consul.d:ro
 
   poweroff:
-    image: sdp-docker-registry.kat.ac.za:5000/poweroff_server
+    image: quay.io/ska-sa/poweroff_server
     command: "--dry-run"
     ports:
       - "127.0.0.1:9118:8080"
