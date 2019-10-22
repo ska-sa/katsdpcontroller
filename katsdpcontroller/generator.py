@@ -1770,7 +1770,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
             '--telstate', '{endpoints[telstate_telstate]}',
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
             '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
-            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]'
+            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
