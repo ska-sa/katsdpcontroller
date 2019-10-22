@@ -1667,8 +1667,8 @@ class TargetMapper:
             while '{}_{}'.format(name, i) in self._used:
                 i += 1
             name = '{}_{}'.format(name, i)
-        self._cache[target] = name
         self._used.add(name)
+        self._cache[target] = name
         return name
 
 
