@@ -41,7 +41,6 @@ IMAGE_INFO = {
     'docker-base-build': ImageInfo(repo='katsdpdockerbase'),
     'docker-base-gpu-build': ImageInfo(action=Action.BUILD, repo='katsdpdockerbase'),
     'docker-base-gpu-runtime': ImageInfo(action=Action.BUILD, repo='katsdpdockerbase'),
-    'katsdpcal': ImageInfo(action=Action.BUILD, repo='katsdppipelines'),
     'katsdpcontim': ImageInfo(action=Action.BUILD),
     'katsdpingest_geforce_gtx_titan_x': ImageInfo(action=Action.TUNE, repo='katsdpingest'),
     'katsdpingest': ImageInfo(action=Action.BUILD),
