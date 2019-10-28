@@ -68,7 +68,7 @@ class Fixture(asynctest.TestCase):
 
     def setUp(self):
         self.config = {
-            "version": "2.4",
+            "version": "2.5",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -153,12 +153,14 @@ class Fixture(asynctest.TestCase):
                     "src_streams": ["sdp_l1_flags"],
                     "uvblavg_parameters": {},
                     "mfimage_parameters": {},
-                    "max_realtime": 10000.0
+                    "max_realtime": 10000.0,
+                    "min_time": 20 * 60
                 },
                 "spectral_image": {
                     "type": "sdp.spectral_image",
                     "src_streams": ["sdp_l1_flags", "continuum_image"],
-                    "output_channels": [100, 4000]
+                    "output_channels": [100, 4000],
+                    "min_time": 3600.0
                 }
             },
             "config": {}

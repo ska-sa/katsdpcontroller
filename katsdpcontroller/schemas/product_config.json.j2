@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4"]
+            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5"]
         }
     }
 }
@@ -41,6 +41,10 @@
         "positive_integer": {
             "type": "integer",
             "minimum": 1
+        },
+        "nonneg_number": {
+            "type": "number",
+            "minimum": 0.0
         },
         "positive_number": {
             "type": "number",
@@ -439,10 +443,10 @@
                                         "src_streams": {"$ref": "#/definitions/singleton"},
                                         "uvblavg_parameters": {"$ref": "#/definitions/continuum_parameters"},
                                         "mfimage_parameters": {"$ref": "#/definitions/continuum_parameters"},
-                                        "max_realtime": {
-                                            "type": "number",
-                                            "minimum": 0
-                                        }
+{% if version >= "2.5" %}
+                                        "min_time": {"$ref": "#/definitions/positive_number"},
+{% endif %}
+                                        "max_realtime": {"$ref": "#/definitions/nonneg_number"}
                                     },
                                     "required": ["src_streams"],
                                     "additionalProperties": false
@@ -469,6 +473,9 @@
                                             "minItems": 1,
                                             "maxItems": 2
                                         },
+{% if version >= "2.5" %}
+                                        "min_time": {"$ref": "#/definitions/positive_number"},
+{% endif %}
                                         "output_channels": {"$ref": "#/definitions/channel_range"}
                                     },
                                     "required": ["src_streams"],

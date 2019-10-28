@@ -5,13 +5,15 @@ import time
 import copy
 import urllib
 import os.path
-
-import networkx
+from typing import Dict, Set
 
 import addict
+import networkx
+import numpy as np
 
 import katdal
 import katdal.datasources
+import katpoint
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from katsdpcontroller import scheduler
@@ -78,6 +80,10 @@ CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 WRITER_OBJECT_SIZE = 20e6    # 20 MB
 #: Maximum channels per chunk for spectral imager
 SPECTRAL_OBJECT_CHANNELS = 64
+#: Minimum observation time for continuum imager (seconds)
+DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
+#: Minimum observation time for spectral imager (seconds)
+DEFAULT_SPECTRAL_MIN_TIME = 2 * 3600     # 2 hours
 
 logger = logging.getLogger(__name__)
 
@@ -1638,30 +1644,45 @@ def _sky_model_url(data_url, continuum_name, target):
     return url
 
 
-def _normalise_target_name(name, used):
-    name = re.sub(r'[^-A-Za-z0-9_]', '_', name)
-    if name not in used:
+class TargetMapper:
+    """Assign normalised names to targets.
+
+    Each target passed to :meth:`__call__` is given a unique name containing
+    only alphanumeric characters, dashes and underscores. Passing the same
+    target will return the same name.
+
+    This class is not thread-safe.
+    """
+
+    def __init__(self) -> None:
+        self._cache: Dict[katpoint.Target, str] = {}
+        self._used: Set[str] = set()
+
+    def __call__(self, target: katpoint.Target) -> str:
+        if target in self._cache:
+            return self._cache[target]
+        name = re.sub(r'[^-A-Za-z0-9_]', '_', target.name)
+        if name in self._used:
+            i = 1
+            while '{}_{}'.format(name, i) in self._used:
+                i += 1
+            name = '{}_{}'.format(name, i)
+        self._used.add(name)
+        self._cache[target] = name
         return name
-    else:
-        i = 1
-        while '{}_{}'.format(name, i) in used:
-            i += 1
-        return '{}_{}'.format(name, i)
 
 
-def _get_targets(telstate, capture_block_id, stream_name):
+def _get_data_set(telstate, capture_block_id, stream_name):
+    """Open a :class:`katdal.DataSet` from a live telescope state."""
     view, _, _ = katdal.datasources.view_l0_capture_stream(telstate, capture_block_id, stream_name)
     datasource = katdal.datasources.TelstateDataSource(
         view, capture_block_id, stream_name, chunk_store=None)
     dataset = katdal.VisibilityDataV4(datasource)
-    return dataset.catalogue
+    return dataset
 
 
-def _unique_targets(config, capture_block_id, name, telstate, cache):
-    """Identify all the targets to image and assign names.
-
-    Each target is given a unique name containing only alphanumerics, dash (-)
-    and underscore (_), and hence suitable for filenames.
+def _get_targets(config, capture_block_id, name, telstate, min_time):
+    """Identify all the targets to image.
 
     Parameter
     ---------
@@ -1673,10 +1694,8 @@ def _unique_targets(config, capture_block_id, name, telstate, cache):
         Name of the ``sdp.continuum_image`` or ``sdp.spectral_image`` output
     telstate : :class:`katsdptelstate.TelescopeState`
         Root view of the telescope state
-    cache : dict
-        A cache for memoising the return value. It is keyed only by the
-        incoming ``cbf.baseline_correlation_products`` stream, so must not be
-        reused across capture blocks.
+    min_time : float
+        Skip targets that don't have at least this much observation time (in seconds).
 
     Returns
     -------
@@ -1686,11 +1705,6 @@ def _unique_targets(config, capture_block_id, name, telstate, cache):
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
-    # Get the cbf.baseline_correlation_products
-    cache_key = config['outputs'][l0_name]['src_streams'][0]
-    if cache_key in cache:
-        return cache[cache_key]
-
     l0_info = L0Info(config, l0_name)
     if l0_info.n_antennas < 4:
         # Won't be any calibration solutions
@@ -1698,11 +1712,20 @@ def _unique_targets(config, capture_block_id, name, telstate, cache):
 
     targets = {}
     l0_stream = name + '.' + l0_name
-    for target in _get_targets(telstate, capture_block_id, l0_stream):
+    data_set = _get_data_set(telstate, capture_block_id, l0_stream)
+    tracking = data_set.sensor.get('Observation/scan_state') == 'track'
+    target_sensor = data_set.sensor.get('Observation/target_index')
+    targets = []
+    for i, target in enumerate(data_set.catalogue):
         if 'target' not in target.tags:
             continue
-        target_name = _normalise_target_name(target.name, targets)
-        targets[target_name] = target
+        observed = tracking & (target_sensor == i)
+        obs_time = np.sum(observed) * data_set.dump_period
+        if obs_time >= min_time:
+            targets.append(target)
+        else:
+            logger.info('Skipping target %s: observed for %.1f seconds, threshold is %.1f',
+                        target.name, obs_time, min_time)
     return targets
 
 
@@ -1714,7 +1737,7 @@ def _render_continuum_parameters(parameters):
     return '; '.join('{}={!r}'.format(key, value) for key, value in parameters.items())
 
 
-def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_cache):
+def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_mapper):
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
@@ -1722,21 +1745,11 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
     l0_stream = name + '.' + l0_name
     data_url = _stream_url(capture_block_id, l0_stream)
     cpus = _continuum_imager_cpus(config)
-    targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
+    min_time = output.get('min_time', DEFAULT_CONTINUUM_MIN_TIME)
+    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
-    # katdal doesn't support selection by target description, and selection by
-    # name can be ambiguous (if there are multiple targets with the same
-    # name), so we select by index.
-    catalogue = _get_targets(telstate, capture_block_id, l0_stream)
-
-    for target_name, target in targets.items():
-        try:
-            target_index = catalogue.targets.index(target)
-        except ValueError:
-            logger.warning('Target %s not found in catalogue for %s',
-                           target.name, name, extra=dict(capture_block_id=capture_block_id))
-            continue
-
+    for target in targets:
+        target_name = target_mapper(target)
         imager = SDPLogicalTask('continuum_image.{}.{}'.format(name, target_name))
         imager.cpus = cpus
         # These resources are very rough estimates
@@ -1757,7 +1770,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
             '--telstate', '{endpoints[telstate_telstate]}',
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
             '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
-            '--select', 'scans="track"; corrprods="cross"; targets=[{}]'.format(target_index),
+            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
@@ -1776,12 +1789,12 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_c
         logger.info('No continuum imager targets found for %s', capture_block_id)
     else:
         logger.info('Continuum imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target in targets.values()))
+                    ', '.join(target.name for target in targets))
     view = telstate.view(telstate.join(capture_block_id, name))
-    view['targets'] = {target.description: name for name, target in targets.items()}
+    view['targets'] = {target.description: target_mapper(target) for target in targets}
 
 
-def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_cache):
+def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_mapper):
     # Trace back to find the visibility stream (required to open with katdal)
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
@@ -1789,15 +1802,17 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
     l0_info = L0Info(config, l0_name)
     output_channels = output['output_channels']
     data_url = _stream_url(capture_block_id, name + '.' + l0_name)
-    targets = _unique_targets(config, capture_block_id, name, telstate, target_cache)
+    min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
+    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
-    for target_name, target in targets.items():
+    for target in targets:
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
             if first_channel >= last_channel:
                 continue
 
+            target_name = target_mapper(target)
             continuum_name = None
             continuum_telstate_name = None
             continuum = None
@@ -1855,9 +1870,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ca
         logger.info('No spectral imager targets found for %s', capture_block_id)
     else:
         logger.info('Spectral imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target in targets.values()))
+                    ', '.join(target.name for target in targets))
     view = telstate.view(telstate.join(capture_block_id, name))
-    view['targets'] = {target.description: name for name, target in targets.items()}
+    view['targets'] = {target.description: target_mapper(target) for target in targets}
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
@@ -1865,18 +1880,18 @@ def build_postprocess_logical_graph(config, capture_block_id, telstate):
     telstate_node = scheduler.LogicalExternal('telstate')
     g.add_node(telstate_node)
 
-    target_cache = {}
+    target_mapper = TargetMapper()
 
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.continuum_image':
-            _make_continuum_imager(g, config, capture_block_id, name, telstate, target_cache)
+            _make_continuum_imager(g, config, capture_block_id, name, telstate, target_mapper)
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.spectral_image':
-            _make_spectral_imager(g, config, capture_block_id, name, telstate, target_cache)
+            _make_spectral_imager(g, config, capture_block_id, name, telstate, target_mapper)
 
     seen = set()
     for node in g:
