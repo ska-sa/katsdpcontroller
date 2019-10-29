@@ -1,5 +1,8 @@
 global
     maxconn 256
+    # Workaround for haproxy apparently leaking file handles to
+    # /dev/random and /dev/urandom. Remove if that gets fixed.
+    ulimit-n 1048576
 
 defaults
     mode http
