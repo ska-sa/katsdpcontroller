@@ -3,6 +3,9 @@ global
     # Workaround for haproxy apparently leaking file handles to
     # /dev/random and /dev/urandom. Remove if that gets fixed.
     ulimit-n 1048576
+    # Enables hitless reloads. See
+    # https://www.haproxy.com/blog/hitless-reloads-with-haproxy-howto/
+    stats socket {{ tmpdir }}/haproxy.sock mode 600 expose-fd listeners level user
 
 defaults
     mode http
