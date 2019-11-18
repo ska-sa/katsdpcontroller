@@ -26,10 +26,13 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
-# Install haproxy for --haproxy support and graphviz for --write-graphs support
+# Install haproxy for --haproxy support and graphviz for --write-graphs support.
+# We need to add a PPA for haproxy because the version in Ubuntu 18.04 has a bug
+# that causes it to run out of file handles.
 USER root
-RUN apt-get -y update && \
-    apt-get -y --no-install-recommends install haproxy graphviz && \
+RUN apt-add-repository ppa:vbernat/haproxy-1.8 && \
+    apt-get -y update && \
+    apt-get -y --no-install-recommends install "haproxy=1.8.22-*" graphviz && \
     rm -rf /var/lib/apt/lists/*
 USER kat
 

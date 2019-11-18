@@ -1,8 +1,8 @@
 global
     maxconn 256
-    # Workaround for haproxy apparently leaking file handles to
-    # /dev/random and /dev/urandom. Remove if that gets fixed.
-    ulimit-n 1048576
+    # Enables hitless reloads. See
+    # https://www.haproxy.com/blog/hitless-reloads-with-haproxy-howto/
+    stats socket {{ tmpdir }}/haproxy.sock mode 600 expose-fd listeners level user
 
 defaults
     mode http
@@ -20,9 +20,13 @@ frontend http-in
     http-request set-var(req.label) path,field(5,/) if has_gui
     use_backend %[var(req.product)]:%[var(req.service)]:%[var(req.label)] if has_gui
     default_backend fallback
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats admin if LOCALHOST
 
 backend fallback
-    server fallback_html_server 127.0.0.1:{{ internal_port }}
+    server fallback_html_server 127.0.0.1:{{ internal_port }} check
 
 {% for product_name, product in guis.products.items() %}
 {% for gui in product %}
@@ -30,6 +34,6 @@ backend {{ product_name }}:{{ gui.service or 'product' }}:{{ gui.label }}
 {% if not gui.orig_href.path.startswith('/gui/' + product_name + '/' + gui.service + '/' + gui.label) %}
     http-request set-path {{ gui.orig_href.path }}%[path,regsub(^/gui/.*?/.*?/.*?/,)]
 {% endif %}
-    server {{ product_name }}:{{ gui.service }}:{{ gui.label }}:server {{ gui.orig_href.host }}:{{ gui.orig_href.port }}
+    server {{ product_name }}:{{ gui.service }}:{{ gui.label }}:server {{ gui.orig_href.host }}:{{ gui.orig_href.port }} check
 {% endfor %}
 {% endfor %}

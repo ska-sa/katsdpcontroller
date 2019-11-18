@@ -17,8 +17,10 @@ import json
 import logging
 import tempfile
 import signal
+import os
 import weakref
 import functools
+import shutil
 from typing import Dict, List, Set, Tuple, Optional
 
 import pkg_resources
@@ -156,8 +158,9 @@ class _Haproxy:
     """Wraps an haproxy process and updates its config file on the fly."""
 
     def __init__(self, haproxy_bind: Tuple[str, int]) -> None:
-        self._cfg = tempfile.NamedTemporaryFile(mode='w+', suffix='.cfg')
-        self._pidfile = tempfile.NamedTemporaryFile(suffix='.pid')
+        self._tmpdir = tempfile.mkdtemp()
+        self._cfg = open(os.path.join(self._tmpdir, 'haproxy.cfg'), 'w+')
+        self._pidfile = os.path.join(self._tmpdir, 'haproxy.pid')
         self._content = ''
         self._process: Optional[asyncio.subprocess.Process] = None
         self.haproxy_bind = haproxy_bind
@@ -169,6 +172,7 @@ class _Haproxy:
     async def update(self, guis: dict, internal_port: int) -> None:
         content = self._template.render(haproxy_bind=self.haproxy_bind,
                                         internal_port=internal_port,
+                                        tmpdir=self._tmpdir,
                                         guis=guis)
         if content != self._content:
             logger.info('Updating haproxy')
@@ -178,7 +182,7 @@ class _Haproxy:
             self._cfg.flush()
             if self._process is None:
                 self._process = await asyncio.create_subprocess_exec(
-                    'haproxy', '-W', '-p', self._pidfile.name, '-f', self._cfg.name)
+                    'haproxy', '-W', '-p', self._pidfile, '-f', self._cfg.name)
             else:
                 self._process.send_signal(signal.SIGUSR2)
             self._content = content
@@ -191,7 +195,7 @@ class _Haproxy:
             if ret:
                 logger.warning('haproxy exited with non-zero exit status %d', ret)
         self._cfg.close()
-        self._pidfile.close()
+        shutil.rmtree(self._tmpdir)
 
 
 class _Updater:
