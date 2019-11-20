@@ -2,7 +2,7 @@
 
 import logging
 import enum
-from typing import Tuple, Dict, Callable, Type, Mapping, Iterable, Sequence, Union, Optional
+from typing import List, Tuple, Dict, Callable, Type, Mapping, Iterable, Sequence, Union, Optional
 
 import aiokatcp
 import prometheus_client       # noqa: F401
@@ -19,6 +19,19 @@ _Factory = Callable[[str, aiokatcp.Sensor], Optional['PrometheusInfo']]
 
 def _dummy_factory(name: str, sensor: aiokatcp.Sensor) -> None:
     return None
+
+
+def _reading_to_float(reading: aiokatcp.Reading) -> float:
+    value = reading.value
+    if isinstance(value, enum.Enum):
+        try:
+            values = list(type(value))     # type: List[enum.Enum]
+            idx = values.index(value)
+        except ValueError:
+            idx = -1
+        return float(idx)
+    else:
+        return float(reading.value)
 
 
 class PrometheusInfo:
@@ -65,7 +78,7 @@ class PrometheusObserver:
 
     def __call__(self, sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> None:
         valid = reading.status.valid_value()
-        value = float(reading.value) if valid else 0.0
+        value = _reading_to_float(reading) if valid else 0.0
         timestamp = reading.timestamp
         self._status_metric.set(reading.status.value)
         # Detecting the type of the metric is tricky, because Counter and
