@@ -142,7 +142,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.prometheus_factory = _dummy_factory
         if prometheus_sensors is not None:
             self.prometheus_sensors = prometheus_sensors
-        # Indexed by unqualified sensor name; None if no observer is needed.
+        # Indexed by rewritten sensor name; None if no observer is needed.
         # Invariant: _observers has an entry if and only if the corresponding
         # sensor exists in self.server.sensors
         self._observers: Dict[str, Optional[PrometheusObserver]] = {}
@@ -184,10 +184,10 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             sensor = aiokatcp.Sensor(sensor.stype, sensor.name, sensor.description,
                                      sensor.units, new_value, sensor.status)
         self.server.sensors.add(sensor)
-        old_observer = self._observers.get(name)
+        old_observer = self._observers.get(sensor.name)
         if old_observer is not None:
             old_observer.close()
-        self._observers[name] = self._make_observer(name, sensor)
+        self._observers[sensor.name] = self._make_observer(name, sensor)
         self._interface_changed = True
 
     def _sensor_removed(self, name: str) -> None:
