@@ -88,6 +88,8 @@ def parse_args() -> argparse.Namespace:
                         help='Registry to push images into [%(default)s]')
     parser.add_argument('--downstream-tag', default='latest', metavar='TAG',
                         help='Docker tag for built images [%(default)s]')
+    parser.add_argument('--copy-all', action='store_true',
+                        help="Copy all images rather than building")
     parser.add_argument('--build-all', action='store_true',
                         help='Build all images rather than copying from upstream')
     parser.add_argument('--include', type=comma_split, default=['all'],
@@ -235,7 +237,7 @@ def main() -> None:
         info = image_info(name)
         if info.action == Action.TUNE:
             tune_image(name, args)
-        elif info.action == Action.BUILD or args.build_all:
+        elif (info.action == Action.BUILD or args.build_all) and not args.copy_all:
             build_image(name, args)
         else:
             copy_image(name, args)
