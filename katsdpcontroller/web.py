@@ -100,9 +100,11 @@ async def _favicon_handler(request: web.Request) -> web.Response:
     raise web.HTTPFound(location='static/favicon.ico')
 
 
-@aiohttp_jinja2.template('missing_gui.html.j2', status=404)
 async def _missing_gui_handler(request: web.Request) -> dict:
-    return {}
+    response = aiohttp_jinja2.render_template('missing_gui.html.j2', request, {}, status=404)
+    # Avoid spamming logs (feeds into web_utils.AccessLogger).
+    response['log_level'] = logging.DEBUG
+    return response
 
 
 async def _block_dashboard(request: web.Request) -> web.Response:
@@ -351,7 +353,7 @@ def make_app(server: master_controller.DeviceServer,
         web.get('/ws', _websocket_handler),
         web.get('/rotate', _rotate_handler),
         web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
-        web.get('/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
+        web.route('*', '/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
         web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
     ])
     aiohttp_jinja2.setup(
