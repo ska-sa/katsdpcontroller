@@ -100,7 +100,7 @@ async def _favicon_handler(request: web.Request) -> web.Response:
     raise web.HTTPFound(location='static/favicon.ico')
 
 
-async def _missing_gui_handler(request: web.Request) -> dict:
+async def _missing_gui_handler(request: web.Request) -> web.Response:
     response = aiohttp_jinja2.render_template('missing_gui.html.j2', request, {}, status=404)
     # Avoid spamming logs (feeds into web_utils.AccessLogger).
     response['log_level'] = logging.DEBUG
