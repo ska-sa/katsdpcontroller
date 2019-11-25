@@ -271,7 +271,7 @@ class SDPSubarrayProductBase:
             default="{}", initial_status=Sensor.Status.NOMINAL)
         self._state_sensor = Sensor(
             ProductState, "state",
-            "State of the subarray product state machine",
+            "State of the subarray product state machine (prometheus: gauge)",
             status_func=_error_on_error)
         self._device_status_sensor = sdp_controller.sensors['device-status']
 

@@ -84,6 +84,9 @@ class TestSensorProxyClient(asynctest.TestCase):
             elif name == 'histogram-sensor':
                 return PrometheusInfo(functools.partial(Histogram, buckets=(1, 10)),
                                       'test_histogram_sensor', 'A histogram', {}, self.registry)
+            elif name == 'enum-sensor':
+                return PrometheusInfo(Gauge, 'test_enum_sensor', 'An enum gauge',
+                                      {}, self.registry)
             else:
                 return None
 
@@ -188,6 +191,10 @@ class TestSensorProxyClient(asynctest.TestCase):
         # Gauge must not change.
         await self._set('float-sensor', 1.0, status=Sensor.Status.FAILURE)
         self._check_prom('test_float_sensor', 2.5, Sensor.Status.FAILURE)
+
+    async def test_enum_gauge(self) -> None:
+        await self._set('enum-sensor', MyEnum.NO)
+        self._check_prom('test_enum_sensor', 1.0)
 
     async def test_histogram(self) -> None:
         # Record some values, check the counts
