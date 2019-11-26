@@ -3,6 +3,11 @@ global
     # Enables hitless reloads. See
     # https://www.haproxy.com/blog/hitless-reloads-with-haproxy-howto/
     stats socket {{ tmpdir }}/haproxy.sock mode 600 expose-fd listeners level user
+    # haproxy normally computes this from maxconn, number of backends etc, but when
+    # we do a reload it complains if we've added more backends as it cannot
+    # increase it.  So we set it to a large enough value up front (increase it
+    # if maxconn increases).
+    ulimit-n 1024
 
 defaults
     mode http
