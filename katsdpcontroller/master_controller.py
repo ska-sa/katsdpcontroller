@@ -529,7 +529,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
     async def create_product(self, name: str, config: dict) -> InternalProduct:
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
-            '127.0.0.1', 0, mc_client, None, self._args.batch_role,
+            '127.0.0.1', 0, mc_client, name, None, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory, {})
         product = InternalProduct(name, config, asyncio.Task.current_task(), server)
         self._add_product(product)

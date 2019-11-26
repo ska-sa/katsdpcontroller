@@ -6,12 +6,14 @@ import json
 import time
 import os
 import copy
+import uuid
 from ipaddress import IPv4Address
 from typing import Dict, Set, List, Callable, Sequence, Optional, Type, Mapping
 
 import addict
 import jsonschema
 import networkx
+import aiohttp
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 import katsdptelstate
@@ -25,6 +27,7 @@ from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
+CONSUL_URL = 'http://localhost:8500'
 logger = logging.getLogger(__name__)
 
 
@@ -1096,6 +1099,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,
+                 subarray_product_id: str,
                  sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
@@ -1105,6 +1109,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                  graph_dir: str = None,
                  dashboard_url: str = None) -> None:
         self.sched = sched
+        self.subarray_product_id = subarray_product_id
         self.batch_role = batch_role
         self.interface_mode = interface_mode
         self.localhost = localhost
@@ -1136,12 +1141,66 @@ class DeviceServer(aiokatcp.DeviceServer):
             if isinstance(task_stats, TaskStats):
                 for sensor in task_stats.sensors.values():
                     self.sensors.add(sensor)
+        self._consul_service_id = None     # type: Optional[str]
+
+    async def _consul_register(self) -> None:
+        if self.sched is None:
+            return
+        # We're talking to localhost, so use a low timeout. This will avoid
+        # stalling the startup if consul isn't running on the host.
+        timeout = aiohttp.ClientTimeout(total=5)
+        service_id = str(uuid.uuid4())
+        port = self.sched.http_port
+        service = {
+            'Name': 'product-controller',
+            'ID': service_id,
+            'Tags': ['prometheus-metrics'],
+            'Meta': {
+                'subarray_product_id': self.subarray_product_id
+            },
+            'Port': port,
+            'Checks': [
+                {
+                    "Interval": "15s",
+                    "Timeout": "5s",
+                    "HTTP": f"http://localhost:{port}/health",
+                    "DeregisterCriticalServiceAfter": "90s"
+                }
+            ]
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.put(f'{CONSUL_URL}/v1/agent/service/register',
+                                       params={'replace-existing-checks': '1'},
+                                       json=service) as resp:
+                    resp.raise_for_status()
+                    self._consul_service_id = service_id
+                    logging.info("Registered with consul as ID %s", service_id)
+        except aiohttp.ClientError as exc:
+            logger.warning('Could not register with consul: %s', exc)
+
+    async def _consul_deregister(self) -> None:
+        service_id = self._consul_service_id
+        if service_id is None:
+            return
+        timeout = aiohttp.ClientTimeout(total=5)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.put(
+                        f'{CONSUL_URL}/v1/agent/service/deregister/{service_id}') as resp:
+                    resp.raise_for_status()
+                    self._consul_service_id = None
+                    logging.info('Deregistered from consul (ID %s)', service_id)
+        except aiohttp.ClientError as exc:
+            logger.warning('Could not deregister from consul: %s', exc)
 
     async def start(self) -> None:
         await self.master_controller.wait_connected()
+        await self._consul_register()
         await super().start()
 
     async def on_stop(self) -> None:
+        await self._consul_deregister()
         if self.product is not None and self.product.state != ProductState.DEAD:
             logger.warning('Product controller interrupted - deconfiguring running product')
             try:

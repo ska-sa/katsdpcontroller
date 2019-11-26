@@ -12,6 +12,7 @@ import typing
 from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
 import asynctest
+from aioresponses import aioresponses
 from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
@@ -176,8 +177,15 @@ class BaseTestSDPController(asynctest.TestCase):
         self.addCleanup(mc_client.wait_closed)
         self.addCleanup(mc_client.close)
 
-        self.server = DeviceServer(master_controller=mc_client, **server_kwargs)
-        await self.server.start()
+        self.server = DeviceServer(
+            master_controller=mc_client, subarray_product_id=SUBARRAY_PRODUCT,
+            **server_kwargs)
+        # server.start will try to register with consul. Mock that out, and make sure it
+        # fails (which will prevent it from trying to deregister on stop).
+        with aioresponses() as m:
+            m.put('http://localhost:8500/v1/agent/service/register?replace-existing-checks=1',
+                  status=500)
+            await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
         self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
@@ -366,6 +374,7 @@ class TestSDPController(BaseTestSDPController):
         self.n_batch_tasks = 0
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
+        self.sched.http_port = 8080
         self.sched.task_stats = scheduler.TaskStats()
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         await self.setup_server(
