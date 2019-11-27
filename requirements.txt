@@ -58,6 +58,7 @@ prometheus_client==0.2.0
 pydotplus==2.0.2
 pyephem                    # via katpoint
 pygelf                     # via katsdpservices
+pyjwt                      # via katdal
 pyparsing==2.2.0           # via pydotplus
 pymesos==0.3.6
 pytz                       # via plotly
