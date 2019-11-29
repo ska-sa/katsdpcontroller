@@ -64,8 +64,9 @@ class KatcpTransition(object):
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, name):
+        super().__init__(name)
+        self.task_type = name.split('.', 1)[0]
         self.physical_factory = SDPPhysicalTask
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
@@ -416,6 +417,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         # Provide info about which container this is for logspout to collect.
         labels = {
             'task': self.logical_node.name,
+            'task_type': self.logical_node.task_type,
             'task_id': self.taskinfo.task_id.value,
             'subarray_product_id': self.subarray_product_id
         }
