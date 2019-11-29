@@ -182,6 +182,7 @@ class BaseTestSDPController(asynctest.TestCase):
         self.server = DeviceServer(
             master_controller=mc_client, subarray_product_id=SUBARRAY_PRODUCT,
             prometheus_registry=self.prometheus_registry,
+            shutdown_delay=0.0,
             **server_kwargs)
         # server.start will try to register with consul. Mock that out, and make sure it
         # fails (which will prevent it from trying to deregister on stop).

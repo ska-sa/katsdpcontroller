@@ -1699,8 +1699,9 @@ def _get_targets(config, capture_block_id, name, telstate, min_time):
 
     Returns
     -------
-    targets : dict of str to :class:`katpoint.Target`
-        Each key is the unique normalised target name, and the value is the target.
+    targets : Dict[str, Tuple[katpoint.Target, float]]
+        Each key is the unique normalised target name, and the value is the
+        target and the observation time on the target.
     """
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
@@ -1722,7 +1723,7 @@ def _get_targets(config, capture_block_id, name, telstate, min_time):
         observed = tracking & (target_sensor == i)
         obs_time = np.sum(observed) * data_set.dump_period
         if obs_time >= min_time:
-            targets.append(target)
+            targets.append((target, obs_time))
         else:
             logger.info('Skipping target %s: observed for %.1f seconds, threshold is %.1f',
                         target.name, obs_time, min_time)
@@ -1748,7 +1749,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
     min_time = output.get('min_time', DEFAULT_CONTINUUM_MIN_TIME)
     targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
-    for target in targets:
+    for target, obs_time in targets:
         target_name = target_mapper(target)
         imager = SDPLogicalTask('continuum_image.{}.{}'.format(name, target_name))
         imager.cpus = cpus
@@ -1783,15 +1784,16 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
                 '--uvblavg', _render_continuum_parameters(output['uvblavg_parameters'])
             ])
         imager.katsdpservices_config = False
+        imager.batch_data_time = obs_time
         g.add_node(imager)
 
     if not targets:
         logger.info('No continuum imager targets found for %s', capture_block_id)
     else:
         logger.info('Continuum imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target in targets))
+                    ', '.join(target.name for target, _ in targets))
     view = telstate.view(telstate.join(capture_block_id, name))
-    view['targets'] = {target.description: target_mapper(target) for target in targets}
+    view['targets'] = {target.description: target_mapper(target) for target, _ in targets}
 
 
 def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_mapper):
@@ -1805,7 +1807,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
     targets = _get_targets(config, capture_block_id, name, telstate, min_time)
 
-    for target in targets:
+    for target, obs_time in targets:
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS, l0_info.n_channels, output_channels[1])
@@ -1863,6 +1865,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 imager.command += ['--subtract', sky_model_url]
 
             imager.katsdpservices_config = False
+            imager.batch_data_time = obs_time
             g.add_node(imager)
             if continuum is not None:
                 g.add_edge(imager, continuum, depends_finished=True)
@@ -1870,9 +1873,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
         logger.info('No spectral imager targets found for %s', capture_block_id)
     else:
         logger.info('Spectral imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target in targets))
+                    ', '.join(target.name for target, _ in targets))
     view = telstate.view(telstate.join(capture_block_id, name))
-    view['targets'] = {target.description: target_mapper(target) for target in targets}
+    view['targets'] = {target.description: target_mapper(target) for target, _ in targets}
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):

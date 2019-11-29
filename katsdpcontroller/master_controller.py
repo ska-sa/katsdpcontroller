@@ -476,7 +476,8 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
             '127.0.0.1', 0, mc_client, name, None, self._args.batch_role,
-            True, self._args.localhost, self._image_resolver_factory, {})
+            True, self._args.localhost, self._image_resolver_factory, {},
+            shutdown_delay=0)
         product = InternalProduct(name, config, asyncio.Task.current_task(), server)
         self._add_product(product)
         await product.server.start()

@@ -1158,7 +1158,8 @@ class DeviceServer(aiokatcp.DeviceServer):
                  s3_config: dict,
                  graph_dir: str = None,
                  dashboard_url: str = None,
-                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
+                 prometheus_registry: CollectorRegistry = REGISTRY,
+                 shutdown_delay: float = 10.0) -> None:
         self.sched = sched
         self.subarray_product_id = subarray_product_id
         self.batch_role = batch_role
@@ -1169,6 +1170,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.graph_dir = graph_dir
         self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
+        self.shutdown_delay = shutdown_delay
 
         super().__init__(host, port)
         # setup sensors (note: SDPProductController adds other sensors)
@@ -1290,7 +1292,12 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
 
         def dead_callback(product):
-            self.halt(cancel=False)
+            if self.shutdown_delay > 0:
+                logger.info('Sleeping %.1f seconds to give time for final Prometheus scrapes',
+                            self.shutdown_delay)
+                asyncio.get_event_loop().call_later(self.shutdown_delay, self.halt, False)
+            else:
+                self.halt(False)
 
         logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
         logger.info("Launching subarray product.")
