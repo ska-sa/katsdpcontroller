@@ -124,7 +124,7 @@ def git_clone(workdir: str, url: str, branch: str) -> None:
             'git', 'clone',
             '--branch', branch,
             '--recurse-submodules',
-            '--depth=1', '--shallow-submodules',
+            '--depth=1',
             url, '.'
         ], stdin=subprocess.DEVNULL, check=True, cwd=workdir,
         env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
