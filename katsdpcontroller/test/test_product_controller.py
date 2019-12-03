@@ -8,6 +8,7 @@ import asyncio
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
+from urllib.parse import urljoin
 import typing
 from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
@@ -29,7 +30,7 @@ import katpoint
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys)
+    ProductState, DeviceStatus, _redact_keys, CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
@@ -186,7 +187,7 @@ class BaseTestSDPController(asynctest.TestCase):
         # server.start will try to register with consul. Mock that out, and make sure it
         # fails (which will prevent it from trying to deregister on stop).
         with aioresponses() as m:
-            m.put('http://localhost:8500/v1/agent/service/register?replace-existing-checks=1',
+            m.put(urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
                   status=500)
             await self.server.start()
         self.addCleanup(self.server.stop)

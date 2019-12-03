@@ -323,4 +323,7 @@ class PrometheusWatcher:
             self.sensors.remove_remove_callback(self._removed)
         except ValueError:
             pass
-        self.sensors.remove_add_callback(self._added)
+        try:
+            self.sensors.remove_add_callback(self._added)
+        except ValueError:
+            pass
