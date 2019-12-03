@@ -18,39 +18,63 @@ from . import scheduler, sensor_proxy, product_config
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
 DEPENDS_INIT = 'depends_init'
+# Buckets appropriate for measuring postprocessing task times (in seconds)
+POSTPROCESSING_TIME_BUCKETS = [
+    1 * 60,
+    2 * 60,
+    5 * 60,
+    10 * 60,
+    20 * 60,
+    30 * 60,
+    40 * 60,
+    50 * 60,
+    1 * 3600,
+    2 * 3600,
+    3 * 3600,
+    4 * 3600,
+    5 * 3600,
+    6 * 3600,
+    8 * 3600,
+    10 * 3600,
+    12 * 3600,
+    14 * 3600,
+    16 * 3600,
+    18 * 3600,
+    20 * 3600,
+    22 * 3600,
+    24 * 3600]
+# Buckets appropriate for measuring processing times relative to observation
+# times.
+POSTPROCESSING_REL_BUCKETS = [
+    0.001,
+    0.0025,
+    0.005,
+    0.0075,
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    2.5,
+    5.0,
+    7.5,
+    10.0
+]
 BATCH_RUNTIME = Histogram(
     'katsdpcontroller_batch_runtime_seconds',
     'Wall-clock execution time of batch tasks',
     ['task_type'],
-    buckets=[1 * 60,
-             2 * 60,
-             5 * 60,
-             10 * 60,
-             20 * 60,
-             30 * 60,
-             40 * 60,
-             50 * 60,
-             1 * 3600,
-             2 * 3600,
-             3 * 3600,
-             4 * 3600,
-             5 * 3600,
-             6 * 3600,
-             8 * 3600,
-             10 * 3600,
-             12 * 3600,
-             14 * 3600,
-             16 * 3600,
-             18 * 3600,
-             20 * 3600,
-             22 * 3600,
-             24 * 3600])
+    buckets=POSTPROCESSING_TIME_BUCKETS)
 BATCH_RUNTIME_REL = Histogram(
     'katsdpcontroller_batch_runtime_rel',
     'Wall-clock execution time of batch jobs as a fraction of data length',
     ['task_type'],
-    buckets=[0.001, 0.0025, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.075,
-             0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.5, 5.0, 7.5, 10.0])
+    buckets=POSTPROCESSING_REL_BUCKETS)
 
 
 class CaptureBlockState(scheduler.OrderedEnum):

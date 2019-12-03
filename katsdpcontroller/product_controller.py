@@ -25,7 +25,8 @@ import katsdpcontroller
 from . import scheduler, product_config, generator, tasks, sensor_proxy
 from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, device_status_to_sensor_status, ProductState)
-from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
+from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
+                    POSTPROCESSING_TIME_BUCKETS, POSTPROCESSING_REL_BUCKETS)
 
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
@@ -34,6 +35,15 @@ CONSUL_URL = 'http://localhost:8500'
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
+POSTPROCESSING_TIME = Histogram(
+    'katsdpcontroller_postprocessing_time_seconds',
+    'Wall-clock time for postprocessing each capture block (including burndown phase)',
+    buckets=POSTPROCESSING_TIME_BUCKETS)
+POSTPROCESSING_TIME_REL = Histogram(
+    'katsdpcontroller_postprocessing_time_rel',
+    'Wall-clock time for postprocessing each capture block (including burndown phase)'
+    ', relative to observation time',
+    buckets=POSTPROCESSING_REL_BUCKETS)
 logger = logging.getLogger(__name__)
 
 
@@ -242,6 +252,8 @@ class CaptureBlock:
         self.postprocess_physical_graph: Optional[networkx.MultiDiGraph] = None
         self.dead_event = asyncio.Event()
         self.state_change_callback: Optional[Callable[[], None]] = None
+        # Time each state is reached
+        self.state_time: Dict[CaptureBlockState, float] = {}
 
     @property
     def state(self) -> CaptureBlockState:
@@ -251,6 +263,8 @@ class CaptureBlock:
     def state(self, value: CaptureBlockState) -> None:
         if self._state != value:
             self._state = value
+            if value not in self.state_time:
+                self.state_time[value] = time.time()
             if value == CaptureBlockState.DEAD:
                 self.dead_event.set()
             if self.state_change_callback is not None:
@@ -982,6 +996,14 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                                        queue=self.batch_queue,
                                        resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
         finally:
+            init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
+            done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
+            obs_time = done_time - init_time
+            postprocessing_time = time.time() - done_time
+            POSTPROCESSING_TIME.observe(postprocessing_time)
+            # In unit tests the obs time might be zero, which leads to errors here
+            if obs_time > 0:
+                POSTPROCESSING_TIME_REL.observe(postprocessing_time / obs_time)
             await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
     def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:

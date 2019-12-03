@@ -288,8 +288,8 @@
       "dataFormat": "tsbuckets",
       "datasource": "Prometheus",
       "gridPos": {
-        "h": 13,
-        "w": 21,
+        "h": 12,
+        "w": 12,
         "x": 0,
         "y": 8
       },
@@ -302,7 +302,7 @@
       "links": [],
       "targets": [
         {
-          "expr": "sum(increase(katsdpcontroller_batch_runtime_seconds_bucket[$__interval])) by (le)",
+          "expr": "sum(xincrease(katsdpcontroller_batch_runtime_seconds_bucket[$__interval])) by (le)",
           "format": "heatmap",
           "interval": "1m",
           "intervalFactor": 1,
@@ -312,7 +312,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Runtime",
+      "title": "Task runtime",
       "tooltip": {
         "show": true,
         "showHistogram": false
@@ -352,10 +352,10 @@
       "dataFormat": "tsbuckets",
       "datasource": "Prometheus",
       "gridPos": {
-        "h": 13,
-        "w": 21,
-        "x": 0,
-        "y": 21
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 8
       },
       "heatmap": {},
       "highlightCards": true,
@@ -366,7 +366,7 @@
       "links": [],
       "targets": [
         {
-          "expr": "sum(increase(katsdpcontroller_batch_runtime_rel_bucket[$__interval])) by (le)",
+          "expr": "sum(xincrease(katsdpcontroller_batch_runtime_rel_bucket[$__interval])) by (le)",
           "format": "heatmap",
           "interval": "1m",
           "intervalFactor": 1,
@@ -376,7 +376,133 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Runtime relative to obs time",
+      "title": "Task runtime relative to obs time",
+      "tooltip": {
+        "show": true,
+        "showHistogram": false
+      },
+      "type": "heatmap",
+      "xAxis": {
+        "show": true
+      },
+      "xBucketNumber": null,
+      "xBucketSize": null,
+      "yAxis": {
+        "decimals": null,
+        "format": "percentunit",
+        "logBase": 1,
+        "max": null,
+        "min": null,
+        "show": true,
+        "splitFactor": null
+      },
+      "yBucketBound": "upper",
+      "yBucketNumber": null,
+      "yBucketSize": null
+    },
+    {
+      "cards": {
+        "cardPadding": null,
+        "cardRound": null
+      },
+      "color": {
+        "cardColor": "#b4ff00",
+        "colorScale": "sqrt",
+        "colorScheme": "interpolateOranges",
+        "exponent": 0.5,
+        "mode": "opacity"
+      },
+      "dataFormat": "tsbuckets",
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "heatmap": {},
+      "highlightCards": true,
+      "id": 10,
+      "legend": {
+        "show": false
+      },
+      "links": [],
+      "targets": [
+        {
+          "expr": "sum(xincrease(katsdpcontroller_postprocessing_time_seconds_bucket[$__interval])) by (le)",
+          "format": "heatmap",
+          "interval": "1m",
+          "intervalFactor": 1,
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Postprocessing time",
+      "tooltip": {
+        "show": true,
+        "showHistogram": false
+      },
+      "type": "heatmap",
+      "xAxis": {
+        "show": true
+      },
+      "xBucketNumber": null,
+      "xBucketSize": null,
+      "yAxis": {
+        "decimals": null,
+        "format": "dthms",
+        "logBase": 1,
+        "max": null,
+        "min": null,
+        "show": true,
+        "splitFactor": null
+      },
+      "yBucketBound": "upper",
+      "yBucketNumber": null,
+      "yBucketSize": null
+    },
+    {
+      "cards": {
+        "cardPadding": null,
+        "cardRound": null
+      },
+      "color": {
+        "cardColor": "#b4ff00",
+        "colorScale": "sqrt",
+        "colorScheme": "interpolateOranges",
+        "exponent": 0.5,
+        "mode": "opacity"
+      },
+      "dataFormat": "tsbuckets",
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "heatmap": {},
+      "highlightCards": true,
+      "id": 11,
+      "legend": {
+        "show": false
+      },
+      "links": [],
+      "targets": [
+        {
+          "expr": "sum(xincrease(katsdpcontroller_postprocessing_time_rel_bucket[$__interval])) by (le)",
+          "format": "heatmap",
+          "interval": "1m",
+          "intervalFactor": 1,
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Postprocessing time relative to obs time",
       "tooltip": {
         "show": true,
         "showHistogram": false
@@ -401,7 +527,7 @@
       "yBucketSize": null
     }
   ],
-  "refresh": "10s",
+  "refresh": "30s",
   "schemaVersion": 18,
   "style": "dark",
   "tags": [],
