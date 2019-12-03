@@ -73,7 +73,7 @@ services:
 
   prometheus:
     network_mode: host
-    image: prom/prometheus:v2.8.0
+    image: quay.io/ska-sa/xrate
     volumes:
       - ./etc/prometheus:/etc/prometheus:ro
       - prometheus_data:/prometheus
