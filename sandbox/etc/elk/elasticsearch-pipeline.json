@@ -2,6 +2,12 @@
   "description": "transfers timestamp_precise to @timestamp if present",
   "processors": [
     {
+      "set": {
+        "field": "timestamp_coarse",
+        "value": "{{@timestamp}}"
+      }
+    },
+    {
       "remove": {
         "field": "@timestamp",
         "if": "ctx.containsKey('timestamp_precise')"
