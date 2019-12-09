@@ -998,12 +998,17 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         finally:
             init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
             done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
-            obs_time = done_time - init_time
+            observation_time = done_time - init_time
             postprocessing_time = time.time() - done_time
             POSTPROCESSING_TIME.observe(postprocessing_time)
+            logger.info('Capture block %s postprocessing finished in %.3fs',
+                        capture_block.name, postprocessing_time,
+                        extra=dict(capture_block_id=capture_block.name,
+                                   observation_time=observation_time,
+                                   postprocessing_time=postprocessing_time))
             # In unit tests the obs time might be zero, which leads to errors here
-            if obs_time > 0:
-                POSTPROCESSING_TIME_REL.observe(postprocessing_time / obs_time)
+            if observation_time > 0:
+                POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
             await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
     def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
