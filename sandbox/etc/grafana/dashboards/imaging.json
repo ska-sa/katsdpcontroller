@@ -24,12 +24,14 @@
       "dashes": false,
       "datasource": "Prometheus",
       "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
         "h": 8,
         "w": 21,
         "x": 0,
         "y": 0
       },
+      "hiddenSeries": false,
       "id": 2,
       "legend": {
         "avg": false,
@@ -44,6 +46,9 @@
       "linewidth": 1,
       "links": [],
       "nullPointMode": "null as zero",
+      "options": {
+        "dataLinks": []
+      },
       "paceLength": 10,
       "percentage": false,
       "pointradius": 5,
@@ -152,6 +157,7 @@
       "maxDataPoints": 100,
       "nullPointMode": "connected",
       "nullText": null,
+      "options": {},
       "postfix": "",
       "postfixFontSize": "50%",
       "prefix": "",
@@ -233,6 +239,7 @@
       "maxDataPoints": 100,
       "nullPointMode": "connected",
       "nullText": null,
+      "options": {},
       "postfix": "",
       "postfixFontSize": "50%",
       "prefix": "",
@@ -294,12 +301,15 @@
         "y": 8
       },
       "heatmap": {},
+      "hideZeroBuckets": false,
       "highlightCards": true,
       "id": 7,
       "legend": {
         "show": false
       },
       "links": [],
+      "options": {},
+      "reverseYBuckets": false,
       "targets": [
         {
           "expr": "sum(xincrease(katsdpcontroller_batch_runtime_seconds_bucket[$__interval])) by (le)",
@@ -358,12 +368,15 @@
         "y": 8
       },
       "heatmap": {},
+      "hideZeroBuckets": false,
       "highlightCards": true,
       "id": 8,
       "legend": {
         "show": false
       },
       "links": [],
+      "options": {},
+      "reverseYBuckets": false,
       "targets": [
         {
           "expr": "sum(xincrease(katsdpcontroller_batch_runtime_rel_bucket[$__interval])) by (le)",
@@ -421,12 +434,15 @@
         "y": 20
       },
       "heatmap": {},
+      "hideZeroBuckets": false,
       "highlightCards": true,
       "id": 10,
       "legend": {
         "show": false
       },
       "links": [],
+      "options": {},
+      "reverseYBuckets": false,
       "targets": [
         {
           "expr": "sum(xincrease(katsdpcontroller_postprocessing_time_seconds_bucket[$__interval])) by (le)",
@@ -484,12 +500,15 @@
         "y": 20
       },
       "heatmap": {},
+      "hideZeroBuckets": false,
       "highlightCards": true,
       "id": 11,
       "legend": {
         "show": false
       },
       "links": [],
+      "options": {},
+      "reverseYBuckets": false,
       "targets": [
         {
           "expr": "sum(xincrease(katsdpcontroller_postprocessing_time_rel_bucket[$__interval])) by (le)",
@@ -525,10 +544,130 @@
       "yBucketBound": "upper",
       "yBucketNumber": null,
       "yBucketSize": null
+    },
+    {
+      "datasource": "Logs",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 13,
+      "options": {},
+      "pconfig": {
+        "fixScale": "",
+        "layout": {
+          "dragmode": "lasso",
+          "font": {
+            "family": "\"Open Sans\", Helvetica, Arial, sans-serif"
+          },
+          "hovermode": "closest",
+          "legend": {
+            "orientation": "h"
+          },
+          "showlegend": false,
+          "xaxis": {
+            "rangemode": "tozero",
+            "showgrid": true,
+            "title": "Observation time",
+            "type": "linear",
+            "zeroline": true
+          },
+          "yaxis": {
+            "rangemode": "tozero",
+            "showgrid": true,
+            "title": "Postprocessing time",
+            "type": "linear",
+            "zeroline": true
+          }
+        },
+        "loadFromCDN": false,
+        "settings": {
+          "displayModeBar": false,
+          "type": "scatter"
+        },
+        "showAnnotations": true,
+        "traces": [
+          {
+            "mapping": {
+              "color": "timestamp_coarse",
+              "size": null,
+              "text": "capture_block_id",
+              "x": "observation_time",
+              "y": "postprocessing_time",
+              "z": null
+            },
+            "name": "Trace 1",
+            "settings": {
+              "color_option": "solid",
+              "line": {
+                "color": "#005f81",
+                "dash": "solid",
+                "shape": "linear",
+                "width": 6
+              },
+              "marker": {
+                "color": "#33B5E5",
+                "colorscale": "YlOrRd",
+                "line": {
+                  "color": "#DDD",
+                  "width": 0
+                },
+                "showscale": false,
+                "size": 10,
+                "sizemin": 3,
+                "sizemode": "diameter",
+                "sizeref": 0.2,
+                "symbol": "circle"
+              },
+              "textposition": ""
+            },
+            "show": {
+              "line": true,
+              "lines": false,
+              "markers": true
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "bucketAggs": [
+            {
+              "field": "timestamp_coarse",
+              "id": "2",
+              "settings": {
+                "interval": "auto",
+                "min_doc_count": 0,
+                "trimEdges": 0
+              },
+              "type": "date_histogram"
+            }
+          ],
+          "metrics": [
+            {
+              "field": "select field",
+              "id": "1",
+              "meta": {},
+              "settings": {},
+              "type": "logs"
+            }
+          ],
+          "query": "message:\"postprocessing finished in\"",
+          "refId": "A",
+          "timeField": "timestamp_coarse"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Postprocessing time",
+      "type": "natel-plotly-panel",
+      "version": 1
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 18,
+  "schemaVersion": 21,
   "style": "dark",
   "tags": [],
   "templating": {
