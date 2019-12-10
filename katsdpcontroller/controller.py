@@ -130,8 +130,8 @@ class ProductState(scheduler.OrderedEnum):
     - CONFIGURING -> IDLE (via product-configure)
     - IDLE -> CAPTURING (via capture-init)
     - CAPTURING -> IDLE (via capture-done)
-    - CONFIGURING/IDLE/CAPTURING/ERROR -> DECONFIGURING -> DEAD (via product-deconfigure)
-    - IDLE/CAPTURING/DECONFIGURING -> ERROR (via an internal error)
+    - CONFIGURING/IDLE/CAPTURING/ERROR -> DECONFIGURING -> POSTPROCESSING -> DEAD (via product-deconfigure)
+    - IDLE/CAPTURING/DECONFIGURING/POSTPROCESSING -> ERROR (via an internal error)
     """
     CONFIGURING = 0
     IDLE = 1
@@ -139,6 +139,7 @@ class ProductState(scheduler.OrderedEnum):
     DECONFIGURING = 3
     DEAD = 4
     ERROR = 5
+    POSTPROCESSING = 6
 
 
 class DeviceStatus(scheduler.OrderedEnum):
