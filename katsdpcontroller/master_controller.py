@@ -14,7 +14,6 @@ import uuid
 import ipaddress
 import json
 import itertools
-import functools
 import re
 import time
 from datetime import datetime
@@ -31,7 +30,6 @@ import async_timeout
 import jsonschema
 import yarl
 import aiohttp
-from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import katsdpservices
 
 import katsdpcontroller
@@ -42,9 +40,6 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
                          ProductState, DeviceStatus, device_status_to_sensor_status)
 
 
-_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
-                      r'(?: +labels: *(?P<labels>[a-z,]+))?',
-                      re.IGNORECASE)
 ZK_STATE_VERSION = 3
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
@@ -59,51 +54,6 @@ class NoAddressesError(Exception):
 
 class ProductFailed(Exception):
     """Attempt to create a subarray product was unsuccessful"""
-
-
-def _prometheus_factory(registry: CollectorRegistry,
-                        name: str,
-                        sensor: aiokatcp.Sensor) -> Optional[sensor_proxy.PrometheusInfo]:
-    assert sensor.description is not None
-    match = _HINT_RE.search(sensor.description)
-    if not match:
-        return None
-    type_ = match.group('type').lower()
-    args_ = match.group('args')
-    if type_ == 'counter':
-        class_ = Counter
-        if args_ is not None:
-            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
-    elif type_ == 'gauge':
-        class_ = Gauge
-        if args_ is not None:
-            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
-    elif type_ == 'histogram':
-        class_ = Histogram
-        if args_ is not None:
-            try:
-                buckets = [float(x.strip()) for x in args_.split(',')]
-                class_ = functools.partial(Histogram, buckets=buckets)
-            except ValueError as exc:
-                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
-    else:
-        logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
-        return None
-    parts = name.rsplit('.')
-    base = parts.pop()
-    label_names = (match.group('labels') or '').split(',')
-    label_names = [label for label in label_names if label]    # ''.split(',') is [''], want []
-    if len(parts) < len(label_names):
-        logger.warning('Not enough parts in name %s for labels %s', name, label_names)
-        return None
-    service_parts = len(parts) - len(label_names)
-    service = '.'.join(parts[:service_parts])
-    labels = dict(zip(label_names, parts[service_parts:]))
-    if service:
-        labels['service'] = service
-    normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
-    return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
-                                       labels, registry)
 
 
 def _load_s3_config(filename: str) -> dict:
@@ -175,7 +125,7 @@ class Product:
         self.sensors.add(Sensor(Address, f'{self.name}.katcp-address',
                                 'Address of the katcp server for the product controller'))
 
-    def connect(self, server: aiokatcp.DeviceServer, registry: CollectorRegistry,
+    def connect(self, server: aiokatcp.DeviceServer,
                 rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
                 host: _IPAddress, ports: Dict[str, int]) -> None:
         """Notify product of the location of the katcp interface.
@@ -193,8 +143,7 @@ class Product:
                 self.logger.warning('Sensor %s does not exist', sensor_name)
         self.katcp_conn = aiokatcp.Client(str(host), ports['katcp'])
         self.katcp_conn.add_sensor_watcher(sensor_proxy.SensorWatcher(
-            self.katcp_conn, server, f'{self.name}.', {'subarray_product_id': self.name},
-            functools.partial(_prometheus_factory, registry),
+            self.katcp_conn, server, f'{self.name}.',
             rewrite_gui_urls=rewrite_gui_urls,
             enum_types=(DeviceStatus,)))
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
@@ -288,7 +237,6 @@ class ProductManagerBase(Generic[_P]):
 
     def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer,
                  image_resolver_factory: scheduler.ImageResolverFactory,
-                 prometheus_registry: CollectorRegistry = REGISTRY,
                  rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
@@ -297,7 +245,6 @@ class ProductManagerBase(Generic[_P]):
         self._products: Dict[str, _P] = {}
         self._next_capture_block_id = 1
         self._image_resolver_factory = image_resolver_factory
-        self._prometheus_registry = prometheus_registry
         self._rewrite_gui_urls = rewrite_gui_urls
 
     @abstractmethod
@@ -487,8 +434,7 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        product.connect(self._server, self._prometheus_registry, self._rewrite_gui_urls,
-                        host, ports)
+        product.connect(self._server, self._rewrite_gui_urls, host, ports)
         assert product.katcp_conn is not None
         product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
@@ -529,7 +475,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
     async def create_product(self, name: str, config: dict) -> InternalProduct:
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
-            '127.0.0.1', 0, mc_client, None, self._args.batch_role,
+            '127.0.0.1', 0, mc_client, name, None, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory, {})
         product = InternalProduct(name, config, asyncio.Task.current_task(), server)
         self._add_product(product)
@@ -586,10 +532,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     def __init__(self, args: argparse.Namespace,
                  server: aiokatcp.DeviceServer,
                  image_resolver_factory: scheduler.ImageResolverFactory,
-                 prometheus_registry: CollectorRegistry = REGISTRY,
                  rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
-        super().__init__(args, server, image_resolver_factory,
-                         prometheus_registry, rewrite_gui_urls)
+        super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.
@@ -1002,7 +946,6 @@ class DeviceServer(aiokatcp.DeviceServer):
     _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(self, args: argparse.Namespace,
-                 prometheus_registry: CollectorRegistry = REGISTRY,
                  rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
@@ -1016,7 +959,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         else:
             manager_cls = SingularityProductManager
         self._manager = manager_cls(args, self, image_resolver_factory,
-                                    prometheus_registry,
                                     rewrite_gui_urls if args.haproxy else None)
         self._consul_url = args.consul_url
         self._override_dicts = {}

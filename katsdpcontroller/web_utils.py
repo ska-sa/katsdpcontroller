@@ -2,7 +2,9 @@
 
 import logging
 
+from aiohttp import web
 import aiohttp.web_log
+import prometheus_async
 
 
 class _ReplaceLevel(object):
@@ -16,6 +18,20 @@ class _ReplaceLevel(object):
 
     def __getattr__(self, attr):
         return getattr(self._logger, attr)
+
+
+async def prometheus_handler(request: web.Request) -> web.Response:
+    response = await prometheus_async.aio.web.server_stats(request)
+    if response.status == 200:
+        # Avoid spamming logs (feeds into AccessLogger).
+        response['log_level'] = logging.DEBUG
+    return response
+
+
+async def health_handler(request: web.Request) -> web.Response:
+    response = web.Response(text='Health OK')
+    response['log_level'] = logging.DEBUG   # avoid spamming logs
+    return response
 
 
 class AccessLogger(aiohttp.web_log.AccessLogger):

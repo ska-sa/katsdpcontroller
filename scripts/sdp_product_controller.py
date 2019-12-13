@@ -169,6 +169,8 @@ def main() -> None:
         sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
                                     task_stats=product_controller.TaskStats(),
                                     runner_kwargs=dict(access_log_class=web_utils.AccessLogger))
+        sched.app.router.add_get('/metrics', web_utils.prometheus_handler)
+        sched.app.router.add_get('/health', web_utils.health_handler)
         driver = pymesos.MesosSchedulerDriver(
             sched, framework_info, args.mesos_master, use_addict=True,
             implicit_acknowledgements=False)
@@ -182,7 +184,7 @@ def main() -> None:
                                            port=args.dashboard_port, path=dashboard_path))
 
     server = product_controller.DeviceServer(
-        args.host, args.port, master_controller, sched,
+        args.host, args.port, master_controller, args.subarray_product_id, sched,
         batch_role=args.batch_role,
         interface_mode=args.interface_mode,
         localhost=args.localhost,

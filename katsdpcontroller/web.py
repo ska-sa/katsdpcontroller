@@ -24,7 +24,6 @@ import shutil
 from typing import Dict, List, Set, Tuple, Optional
 
 import pkg_resources
-import prometheus_async
 from aiokatcp import Sensor, Reading
 import yarl
 from aiohttp import web, WSMsgType
@@ -36,14 +35,6 @@ from . import master_controller, web_utils
 
 logger = logging.getLogger(__name__)
 GUI_URLS_RE = re.compile(r'^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$')
-
-
-async def _prometheus_handler(request: web.Request) -> web.Response:
-    response = await prometheus_async.aio.web.server_stats(request)
-    if response.status == 200:
-        # Avoid spamming logs (feeds into web_utils.AccessLogger).
-        response['log_level'] = logging.DEBUG
-    return response
 
 
 def _dump_yarl(obj: object) -> str:
@@ -349,7 +340,7 @@ def make_app(server: master_controller.DeviceServer,
     app.add_routes([
         web.get('/', _index_handler),
         web.get('/favicon.ico', _favicon_handler),
-        web.get('/metrics', _prometheus_handler),
+        web.get('/metrics', web_utils.prometheus_handler),
         web.get('/ws', _websocket_handler),
         web.get('/rotate', _rotate_handler),
         web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),

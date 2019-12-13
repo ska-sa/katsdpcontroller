@@ -8,16 +8,19 @@ import asyncio
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
+from urllib.parse import urljoin
 import typing
 from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
 import asynctest
+from aioresponses import aioresponses
 from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
 import aiokatcp
 from aiokatcp import Message, FailReply, Sensor
 from aiokatcp.test.test_utils import timelimit
+from prometheus_client import CollectorRegistry
 import pymesos
 import networkx
 import netifaces
@@ -27,7 +30,7 @@ import katpoint
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys)
+    ProductState, DeviceStatus, _redact_keys, CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
@@ -175,9 +178,18 @@ class BaseTestSDPController(asynctest.TestCase):
         mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
         self.addCleanup(mc_client.wait_closed)
         self.addCleanup(mc_client.close)
+        self.prometheus_registry = CollectorRegistry()
 
-        self.server = DeviceServer(master_controller=mc_client, **server_kwargs)
-        await self.server.start()
+        self.server = DeviceServer(
+            master_controller=mc_client, subarray_product_id=SUBARRAY_PRODUCT,
+            prometheus_registry=self.prometheus_registry,
+            **server_kwargs)
+        # server.start will try to register with consul. Mock that out, and make sure it
+        # fails (which will prevent it from trying to deregister on stop).
+        with aioresponses() as m:
+            m.put(urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
+                  status=500)
+            await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
         self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
@@ -210,6 +222,7 @@ class BaseTestSDPController(asynctest.TestCase):
 @timelimit
 class TestSDPControllerInterface(BaseTestSDPController):
     """Testing of the SDP controller in interface mode."""
+
     async def setUp(self) -> None:
         await super().setUp()
         image_resolver_factory = scheduler.ImageResolverFactory(scheduler.SimpleImageLookup('sdp'))
@@ -366,6 +379,7 @@ class TestSDPController(BaseTestSDPController):
         self.n_batch_tasks = 0
         self.sched.close.return_value = done_future
         self.sched.http_url = 'http://scheduler:8080/'
+        self.sched.http_port = 8080
         self.sched.task_stats = scheduler.TaskStats()
         self.driver = mock.create_autospec(spec=pymesos.MesosSchedulerDriver, instance=True)
         await self.setup_server(
@@ -920,6 +934,39 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request('capture-init', CAPTURE_BLOCK)
         reply, _ = await self.client.request('capture-status')
         self.assertEqual(reply, [b'capturing'])
+
+    def _check_prom(self, name: str, service: str, type: str, value: float,
+                    sample_name: str = None, extra_labels: Mapping[str, str] = None) -> None:
+        name = 'katsdpcontroller_' + name
+        registry = self.prometheus_registry
+        for metric in registry.collect():
+            if metric.name == name:
+                break
+        else:
+            raise KeyError(f'Metric {name} not found')
+        self.assertEqual(metric.type, type)
+        labels = {'subarray_product_id': SUBARRAY_PRODUCT, 'service': service}
+        if sample_name is None:
+            sample_name = name
+        else:
+            sample_name = 'katsdpcontroller_' + sample_name
+        if extra_labels is not None:
+            labels.update(extra_labels)
+        self.assertEqual(registry.get_sample_value(sample_name, labels), value)
+
+    async def test_prom_sensors(self) -> None:
+        """Test that sensors are mirrored into Prometheus."""
+        self.server.sensors.add(aiokatcp.Sensor(
+            float, 'foo.gauge', '(prometheus: gauge)', default=1.5,
+            initial_status=Sensor.Status.NOMINAL))
+        self.server.sensors.add(aiokatcp.Sensor(
+            float, 'foo.cheese.labelled-gauge', '(prometheus: gauge labels: type)', default=1,
+            initial_status=Sensor.Status.NOMINAL))
+        self.server.sensors.add(aiokatcp.Sensor(
+            int, 'foo.histogram', '(prometheus: histogram(1, 10, 100))'))
+        self._check_prom('gauge', 'foo', 'gauge', 1.5)
+        self._check_prom('labelled_gauge', 'foo', 'gauge', 1, extra_labels={'type': 'cheese'})
+        self._check_prom('histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
 
 
 class TestSDPResources(asynctest.TestCase):

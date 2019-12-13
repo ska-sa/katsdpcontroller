@@ -5,19 +5,24 @@ import logging
 import json
 import time
 import os
+import re
 import copy
+import uuid
+import functools
 from ipaddress import IPv4Address
 from typing import Dict, Set, List, Callable, Sequence, Optional, Type, Mapping
 
 import addict
 import jsonschema
 import networkx
+import aiohttp
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
+from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import katsdptelstate
 
 import katsdpcontroller
-from . import scheduler, product_config, generator, tasks
+from . import scheduler, product_config, generator, tasks, sensor_proxy
 from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, device_status_to_sensor_status, ProductState)
 from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
@@ -25,6 +30,10 @@ from .tasks import CaptureBlockState, KatcpTransition, DEPENDS_INIT
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
+CONSUL_URL = 'http://localhost:8500'
+_HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
+                      r'(?: +labels: *(?P<labels>[a-z,]+))?',
+                      re.IGNORECASE)
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +80,50 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
         taskinfo.command.arguments = [_redact_arg(arg, s3_config)
                                       for arg in taskinfo.command.arguments]
     return taskinfo
+
+
+def _prometheus_factory(registry: CollectorRegistry,
+                        sensor: aiokatcp.Sensor) -> Optional[sensor_proxy.PrometheusInfo]:
+    assert sensor.description is not None
+    match = _HINT_RE.search(sensor.description)
+    if not match:
+        return None
+    type_ = match.group('type').lower()
+    args_ = match.group('args')
+    if type_ == 'counter':
+        class_ = Counter
+        if args_ is not None:
+            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
+    elif type_ == 'gauge':
+        class_ = Gauge
+        if args_ is not None:
+            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
+    elif type_ == 'histogram':
+        class_ = Histogram
+        if args_ is not None:
+            try:
+                buckets = [float(x.strip()) for x in args_.split(',')]
+                class_ = functools.partial(Histogram, buckets=buckets)
+            except ValueError as exc:
+                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
+    else:
+        logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
+        return None
+    parts = sensor.name.rsplit('.')
+    base = parts.pop()
+    label_names = (match.group('labels') or '').split(',')
+    label_names = [label for label in label_names if label]    # ''.split(',') is [''], want []
+    if len(parts) < len(label_names):
+        logger.warning('Not enough parts in name %s for labels %s', sensor.name, label_names)
+        return None
+    service_parts = len(parts) - len(label_names)
+    service = '.'.join(parts[:service_parts])
+    labels = dict(zip(label_names, parts[service_parts:]))
+    if service:
+        labels['service'] = service
+    normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
+    return sensor_proxy.PrometheusInfo(class_, normalised_name, sensor.description,
+                                       labels, registry)
 
 
 class KatcpImageLookup(scheduler.ImageLookup):
@@ -1097,6 +1150,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,
+                 subarray_product_id: str,
                  sched: Optional[scheduler.Scheduler],
                  batch_role: str,
                  interface_mode: bool,
@@ -1104,8 +1158,10 @@ class DeviceServer(aiokatcp.DeviceServer):
                  image_resolver_factory: scheduler.ImageResolverFactory,
                  s3_config: dict,
                  graph_dir: str = None,
-                 dashboard_url: str = None) -> None:
+                 dashboard_url: str = None,
+                 prometheus_registry: CollectorRegistry = REGISTRY) -> None:
         self.sched = sched
+        self.subarray_product_id = subarray_product_id
         self.batch_role = batch_role
         self.interface_mode = interface_mode
         self.localhost = localhost
@@ -1132,17 +1188,75 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(str, 'gui-urls', 'URLs for product-wide GUIs',
                                 default=json.dumps(gui_urls),
                                 initial_status=Sensor.Status.NOMINAL))
+        self._prometheus_watcher = sensor_proxy.PrometheusWatcher(
+            self.sensors, {'subarray_product_id': subarray_product_id},
+            functools.partial(_prometheus_factory, prometheus_registry))
         if sched is not None:
             task_stats = sched.task_stats
             if isinstance(task_stats, TaskStats):
                 for sensor in task_stats.sensors.values():
                     self.sensors.add(sensor)
+        self._consul_service_id = None     # type: Optional[str]
+
+    async def _consul_register(self) -> None:
+        if self.sched is None:
+            return
+        # We're talking to localhost, so use a low timeout. This will avoid
+        # stalling the startup if consul isn't running on the host.
+        timeout = aiohttp.ClientTimeout(total=5)
+        service_id = str(uuid.uuid4())
+        port = self.sched.http_port
+        service = {
+            'Name': 'product-controller',
+            'ID': service_id,
+            'Tags': ['prometheus-metrics'],
+            'Meta': {
+                'subarray_product_id': self.subarray_product_id
+            },
+            'Port': port,
+            'Checks': [
+                {
+                    "Interval": "15s",
+                    "Timeout": "5s",
+                    "HTTP": f"http://localhost:{port}/health",
+                    "DeregisterCriticalServiceAfter": "90s"
+                }
+            ]
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.put(f'{CONSUL_URL}/v1/agent/service/register',
+                                       params={'replace-existing-checks': '1'},
+                                       json=service) as resp:
+                    resp.raise_for_status()
+                    self._consul_service_id = service_id
+                    logging.info("Registered with consul as ID %s", service_id)
+        except aiohttp.ClientError as exc:
+            logger.warning('Could not register with consul: %s', exc)
+
+    async def _consul_deregister(self) -> None:
+        service_id = self._consul_service_id
+        if service_id is None:
+            return
+        timeout = aiohttp.ClientTimeout(total=5)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.put(
+                        f'{CONSUL_URL}/v1/agent/service/deregister/{service_id}') as resp:
+                    resp.raise_for_status()
+                    self._consul_service_id = None
+                    logging.info('Deregistered from consul (ID %s)', service_id)
+        except aiohttp.ClientError as exc:
+            logger.warning('Could not deregister from consul: %s', exc)
 
     async def start(self) -> None:
         await self.master_controller.wait_connected()
+        await self._consul_register()
         await super().start()
 
     async def on_stop(self) -> None:
+        await self._consul_deregister()
+        self._prometheus_watcher.close()
         if self.product is not None and self.product.state != ProductState.DEAD:
             logger.warning('Product controller interrupted - deconfiguring running product')
             try:
