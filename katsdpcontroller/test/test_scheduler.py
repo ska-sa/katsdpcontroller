@@ -1966,6 +1966,32 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 1)
 
+    async def test_batch_run_depends_retry(self):
+        """If a dependencies fails once, wait until it's retried."""
+        task = asyncio.ensure_future(self.sched.batch_run(
+            self.physical_batch_graph, self.resolver, attempts=3))
+        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
+        task_id = self.batch_nodes[0].taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_FAILED')
+        await asynctest.exhaust_callbacks(self.loop)
+        # The graph should now have been modified in place, so we need to
+        # get the new physical node
+        self.batch_nodes[0] = next(node for node in self.physical_batch_graph
+                                   if node.name == 'batch0')
+        # Retry the first task. The next task must not have started yet.
+        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        # Finish the retried first task.
+        self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
+        assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
+        # Finish the second task
+        await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
+        results = await task
+        assert_equal(list(results.values()), [None, None])
+
     async def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
         await self._ready_graph()
