@@ -1025,8 +1025,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
         # We don't go to error state from CONFIGURING because we check all
         # nodes at the end of configuration and will fail the configure
-        # there; and from DECONFIGURING we don't want to go to ERROR because
-        # that may prevent deconfiguring.
+        # there; and from DECONFIGURING/POSTPROCESSING we don't want to go to
+        # ERROR because that may prevent deconfiguring.
         if self.state in (ProductState.IDLE, ProductState.CAPTURING):
             self.state = ProductState.ERROR
 
@@ -1087,12 +1087,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
             shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
             await asyncio.gather(*wait_tasks)
+            self.state = ProductState.POSTPROCESSING
             ready.set()
             await shutdown_task
 
 
 class DeviceServer(aiokatcp.DeviceServer):
-    VERSION = 'product-controller-1.0'
+    VERSION = 'product-controller-1.1'
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,

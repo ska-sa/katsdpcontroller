@@ -201,7 +201,7 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
     (b'cal.1.capture-block-state', b'', b'string'),
     (b'state', b'', b'discrete',
-     b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error'),
+     b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error', b'postprocessing'),
     (b'capture-block-state', b'', b'string')
 ]
 
