@@ -3318,49 +3318,6 @@ class Scheduler(pymesos.Scheduler):
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
 
-    async def get_master_and_slaves(self, timeout=None):
-        """Obtain a list of slave hostnames from the master.
-
-        Parameters
-        ----------
-        timeout : float, optional
-            Timeout for HTTP connection to the master
-
-        Raises
-        ------
-        aiohttp.client.ClientError
-            If there was an HTTP connection problem (including timeout)
-        ValueError
-            If the HTTP response from the master was malformed
-        ValueError
-            If there is no current master
-
-        Returns
-        -------
-        master : list of str
-            Hostname of the master
-        slaves : list of str
-            Hostnames of slaves
-        """
-        if self._driver is None:
-            raise ValueError('No driver is set')
-        # Need to copy, because the driver runs in a separate thread
-        # (self.master is a property that takes a lock).
-        master = self._driver.master
-        if master is None:
-            raise ValueError('No master is set')
-        url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=timeout) as r:
-                r.raise_for_status()
-                data = await r.json()
-                try:
-                    slaves = data['slaves']
-                    master_host = urllib.parse.urlsplit(url).hostname
-                    return master_host, [slave['hostname'] for slave in slaves]
-                except (KeyError, TypeError) as error:
-                    raise ValueError('Malformed response') from error
-
     def get_task(self, task_id, return_graph=False):
         try:
             if return_graph:
