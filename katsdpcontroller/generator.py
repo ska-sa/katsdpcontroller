@@ -1838,7 +1838,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             # TODO: these resources are very rough estimates. The memory
             # estimate is conservative since it assumes no compression.
             dumps = int(round(obs_time / l0_info.int_time))
-            imager.mem = _mb(dump_bytes * dumps)  + 8192
+            imager.mem = _mb(dump_bytes * dumps) + 8192
             imager.disk = 8192
             imager.max_run_time = 3600     # 1 hour
             imager.volumes = [DATA_VOL]
