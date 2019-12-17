@@ -938,7 +938,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
 class DeviceServer(aiokatcp.DeviceServer):
     """katcp server around a :class:`ProductManagerBase`."""
 
-    VERSION = "sdpcontroller-3.2"
+    VERSION = "sdpcontroller-3.3"
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     _manager: ProductManagerBase

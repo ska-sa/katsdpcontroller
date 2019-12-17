@@ -1951,8 +1951,9 @@ class PhysicalTask(PhysicalNode):
         self.taskinfo = None
         self.allocation = None
         self.status = None
-        self.start_time = None
-        self.end_time = None
+        self.start_time = None         # time.time()
+        self.end_time = None           # time.time()
+        self.kill_sent_time = None     # loop.time() when killTask called
         self._queue = None
         self.task_stats = None
         for name, cls in GLOBAL_RESOURCES.items():
@@ -2162,6 +2163,7 @@ class PhysicalTask(PhysicalNode):
         # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
+        self.kill_sent_time = asyncio.get_event_loop().time()
         super().kill(driver, **kwargs)
 
     @property
@@ -2436,6 +2438,12 @@ class Scheduler(pymesos.Scheduler):
     task_stats : :class:`TaskStats`
         Statistics collector passed to constructor
     """
+
+    # If offers come at 5s intervals, then 11s gives two chances.
+    resources_timeout = 11.0         #: Time to wait for sufficient resources to be offered
+    reconciliation_interval = 30.0   #: Time to wait between reconciliation requests
+    kill_timeout = 5.0               #: Minimum time before trying to re-kill a task
+
     def __init__(self, default_role, http_host, http_port, http_url=None,
                  *, task_stats=None, runner_kwargs=None):
         self._loop = asyncio.get_event_loop()
@@ -2450,13 +2458,12 @@ class Scheduler(pymesos.Scheduler):
         #: (task, graph) for tasks that have been launched (STARTED to KILLING), indexed by task ID
         self._active = {}
         self._closing = False       #: set to ``True`` when :meth:`close` is called
-        # If offers come at 5s intervals, then 11s gives two chances.
-        self.resources_timeout = 11.0   #: Time to wait for sufficient resources to be offered
         self.http_host = http_host
         self.http_port = http_port
         self.http_url = http_url
         self.task_stats = task_stats if task_stats is not None else TaskStats()
         self._launcher_task = self._loop.create_task(self._launcher())
+        self._reconciliation_task = self._loop.create_task(self._reconciliation())
 
         # Configure the web app
         app = aiohttp.web.Application()
@@ -2640,6 +2647,18 @@ class Scheduler(pymesos.Scheduler):
                     # The task itself is responsible for advancing to
                     # READY
             task.set_status(status)
+            if (task.kill_sent_time is not None
+                    and status.state != 'TASK_KILLING'
+                    and status.state not in TERMINAL_STATUSES
+                    and self._loop.time() > task.kill_sent_time + self.kill_timeout):
+                logger.warning('Retrying kill on %s (task ID %s)',
+                               task.name, status.task_id.value)
+                self._driver.killTask(status.task_id)
+        else:
+            if status.state not in TERMINAL_STATUSES:
+                logger.warning('Received status update for unknown task %s, killing it',
+                               status.task_id.value)
+                self._driver.killTask(status.task_id)
         self._driver.acknowledgeStatusUpdate(status)
 
     @classmethod
@@ -3278,6 +3297,34 @@ class Scheduler(pymesos.Scheduler):
             futures.append(asyncio.ensure_future(kill_one(node, kill_graph)))
         await asyncio.gather(*futures)
 
+    async def _reconciliation(self) -> None:
+        """Background task that periodically requests reconciliation.
+
+        See http://mesos.apache.org/documentation/latest/reconciliation/ for
+        a description of reconciliation.
+
+        We don't use the (somewhat complex) algorithm described there, instead
+        just periodically requesting either implicit or explicit
+        reconciliation (the former is useful to learn about tasks we thought
+        were dead, the latter to learn about tasks we thought were alive but
+        have been lost). This means that it may take somewhat longer to
+        converge.
+        """
+        explicit = True
+        while True:
+            try:
+                if explicit:
+                    tasks = [{'task_id': task_id} for task_id in self._active]
+                    logger.debug('Requesting explicit reconciliation of %d tasks', len(tasks))
+                else:
+                    tasks = []
+                    logger.debug('Requesting implicit reconciliation')
+                self._driver.reconcileTasks(tasks)
+            except Exception:
+                logger.warning('Exception during task reconciliation', exc_info=True)
+            await asyncio.sleep(self.reconciliation_interval)
+            explicit = not explicit
+
     async def close(self):
         """Shut down the scheduler. This is a coroutine that kills any graphs
         with running tasks or pending launches, and joins the driver thread. It
@@ -3290,6 +3337,13 @@ class Scheduler(pymesos.Scheduler):
             running will not be shut down. This is subject to change in the
             future.
         """
+        async def cleanup_task(task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
         # TODO: do we need to explicitly decline outstanding offers?
         self._closing = True    # Prevents concurrent launches
         await self.http_runner.cleanup()
@@ -3305,61 +3359,16 @@ class Scheduler(pymesos.Scheduler):
         for queue in self._queues:
             while queue:
                 queue.front().future.cancel()
-        self._launcher_task.cancel()
-        try:
-            await self._launcher_task
-        except asyncio.CancelledError:
-            pass
+        await cleanup_task(self._launcher_task)
         self._launcher_task = None
+        await cleanup_task(self._reconciliation_task)
+        self._reconciliation_task = None
         self._driver.stop()
         # If self._driver is a mock, then asyncio incorrectly complains about passing
         # self._driver.join directly, due to
         # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
-
-    async def get_master_and_slaves(self, timeout=None):
-        """Obtain a list of slave hostnames from the master.
-
-        Parameters
-        ----------
-        timeout : float, optional
-            Timeout for HTTP connection to the master
-
-        Raises
-        ------
-        aiohttp.client.ClientError
-            If there was an HTTP connection problem (including timeout)
-        ValueError
-            If the HTTP response from the master was malformed
-        ValueError
-            If there is no current master
-
-        Returns
-        -------
-        master : list of str
-            Hostname of the master
-        slaves : list of str
-            Hostnames of slaves
-        """
-        if self._driver is None:
-            raise ValueError('No driver is set')
-        # Need to copy, because the driver runs in a separate thread
-        # (self.master is a property that takes a lock).
-        master = self._driver.master
-        if master is None:
-            raise ValueError('No master is set')
-        url = urllib.parse.urlunsplit(('http', master, '/slaves', '', ''))
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=timeout) as r:
-                r.raise_for_status()
-                data = await r.json()
-                try:
-                    slaves = data['slaves']
-                    master_host = urllib.parse.urlsplit(url).hostname
-                    return master_host, [slave['hostname'] for slave in slaves]
-                except (KeyError, TypeError) as error:
-                    raise ValueError('Malformed response') from error
 
     def get_task(self, task_id, return_graph=False):
         try:

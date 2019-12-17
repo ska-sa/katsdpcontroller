@@ -160,7 +160,7 @@ def main() -> None:
     framework_info.checkpoint = True
     framework_info.principal = args.principal
     framework_info.roles = [args.realtime_role, args.batch_role]
-    framework_info.capabilities = [{'type': 'MULTI_ROLE'}]
+    framework_info.capabilities = [{'type': 'MULTI_ROLE'}, {'type': 'TASK_KILLING_STATE'}]
 
     loop = asyncio.get_event_loop()
     if args.interface_mode:
