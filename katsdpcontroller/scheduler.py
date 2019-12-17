@@ -3314,7 +3314,7 @@ class Scheduler(pymesos.Scheduler):
         while True:
             try:
                 if explicit:
-                    tasks = [{'task_id': task_id} for task_id in self._active]
+                    tasks = [{'task_id': {'value': task_id}} for task_id in self._active]
                     logger.debug('Requesting explicit reconciliation of %d tasks', len(tasks))
                 else:
                     tasks = []
