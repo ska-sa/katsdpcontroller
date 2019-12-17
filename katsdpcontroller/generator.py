@@ -63,7 +63,7 @@ BYTES_PER_WEIGHT = 1
 #: Number of bytes per vis-flags-weights combination
 BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
 #: Number of bytes used by spectral imager per visibility
-BYTES_PER_VFW_SPECTRAL = 15.5       # 62 bytes for 4 polarisation products
+BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
