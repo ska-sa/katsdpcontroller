@@ -1,44 +1,5 @@
-ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
+# XXX Temporary hack to disable spectral imaging - DO NOT MERGE
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
+FROM sdp-docker-registry.kat.ac.za:5000/katsdpcontroller:production-00116-20191127
 
-# Switch to Python 3 environment
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
-
-# Install Python dependencies
-COPY requirements.txt /tmp/install/requirements.txt
-RUN install-requirements.py --default-versions ~/docker-base/base-requirements.txt -r /tmp/install/requirements.txt
-
-# Install the current package
-COPY --chown=kat:kat . /tmp/install/katsdpcontroller
-WORKDIR /tmp/install/katsdpcontroller
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
-
-#######################################################################
-
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
-LABEL maintainer="sdpdev+katsdpcontroller@ska.ac.za"
-
-# Label the image with a list of images it uses
-ARG dependencies
-RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
-LABEL za.ac.kat.sdp.image-depends $dependencies
-
-# Install haproxy for --haproxy support and graphviz for --write-graphs support.
-# We need to add a PPA for haproxy because the version in Ubuntu 18.04 has a bug
-# that causes it to run out of file handles.
-USER root
-RUN apt-add-repository ppa:vbernat/haproxy-1.8 && \
-    apt-get -y update && \
-    apt-get -y --no-install-recommends install "haproxy=1.8.22-*" graphviz && \
-    rm -rf /var/lib/apt/lists/*
-USER kat
-
-COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
-
-# Network setup
-EXPOSE 5001
-EXPOSE 5004
+COPY --chown=kat:kat katsdpcontroller/generator.py /home/kat/ve3/lib/python3.6/site-packages/katsdpcontroller/generator.py
