@@ -1204,6 +1204,10 @@ class TestScheduler(asynctest.ClockedTestCase):
     def _dummy_random():
         return 0.0
 
+    def _driver_calls(self):
+        """self.driver.mock_calls, with reconcileTasks filtered out."""
+        return [call for call in self.driver.mock_calls if call[0] != 'reconcileTasks']
+
     async def setUp(self):
         self.framework_id = 'frameworkid'
         # Normally TaskIDAllocator's constructor returns a singleton to keep
@@ -1297,7 +1301,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             AnyOrderList([
                 mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
                 mock.call.suppressOffers({'default'})
-            ]), self.driver.mock_calls)
+            ]), self._driver_calls())
 
     async def test_launch_cycle(self):
         """Launch raises CycleError if there is a cycle of depends_ready edges"""
@@ -1419,13 +1423,13 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_false(node.ready_event.is_set())
             assert_false(node.dead_event.is_set())
         assert_equal({TaskState.STARTING: 2}, self.task_stats.state_counts)
-        assert_equal([mock.call.reviveOffers({'default'})], self.driver.mock_calls)
+        assert_equal([mock.call.reviveOffers({'default'})], self._driver_calls())
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
         self.sched.resourceOffers(self.driver, [offer1])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal([], self.driver.mock_calls)
+        assert_equal([], self._driver_calls())
         for node in self.nodes:
             assert_equal(TaskState.STARTING, node.state)
             assert_false(node.ready_event.is_set())
@@ -1453,7 +1457,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers({'default'})
-        ]), self.driver.mock_calls)
+        ]), self._driver_calls())
         self.driver.reset_mock()
         assert_equal({TaskState.STARTED: 2}, self.task_stats.state_counts)
 
@@ -1464,7 +1468,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.RUNNING, self.nodes[1].state)
         assert_equal(status, self.nodes[1].status)
         assert_equal([mock.call.acknowledgeStatusUpdate(status)],
-                     self.driver.mock_calls)
+                     self._driver_calls())
         self.driver.reset_mock()
         assert_equal({TaskState.STARTED: 1, TaskState.RUNNING: 1}, self.task_stats.state_counts)
 
@@ -1484,7 +1488,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
             assert_equal(status, self.nodes[0].status)
             assert_equal([mock.call.acknowledgeStatusUpdate(status)],
-                         self.driver.mock_calls)
+                         self._driver_calls())
             self.driver.reset_mock()
             poll_ports.assert_called_once_with('agenthost0', [30000])
         assert_equal({TaskState.RUNNING: 2}, self.task_stats.state_counts)
@@ -1644,7 +1648,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.NOT_READY, self.nodes[1].state)
         assert_equal(TaskState.NOT_READY, self.nodes[2].state)
         # Once we abort, we should no longer be interested in offers
-        assert_equal([mock.call.suppressOffers({'default'})], self.driver.mock_calls)
+        assert_equal([mock.call.suppressOffers({'default'})], self._driver_calls())
 
     async def test_launch_force_host(self):
         """Like test_launch_serial, but tests forcing a logical task to a node."""
@@ -1681,7 +1685,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # The offers must be returned to Mesos
         assert_equal(AnyOrderList([
             mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
-            mock.call.suppressOffers({'default'})]), self.driver.mock_calls)
+            mock.call.suppressOffers({'default'})]), self._driver_calls())
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
@@ -1704,7 +1708,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         offer2 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.offerRescinded(self.driver, offer2.id)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal([], self.driver.mock_calls)
+        assert_equal([], self._driver_calls())
         launch.cancel()
 
     async def test_unavailability(self):
@@ -1717,7 +1721,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer([offer0.id])], self.driver.mock_calls)
+        assert_equal([mock.call.declineOffer([offer0.id])], self._driver_calls())
         launch.cancel()
 
     async def test_unavailability_past(self):
@@ -1733,7 +1737,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal([
             mock.call.launchTasks([offer0.id], mock.ANY),
             mock.call.suppressOffers({'default'})
-        ], self.driver.mock_calls)
+        ], self._driver_calls())
         launch.cancel()
 
     async def _test_kill_in_state(self, state):
@@ -1801,7 +1805,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         kill = asyncio.ensure_future(self.sched.kill(self.physical_graph))
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
-                     self.driver.mock_calls)
+                     self._driver_calls())
         assert_equal(TaskState.READY, self.nodes[0].state)
         assert_equal(TaskState.KILLING, self.nodes[1].state)
         assert_equal(TaskState.READY, self.nodes[2].state)
@@ -1814,7 +1818,7 @@ class TestScheduler(asynctest.ClockedTestCase):
                 mock.call.killTask(self.nodes[0].taskinfo.task_id),
                 mock.call.acknowledgeStatusUpdate(status)
             ]),
-            self.driver.mock_calls)
+            self._driver_calls())
         assert_equal(TaskState.KILLING, self.nodes[0].state)
         assert_equal(TaskState.DEAD, self.nodes[1].state)
         assert_equal(TaskState.DEAD, self.nodes[2].state)
@@ -2014,10 +2018,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
-        assert_in(mock.call.suppressOffers({'default'}), self.driver.mock_calls)
-        pos = self.driver.mock_calls.index(mock.call.suppressOffers({'default'}))
-        assert_true(1 <= pos < len(self.driver.mock_calls) - 2)
-        del self.driver.mock_calls[pos]
+        driver_calls = self._driver_calls()
+        assert_in(mock.call.suppressOffers({'default'}), driver_calls)
+        pos = driver_calls.index(mock.call.suppressOffers({'default'}))
+        assert_true(1 <= pos < len(driver_calls) - 2)
+        del driver_calls[pos]
         assert_equal([
             mock.call.reviveOffers({'default'}),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
@@ -2026,10 +2031,47 @@ class TestScheduler(asynctest.ClockedTestCase):
             mock.call.acknowledgeStatusUpdate(status0),
             mock.call.stop(),
             mock.call.join()
-            ], self.driver.mock_calls)
+            ], driver_calls)
         assert_true(launch.done())
         await launch
 
     async def test_status_unknown_task_id(self):
-        """statusUpdate must correctly handle an unknown task ID"""
+        """statusUpdate must correctly handle an unknown task ID.
+
+        It must also kill it if it's not already dead.
+        """
         self._status_update('test-01234567', 'TASK_LOST')
+        self._status_update('test-12345678', 'TASK_RUNNING')
+        await asynctest.exhaust_callbacks(self.loop)
+        self.driver.killTask.assert_called_once_with({'value': 'test-12345678'})
+
+    async def test_retry_kill(self):
+        """Killing a task must be retried after a timeout."""
+        await self._ready_graph()
+        kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, [self.nodes[0]]))
+        await asynctest.exhaust_callbacks(self.loop)
+        self.driver.killTask.assert_called_once_with(self.nodes[0].taskinfo.task_id)
+        self.driver.killTask.reset_mock()
+        # Send a task status update in less than the kill timeout. It must not
+        # lead to a retry.
+        await self.advance(1.0)
+        self._status_update(self.task_ids[0], 'TASK_RUNNING')
+        await asynctest.exhaust_callbacks(self.loop)
+        self.driver.killTask.assert_not_called()
+
+        # Give time for reconciliation requests to occur
+        await self.advance(70.0)
+        self.driver.reconcileTasks.assert_called()
+        self._status_update(self.task_ids[0], 'TASK_RUNNING')
+        await asynctest.exhaust_callbacks(self.loop)
+        self.driver.killTask.assert_called_once_with(self.nodes[0].taskinfo.task_id)
+
+        # Send an update for TASK_KILLING state: must not trigger another attempt
+        self.driver.killTask.reset_mock()
+        self._status_update(self.task_ids[0], 'TASK_KILLING')
+        await asynctest.exhaust_callbacks(self.loop)
+        self.driver.killTask.assert_not_called()
+
+        # Let it die so that we can clean up the async task
+        self._status_update(self.task_ids[0], 'TASK_FAILED')
+        await kill
