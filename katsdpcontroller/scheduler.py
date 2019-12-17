@@ -2153,9 +2153,9 @@ class PhysicalTask(PhysicalNode):
 
     def set_status(self, status):
         self.status = status
-        if status.state == 'TASK_RUNNING':
+        if status.state == 'TASK_RUNNING' and self.start_time is None:
             self.start_time = status.timestamp
-        elif status.state in TERMINAL_STATUSES:
+        elif status.state in TERMINAL_STATUSES and self.end_time is None:
             self.end_time = status.timestamp
 
     def kill(self, driver, **kwargs):
