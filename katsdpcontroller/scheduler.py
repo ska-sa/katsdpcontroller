@@ -2795,6 +2795,8 @@ class Scheduler(pymesos.Scheduler):
         # Revive/suppress to match the necessary roles
         roles = set(queue.role for (queue, group) in candidates)
         self._update_roles(roles)
+        # See comment at the bottom
+        useful_agents = set()
 
         for queue, group in candidates:
             nodes = group.nodes
@@ -2818,20 +2820,27 @@ class Scheduler(pymesos.Scheduler):
                 agents.sort(key=lambda agent: (agent.priority, agent.resources['mem'].available))
                 nodes.sort(key=self._node_sort_key, reverse=True)
                 allocations = []
+                insufficient = False
                 for node in nodes:
                     allocation = None
                     if isinstance(node, PhysicalTask):
                         for agent in agents:
                             try:
                                 allocation = agent.allocate(node.logical_node)
+                                useful_agents.add((role, agent.agent_id))
                                 break
                             except InsufficientResourcesError as error:
                                 logger.debug('Cannot add %s to %s: %s',
                                              node.name, agent.agent_id, error)
                         else:
-                            # Raises an InsufficientResourcesError
-                            self._diagnose_insufficient(orig_agents, nodes)
+                            insufficient = True
+                            # We keep trying to allocate remaining nodes
+                            # anyway, just to populate useful_agents.
+                            continue
                         allocations.append((node, allocation))
+                if insufficient:
+                    # Raises an InsufficientResourcesError
+                    self._diagnose_insufficient(orig_agents, nodes)
             except InsufficientResourcesError as error:
                 logger.debug('Could not yet launch graph: %s', error)
                 group.last_insufficient = error
@@ -2892,6 +2901,27 @@ class Scheduler(pymesos.Scheduler):
                         group.future.set_exception(error)
                     # Don't remove from the queue: launch() handles that
                 break
+
+        if candidates and not self._wakeup_launcher.is_set():
+            # We failed to launch anything and we're not about to try again,
+            # so nothing will happen until there is a change. We want to
+            # avoid holding on to offers that aren't useful (so that other
+            # Mesos frameworks can use them), while not releasing offers that
+            # will be useful once more offers become available.
+            #
+            # This is just an approximation and may decline more than it
+            # should. For example, if there are two candidates, it might
+            # consider one offer sufficient to satisfy a requirement in both
+            # candidates, even though it cannot be used for both. However, it
+            # should still always ensure forward progress.
+            to_decline = []
+            for role, role_offers in self._offers.items():
+                for agent_id, agent_offers in list(role_offers.items()):
+                    if (role, agent_id) not in useful_agents:
+                        to_decline.extend([offer.id for offer in agent_offers.values()])
+                        del role_offers[agent_id]
+            if to_decline:
+                self._driver.declineOffer(to_decline)
 
     async def _launcher(self):
         """Background task to monitor the queues and offers and launch when possible.
