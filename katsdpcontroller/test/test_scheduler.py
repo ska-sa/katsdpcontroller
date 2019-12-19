@@ -1689,18 +1689,17 @@ class TestScheduler(asynctest.ClockedTestCase):
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
-        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
-        # Provide an offer that is insufficient
-        offer0 = self._make_offer({'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
-        self.sched.resourceOffers(self.driver, [offer0])
+        launch, kill = await self._transition_node0(TaskState.STARTING)
+        offers = self._make_offers()
+        # Provide an offer that is sufficient only for node 0
+        self.sched.resourceOffers(self.driver, [offers[0]])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         # Rescind the offer
-        self.sched.offerRescinded(self.driver, offer0.id)
+        self.sched.offerRescinded(self.driver, offers[0].id)
         # Make a new offer, which is also insufficient, but which with the
         # original one would have been sufficient.
-        offer1 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
-        self.sched.resourceOffers(self.driver, [offer1])
+        self.sched.resourceOffers(self.driver, [offers[1]])
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         # Rescind an unknown offer. This can happen if an offer was accepted at
@@ -1709,6 +1708,18 @@ class TestScheduler(asynctest.ClockedTestCase):
         self.sched.offerRescinded(self.driver, offer2.id)
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal([], self._driver_calls())
+        launch.cancel()
+
+    async def test_decline_unneeded_offers(self):
+        """Test that useless offers are not hoarded."""
+        launch, kill = await self._transition_node0(TaskState.STARTING)
+        offers = self._make_offers()
+        # Replace offer 0 with a useless offer
+        offers[0] = self._make_offer({'cpus': 0.1})
+        self.sched.resourceOffers(self.driver, offers)
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert_equal([mock.call.declineOffer([offers[0].id])], self._driver_calls())
         launch.cancel()
 
     async def test_unavailability(self):
