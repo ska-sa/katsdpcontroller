@@ -72,6 +72,13 @@ registry shared between multiple people). Note that some of the built images
 (for example, those bundling CUDA) might not be suitable for public
 redistribution due to licensing restrictions.
 
+If you're inside the SARAO firewall (and have used `docker login` to
+authenticate to the registry), you can replace the last step with
+```sh
+./update-local-registry.py --copy-all --upstream sdp-docker-registry.kat.ac.za:5000
+```
+which will be faster since it will avoid building a number of images.
+
 ## Starting up the sandbox
 
 1. Run `./prepare.sh`. This will query your system for information
@@ -90,7 +97,11 @@ redistribution due to licensing restrictions.
    minute for the services to start up and try again. This step is only
    needed once, unless you destroy the Docker volumes from the sandbox.
 
-4. Sometimes Singularity doesn't realise that it should be the master if it is
+4. Run `./grafana-setup.sh`, which will install a plugin needed for one of the
+   Grafana plots. Again, this step is only needed once, unless you destroy
+   the Docker volumes.
+
+5. Sometimes Singularity doesn't realise that it should be the master if it is
    started too soon after Zookeeper. To be on the safe side, run
    `docker-compose restart singularity` to get it going.
 
@@ -153,7 +164,7 @@ docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127
 ### Local machine
 
 ```sh
-KATSDP_LOG_GELF_ADDRESS=127.0.0.1 scripts/sdp_master_controller.py --gui-urls sandbox/gui-urls/ --localhost --image-tag-file sandbox/sdp_image_tag --s3-config-file sandbox/s3_config.json --no-pull --haproxy localhost:2181 http://localhost:7099/singularity
+KATSDP_LOG_GELF_ADDRESS=127.0.0.1 scripts/sdp_master_controller.py --gui-urls sandbox/gui-urls/ --localhost --image-tag-file sandbox/sdp_image_tag --s3-config-file sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity
 ```
 
 ## Running kattelmod
