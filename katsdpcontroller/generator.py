@@ -824,6 +824,7 @@ def _make_ingest(g, config, spectral_name, continuum_name):
         'sd_int_time': spectral_info.int_time,
         'output_channels': output_channels_str,
         'sd_output_channels': output_channels_str,
+        'use_data_suspect': True,
         'aiomonitor': True
     }
     if spectral_name:
