@@ -62,6 +62,8 @@ BYTES_PER_FLAG = 1
 BYTES_PER_WEIGHT = 1
 #: Number of bytes per vis-flags-weights combination
 BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
+#: Number of bytes used by spectral imager per visibility
+BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
@@ -1803,6 +1805,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     l1_flags_name = output['src_streams'][0]
     l0_name = config['outputs'][l1_flags_name]['src_streams'][0]
     l0_info = L0Info(config, l0_name)
+    dump_bytes = l0_info.n_baselines * SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     output_channels = output['output_channels']
     data_url = _stream_url(capture_block_id, name + '.' + l0_name)
     min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
@@ -1833,8 +1836,10 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 name, first_channel, last_channel, target_name))
             imager.cpus = _spectral_imager_cpus(config)
-            # TODO: these resources are very rough estimates
-            imager.mem = 8192
+            # TODO: these resources are very rough estimates. The memory
+            # estimate is conservative since it assumes no compression.
+            dumps = int(round(obs_time / l0_info.int_time))
+            imager.mem = _mb(dump_bytes * dumps) + 8192
             imager.disk = 8192
             imager.max_run_time = 3600     # 1 hour
             imager.volumes = [DATA_VOL]
