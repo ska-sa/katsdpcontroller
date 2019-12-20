@@ -1001,8 +1001,8 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             observation_time = done_time - init_time
             postprocessing_time = time.time() - done_time
             POSTPROCESSING_TIME.observe(postprocessing_time)
-            logger.info('Capture block %s postprocessing finished in %.3fs',
-                        capture_block.name, postprocessing_time,
+            logger.info('Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
+                        capture_block.name, postprocessing_time, observation_time,
                         extra=dict(capture_block_id=capture_block.name,
                                    observation_time=observation_time,
                                    postprocessing_time=postprocessing_time))
