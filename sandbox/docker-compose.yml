@@ -73,7 +73,7 @@ services:
 
   prometheus:
     network_mode: host
-    image: prom/prometheus:v2.8.0
+    image: quay.io/ska-sa/xrate
     volumes:
       - ./etc/prometheus:/etc/prometheus:ro
       - prometheus_data:/prometheus
@@ -84,7 +84,7 @@ services:
 
   grafana:
     network_mode: host
-    image: grafana/grafana:6.0.2
+    image: grafana/grafana:6.5.1
     depends_on:
       - prometheus
     environment:

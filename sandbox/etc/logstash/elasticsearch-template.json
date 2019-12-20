@@ -31,6 +31,7 @@
     } ],
     "properties" : {
       "@timestamp": { "type": "date_nanos"},
+      "timestamp_coarse": { "type": "date" },
       "@version": { "type": "keyword"},
       "level_name": { "type": "keyword" },
       "level": {"type": "short"},

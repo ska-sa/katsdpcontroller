@@ -1935,7 +1935,7 @@
       }
     },
     {
-      "content": "<style>\n.signal-display\n{\n  border: 0px;\n  margin: 0px;\n  padding: 0px;\n}\niframe.signal-display\n{\n  background-color: white;\n  width: 100%;\n  height: 100%;\n}\ndiv.signal-display\n{\n  height: 100%;\n}\np.signal-display\n{\n  display: block;\n  height: 100%;\n}\n</style>\n<script type=\"text/javascript\">\n$(\"div.signal-display\").parent().addClass(\"signal-display\");\n$(\"iframe.signal-display\").attr(\"src\", \"http://\" + window.location.hostname + \":5002/$sub/sdp_l0\");\n</script>\n<div class=\"signal-display\">\n  <iframe class=\"signal-display\" src=\"\">\n</div>",
+      "content": "<style>\n.signal-display\n{\n  border: 0px;\n  margin: 0px;\n  padding: 0px;\n}\niframe.signal-display\n{\n  background-color: white;\n  width: 100%;\n  height: 100%;\n}\ndiv.signal-display\n{\n  height: 100%;\n}\np.signal-display\n{\n  display: block;\n  height: 100%;\n}\n</style>\n<script type=\"text/javascript\">\n$(\"div.signal-display\").parent().addClass(\"signal-display\");\n$(\"iframe.signal-display\").attr(\"src\", \"http://\" + window.location.hostname + \":5004/gui/$sub/timeplot.sdp_l0/signal-display/\");\n</script>\n<div class=\"signal-display\">\n  <iframe class=\"signal-display\" src=\"\">\n</div>",
       "gridPos": {
         "h": 20,
         "w": 24,

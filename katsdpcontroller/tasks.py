@@ -7,10 +7,9 @@ import os
 
 from addict import Dict
 import async_timeout
-
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
-
+from prometheus_client import Histogram
 from katsdptelstate.endpoint import Endpoint
 
 from . import scheduler, sensor_proxy, product_config
@@ -19,6 +18,63 @@ from . import scheduler, sensor_proxy, product_config
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
 DEPENDS_INIT = 'depends_init'
+# Buckets appropriate for measuring postprocessing task times (in seconds)
+POSTPROCESSING_TIME_BUCKETS = [
+    1 * 60,
+    2 * 60,
+    5 * 60,
+    10 * 60,
+    20 * 60,
+    30 * 60,
+    40 * 60,
+    50 * 60,
+    1 * 3600,
+    2 * 3600,
+    3 * 3600,
+    4 * 3600,
+    5 * 3600,
+    6 * 3600,
+    8 * 3600,
+    10 * 3600,
+    12 * 3600,
+    14 * 3600,
+    16 * 3600,
+    18 * 3600,
+    20 * 3600,
+    22 * 3600,
+    24 * 3600]
+# Buckets appropriate for measuring processing times relative to observation
+# times.
+POSTPROCESSING_REL_BUCKETS = [
+    0.001,
+    0.0025,
+    0.005,
+    0.0075,
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    2.5,
+    5.0,
+    7.5,
+    10.0
+]
+BATCH_RUNTIME = Histogram(
+    'katsdpcontroller_batch_runtime_seconds',
+    'Wall-clock execution time of batch tasks',
+    ['task_type'],
+    buckets=POSTPROCESSING_TIME_BUCKETS)
+BATCH_RUNTIME_REL = Histogram(
+    'katsdpcontroller_batch_runtime_rel',
+    'Wall-clock execution time of batch jobs as a fraction of data length',
+    ['task_type'],
+    buckets=POSTPROCESSING_REL_BUCKETS)
 
 
 class CaptureBlockState(scheduler.OrderedEnum):
@@ -64,8 +120,9 @@ class KatcpTransition(object):
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, name):
+        super().__init__(name)
+        self.task_type = name.split('.', 1)[0]
         self.physical_factory = SDPPhysicalTask
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
@@ -80,6 +137,9 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = True
+        # Set to a time in seconds to indicate time spend collecting the data
+        # to be processed.
+        self.batch_data_time = None
 
 
 class SDPConfigMixin:
@@ -208,7 +268,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
     - Provides a number of internal katcp sensors
     - Tracks live capture block IDs for this task
     - Connects to the service's katcp port and mirrors katcp sensors. Such
-      are exposed at the master controller level using the
+      are exposed at the product controller level using the
       following syntax:
         <name>.<sensor_name>
       For example:
@@ -416,6 +476,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         # Provide info about which container this is for logspout to collect.
         labels = {
             'task': self.logical_node.name,
+            'task_type': self.logical_node.task_type,
             'task_id': self.taskinfo.task_id.value,
             'subarray_product_id': self.subarray_product_id
         }
@@ -462,6 +523,22 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             self._capture_blocks_empty.set()
             if not self.death_expected:
                 self.subarray_product.unexpected_death(self)
+
+    def set_status(self, status):
+        # Ensure we only count once, even in corner cases like a lost task
+        # being rediscovered
+        old_end_time = self.end_time
+        super().set_status(status)
+        if self.logical_node.batch_data_time is not None:
+            # Create these as early as possible so that the metrics are exposed
+            labels = (self.logical_node.task_type,)
+            batch_runtime = BATCH_RUNTIME.labels(*labels)
+            batch_runtime_rel = BATCH_RUNTIME_REL.labels(*labels)
+            if self.end_time is not None and old_end_time is None:
+                elapsed = self.end_time - self.start_time
+                batch_runtime.observe(elapsed)
+                batch_runtime_rel.observe(elapsed / self.logical_node.batch_data_time)
+                logger.info('Task %s ran for %s s', self.name, elapsed)
 
     def clone(self):
         clone = self.logical_node.physical_factory(

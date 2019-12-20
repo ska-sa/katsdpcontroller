@@ -10,3 +10,15 @@ datasources:
       keepCookies: []
       timeInterval: 4s
     version: 1
+  - name: Logs
+    type: elasticsearch
+    access: proxy
+    url: "http://127.0.0.1:9200"
+    database: "[logstash-]YYYY.MM.DD"
+    jsonData:
+      timeField: "timestamp_coarse"
+      interval: "Daily"
+      esVersion: 70
+      logMessageField: "message"
+      logLevelField: "level_name"
+    version: 1
