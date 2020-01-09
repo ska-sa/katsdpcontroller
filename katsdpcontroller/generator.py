@@ -1841,7 +1841,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             dumps = int(round(obs_time / l0_info.int_time))
             imager.mem = _mb(dump_bytes * dumps) + 8192
             imager.disk = 8192
-            imager.max_run_time = 3600     # 1 hour
+            imager.max_run_time = 6 * 3600     # 6 hours
             imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
             # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
