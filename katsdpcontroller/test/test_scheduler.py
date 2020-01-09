@@ -1902,7 +1902,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         task_id = self.batch_nodes[0].taskinfo.task_id.value
         self._status_update(task_id, 'TASK_KILLED')
         results = await task
-        with assert_raises(asyncio.TimeoutError):
+        with assert_raises(scheduler.TaskError):
             raise next(iter(results.values()))
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
@@ -1924,14 +1924,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 0)
 
-    async def test_batch_run_retry(self):
-        """batch_run where first attempt fails, later attempt succeeds"""
-        task = asyncio.ensure_future(self.sched.batch_run(
-            self.physical_batch_graph, self.resolver, [self.batch_nodes[0]], attempts=2))
-        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
-        task_id = self.batch_nodes[0].taskinfo.task_id.value
-        self._status_update(task_id, 'TASK_FAILED')
-        await asynctest.exhaust_callbacks(self.loop)
+    async def _batch_run_retry_second(self, task):
+        """Do the retry on a test_batch_run_retry_* test."""
         # The graph should now have been modified in place, so we need to
         # get the new physical node
         self.batch_nodes[0] = next(node for node in self.physical_batch_graph
@@ -1943,6 +1937,29 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_done, 1)
         assert_equal(self.task_stats.batch_failed, 0)
         assert_equal(self.task_stats.batch_skipped, 0)
+
+    async def test_batch_run_retry(self):
+        """batch_run where first attempt fails, later attempt succeeds."""
+        task = asyncio.ensure_future(self.sched.batch_run(
+            self.physical_batch_graph, self.resolver, [self.batch_nodes[0]], attempts=2))
+        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
+        task_id = self.batch_nodes[0].taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_FAILED')
+        await asynctest.exhaust_callbacks(self.loop)
+        await self._batch_run_retry_second(task)
+
+    async def test_batch_run_retry_timeout(self):
+        """batch_run where first attempt times out, later attempt succeeds."""
+        task = asyncio.ensure_future(self.sched.batch_run(
+            self.physical_batch_graph, self.resolver, [self.batch_nodes[0]], attempts=2))
+        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
+        task_id = self.batch_nodes[0].taskinfo.task_id.value
+        await self.advance(100)
+        self.driver.killTask.assert_called_with(self.batch_nodes[0].taskinfo.task_id)
+        task_id = self.batch_nodes[0].taskinfo.task_id.value
+        self._status_update(task_id, 'TASK_KILLED')
+        await asynctest.exhaust_callbacks(self.loop)
+        await self._batch_run_retry_second(task)
 
     async def test_batch_run_depends(self):
         """Batch launch with one task depending on another"""
