@@ -3092,9 +3092,13 @@ class Scheduler(pymesos.Scheduler):
                               queue, resources_timeout):
         """Single attempt for :meth:`batch_run`."""
         async def wait_one(node):
-            await asyncio.wait_for(node.dead_event.wait(), timeout=node.logical_node.max_run_time)
-            if node.status is not None and node.status.state != 'TASK_FINISHED':
-                raise TaskError(node)
+            try:
+                await asyncio.wait_for(node.dead_event.wait(),
+                                       timeout=node.logical_node.max_run_time)
+                if node.status is not None and node.status.state != 'TASK_FINISHED':
+                    raise TaskError(node)
+            except asyncio.TimeoutError as exc:
+                raise TaskError(node, 'exceeded maximum runtime') from exc
 
         for node in nodes:
             # Batch tasks die on their own
