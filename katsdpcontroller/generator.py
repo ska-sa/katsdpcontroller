@@ -37,7 +37,7 @@ CAPTURE_TRANSITIONS = {
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
     ],
     CaptureBlockState.BURNDOWN: [
-        KatcpTransition('capture-done', timeout=120)
+        KatcpTransition('capture-done', timeout=600)
     ]
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
