@@ -400,7 +400,9 @@ def _make_telstate(g, config):
             n_antennas += len(stream['antennas'])
 
     telstate = SDPLogicalTask('telstate')
-    telstate.cpus = 0.4
+    # redis is nominally single-threaded, but has some helper threads
+    # for background tasks so can occasionally exceed 1 CPU.
+    telstate.cpus = 1.2 if not is_develop(config) else 0.2
     telstate.mem = 2048 + 400 * n_antennas
     telstate.disk = telstate.mem
     telstate.image = 'katsdptelstate'
