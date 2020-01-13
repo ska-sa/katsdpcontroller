@@ -1160,7 +1160,7 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
     # writing) and scale from there, while capping at 3.
     vis_writer.cpus = min(3, 2 * info.n_vis / _N32_32)
 
-    workers = 4
+    workers = 4 if local else 50
     max_accum_dumps = _writer_max_accum_dumps(config, name, BYTES_PER_VFW, max_channels)
     # Buffer enough data for 45 seconds. We've seen the disk system throw a fit
     # and hang for 30 seconds at a time, and this should allow us to ride that
