@@ -2,6 +2,7 @@
 
 import unittest
 from unittest import mock
+import copy
 import itertools
 import json
 import asyncio
@@ -30,7 +31,7 @@ import katpoint
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys, CONSUL_URL)
+    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
@@ -167,6 +168,63 @@ class TestRedactKeys(unittest.TestCase):
         self.assertEqual(result, ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe'])
 
 
+class TestNormaliseS3Config(unittest.TestCase):
+    def test_single_url(self) -> None:
+        s3_config = {
+            'archive': {
+                'read': {
+                    'access_key': 'ACCESS_KEY',
+                    'secret_key': 'tellno1'
+                },
+                'write': {
+                    'access_key': 's3cr3t',
+                    'secret_key': 'mores3cr3t'
+                },
+                'url': 'http://invalid/'
+            }
+        }
+        expected = {
+            'archive': {
+                'read': {
+                    'access_key': 'ACCESS_KEY',
+                    'secret_key': 'tellno1',
+                    'url': 'http://invalid/'
+                },
+                'write': {
+                    'access_key': 's3cr3t',
+                    'secret_key': 'mores3cr3t',
+                    'url': 'http://invalid/'
+                }
+            }
+        }
+        result = _normalise_s3_config(s3_config)
+        self.assertEqual(result, expected)
+
+        del s3_config['archive']['read']
+        del expected['archive']['read']
+        result = _normalise_s3_config(s3_config)
+        self.assertEqual(result, expected)
+
+    def test_already_split(self) -> None:
+        s3_config = {
+            'archive': {
+                'read': {
+                    'access_key': 'ACCESS_KEY',
+                    'secret_key': 'tellno1',
+                    'url': 'http://read.invalid/'
+                },
+                'write': {
+                    'access_key': 's3cr3t',
+                    'secret_key': 'mores3cr3t',
+                    'url': 'http://write.invalid/'
+                },
+            }
+        }
+        expected = copy.deepcopy(s3_config)
+        result = _normalise_s3_config(s3_config)
+        self.assertEqual(result, expected)
+
+
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
 
@@ -232,7 +290,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
                                 interface_mode=True,
                                 localhost=True,
                                 image_resolver_factory=image_resolver_factory,
-                                s3_config=None)
+                                s3_config={})
         create_patch(self, 'time.time', return_value=123456789.5)
 
     async def test_capture_init(self) -> None:
@@ -565,6 +623,7 @@ class TestSDPController(BaseTestSDPController):
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
             's3_endpoint_url': 'http://archive.s3.invalid/',
+            's3_write_url': 'http://archive.s3.invalid/',
             's3_expiry_days': None,
             'workers': mock.ANY,
             'buffer_dumps': mock.ANY,
