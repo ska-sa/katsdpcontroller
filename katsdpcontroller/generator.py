@@ -1838,11 +1838,11 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 name, first_channel, last_channel, target_name))
             imager.cpus = _spectral_imager_cpus(config)
-            # TODO: these resources are very rough estimates. The memory
+            # TODO: these resources are very rough estimates. The disk
             # estimate is conservative since it assumes no compression.
             dumps = int(round(obs_time / l0_info.int_time))
-            imager.mem = _mb(dump_bytes * dumps) + 8192
-            imager.disk = 8192
+            imager.mem = 15 * 1024
+            imager.disk = _mb(dump_bytes * dumps) + 1024
             imager.max_run_time = 6 * 3600     # 6 hours
             imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
@@ -1853,6 +1853,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             imager.image = 'katsdpimager'
             # TODO: add lots more options to the ICD
             imager.command = [
+                'run-and-cleanup', '--create', '--tmp', '/mnt/mesos/sandbox/tmp', '--',
                 'imager-mkat-pipeline.py',
                 '-i', 'target={}'.format(target.description),
                 '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
@@ -1863,7 +1864,6 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 '--major', '5',
                 '--weight-type', 'robust',
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
-                '--no-tmp-file',
                 data_url,
                 DATA_VOL.container_path,
                 '{}_{}_{}'.format(capture_block_id, name, target_name)
