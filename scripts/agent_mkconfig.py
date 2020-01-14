@@ -266,10 +266,12 @@ def attributes_resources(args):
 
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
-    # Mesos sees "cpus" and "mem" in our custom resource names, and skips the
-    # automatic detection. We have to recreate its logic.
-    resources['cpus'] = len(hwloc.cpu_nodes())
-    resources['mem'] = (psutil.virtual_memory().total - 2**30) // 2**20
+    resources['cpus'] = float(len(hwloc.cpu_nodes())) - args.reserve_cpu
+    if resources['cpus'] < 0.1:
+        raise RuntimeError('--reserve-cpu ({}) is too high'.format(args.reserve_cpu))
+    resources['mem'] = psutil.virtual_memory().total // 2**20 - args.reserve_mem
+    if resources['mem'] < 1024.0:
+        raise RuntimeError('--reserve-mem ({}) is too high'.format(args.reserve_mem))
     return attributes, resources
 
 
@@ -361,6 +363,10 @@ def main():
                         help='Directory for attributes [%(default)s]')
     parser.add_argument('--resources-dir', default='/etc/mesos-slave/resources',
                         help='Directory for resources [%(default)s]')
+    parser.add_argument('--reserve-cpu', type=float, default=0.0,
+                        help='Amount of CPU resource to exclude from Mesos [%(default)s]')
+    parser.add_argument('--reserve-mem', type=float, default=1024.0,
+                        help='MiB of memory resource to exclude from Mesos [%(default)s]')
     parser.add_argument('--network', dest='networks', action='append', default=[],
                         metavar='INTERFACE:NETWORK',
                         help='Map network interface to a logical network')
