@@ -8,18 +8,44 @@
             "properties": {
                 "access_key": {"$ref": "#/definitions/key"},
                 "secret_key": {"$ref": "#/definitions/key"}
-            }
+            },
+            "required": ["access_key", "secret_key"]
         },
-        "store": {
+        "key_pair_url": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "read": {"$ref": "#/definitions/key_pair"},
-                "write": {"$ref": "#/definitions/key_pair"},
-                "url": { "type": "string", "format": "uri" },
-                "expiry_days": { "type": "integer", "minimumValue": 0 }
+                "access_key": {"$ref": "#/definitions/key"},
+                "secret_key": {"$ref": "#/definitions/key"},
+                "url": { "type": "string", "format": "uri" }
             },
-            "required": ["write", "url"]
+            "required": ["access_key", "secret_key", "url"]
+        },
+        "expiry": { "type": "integer", "minimumValue": 0 },
+        "store": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "read": {"$ref": "#/definitions/key_pair"},
+                        "write": {"$ref": "#/definitions/key_pair"},
+                        "url": { "type": "string", "format": "uri" },
+                        "expiry_days": { "$ref": "#/definitions/expiry" }
+                    },
+                    "required": ["write", "url"]
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "read": {"$ref": "#/definitions/key_pair_url"},
+                        "write": {"$ref": "#/definitions/key_pair_url"},
+                        "expiry_days": { "$ref": "#/definitions/expiry" }
+                    },
+                    "required": ["write"]
+                }
+            ]
         },
         "rwstore": {
             "allOf": [

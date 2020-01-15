@@ -437,7 +437,7 @@ def _make_cam2telstate(g, config, name):
 
 def _make_meta_writer(g, config):
     def make_meta_writer_config(task, resolver):
-        s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['url'])
+        s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['write']['url'])
         return {
             's3_host': s3_url.hostname,
             's3_port': s3_url.port,
@@ -1198,7 +1198,8 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
+            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True
@@ -1275,7 +1276,8 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
-            's3_endpoint_url': resolver.s3_config[s3_name]['url'],
+            's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
+            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True

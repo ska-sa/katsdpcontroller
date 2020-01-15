@@ -92,6 +92,19 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
     return taskinfo
 
 
+def _normalise_s3_config(s3_config: dict) -> dict:
+    """Normalise s3_config to have separate `url` fields for `read` and `write`."""
+    s3_config = copy.deepcopy(s3_config)
+    for config in s3_config.values():
+        for mode in ['read', 'write']:
+            if mode in config:
+                if 'url' not in config[mode]:
+                    config[mode]['url'] = config['url']
+        if 'url' in config:
+            del config['url']
+    return s3_config
+
+
 def _prometheus_factory(registry: CollectorRegistry,
                         sensor: aiokatcp.Sensor) -> Optional[sensor_proxy.PrometheusInfo]:
     assert sensor.description is not None
@@ -1194,7 +1207,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.interface_mode = interface_mode
         self.localhost = localhost
         self.image_resolver_factory = image_resolver_factory
-        self.s3_config = s3_config
+        self.s3_config = _normalise_s3_config(s3_config)
         self.graph_dir = graph_dir
         self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
