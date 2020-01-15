@@ -43,7 +43,7 @@
                 }
             },
             "else": {
-                "$comment": "If not URL is passed to store, URLs must be used in sections",
+                "$comment": "If no URL is passed to store, URLs must be used in sections",
                 "properties": {
                     "read": {"$ref": "#/$defs/has_url"},
                     "write": {"$ref": "#/$defs/has_url"}
