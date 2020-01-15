@@ -55,6 +55,7 @@ class SimpleTaskStats(scheduler.TaskStats):
         self.batch_created = 0
         self.batch_started = 0
         self.batch_done = 0
+        self.batch_retried = 0
         self.batch_failed = 0
         self.batch_skipped = 0
         self._state_counts = Counter()
@@ -72,6 +73,9 @@ class SimpleTaskStats(scheduler.TaskStats):
 
     def batch_tasks_done(self, n_tasks):
         self.batch_done += n_tasks
+
+    def batch_tasks_retried(self, n_tasks):
+        self.batch_retried += n_tasks
 
     def batch_tasks_failed(self, n_tasks):
         self.batch_failed += n_tasks
@@ -1873,6 +1877,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_retried, 0)
         assert_equal(self.task_stats.batch_failed, 0)
         assert_equal(self.task_stats.batch_skipped, 0)
 
@@ -1889,6 +1894,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_retried, 0)
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 0)
 
@@ -1907,6 +1913,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_retried, 0)
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 0)
 
@@ -1921,6 +1928,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_retried, 0)
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 0)
 
@@ -1935,6 +1943,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 1)
+        assert_equal(self.task_stats.batch_retried, 1)
         assert_equal(self.task_stats.batch_failed, 0)
         assert_equal(self.task_stats.batch_skipped, 0)
 
@@ -1995,6 +2004,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_created, 2)
         assert_equal(self.task_stats.batch_started, 1)
         assert_equal(self.task_stats.batch_done, 2)
+        assert_equal(self.task_stats.batch_retried, 0)
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 1)
 

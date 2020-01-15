@@ -26,7 +26,7 @@
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 21,
         "x": 0,
         "y": 0
@@ -126,6 +126,8 @@
         "#d44a3a"
       ],
       "datasource": "Prometheus",
+      "decimals": 0,
+      "description": "Tasks that have failed but been rescheduled (counted once for each failure).",
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -135,12 +137,95 @@
         "thresholdMarkers": true
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 21,
         "y": 0
       },
       "id": 4,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "options": {},
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(increase(katsdpcontroller_batch_tasks_retried[$__range]))",
+          "format": "time_series",
+          "intervalFactor": 1,
+          "refId": "A"
+        }
+      ],
+      "thresholds": "1,1",
+      "title": "Retries",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": "Prometheus",
+      "decimals": 0,
+      "description": "Tasks that have failed after all retry attempts.",
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 21,
+        "y": 3
+      },
+      "id": 14,
       "interval": null,
       "links": [],
       "mappingType": 1,
@@ -207,6 +292,7 @@
         "#d44a3a"
       ],
       "datasource": "Prometheus",
+      "decimals": 0,
       "description": "Tasks skipped because a prerequisite task failed",
       "format": "none",
       "gauge": {
@@ -217,10 +303,10 @@
         "thresholdMarkers": true
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 21,
-        "y": 4
+        "y": 6
       },
       "id": 5,
       "interval": null,
@@ -298,7 +384,7 @@
         "h": 12,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -365,7 +451,7 @@
         "h": 12,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 9
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -431,7 +517,7 @@
         "h": 11,
         "w": 12,
         "x": 0,
-        "y": 20
+        "y": 21
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -497,7 +583,7 @@
         "h": 11,
         "w": 12,
         "x": 12,
-        "y": 20
+        "y": 21
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -551,7 +637,7 @@
         "h": 11,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 32
       },
       "id": 13,
       "options": {},
@@ -580,6 +666,12 @@
             "title": "Postprocessing time",
             "type": "linear",
             "zeroline": true
+          },
+          "zaxis": {
+            "rangemode": "normal",
+            "showgrid": true,
+            "type": "linear",
+            "zeroline": false
           }
         },
         "loadFromCDN": false,
@@ -705,5 +797,5 @@
   "timezone": "",
   "title": "Imaging",
   "uid": "sX9cxaxZz",
-  "version": 1
+  "version": 4
 }

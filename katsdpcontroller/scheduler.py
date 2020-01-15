@@ -2380,6 +2380,9 @@ class TaskStats:
         """`n_tasks` batch tasks were skipped because a dependency failed."""
         pass
 
+    def batch_tasks_retried(self, n_tasks):
+        """`n_tasks` batch tasks failed and were re-scheduled."""
+
     def batch_tasks_failed(self, n_tasks):
         """`n_tasks` batch tasks failed after all retries."""
         pass
@@ -3176,6 +3179,7 @@ class Scheduler(pymesos.Scheduler):
                     mapping = dict(zip(nodes, new_nodes))
                     networkx.relabel_nodes(graph, mapping, copy=False)
                     nodes = new_nodes
+                    self.task_stats.batch_tasks_retried(len(nodes))
             else:
                 break
 
@@ -3263,7 +3267,7 @@ class Scheduler(pymesos.Scheduler):
                         resources_timeout=resources_timeout, attempts=attempts)
                 except Exception:
                     logger.exception('Batch task %s failed', node.name)
-                    self.task_stats.batch_tasks_failed(1)
+                    self.task_stats.batch_tasks_failed(len(node_set))
                     raise
             finally:
                 self.task_stats.batch_tasks_done(len(node_set))
