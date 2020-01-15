@@ -2382,6 +2382,7 @@ class TaskStats:
 
     def batch_tasks_retried(self, n_tasks):
         """`n_tasks` batch tasks failed and were re-scheduled."""
+        pass
 
     def batch_tasks_failed(self, n_tasks):
         """`n_tasks` batch tasks failed after all retries."""
