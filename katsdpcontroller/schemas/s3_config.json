@@ -1,65 +1,80 @@
 {
-    "$schema": "http://json-schema.org/draft-04/schema#",
-    "definitions": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$defs": {
         "key": {"type": "string"},
-        "key_pair": {
+        "has_keys": { "required": ["access_key", "secret_key"] },
+        "has_url": { "required": ["url"] },
+        "no_url": { "not": { "required": ["url"] } },
+        "section": {
+            "$comment": "A read or write section in a store (no required properties)",
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "access_key": {"$ref": "#/definitions/key"},
-                "secret_key": {"$ref": "#/definitions/key"}
-            },
-            "required": ["access_key", "secret_key"]
-        },
-        "key_pair_url": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "access_key": {"$ref": "#/definitions/key"},
-                "secret_key": {"$ref": "#/definitions/key"},
+                "access_key": {"$ref": "#/$defs/key"},
+                "secret_key": {"$ref": "#/$defs/key"},
                 "url": { "type": "string", "format": "uri" }
             },
-            "required": ["access_key", "secret_key", "url"]
+            "if": {
+                "$comment": "if either key is given, both must be",
+                "anyOf": [
+                    {"required": ["access_key"]},
+                    {"required": ["secret_key"]}
+                ]
+            },
+            "then": {
+                "required": ["access_key", "secret_key"]
+            }
         },
-        "expiry": { "type": "integer", "minimumValue": 0 },
         "store": {
-            "oneOf": [
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "read": {"$ref": "#/$defs/section"},
+                "write": {"$ref": "#/$defs/section"},
+                "url": {"$type": "string", "format": "uri"},
+                "expiry_days": {"type": "integer", "minimumValue": 0}
+            },
+            "if": { "$ref": "#/$defs/has_url" },
+            "then": {
+                "$comment": "If an URL is passed to store, URLs can't be used in sections",
+                "properties": {
+                    "read": {"$ref": "#/$defs/no_url"},
+                    "write": {"$ref": "#/$defs/no_url"}
+                }
+            },
+            "else": {
+                "$comment": "If no URL is passed to store, URLs must be used in sections",
+                "properties": {
+                    "read": {"$ref": "#/$defs/has_url"},
+                    "write": {"$ref": "#/$defs/has_url"}
+                }
+            }
+        },
+        "imager_store": {
+            "$comment": "Store with read and write sections, both with keys",
+            "allOf": [
+                { "$ref": "#/$defs/store" },
                 {
-                    "type": "object",
-                    "additionalProperties": false,
                     "properties": {
-                        "read": {"$ref": "#/definitions/key_pair"},
-                        "write": {"$ref": "#/definitions/key_pair"},
-                        "url": { "type": "string", "format": "uri" },
-                        "expiry_days": { "$ref": "#/definitions/expiry" }
+                        "read": {"$ref": "#/$defs/has_keys"},
+                        "write": {"$ref": "#/$defs/has_keys"}
                     },
-                    "required": ["write", "url"]
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "read": {"$ref": "#/definitions/key_pair_url"},
-                        "write": {"$ref": "#/definitions/key_pair_url"},
-                        "expiry_days": { "$ref": "#/definitions/expiry" }
-                    },
-                    "required": ["write"]
+                    "required": ["read", "write"]
                 }
             ]
         },
-        "rwstore": {
-            "allOf": [
-                { "$ref": "#/definitions/store" },
-                { "required": ["read"] }
-            ]
+        "archive_store": {
+            "$comment": "Store with a read URL",
+            "if": { "$ref": "#/$defs/no_url" },
+            "then": { "required": ["read"] }
         }
     },
     "type": "object",
     "additionalProperties": false,
     "properties": {
-        "continuum": {"$ref": "#/definitions/rwstore"},
-        "spectral": {"$ref": "#/definitions/rwstore"},
-        "archive": {"$ref": "#/definitions/store"}
+        "continuum": {"$ref": "#/$defs/imager_store"},
+        "spectral": {"$ref": "#/$defs/imager_store"},
+        "archive": {"$ref": "#/$defs/archive_store"}
     },
     "required": ["continuum", "spectral", "archive"]
 }

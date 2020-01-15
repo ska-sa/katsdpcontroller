@@ -22,10 +22,8 @@
         "url": "http://localhost:9000/"
     },
     "archive": {
-        "write": {
-            "access_key": "dummy",
-            "secret_key": "dummy"
-        },
-        "url": "http://s3.invalid/"
+        "read": {
+            "url": "http://s3.invalid/"
+        }
     }
 }

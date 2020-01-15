@@ -436,23 +436,9 @@ def _make_cam2telstate(g, config, name):
 
 
 def _make_meta_writer(g, config):
-    def make_meta_writer_config(task, resolver):
-        s3_url = urllib.parse.urlsplit(resolver.s3_config['archive']['write']['url'])
-        return {
-            's3_host': s3_url.hostname,
-            's3_port': s3_url.port,
-            'rdb_path': OBJ_DATA_VOL.container_path
-        }
-
     meta_writer = SDPLogicalTask('meta_writer')
     meta_writer.image = 'katsdpmetawriter'
-    # The keys are passed on the command-line rather than through config so that
-    # they are redacted from telstate
-    meta_writer.command = [
-        'meta_writer.py',
-        '--access-key', '{resolver.s3_config[archive][write][access_key]}',
-        '--secret-key', '{resolver.s3_config[archive][write][secret_key]}'
-    ]
+    meta_writer.command = ['meta_writer.py']
     meta_writer.cpus = 0.2
     # Only a base allocation: it also gets telstate_extra added
     # meta_writer.mem = 256
@@ -476,7 +462,9 @@ def _make_meta_writer(g, config):
     }
     meta_writer.final_state = CaptureBlockState.DEAD
 
-    g.add_node(meta_writer, config=make_meta_writer_config)
+    g.add_node(meta_writer, config=lambda task, resolver: {
+        'rdb_path': OBJ_DATA_VOL.container_path
+    })
     return meta_writer
 
 
@@ -1199,13 +1187,14 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
-            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        else:
+            conf['s3_write_url'] = resolver.s3_config[s3_name]['write']['url']
         if prefix is not None:
             conf['new_name'] = output_name
         if max_channels is not None:
@@ -1277,13 +1266,14 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
-            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        else:
+            conf['s3_write_url'] = resolver.s3_config[s3_name]['write']['url']
         if prefix is not None:
             conf['new_name'] = output_name
             conf['rename_src'] = {l0_name: prefix + '.' + l0_name}

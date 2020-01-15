@@ -201,7 +201,7 @@ class TestNormaliseS3Config(unittest.TestCase):
         self.assertEqual(result, expected)
 
         del s3_config['archive']['read']
-        del expected['archive']['read']
+        expected['archive']['read'] = {'url': 'http://invalid/'}
         result = _normalise_s3_config(s3_config)
         self.assertEqual(result, expected)
 
@@ -623,7 +623,6 @@ class TestSDPController(BaseTestSDPController):
             'l0_interface': 'em1',
             'l0_name': 'sdp_l0',
             's3_endpoint_url': 'http://archive.s3.invalid/',
-            's3_write_url': 'http://archive.s3.invalid/',
             's3_expiry_days': None,
             'workers': mock.ANY,
             'buffer_dumps': mock.ANY,
