@@ -53,8 +53,8 @@ def _redact_arg(arg: str, s3_config: dict) -> str:
         for mode in ['read', 'write']:
             if mode in config:
                 for name in ['access_key', 'secret_key']:
-                    key = config[mode][name]
-                    if arg == key or arg.endswith('=' + key):
+                    key = config[mode].get(name)
+                    if key and (arg == key or arg.endswith('=' + key)):
                         return arg[:-len(key)] + 'REDACTED'
     return arg
 

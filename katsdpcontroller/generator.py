@@ -1199,13 +1199,14 @@ def _make_vis_writer(g, config, name, s3_name, local, prefix=None, max_channels=
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
-            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        else:
+            conf['s3_write_url'] = resolver.s3_config[s3_name]['write']['url']
         if prefix is not None:
             conf['new_name'] = output_name
         if max_channels is not None:
@@ -1277,13 +1278,14 @@ def _make_flag_writer(g, config, name, l0_name, s3_name, local, prefix=None, max
             'workers': workers,
             'buffer_dumps': buffer_dumps,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
-            's3_write_url': resolver.s3_config[s3_name]['write']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
             'aiomonitor': True
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
+        else:
+            conf['s3_write_url'] = resolver.s3_config[s3_name]['write']['url']
         if prefix is not None:
             conf['new_name'] = output_name
             conf['rename_src'] = {l0_name: prefix + '.' + l0_name}
