@@ -178,14 +178,8 @@ S3_CONFIG = '''
     },
     "archive": {
         "read": {
-            "access_key": "not-really-an-access-key",
-            "secret_key": "tellno1"
-        },
-        "write": {
-            "access_key": "another-fake-key",
-            "secret_key": "s3cr3t"
-        },
-        "url": "http://archive.s3.invalid/"
+            "url": "http://archive.s3.invalid/"
+        }
     }
 }'''
 

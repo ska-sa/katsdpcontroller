@@ -201,7 +201,7 @@ class TestNormaliseS3Config(unittest.TestCase):
         self.assertEqual(result, expected)
 
         del s3_config['archive']['read']
-        del expected['archive']['read']
+        expected['archive']['read'] = {'url': 'http://invalid/'}
         result = _normalise_s3_config(s3_config)
         self.assertEqual(result, expected)
 

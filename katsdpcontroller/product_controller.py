@@ -96,11 +96,9 @@ def _normalise_s3_config(s3_config: dict) -> dict:
     """Normalise s3_config to have separate `url` fields for `read` and `write`."""
     s3_config = copy.deepcopy(s3_config)
     for config in s3_config.values():
-        for mode in ['read', 'write']:
-            if mode in config:
-                if 'url' not in config[mode]:
-                    config[mode]['url'] = config['url']
         if 'url' in config:
+            for mode in ['read', 'write']:
+                config.setdefault(mode, {})['url'] = config['url']
             del config['url']
     return s3_config
 

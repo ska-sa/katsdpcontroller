@@ -28,7 +28,7 @@ setup(
         'docker',
         'humanfriendly',
         'jinja2',
-        'jsonschema',
+        'jsonschema>=3.0',   # Version 3 implements Draft 7
         'rfc3987',           # Used by jsonschema to validate URLs
         'networkx>=2.0',
         'pydotplus',
