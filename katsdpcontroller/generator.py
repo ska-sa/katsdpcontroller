@@ -1632,16 +1632,16 @@ def _spectral_imager_cpus(config):
 
 def _stream_url(capture_block_id, stream_name):
     url = 'redis://{endpoints[telstate_telstate]}/'
-    url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
-    url += '&stream_name={}'.format(urllib.parse.quote_plus(stream_name))
+    url += '?capture_block_id={}'.format(escape_format(urllib.parse.quote_plus(capture_block_id)))
+    url += '&stream_name={}'.format(escape_format(urllib.parse.quote_plus(stream_name)))
     return url
 
 
 def _sky_model_url(data_url, continuum_name, target):
     # data_url must have been returned by stream_url
     url = data_url
-    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_name))
-    url += '&target={}'.format(urllib.parse.quote_plus(target.description))
+    url += '&continuum={}'.format(escape_format(urllib.parse.quote_plus(continuum_name)))
+    url += '&target={}'.format(escape_format(urllib.parse.quote_plus(target.description)))
     url += '&format=katdal'
     return url
 
@@ -1767,26 +1767,27 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
         imager.gpus[0].compute = 1.0
         imager.image = 'katsdpcontim'
         mfimage_parameters = dict(nThreads=cpus, **output['mfimage_parameters'])
-        imager.command = [
+        format_args = [         # Args to pass through str.format
             'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
             'continuum_pipeline.py',
             '--telstate', '{endpoints[telstate_telstate]}',
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
-            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
-            '--select',
-            escape_format(f'scans="track"; corrprods="cross"; targets=[{target.description!r}]'),
-            '--capture-block-id', escape_format(capture_block_id),
-            '--output-id', escape_format(name),
-            '--telstate-id', escape_format(telstate.join(name, target_name)),
-            '--outputdir', escape_format(DATA_VOL.container_path),
-            '--mfimage', escape_format(_render_continuum_parameters(mfimage_parameters)),
-            '-w', '/mnt/mesos/sandbox', escape_format(data_url)
+            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}'
+        ]
+        no_format_args = [      # Args to protect from str.format
+            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
+            '--capture-block-id', capture_block_id,
+            '--output-id', name,
+            '--telstate-id', telstate.join(name, target_name),
+            '--outputdir', DATA_VOL.container_path,
+            '--mfimage', _render_continuum_parameters(mfimage_parameters),
+            '-w', '/mnt/mesos/sandbox',
         ]
         if output['uvblavg_parameters']:
-            imager.command.extend([
-                '--uvblavg',
-                escape_format(_render_continuum_parameters(output['uvblavg_parameters']))
+            no_format_args.extend([
+                '--uvblavg', _render_continuum_parameters(output['uvblavg_parameters'])
             ])
+        imager.command = format_args + [escape_format(arg) for arg in no_format_args] + [data_url]
         imager.katsdpservices_config = False
         imager.batch_data_time = obs_time
         g.add_node(imager)
@@ -1863,13 +1864,13 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 '--major', '5',
                 '--weight-type', 'robust',
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
-                escape_format(data_url),
+                data_url,
                 escape_format(DATA_VOL.container_path),
                 escape_format('{}_{}_{}'.format(capture_block_id, name, target_name))
             ]
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
-                imager.command += ['--subtract', escape_format(sky_model_url)]
+                imager.command += ['--subtract', sky_model_url]
 
             imager.katsdpservices_config = False
             imager.batch_data_time = obs_time
