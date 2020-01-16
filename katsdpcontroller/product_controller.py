@@ -221,6 +221,8 @@ class TaskStats(scheduler.TaskStats):
                     'Number of batch tasks that were skipped because a dependency failed')
         add_counter('batch-tasks-done',
                     'Number of completed batch tasks (including failed and skipped)')
+        add_counter('batch-tasks-retried',
+                    'Number of batch tasks that failed and were rescheduled')
         add_counter('batch-tasks-failed',
                     'Number of batch tasks that failed (after all retries)')
 
@@ -243,6 +245,9 @@ class TaskStats(scheduler.TaskStats):
 
     def batch_tasks_skipped(self, n_tasks: int) -> None:
         self.sensors['batch-tasks-skipped'].value += n_tasks
+
+    def batch_tasks_retried(self, n_tasks: int) -> None:
+        self.sensors['batch-tasks-retried'].value += n_tasks
 
     def batch_tasks_failed(self, n_tasks: int) -> None:
         self.sensors['batch-tasks-failed'].value += n_tasks
