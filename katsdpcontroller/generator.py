@@ -31,6 +31,11 @@ def normalise_gpu_name(name):
     return mangled
 
 
+def escape_format(s: str) -> str:
+    """Escape a string for :meth:`str.format`."""
+    return s.replace('{', '{{').replace('}', '}}')
+
+
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
@@ -528,7 +533,7 @@ def _make_cbf_simulator(g, config, name):
         # create-*-stream is passed on the command-line instead of telstate
         # for now due to SR-462.
         if type_ == 'cbf.baseline_correlation_products':
-            sim.command = ['cbfsim.py', '--create-fx-stream', name]
+            sim.command = ['cbfsim.py', '--create-fx-stream', escape_format(name)]
             # It's mostly GPU work, so not much CPU requirement. Scale for 2 CPUs for
             # 16 antennas, 32K, and cap it there (threads for compute and network).
             # cbf_vis is an overestimate since the simulator is not constrained to
@@ -546,7 +551,7 @@ def _make_cbf_simulator(g, config, name):
             sim.gpus[0].mem = (2 * _mb(info.size) + _mb(gains_size)) / n_sim + 256
         else:
             info = TiedArrayChannelisedVoltageInfo(config, name)
-            sim.command = ['cbfsim.py', '--create-beamformer-stream', name]
+            sim.command = ['cbfsim.py', '--create-beamformer-stream', escape_format(name)]
             # The beamformer simulator only simulates data shape, not content. The
             # CPU load thus scales only with network bandwidth. Scale for 2 CPUs at
             # L band, and cap it there since there are only 2 threads. Using 1.999
@@ -1627,16 +1632,16 @@ def _spectral_imager_cpus(config):
 
 def _stream_url(capture_block_id, stream_name):
     url = 'redis://{endpoints[telstate_telstate]}/'
-    url += '?capture_block_id={}'.format(urllib.parse.quote_plus(capture_block_id))
-    url += '&stream_name={}'.format(urllib.parse.quote_plus(stream_name))
+    url += '?capture_block_id={}'.format(escape_format(urllib.parse.quote_plus(capture_block_id)))
+    url += '&stream_name={}'.format(escape_format(urllib.parse.quote_plus(stream_name)))
     return url
 
 
 def _sky_model_url(data_url, continuum_name, target):
     # data_url must have been returned by stream_url
     url = data_url
-    url += '&continuum={}'.format(urllib.parse.quote_plus(continuum_name))
-    url += '&target={}'.format(urllib.parse.quote_plus(target.description))
+    url += '&continuum={}'.format(escape_format(urllib.parse.quote_plus(continuum_name)))
+    url += '&target={}'.format(escape_format(urllib.parse.quote_plus(target.description)))
     url += '&format=katdal'
     return url
 
@@ -1762,24 +1767,27 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
         imager.gpus[0].compute = 1.0
         imager.image = 'katsdpcontim'
         mfimage_parameters = dict(nThreads=cpus, **output['mfimage_parameters'])
-        imager.command = [
+        format_args = [         # Args to pass through str.format
             'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
             'continuum_pipeline.py',
             '--telstate', '{endpoints[telstate_telstate]}',
             '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
-            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}',
+            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}'
+        ]
+        no_format_args = [      # Args to protect from str.format
             '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
             '--capture-block-id', capture_block_id,
             '--output-id', name,
             '--telstate-id', telstate.join(name, target_name),
             '--outputdir', DATA_VOL.container_path,
             '--mfimage', _render_continuum_parameters(mfimage_parameters),
-            '-w', '/mnt/mesos/sandbox', data_url
+            '-w', '/mnt/mesos/sandbox',
         ]
         if output['uvblavg_parameters']:
-            imager.command.extend([
+            no_format_args.extend([
                 '--uvblavg', _render_continuum_parameters(output['uvblavg_parameters'])
             ])
+        imager.command = format_args + [escape_format(arg) for arg in no_format_args] + [data_url]
         imager.katsdpservices_config = False
         imager.batch_data_time = obs_time
         g.add_node(imager)
@@ -1847,7 +1855,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             imager.command = [
                 'run-and-cleanup', '--create', '--tmp', '/mnt/mesos/sandbox/tmp', '--',
                 'imager-mkat-pipeline.py',
-                '-i', 'target={}'.format(target.description),
+                '-i', escape_format('target={}'.format(target.description)),
                 '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
                 '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
                 '--stokes', 'IQUV',
@@ -1857,8 +1865,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 '--weight-type', 'robust',
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 data_url,
-                DATA_VOL.container_path,
-                '{}_{}_{}'.format(capture_block_id, name, target_name)
+                escape_format(DATA_VOL.container_path),
+                escape_format('{}_{}_{}'.format(capture_block_id, name, target_name))
             ]
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
