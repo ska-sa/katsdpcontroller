@@ -1112,7 +1112,7 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps, max
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 256
+    return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 512
 
 
 def _writer_max_accum_dumps(config, name, bytes_per_vis, max_channels):
