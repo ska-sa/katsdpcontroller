@@ -53,7 +53,6 @@ netifaces
 networkx==2.0
 numpy
 omnijson                   # via katportalclient
-pkginfo
 plotly==4.0.0              # via plotly
 prometheus_async==18.1.0
 prometheus_client==0.2.0
