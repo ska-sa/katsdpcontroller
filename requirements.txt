@@ -9,6 +9,7 @@ async-timeout==3.0.1
 attrs==18.1.0              # via prometheus_async
 certifi                    # via requests
 chardet                    # via aiohttp, requests
+cityhash                   # via katdal
 click==7.0                 # via Flask
 dash==1.0.2
 dash-core-components==1.0.0
