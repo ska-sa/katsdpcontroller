@@ -19,7 +19,6 @@ dash-dangerously-set-inner-html==0.0.2
 dash-renderer==1.0.0       # via dash
 dask                       # via katdal
 decorator
-defusedxml                 # via katdal
 docker-pycreds==0.3.0      # via docker
 docker==3.4.1
 fakeredis                  # via katsdptelstate
