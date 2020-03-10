@@ -21,7 +21,7 @@ dask                       # via katdal
 decorator
 docker-pycreds==0.3.0      # via docker
 docker==3.4.1
-fakeredis                  # via katsdptelstate
+ephem                      # via pyephem
 flask==1.1.1               # via dash
 flask-compress==1.4.0      # via dash
 future                     # via katdal
