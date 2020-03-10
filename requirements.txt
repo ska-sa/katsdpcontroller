@@ -32,7 +32,6 @@ humanfriendly==4.17
 idna                       # via requests
 idna-ssl                   # via aiohttp
 importlib-metadata         # via jsonschema
-ipaddress                  # via katsdptelstate
 ipython-genutils==0.2.0    # via nbformat
 itsdangerous==1.1.0        # via flask
 jinja2                     # via aiohttp-jinja2
