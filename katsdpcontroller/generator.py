@@ -1876,7 +1876,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
                 imager.command += ['--subtract', sky_model_url]
-            if band in {'L'}:      # Models are not available for all bands yet
+            if band in {'L', 'UHF'}:      # Models are not available for other bands yet
                 imager.command += ['--primary-beam', 'meerkat']
 
             imager.katsdpservices_config = False
