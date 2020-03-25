@@ -1199,7 +1199,7 @@ class TestScheduler(asynctest.ClockedTestCase):
 
     async def _wait_request(self, task_id):
         async with aiohttp.ClientSession() as session:
-            async with session.get('http://localhost:{}/tasks/{}/wait_start'.format(
+            async with session.get('http://127.0.0.1:{}/tasks/{}/wait_start'.format(
                     self.sched.http_port, task_id)) as resp:
                 resp.raise_for_status()
                 await resp.read()

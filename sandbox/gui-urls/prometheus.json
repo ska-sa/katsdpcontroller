@@ -2,13 +2,13 @@
     {
         "title": "Grafana",
         "description": "Grafana dashboard",
-        "href": "http://localhost:3000/",
+        "href": "http://127.0.0.1:3000/",
         "category": "Dashboard"
     },
     {
         "title": "Prometheus",
         "description": "Low-level interface to query metrics",
-        "href": "http://localhost:9090/",
+        "href": "http://127.0.0.1:9090/",
         "category": "Link"
     }
 ]

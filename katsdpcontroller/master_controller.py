@@ -1551,7 +1551,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         help='Run haproxy to provide frontend to GUIs [no]')
     parser.add_argument('--external-url', metavar='URL', type=yarl.URL,
                         help='External URL for clients to browse the GUI')
-    parser.add_argument('--consul-url', type=yarl.URL, default='http://localhost:8500/',
+    parser.add_argument('--consul-url', type=yarl.URL, default='http://127.0.0.1:8500/',
                         help='base URL for local consul agent [%(default)s]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')

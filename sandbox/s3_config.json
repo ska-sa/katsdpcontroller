@@ -8,7 +8,7 @@
             "access_key": "minioaccesskey",
             "secret_key": "miniosecretkey"
         },
-        "url": "http://localhost:9000/"
+        "url": "http://127.0.0.1:9000/"
     },
     "spectral": {
         "read": {
@@ -19,7 +19,7 @@
             "access_key": "minioaccesskey",
             "secret_key": "miniosecretkey"
         },
-        "url": "http://localhost:9000/"
+        "url": "http://127.0.0.1:9000/"
     },
     "archive": {
         "read": {

@@ -31,7 +31,8 @@ from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
-CONSUL_URL = 'http://localhost:8500'
+LOCALHOST = '127.0.0.1'        # Unlike 'localhost', guaranteed to be IPv4
+CONSUL_URL = f'http://{LOCALHOST}:8500'
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
@@ -1263,7 +1264,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 {
                     "Interval": "15s",
                     "Timeout": "5s",
-                    "HTTP": f"http://localhost:{port}/health",
+                    "HTTP": f"http://{LOCALHOST}:{port}/health",
                     "DeregisterCriticalServiceAfter": "90s"
                 }
             ]

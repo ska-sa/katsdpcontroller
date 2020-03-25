@@ -2,7 +2,7 @@
     {
         "title": "Singularity",
         "description": "Singularity UI",
-        "href": "http://localhost:7099/singularity",
+        "href": "http://127.0.0.1:7099/singularity",
         "category": "Link"
     }
 ]
