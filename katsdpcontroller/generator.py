@@ -36,6 +36,9 @@ def escape_format(s: str) -> str:
     return s.replace('{', '{{').replace('}', '}}')
 
 
+# Docker doesn't support IPv6 out of the box, and on some systems 'localhost'
+# resolves to ::1, so force an IPv4 localhost.
+LOCALHOST = '127.0.0.1'
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
@@ -133,7 +136,7 @@ class TelstateTask(SDPPhysicalTask):
             # host-side binding, so we have to provide docker parameters
             # directly.
             parameters = self.taskinfo.container.docker.setdefault('parameters', [])
-            parameters.append({'key': 'publish', 'value': f'127.0.0.1:{host_port}:6379'})
+            parameters.append({'key': 'publish', 'value': f'{LOCALHOST}:{host_port}:6379'})
 
 
 class IngestTask(SDPPhysicalTask):
@@ -614,7 +617,7 @@ def _make_timeplot(g, name, description,
     timeplot.critical = False
 
     g.add_node(timeplot, config=lambda task, resolver: dict({
-        'html_host': 'localhost' if resolver.localhost else '',
+        'html_host': LOCALHOST if resolver.localhost else '',
         'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
         'spead_interface': task.interfaces['sdp_10g'].name,
         'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
@@ -1060,7 +1063,7 @@ def _make_cal(g, config, name, l0_name, flags_names):
             cal_config = {
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
-                'dask_diagnostics': ('127.0.0.1' if resolver.localhost else '',
+                'dask_diagnostics': (LOCALHOST if resolver.localhost else '',
                                      task.ports['dask_diagnostics']),
                 'dask_prefix': dask_prefix.format(task),
                 'flags_streams': copy.deepcopy(flags_streams_base)
@@ -1445,7 +1448,7 @@ def build_logical_graph(config):
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
-        config=lambda resolver: ({'host': '127.0.0.1'} if resolver.localhost else {})
+        config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {})
     )
 
     # telstate node

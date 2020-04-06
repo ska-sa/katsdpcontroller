@@ -2,7 +2,7 @@
     {
         "title": "Mesos",
         "description": "Mesos UI",
-        "href": "http://localhost:5050/",
+        "href": "http://127.0.0.1:5050/",
         "category": "Link"
     }
 ]

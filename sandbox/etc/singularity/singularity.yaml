@@ -30,7 +30,7 @@ zookeeper:
 
 ui:
   title: Singularity (docker)
-  baseUrl: http://localhost:7099/singularity
+  baseUrl: http://127.0.0.1:7099/singularity
 
 logging:
   loggers:

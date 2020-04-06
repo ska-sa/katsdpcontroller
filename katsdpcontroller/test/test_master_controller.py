@@ -125,7 +125,7 @@ CONSUL_POWEROFF_SERVERS = [
         "ModifyIndex": 7
     }
 ]
-CONSUL_POWEROFF_URL = 'http://localhost:8500/v1/catalog/service/poweroff?near=_agent'
+CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
 
 
 class DummyServer(aiokatcp.DeviceServer):
