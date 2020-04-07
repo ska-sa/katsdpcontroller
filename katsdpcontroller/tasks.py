@@ -360,9 +360,9 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             raise FailReply(msg) from error
 
     async def wait_ready(self):
-        await super().wait_ready()
+        success = await super().wait_ready()
         # establish katcp connection to this node if appropriate
-        if 'port' in self.ports:
+        if success and 'port' in self.ports:
             while True:
                 self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
                                  self.host, self.ports['port'], self.name)
@@ -381,7 +381,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(
                             sensor, self)
-                    return
+                    return success
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
@@ -393,6 +393,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
+        return success
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and

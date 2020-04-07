@@ -1746,6 +1746,10 @@ class PhysicalNode:
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
+    was_ready : bool
+        Set to true once the task enters state :class:`~TaskState.READY`. This
+        can be used to distinguish a task that become ready and then died from
+        one that died without ever becoming ready.
     generation : int
         Number of times that :meth:`clone` was used to obtain this node.
     _ready_waiter : :class:`asyncio.Task`
@@ -1766,6 +1770,7 @@ class PhysicalNode:
         self.dead_event = asyncio.Event()
         self.depends_ready = []
         self.death_expected = False
+        self.was_ready = False
         self._ready_waiter = None
         self.generation = 0
 
@@ -1791,15 +1796,24 @@ class PhysicalNode:
         with, by polling the ports and waiting for dependent tasks. This method
         may be overloaded to implement other checks, but it must be
         cancellation-safe.
+
+        Returns true if the task is now ready or false if a dependency failed
+        and the task is now expected to die. Subclasses must do something to
+        ensure that the task dies.
         """
         for dep in self.depends_ready:
             await dep.ready_event.wait()
+            if not dep.was_ready:
+                logger.debug('Dependency %s of %s failed', dep.name, self.name)
+                self.death_expected = True
+                return False
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
             wait_ports = list(self.ports.values())
         if wait_ports:
             await poll_ports(self.host, wait_ports)
+        return True
 
     def _ready_callback(self, future):
         """This callback is called when the waiter is either finished or
@@ -1810,8 +1824,8 @@ class PhysicalNode:
         call to this callback."""
         self._ready_waiter = None
         try:
-            future.result()  # throw the exception, if any
-            if self.state < TaskState.READY:
+            success = future.result()  # throw the exception, if any
+            if success and self.state < TaskState.READY:
                 self.set_state(TaskState.READY)
         except asyncio.CancelledError:
             pass
@@ -1840,6 +1854,7 @@ class PhysicalNode:
             self.dead_event.set()
             self.ready_event.set()
         elif state == TaskState.READY:
+            self.was_ready = True
             self.ready_event.set()
         elif state == TaskState.RUNNING and self._ready_waiter is None:
             self._ready_waiter = asyncio.ensure_future(self.wait_ready())
@@ -1895,6 +1910,13 @@ class PhysicalExternal(PhysicalNode):
         dup.host = self.host
         dup.ports = copy.copy(self.ports)
         return dup
+
+    async def wait_ready(self):
+        success = await super().wait_ready()
+        if not success:
+            # No action needed to kill ourself, just die.
+            self.set_state(TaskState.DEAD)
+        return success
 
 
 class PhysicalTask(PhysicalNode):
@@ -2307,14 +2329,20 @@ async def wait_start_handler(request):
     task_id = request.match_info['id']
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        return aiohttp.web.HTTPNotFound(reason='Task ID {} not active\n'.format(task_id))
+        raise aiohttp.web.HTTPNotFound(reason='Task ID {} not active\n'.format(task_id))
     else:
         try:
             for dep in task.depends_ready:
                 await dep.ready_event.wait()
+                if not dep.was_ready:
+                    logger.info('Not starting %s because %s died', task.name, dep.name)
+                    raise aiohttp.web.HTTPInternalServerError(
+                        reason=f'Dependency {dep.name} died without becoming ready\n')
+        except (asyncio.CancelledError, aiohttp.web.HTTPException):
+            raise
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
-            return aiohttp.web.HTTPInternalServerError(
+            raise aiohttp.web.HTTPInternalServerError(
                 reason='Exception while waiting for dependencies:\n{}\n'.format(error))
         else:
             return aiohttp.web.Response(body='')
