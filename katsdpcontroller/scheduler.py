@@ -1805,7 +1805,6 @@ class PhysicalNode:
             await dep.ready_event.wait()
             if not dep.was_ready:
                 logger.debug('Dependency %s of %s failed', dep.name, self.name)
-                self.death_expected = True
                 return False
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
@@ -1825,8 +1824,12 @@ class PhysicalNode:
         self._ready_waiter = None
         try:
             success = future.result()  # throw the exception, if any
-            if success and self.state < TaskState.READY:
-                self.set_state(TaskState.READY)
+            if self.state < TaskState.READY:
+                if success:
+                    self.set_state(TaskState.READY)
+                else:
+                    self.dependency_abort()
+                    self.set_state(TaskState.KILLING)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -1881,6 +1884,15 @@ class PhysicalNode:
         """
         self.death_expected = True
 
+    def dependency_abort(self):
+        """Arrange for a task to die due to a failed ``depends_ready``.
+
+        This will only be called in state :const:`TaskState.RUNNING`.
+        This function should not manipulate the task state; the caller will
+        set the state to :const:`TaskState.KILLING`.
+        """
+        self.death_expected = True
+
     def clone(self):
         """Create a duplicate of the task, ready to be run.
 
@@ -1910,13 +1922,6 @@ class PhysicalExternal(PhysicalNode):
         dup.host = self.host
         dup.ports = copy.copy(self.ports)
         return dup
-
-    async def wait_ready(self):
-        success = await super().wait_ready()
-        if not success:
-            # No action needed to kill ourself, just die.
-            self.set_state(TaskState.DEAD)
-        return success
 
 
 class PhysicalTask(PhysicalNode):
@@ -2187,6 +2192,12 @@ class PhysicalTask(PhysicalNode):
         driver.killTask(self.taskinfo.task_id)
         self.kill_sent_time = asyncio.get_event_loop().time()
         super().kill(driver, **kwargs)
+
+    def dependency_abort(self):
+        super().dependency_abort()
+        # The kill is done by asking delay_run.sh to abort rather than a Mesos
+        # kill. But if that fails, we want reconciliation to try harder.
+        self.kill_sent_time = asyncio.get_event_loop().time()
 
     @property
     def queue(self):
