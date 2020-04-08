@@ -137,7 +137,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = True
-        # Set to a time in seconds to indicate time spend collecting the data
+        # Set to a time in seconds to indicate time spent collecting the data
         # to be processed.
         self.batch_data_time = None
 
