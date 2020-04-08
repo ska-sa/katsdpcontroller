@@ -2329,21 +2329,21 @@ async def wait_start_handler(request):
     task_id = request.match_info['id']
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        raise aiohttp.web.HTTPNotFound(reason='Task ID {} not active\n'.format(task_id))
+        raise aiohttp.web.HTTPNotFound(text='Task ID {} not active\n'.format(task_id))
     else:
         try:
             for dep in task.depends_ready:
                 await dep.ready_event.wait()
                 if not dep.was_ready:
                     logger.info('Not starting %s because %s died', task.name, dep.name)
-                    raise aiohttp.web.HTTPInternalServerError(
-                        reason=f'Dependency {dep.name} died without becoming ready\n')
+                    raise aiohttp.web.HTTPServiceUnavailable(
+                        text=f'Dependency {dep.name} died without becoming ready\n')
         except (asyncio.CancelledError, aiohttp.web.HTTPException):
             raise
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
             raise aiohttp.web.HTTPInternalServerError(
-                reason='Exception while waiting for dependencies:\n{}\n'.format(error))
+                text='Exception while waiting for dependencies:\n{}\n'.format(error))
         else:
             return aiohttp.web.Response(body='')
 
