@@ -145,7 +145,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     def _graph_config(self, resolver, graph):
-        return graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
