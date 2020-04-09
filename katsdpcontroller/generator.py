@@ -436,9 +436,14 @@ def _make_cam2telstate(g, config, name):
     cam2telstate.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     cam2telstate.wait_ports = ['port']
     url = config['inputs'][name]['url']
+    antennas = set()
+    for input_ in config['inputs'].values():
+        if input_['type'] == 'cbf.antenna_channelised_voltage':
+            antennas.update(input_['antennas'])
     g.add_node(cam2telstate, config=lambda task, resolver: {
         'url': url,
-        'aiomonitor': True
+        'aiomonitor': True,
+        'receptors': ','.join(sorted(antennas))
     })
     return cam2telstate
 
