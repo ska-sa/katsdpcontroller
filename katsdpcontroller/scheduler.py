@@ -2159,10 +2159,10 @@ class PhysicalTask(PhysicalNode):
             self.end_time = status.timestamp
 
     def kill(self, driver, **kwargs):
-        # TODO: according to the Mesos docs, killing a task is not reliable,
-        # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
+        # Record the first time we sent the kill, so that if it is lost (which
+        # can happen according to Mesos docs), reconciliation can try again.
         self.kill_sent_time = asyncio.get_event_loop().time()
         super().kill(driver, **kwargs)
 
