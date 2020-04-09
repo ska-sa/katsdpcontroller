@@ -1154,9 +1154,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 alive, died = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
-                    fail_list = ', '.join(node.logical_node.name for node in died)
-                    if fail_list == '':
-                        fail_list = 'Some nodes'
+                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
                     ret_msg = (f"{fail_list} failed to start. "
                                "Check the error log for specific details.")
                     logger.error(ret_msg)
