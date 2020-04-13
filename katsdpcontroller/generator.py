@@ -1815,7 +1815,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     data_url = _stream_url(capture_block_id, name + '.' + l0_name)
     min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
     targets, data_set = _get_targets(config, capture_block_id, name, telstate, min_time)
-    band = data_set.spectral_windows[data_set.spw].band
+    band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
     del data_set    # Allow Python to recover the memory
 
     for target, obs_time in targets:
