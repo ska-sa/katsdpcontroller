@@ -519,10 +519,15 @@ class TestSDPController(BaseTestSDPController):
                     node.status = Dict(state=self.fail_launches[node.logical_node.name])
                 else:
                     node.set_state(scheduler.TaskState.RUNNING)
-        futures = []
-        for node in nodes:
-            futures.append(node.ready_event.wait())
-        await asyncio.gather(*futures)
+
+        order_graph = scheduler.subgraph(graph, scheduler.DEPENDS_READY, nodes)
+        for node in reversed(list(networkx.topological_sort(order_graph))):
+            # With the real scheduler, the value returned to delay_run.sh is
+            # used to kill tasks with failed dependencies. We need to simulate
+            # that here - it is sufficient to move tasks from KILLING to DEAD.
+            if node.state == scheduler.TaskState.KILLING:
+                node.set_state(scheduler.TaskState.DEAD)
+            await node.ready_event.wait()
 
     async def _batch_run(self, graph: networkx.MultiDiGraph,
                          resolver: scheduler.Resolver,

@@ -843,9 +843,17 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             raise ProductFailed(
                 f'Could not load S3 credentials from {self._args.s3_config_file}: {exc}') from exc
         args = extract_shared_options(self._args)
-        # Causes the image tag file to be loaded
+        # If the config specifies an image tag, use it to override the tag.
+        image_resolver_kwargs = {}
         try:
-            image_resolver = self._image_resolver_factory()
+            image_resolver_kwargs['tag'] = config['config']['image_tag']
+        except KeyError:
+            pass
+
+        # Creates a temporary ImageResolver so that we read the tag file now
+        # and throw away the cache immediately after this function.
+        try:
+            image_resolver = self._image_resolver_factory(**image_resolver_kwargs)
         except Exception as exc:
             raise ProductFailed(f'Could not load image tag file: {exc}')
         port = device_server_sockname(self._server)[1]
@@ -862,8 +870,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         success = False
         task_id: Optional[str] = None
         try:
-            # Creates a temporary ImageResolver so that we throw away the cache immediately.
-            image = await self._image_resolver_factory()('katsdpcontroller')
+            image = await image_resolver('katsdpcontroller')
             request_id = await self._ensure_request(name)
             await self._ensure_deploy(name, image)
             await self._sing.create_run(request_id, {
@@ -1551,7 +1558,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         help='Run haproxy to provide frontend to GUIs [no]')
     parser.add_argument('--external-url', metavar='URL', type=yarl.URL,
                         help='External URL for clients to browse the GUI')
-    parser.add_argument('--consul-url', type=yarl.URL, default='http://localhost:8500/',
+    parser.add_argument('--consul-url', type=yarl.URL, default='http://127.0.0.1:8500/',
                         help='base URL for local consul agent [%(default)s]')
     parser.add_argument('--image-tag-file',
                         metavar='FILE', help='Load image tag to run from file (on each configure)')

@@ -1746,6 +1746,10 @@ class PhysicalNode:
     depends_ready : list of :class:`PhysicalNode`
         Nodes that this node has `depends_ready` dependencies on. This is only
         populated during :meth:`resolve`.
+    was_ready : bool
+        Set to true once the task enters state :class:`~TaskState.READY`. This
+        can be used to distinguish a task that become ready and then died from
+        one that died without ever becoming ready.
     generation : int
         Number of times that :meth:`clone` was used to obtain this node.
     _ready_waiter : :class:`asyncio.Task`
@@ -1766,6 +1770,7 @@ class PhysicalNode:
         self.dead_event = asyncio.Event()
         self.depends_ready = []
         self.death_expected = False
+        self.was_ready = False
         self._ready_waiter = None
         self.generation = 0
 
@@ -1791,15 +1796,23 @@ class PhysicalNode:
         with, by polling the ports and waiting for dependent tasks. This method
         may be overloaded to implement other checks, but it must be
         cancellation-safe.
+
+        Returns true if the task is now ready or false if a dependency failed
+        and the task is now expected to die. Subclasses must do something to
+        ensure that the task dies.
         """
         for dep in self.depends_ready:
             await dep.ready_event.wait()
+            if not dep.was_ready:
+                logger.debug('Dependency %s of %s failed', dep.name, self.name)
+                return False
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
         else:
             wait_ports = list(self.ports.values())
         if wait_ports:
             await poll_ports(self.host, wait_ports)
+        return True
 
     def _ready_callback(self, future):
         """This callback is called when the waiter is either finished or
@@ -1810,9 +1823,13 @@ class PhysicalNode:
         call to this callback."""
         self._ready_waiter = None
         try:
-            future.result()  # throw the exception, if any
+            success = future.result()  # throw the exception, if any
             if self.state < TaskState.READY:
-                self.set_state(TaskState.READY)
+                if success:
+                    self.set_state(TaskState.READY)
+                else:
+                    self.dependency_abort()
+                    self.set_state(TaskState.KILLING)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -1840,6 +1857,7 @@ class PhysicalNode:
             self.dead_event.set()
             self.ready_event.set()
         elif state == TaskState.READY:
+            self.was_ready = True
             self.ready_event.set()
         elif state == TaskState.RUNNING and self._ready_waiter is None:
             self._ready_waiter = asyncio.ensure_future(self.wait_ready())
@@ -1863,6 +1881,15 @@ class PhysicalNode:
             Scheduler driver
         kwargs : dict
             Extra arguments passed to :meth:`.Scheduler.kill`.
+        """
+        self.death_expected = True
+
+    def dependency_abort(self):
+        """Arrange for a task to die due to a failed ``depends_ready``.
+
+        This will only be called in state :const:`TaskState.RUNNING`.
+        This function should not manipulate the task state; the caller will
+        set the state to :const:`TaskState.KILLING`.
         """
         self.death_expected = True
 
@@ -2159,12 +2186,18 @@ class PhysicalTask(PhysicalNode):
             self.end_time = status.timestamp
 
     def kill(self, driver, **kwargs):
-        # TODO: according to the Mesos docs, killing a task is not reliable,
-        # and may need to be attempted again.
         # The poller is stopped by set_state, so we do not need to do it here.
         driver.killTask(self.taskinfo.task_id)
+        # Record the first time we sent the kill, so that if it is lost (which
+        # can happen according to Mesos docs), reconciliation can try again.
         self.kill_sent_time = asyncio.get_event_loop().time()
         super().kill(driver, **kwargs)
+
+    def dependency_abort(self):
+        super().dependency_abort()
+        # The kill is done by asking delay_run.sh to abort rather than a Mesos
+        # kill. But if that fails, we want reconciliation to try harder.
+        self.kill_sent_time = asyncio.get_event_loop().time()
 
     @property
     def queue(self):
@@ -2307,15 +2340,21 @@ async def wait_start_handler(request):
     task_id = request.match_info['id']
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        return aiohttp.web.HTTPNotFound(reason='Task ID {} not active\n'.format(task_id))
+        raise aiohttp.web.HTTPNotFound(text='Task ID {} not active\n'.format(task_id))
     else:
         try:
             for dep in task.depends_ready:
                 await dep.ready_event.wait()
+                if not dep.was_ready:
+                    logger.info('Not starting %s because %s died', task.name, dep.name)
+                    raise aiohttp.web.HTTPServiceUnavailable(
+                        text=f'Dependency {dep.name} died without becoming ready\n')
+        except (asyncio.CancelledError, aiohttp.web.HTTPException):
+            raise
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
-            return aiohttp.web.HTTPInternalServerError(
-                reason='Exception while waiting for dependencies:\n{}\n'.format(error))
+            raise aiohttp.web.HTTPInternalServerError(
+                text='Exception while waiting for dependencies:\n{}\n'.format(error))
         else:
             return aiohttp.web.Response(body='')
 

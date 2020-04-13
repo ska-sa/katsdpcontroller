@@ -137,7 +137,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = True
-        # Set to a time in seconds to indicate time spend collecting the data
+        # Set to a time in seconds to indicate time spent collecting the data
         # to be processed.
         self.batch_data_time = None
 
@@ -145,7 +145,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
 class SDPConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     def _graph_config(self, resolver, graph):
-        return graph.node[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
@@ -360,9 +360,9 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             raise FailReply(msg) from error
 
     async def wait_ready(self):
-        await super().wait_ready()
+        success = await super().wait_ready()
         # establish katcp connection to this node if appropriate
-        if 'port' in self.ports:
+        if success and 'port' in self.ports:
             while True:
                 self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
                                  self.host, self.ports['port'], self.name)
@@ -381,7 +381,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(
                             sensor, self)
-                    return
+                    return success
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
@@ -393,6 +393,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
+        return success
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and

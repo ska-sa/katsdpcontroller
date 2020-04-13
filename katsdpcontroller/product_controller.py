@@ -10,7 +10,7 @@ import copy
 import uuid
 import functools
 from ipaddress import IPv4Address
-from typing import Dict, Set, List, Callable, Sequence, Optional, Type, Mapping
+from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, Mapping
 
 import addict
 import jsonschema
@@ -31,7 +31,8 @@ from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
-CONSUL_URL = 'http://localhost:8500'
+LOCALHOST = '127.0.0.1'        # Unlike 'localhost', guaranteed to be IPv4
+CONSUL_URL = f'http://{LOCALHOST}:8500'
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
@@ -1062,19 +1063,29 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             key = self.telstate.join(*k) if isinstance(k, tuple) else k
             self.telstate[key] = v
 
-    def check_nodes(self) -> bool:
+    def check_nodes(self) -> Tuple[bool, List[scheduler.PhysicalNode]]:
         """Check that all requested nodes are actually running.
+
+        Returns
+        -------
+        result
+            True if all tasks are in state :const:`~scheduler.TaskState.READY`.
+        died
+            Nodes that have died unexpectedly (does not include nodes that we
+            killed).
 
         .. todo::
 
            Also check health state sensors
         """
+        died = []
+        result = True
         for node in self.physical_graph:
             if node.state != scheduler.TaskState.READY:
-                logger.warning('Task %s is in state %s instead of READY',
-                               node.name, node.state.name)
-                return False
-        return True
+                if node.state == scheduler.TaskState.DEAD and not node.death_expected:
+                    died.append(node)
+                result = False
+        return result, died
 
     def unexpected_death(self, task: scheduler.PhysicalTask) -> None:
         logger.warning('Task %s died unexpectedly', task.name)
@@ -1140,10 +1151,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 await self._launch_telstate()
                 # launch containers for those nodes that require them
                 await self.sched.launch(self.physical_graph, self.resolver)
-                alive = self.check_nodes()
+                alive, died = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
-                    ret_msg = ("Some nodes in the graph failed to start. "
+                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
+                    ret_msg = (f"{fail_list} failed to start. "
                                "Check the error log for specific details.")
                     logger.error(ret_msg)
                     raise FailReply(ret_msg)
@@ -1263,7 +1275,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 {
                     "Interval": "15s",
                     "Timeout": "5s",
-                    "HTTP": f"http://localhost:{port}/health",
+                    "HTTP": f"http://{LOCALHOST}:{port}/health",
                     "DeregisterCriticalServiceAfter": "90s"
                 }
             ]

@@ -125,7 +125,7 @@ CONSUL_POWEROFF_SERVERS = [
         "ModifyIndex": 7
     }
 ]
-CONSUL_POWEROFF_URL = 'http://localhost:8500/v1/catalog/service/poweroff?near=_agent'
+CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
 
 
 class DummyServer(aiokatcp.DeviceServer):
@@ -280,6 +280,24 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         self.assertIn('--image-override=katsdptelstate:branch', arguments)
         self.assertEqual(task.deploy.config['containerInfo']['docker']['image'],
                          'registry.invalid:5000/katsdpcontroller:a_tag')
+
+    async def test_config_tag_override(self) -> None:
+        """Image tag in the config dict overrides tag file."""
+        await self.start_manager()
+        config = {
+            'config': {'image_tag': 'custom_tag'}
+        }
+        product = await run_clocked(self, 100, self.manager.create_product('foo', config))
+        await self.manager.product_active(product)
+        task = list(self.singularity_server.tasks.values())[0]
+        # Check that the right image was used
+        self.assertEqual(task.deploy.config['containerInfo']['docker']['image'],
+                         'registry.invalid:5000/katsdpcontroller:custom_tag')
+        # Check that it was given the right arguments (although it doesn't
+        # really matter because the product controller will pick up the
+        # override in the config dict).
+        arguments = task.arguments()
+        self.assertIn('--image-tag=custom_tag', arguments)
 
     async def test_create_product_dies_fast(self) -> None:
         """Task dies before we observe it running"""
