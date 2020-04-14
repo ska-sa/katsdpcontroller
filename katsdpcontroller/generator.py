@@ -1712,6 +1712,9 @@ def _get_targets(config, capture_block_id, name, telstate, min_time):
     targets : Dict[str, Tuple[katpoint.Target, float]]
         Each key is the unique normalised target name, and the value is the
         target and the observation time on the target.
+    data_set : Optional[katdal.DataSet]
+        A katdal data set corresponding to the arguments. If `targets` is empty
+        then this may be ``None``.
     """
     output = config['outputs'][name]
     l1_flags_name = output['src_streams'][0]
@@ -1719,7 +1722,7 @@ def _get_targets(config, capture_block_id, name, telstate, min_time):
     l0_info = L0Info(config, l0_name)
     if l0_info.n_antennas < 4:
         # Won't be any calibration solutions
-        return {}
+        return {}, None
 
     targets = {}
     l0_stream = name + '.' + l0_name
@@ -1737,7 +1740,7 @@ def _get_targets(config, capture_block_id, name, telstate, min_time):
         else:
             logger.info('Skipping target %s: observed for %.1f seconds, threshold is %.1f',
                         target.name, obs_time, min_time)
-    return targets
+    return targets, data_set
 
 
 def _render_continuum_parameters(parameters):
@@ -1757,7 +1760,7 @@ def _make_continuum_imager(g, config, capture_block_id, name, telstate, target_m
     data_url = _stream_url(capture_block_id, l0_stream)
     cpus = _continuum_imager_cpus(config)
     min_time = output.get('min_time', DEFAULT_CONTINUUM_MIN_TIME)
-    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
+    targets = _get_targets(config, capture_block_id, name, telstate, min_time)[0]
 
     for target, obs_time in targets:
         target_name = target_mapper(target)
@@ -1819,7 +1822,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     output_channels = output['output_channels']
     data_url = _stream_url(capture_block_id, name + '.' + l0_name)
     min_time = output.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
-    targets = _get_targets(config, capture_block_id, name, telstate, min_time)
+    targets, data_set = _get_targets(config, capture_block_id, name, telstate, min_time)
+    band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
+    del data_set    # Allow Python to recover the memory
 
     for target, obs_time in targets:
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
@@ -1879,6 +1884,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
                 imager.command += ['--subtract', sky_model_url]
+            if band in {'L', 'UHF'}:      # Models are not available for other bands yet
+                imager.command += ['--primary-beam', 'meerkat']
 
             imager.katsdpservices_config = False
             imager.batch_data_time = obs_time

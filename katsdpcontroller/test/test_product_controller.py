@@ -27,6 +27,7 @@ import networkx
 import netifaces
 import katsdptelstate
 import katpoint
+import katdal
 
 from ..controller import device_server_sockname
 from ..product_controller import (
@@ -125,6 +126,10 @@ class DummyDataSet:
             'Observation/scan_state': np.array(scan_state),
             'Observation/target_index': np.array(target_index)
         }
+        self.spw = 0
+        self.spectral_windows = [
+            katdal.SpectralWindow(1284e6, 856e6 / 4096, 4096, 'c856M4k', 'L')
+        ]
 
 
 def get_metric(metric):
