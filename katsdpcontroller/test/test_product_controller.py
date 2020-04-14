@@ -530,6 +530,10 @@ class TestSDPController(BaseTestSDPController):
                     node.status = Dict(state=self.fail_launches[node.logical_node.name])
                 else:
                     node.set_state(scheduler.TaskState.RUNNING)
+        futures = []
+        for node in nodes:
+            futures.append(node.ready_event.wait())
+        await asyncio.gather(*futures)
 
     async def _batch_run(self, graph: networkx.MultiDiGraph,
                          resolver: scheduler.Resolver,
