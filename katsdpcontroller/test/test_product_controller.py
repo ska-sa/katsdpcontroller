@@ -416,6 +416,17 @@ class TestSDPController(BaseTestSDPController):
         done_future.set_result(None)
         create_patch(self, 'time.time', return_value=123456789.5)
         create_patch(self, 'socket.getaddrinfo', side_effect=self._getaddrinfo)
+
+        # We don't have a delay_run.sh to abort when told to, so we need to
+        # ensure that dependency_abort actually kills the task.
+        orig_dependency_abort = scheduler.PhysicalTask.dependency_abort
+
+        def _dependency_abort(task: scheduler.PhysicalTask) -> None:
+            orig_dependency_abort(task)
+            asyncio.get_event_loop().call_soon(task.set_state, scheduler.TaskState.DEAD)
+        create_patch(self, 'katsdpcontroller.scheduler.PhysicalTask.dependency_abort',
+                     side_effect=_dependency_abort, autospec=True)
+
         # Mock TelescopeState's constructor to create an in-memory telstate
         orig_telstate_init = katsdptelstate.TelescopeState.__init__
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
@@ -519,15 +530,6 @@ class TestSDPController(BaseTestSDPController):
                     node.status = Dict(state=self.fail_launches[node.logical_node.name])
                 else:
                     node.set_state(scheduler.TaskState.RUNNING)
-
-        order_graph = scheduler.subgraph(graph, scheduler.DEPENDS_READY, nodes)
-        for node in reversed(list(networkx.topological_sort(order_graph))):
-            # With the real scheduler, the value returned to delay_run.sh is
-            # used to kill tasks with failed dependencies. We need to simulate
-            # that here - it is sufficient to move tasks from KILLING to DEAD.
-            if node.state == scheduler.TaskState.KILLING:
-                node.set_state(scheduler.TaskState.DEAD)
-            await node.ready_event.wait()
 
     async def _batch_run(self, graph: networkx.MultiDiGraph,
                          resolver: scheduler.Resolver,
