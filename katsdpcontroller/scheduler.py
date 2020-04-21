@@ -204,6 +204,7 @@ DEPENDS_RESOURCES = 'depends_resources'
 DEPENDS_RESOLVE = 'depends_resolve'
 DEPENDS_KILL = 'depends_kill'
 DEPENDS_FINISHED = 'depends_finished'      # for batch tasks
+DEPENDS_FINISHED_CRITICAL = 'depends_finished_critical'
 DECIMAL_CONTEXT = decimal.Context(traps=[
     decimal.Overflow, decimal.InvalidOperation, decimal.DivisionByZero,  # defaults
     decimal.Inexact, decimal.FloatOperation])
@@ -2388,7 +2389,7 @@ def subgraph(graph, edge_filter, nodes=None):
     out.add_nodes_from(nodes)
     for a, b, data in graph.edges(nodes, data=True):
         if b in nodes and edge_filter(data):
-            out.add_edge(a, b)
+            out.add_edge(a, b, **data)
     return out
 
 
@@ -3237,7 +3238,8 @@ class Scheduler(pymesos.Scheduler):
         for cyclic dependencies (it is complicated because it interacts with
         grouping and with the other types of dependencies), but in future it
         may raise :exc:`CycleError`. If a dependent task group fails (after
-        all retries), the depending task is skipped.
+        all retries), the depending task is skipped, unless the edge also
+        has a ``depends_finished_critical`` attribute set to false.
 
         .. note::
             If retries are needed, then `graph` is modified in place with
@@ -3286,7 +3288,9 @@ class Scheduler(pymesos.Scheduler):
 
             try:
                 for node in node_set:
-                    for dep in order_graph.successors(node):
+                    for _, dep, critical in order_graph.edges(
+                            node, data=DEPENDS_FINISHED_CRITICAL,
+                            default=True):
                         future = futures[dep]
                         logger.info('%s waiting for %s', node.name, dep.name)
                         try:
@@ -3296,9 +3300,13 @@ class Scheduler(pymesos.Scheduler):
                                 desc = node.name
                             else:
                                 desc = node.name + ' (and {} others)'.format(len(node_set) - 1)
-                            logger.info('Skipping %s because %s failed', desc, dep.name)
-                            self.task_stats.batch_tasks_skipped(len(node_set))
-                            raise TaskSkipped(node) from None
+                            if critical:
+                                logger.info('Skipping %s because %s failed', desc, dep.name)
+                                self.task_stats.batch_tasks_skipped(len(node_set))
+                                raise TaskSkipped(node) from None
+                            else:
+                                logger.debug('Continuing with %s after non-critical %s failed',
+                                             desc, dep.name)
 
                 self.task_stats.batch_tasks_started(len(node_set))
                 try:

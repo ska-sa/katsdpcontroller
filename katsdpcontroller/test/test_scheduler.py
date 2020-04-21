@@ -2008,6 +2008,37 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(self.task_stats.batch_failed, 1)
         assert_equal(self.task_stats.batch_skipped, 1)
 
+    async def test_batch_run_non_critical_failure(self):
+        """If a non-critical dependency fails, the dependent task runs anyway."""
+        # Modify graph to make dependency non-critical
+        for u, v, data in self.logical_batch_graph.edges(data=True):
+            if data.get('depends_finished', False):
+                data['depends_finished_critical'] = False
+        for u, v, data in self.logical_batch_graph.edges(data=True):
+            print(u, v, data)
+        self._make_physical()
+
+        task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
+        await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
+        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        # Kill it
+        self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
+        # Next task should now start
+        assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
+        await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
+        results = await task
+        with assert_raises(scheduler.TaskError):
+            raise results[self.batch_nodes[0]]
+        assert_is_none(results[self.batch_nodes[1]])
+        assert_equal(self.task_stats.batch_created, 2)
+        assert_equal(self.task_stats.batch_started, 2)
+        assert_equal(self.task_stats.batch_done, 2)
+        assert_equal(self.task_stats.batch_retried, 0)
+        assert_equal(self.task_stats.batch_failed, 1)
+        assert_equal(self.task_stats.batch_skipped, 0)
+
     async def test_batch_run_depends_retry(self):
         """If a dependencies fails once, wait until it's retried."""
         task = asyncio.ensure_future(self.sched.batch_run(
