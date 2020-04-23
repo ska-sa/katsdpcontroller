@@ -1879,7 +1879,8 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
                 data_url,
                 escape_format(DATA_VOL.container_path),
-                escape_format('{}_{}_{}'.format(capture_block_id, name, target_name))
+                escape_format('{}_{}_{}'.format(capture_block_id, name, target_name)),
+                escape_format(name)
             ]
             if continuum_telstate_name is not None:
                 sky_model_url = _sky_model_url(data_url, output['src_streams'][1], target)
