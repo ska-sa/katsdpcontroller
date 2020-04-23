@@ -1900,6 +1900,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                     ', '.join(target.name for target, _ in targets))
     view = telstate.view(telstate.join(capture_block_id, name))
     view['targets'] = {target.description: target_mapper(target) for target, _ in targets}
+    # While it is currently just a contiguous range, output the channels as a
+    # list to allow for applying a static mask in future.
+    view['output_channels'] = list(range(output_channels[0], output_channels[1]))
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
