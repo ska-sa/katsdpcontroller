@@ -910,7 +910,7 @@ class TestSDPController(BaseTestSDPController):
 
         # Check that postprocessing ran and didn't fail
         self.assertEqual(product.capture_blocks, {})
-        self.assertEqual(self.n_batch_tasks, 10)    # 4 continuum, 3x2 spectral
+        self.assertEqual(self.n_batch_tasks, 11)    # 4 continuum, 3x2 spectral, 1 report
 
     async def test_capture_done_disable_batch(self) -> None:
         """Checks that capture-init with override takes effect"""
