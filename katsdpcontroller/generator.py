@@ -1826,6 +1826,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
     del data_set    # Allow Python to recover the memory
 
+    nodes = []
     for target, obs_time in targets:
         for i in range(0, l0_info.n_channels, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, output_channels[0])
@@ -1891,6 +1892,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
             imager.katsdpservices_config = False
             imager.batch_data_time = obs_time
             g.add_node(imager)
+            nodes.append(imager)
             if continuum is not None:
                 g.add_edge(imager, continuum, depends_finished=True)
     if not targets:
@@ -1903,6 +1905,27 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     # While it is currently just a contiguous range, output the channels as a
     # list to allow for applying a static mask in future.
     view['output_channels'] = list(range(output_channels[0], output_channels[1]))
+    return data_url, nodes
+
+def _make_spectral_imager_report(g, config, capture_block_id, name, data_url, spectral_nodes):
+    report = SDPLogicalTask(f'spectral_image_report.{name}')
+    report.cpus = 1.0
+    # Memory is a guess - but since we don't open the chunk store it should be lightweight
+    report.mem = 4 * 1024
+    report.volumes = [DATA_VOL]
+    report.image = 'katsdpimager'
+    report.katsdpservices_config = False
+    report.command = [
+        'imager-mkat-report.py',
+        data_url,
+        escape_format(DATA_VOL.container_path),
+        escape_format(f'{capture_block_id}_{name}'),
+        escape_format(name)
+    ]
+    g.add_node(report)
+    for node in spectral_nodes:
+        g.add_edge(report, node, depends_finished=True, depends_finished_critical=False)
+    return report
 
 
 def build_postprocess_logical_graph(config, capture_block_id, telstate):
@@ -1921,7 +1944,10 @@ def build_postprocess_logical_graph(config, capture_block_id, telstate):
     # nodes.
     for name, output in config['outputs'].items():
         if output['type'] == 'sdp.spectral_image':
-            _make_spectral_imager(g, config, capture_block_id, name, telstate, target_mapper)
+            data_url, nodes = _make_spectral_imager(g, config, capture_block_id, name,
+                                                    telstate, target_mapper)
+            if nodes:
+                _make_spectral_imager_report(g, config, capture_block_id, name, data_url, nodes)
 
     seen = set()
     for node in g:
