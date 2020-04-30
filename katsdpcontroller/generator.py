@@ -1907,6 +1907,7 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
     view['output_channels'] = list(range(output_channels[0], output_channels[1]))
     return data_url, nodes
 
+
 def _make_spectral_imager_report(g, config, capture_block_id, name, data_url, spectral_nodes):
     report = SDPLogicalTask(f'spectral_image_report.{name}')
     report.cpus = 1.0
