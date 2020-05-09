@@ -620,7 +620,7 @@ class TestSDPController(BaseTestSDPController):
         then indicate success.
         """
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(
+        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
             mock.ANY, 'host.telstate:20000')
 
         # Verify the telescope state.
@@ -676,7 +676,9 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        katsdptelstate.TelescopeState.__init__.side_effect = katsdptelstate.ConnectionError
+        katsdptelstate.TelescopeState.__init__.side_effect = (    # type: ignore
+            katsdptelstate.ConnectionError
+        )
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
@@ -687,7 +689,7 @@ class TestSDPController(BaseTestSDPController):
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(
+        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
             mock.ANY, 'host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
