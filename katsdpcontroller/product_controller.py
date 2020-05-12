@@ -336,7 +336,7 @@ class SDPSubarrayProductBase:
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(config)
         self.telstate_endpoint = ""
-        self.telstate: katsdptelstate.TelescopeState = None
+        self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.capture_blocks: Dict[str, CaptureBlock] = {}  # live capture blocks, indexed by name
         # set between capture_init and capture_done
         self.current_capture_block: Optional[CaptureBlock] = None
@@ -980,6 +980,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     raise result
 
     async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
+        assert self.telstate is not None
         self.telstate.add('sdp_capture_block_id', capture_block.name)
         for node in self.physical_graph:
             if isinstance(node, tasks.SDPPhysicalTask):
@@ -1033,7 +1034,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if isinstance(node, tasks.SDPPhysicalTask):
                 node.remove_capture_block(capture_block)
 
-    async def _launch_telstate(self) -> None:
+    async def _launch_telstate(self) -> katsdptelstate.TelescopeState:
         """Make sure the telstate node is launched"""
         boot = [self.telstate_node]
 
@@ -1055,13 +1056,15 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
-        self.telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
-        self.resolver.telstate = self.telstate
+        telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
+        self.telstate = telstate
+        self.resolver.telstate = telstate
 
         # set the configuration
         for k, v in init_telstate.items():
-            key = self.telstate.join(*k) if isinstance(k, tuple) else k
-            self.telstate[key] = v
+            key = telstate.join(*k) if isinstance(k, tuple) else k
+            telstate[key] = v
+        return telstate
 
     def check_nodes(self) -> Tuple[bool, List[scheduler.PhysicalNode]]:
         """Check that all requested nodes are actually running.
@@ -1148,7 +1151,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 resolver = self.resolver
                 resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
                 # launch the telescope state for this graph
-                await self._launch_telstate()
+                telstate = await self._launch_telstate()
                 # launch containers for those nodes that require them
                 await self.sched.launch(self.physical_graph, self.resolver)
                 alive, died = self.check_nodes()
@@ -1168,10 +1171,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                             'host': task.host,
                             'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
                         }
-                self.telstate.add('sdp_task_details', details, immutable=True)
-                self.telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                self.telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                  immutable=True)
+                telstate.add('sdp_task_details', details, immutable=True)
+                telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                             immutable=True)
             except Exception as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 await self._shutdown(force=True)
