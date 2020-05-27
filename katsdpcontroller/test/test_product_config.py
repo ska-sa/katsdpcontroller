@@ -68,7 +68,7 @@ class Fixture(asynctest.TestCase):
 
     def setUp(self):
         self.config = {
-            "version": "2.5",
+            "version": "2.6",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -510,6 +510,7 @@ class TestNormalise(Fixture):
         expected["outputs"]["cal"]["parameters"] = {}
         expected["outputs"]["cal"]["models"] = {}
         expected["outputs"]["spectral_image"]["output_channels"] = [0, 4096]
+        expected["outputs"]["spectral_image"]["parameters"] = {}
         expected["config"]["develop"] = False
         expected["config"]["service_overrides"] = {}
 

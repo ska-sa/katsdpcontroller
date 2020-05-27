@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5"]
+            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
         }
     }
 }
@@ -475,6 +475,34 @@
                                         },
 {% if version >= "2.5" %}
                                         "min_time": {"$ref": "#/definitions/positive_number"},
+{% endif %}
+{% if version >= "2.6" %}
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {
+                                                "robustness": {"type": "number"},
+                                                "grid-oversample": {"$ref": "#/definitions/positive_integer"},
+                                                "kernel-image-oversample": {"$ref": "#/definitions/positive_integer"},
+                                                "w-slices": {"$ref": "#/definitions/positive_integer"},
+                                                "aa-width": {"$ref": "#/definitions/positive_number"},
+                                                "kernel-width": {"$ref": "#/definitions/positive_integer"},
+                                                "eps-w": {"$ref": "#/definitions/positive_number"},
+                                                "primary-beam-cutoff": {"$ref": "#/definitions/positive_number"},
+                                                "psf-cutoff": {"$ref": "#/definitions/positive_number"},
+                                                "psf-limit": {"$ref": "#/definitions/positive_number"},
+                                                "loop-gain": {"$ref": "#/definitions/positive_number"},
+                                                "major-gain": {"$ref": "#/definitions/positive_number"},
+                                                "threshold": {"$ref": "#/definitions/positive_number"},
+                                                "major": {"$ref": "#/definitions/positive_integer"},
+                                                "minor": {"$ref": "#/definitions/positive_integer"},
+                                                "border": {"$ref": "#/definitions/positive_number"},
+                                                "clean-mode": {
+                                                    "type": "string",
+                                                    "enum": ["I", "IQUV"]
+                                                }
+                                            },
+                                            "additionalProperties": false
+                                        },
 {% endif %}
                                         "output_channels": {"$ref": "#/definitions/channel_range"}
                                     },

@@ -533,10 +533,10 @@ def normalise(config):
                 }
                 config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
 
-    # Update to 2.5
-    if config['version'] in ['2.0', '2.1', '2.2', '2.3', '2.4']:
-        # 2.5 is fully backwards-compatible to 2.0
-        config['version'] = '2.5'
+    # Update to 2.6
+    if config['version'] in ['2.0', '2.1', '2.2', '2.3', '2.4', '2.5']:
+        # 2.6 is fully backwards-compatible to 2.0
+        config['version'] = '2.6'
 
     # Fill in defaults
     for name, stream in config['inputs'].items():
@@ -561,6 +561,7 @@ def normalise(config):
             output.setdefault('mfimage_parameters', {})
         if output['type'] == 'sdp.spectral_image':
             output.setdefault('output_channels', [0, _input_channels(config, output)])
+            output.setdefault('parameters', {})
 
     config['config'].setdefault('develop', False)
     config['config'].setdefault('service_overrides', {})
