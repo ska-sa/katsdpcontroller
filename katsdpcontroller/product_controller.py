@@ -575,6 +575,7 @@ class SDPSubarrayProductBase:
         The capture block that was stopped
         """
         capture_block = self.current_capture_block
+        done_exc: Optional[Exception] = None
         assert capture_block is not None
         try:
             await self.capture_done_impl(capture_block)
@@ -582,16 +583,14 @@ class SDPSubarrayProductBase:
                 raise FailReply('Subarray product went into ERROR while stopping capture')
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             self.state = ProductState.ERROR
-            self.current_capture_block = None
-            self._capture_block_dead(capture_block)
-            raise
+            done_exc = exc
         assert self.current_capture_block is capture_block
         if self.state == ProductState.CAPTURING:
             self.state = ProductState.IDLE
         else:
-            assert error_expected
+            assert done_exc is not None or error_expected
         self.current_capture_block = None
         capture_block.state = CaptureBlockState.BURNDOWN
         capture_block.postprocess_task = asyncio.get_event_loop().create_task(
@@ -605,6 +604,8 @@ class SDPSubarrayProductBase:
             self._capture_block_dead(capture_block)
 
         capture_block.postprocess_task.add_done_callback(done_callback)
+        if done_exc is not None:
+            raise done_exc
         return capture_block
 
     def _clear_async_task(self, future: asyncio.Task) -> None:
@@ -991,10 +992,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
     async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
-        await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
-        capture_block.state = CaptureBlockState.POSTPROCESSING
-
         try:
+            await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
+            capture_block.state = CaptureBlockState.POSTPROCESSING
             logical_graph = generator.build_postprocess_logical_graph(
                 capture_block.config, capture_block.name, self.telstate)
             physical_graph = self._instantiate_physical_graph(
