@@ -147,7 +147,7 @@ CONFIG = '''{
             "output_channels": [120, 130],
             "parameters": {
                 "major": 6,
-                "major-gain": 0.15
+                "major_gain": 0.15
             }
         }
     },
