@@ -1888,6 +1888,9 @@ def _make_spectral_imager(g, config, capture_block_id, name, telstate, target_ma
                 imager.command += ['--subtract', sky_model_url]
             if band in {'L', 'UHF'}:      # Models are not available for other bands yet
                 imager.command += ['--primary-beam', 'meerkat']
+            for key, value in output['parameters'].items():
+                str_value = repr(value) if isinstance(value, float) else str(value)
+                imager.command += [f'--{key}'.replace('_', '-'), escape_format(str_value)]
 
             imager.katsdpservices_config = False
             imager.batch_data_time = obs_time

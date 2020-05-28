@@ -15,7 +15,7 @@ from nose.tools import assert_raises, assert_equal, assert_true
 _T = TypeVar('_T')
 
 CONFIG = '''{
-    "version": "2.4",
+    "version": "2.6",
     "inputs": {
         "camdata": {
             "type": "cam.http",
@@ -144,7 +144,11 @@ CONFIG = '''{
         "spectral_image": {
             "type": "sdp.spectral_image",
             "src_streams": ["sdp_l1_flags"],
-            "output_channels": [120, 130]
+            "output_channels": [120, 130],
+            "parameters": {
+                "major": 6,
+                "major_gain": 0.15
+            }
         }
     },
     "config": {}
