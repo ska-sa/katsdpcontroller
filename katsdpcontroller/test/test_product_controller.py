@@ -823,6 +823,9 @@ class TestSDPController(BaseTestSDPController):
         # check that the subsequent transitions still run
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, True)
+        # check that postprocessing transitions still run.
+        await asynctest.exhaust_callbacks(self.loop)
+        katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
         # check that the subarray is in an appropriate state
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
@@ -963,8 +966,12 @@ class TestSDPController(BaseTestSDPController):
         with self.assertRaises(FailReply):
             async with self._capture_done_slow():
                 self._ingest_died(product)
-        # check that the subarray is in an appropriate state
+        # check that the subarray is in an appropriate state and that final
+        # writeback occurred.
         self.assertEqual(ProductState.ERROR, product.state)
+        await asynctest.exhaust_callbacks(self.loop)
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
         self.assertEqual({}, product.capture_blocks)
 
     async def test_deconfigure_on_stop(self) -> None:
