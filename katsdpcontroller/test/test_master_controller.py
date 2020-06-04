@@ -703,7 +703,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
                      side_effect=aiokatcp.Client.wait_connected, autospec=True)
         return DelayedManager(
             self.client.request('product-configure', subarray_product, CONFIG),
-            aiokatcp.Client.wait_connected,
+            aiokatcp.Client.wait_connected,         # type: ignore
             None, cancelled)
 
     async def test_product_deconfigure(self) -> None:
