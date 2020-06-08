@@ -1483,7 +1483,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         failed: List[str] = []
         async with aiohttp.ClientSession() as session:
             async def post1(url):
-                async with session.post(url) as resp:
+                async with session.post(url, headers={'X-Poweroff-Server': '1'}) as resp:
                     resp.raise_for_status()
 
             futures = [post1(url) for url in urls]
