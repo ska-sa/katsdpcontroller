@@ -95,6 +95,8 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
                         metavar='TAG', help='Image tag to use')
     parser.add_argument('--s3-config', type=parse_s3_config, metavar='JSON',
                         help='Configuration for connecting services to S3')
+    parser.add_argument('--model-base-url', type=str, metavar='URL',
+                        help='Base URL for models')
     parser.add_argument('master_controller', type=endpoint_parser(None),
                         help='Master controller katcp endpoint')
     parser.add_argument('mesos_master',
@@ -113,6 +115,8 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
 
     if args.s3_config is None and not args.interface_mode:
         parser.error('--s3-config is required (unless --interface-mode is given)')
+    if args.model_base_url is None and not args.interface_mode:
+        parser.error('--model-base-url is required (unless --interface-mode is given)')
 
     if args.http_url is None:
         # When Singularity creates the port mapping, it puts the host ports
@@ -189,7 +193,8 @@ def main() -> None:
         interface_mode=args.interface_mode,
         localhost=args.localhost,
         image_resolver_factory=image_resolver_factory,
-        s3_config=args.s3_config,
+        s3_config=args.s3_config if args.s3_config is not None else {},
+        model_base_url=args.model_base_url if args.model_base_url is not None else '',
         graph_dir=args.write_graphs,
         dashboard_url=dashboard_url)
     if not args.interface_mode and args.dashboard_port != 0:

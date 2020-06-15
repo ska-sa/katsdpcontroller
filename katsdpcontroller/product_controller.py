@@ -19,6 +19,7 @@ import aiohttp
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
+import yarl
 import katsdptelstate
 
 import katsdpcontroller
@@ -149,6 +150,61 @@ def _prometheus_factory(registry: CollectorRegistry,
                                        labels, registry)
 
 
+def _relative_url(base: yarl.URL, target: yarl.URL) -> yarl.URL:
+    """Produce URL `rel` such that ``base.join(rel) == target``.
+
+    It does not deal with query strings or fragments.
+
+    Raises
+    ------
+    ValueError
+        if either of the URLs are not absolute
+    ValueError
+        if either URL contains fragments or query strings
+    ValueError
+        if `target` is not nested under `base`
+    """
+    if not base.is_absolute() or not target.is_absolute():
+        raise ValueError('Absolute URLs expected')
+    if base.query_string or target.query_string:
+        raise ValueError('Query strings are not supported')
+    if base.fragment or target.fragment:
+        raise ValueError('Fragments are not supported')
+    if base.origin() != target.origin():
+        raise ValueError('URLs have different origins')
+    # Strip off the last component, which is empty if the URL ends with a /
+    # other than at the root, or the filename if it does not.
+    base_parts = base.raw_parts[:-1] if len(base.parts) > 1 else base.raw_parts
+    if target.raw_parts[:len(base_parts)] != base_parts:
+        raise ValueError('Target URL is not nested under the base')
+    rel_parts = target.raw_parts[len(base_parts):]
+    rel = yarl.URL.build(path='/'.join(rel_parts), encoded=True)
+    assert base.join(rel) == target
+    return rel
+
+
+async def _resolve_model(base_url: str, rel_url: str) -> str:
+    # TODO: make an asynchronous resolver/fetcher in katsdpmodels. This doesn't
+    # have dedicated unit tests because it's assumed that it'll be replaced.
+    MAX_ALIASES = 30
+    base = yarl.URL(base_url)
+    url = base / rel_url
+    start_url = url
+    aliases = 0
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(30)) as client:
+        while url.name.endswith('.alias'):
+            aliases += 1
+            if aliases > MAX_ALIASES:
+                raise RuntimeError(
+                    f'Reached limit of {MAX_ALIASES} level of aliases when resolving {start_url}')
+            async with client.get(url) as resp:
+                resp.raise_for_status()
+                text = await resp.text()
+                new_rel = yarl.URL(text.rstrip())
+                url = resp.url.join(new_rel)
+    return str(_relative_url(base, url))
+
+
 class KatcpImageLookup(scheduler.ImageLookup):
     """Image lookup that asks the master controller to do the work.
 
@@ -171,10 +227,12 @@ class Resolver(scheduler.Resolver):
                  http_url: Optional[str],
                  service_overrides: Mapping[str, product_config.ServiceOverride],
                  s3_config: dict,
+                 model_base_url: str,
                  localhost: bool) -> None:
         super().__init__(image_resolver, task_id_allocator, http_url)
         self.service_overrides = service_overrides
         self.s3_config = s3_config
+        self.model_base_url = model_base_url
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.resources: Optional[SDPResources] = None
         self.localhost = localhost
@@ -863,6 +921,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
+
     sched: scheduler.Scheduler     # Override Optional[] from base class
 
     def _instantiate(self, logical_node: scheduler.LogicalNode,
@@ -1060,6 +1119,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                         src_stream.name for src_stream in stream.src_streams
                     ]
 
+        # Load canonical model URLs
+        init_telstate['sdp_model_base_url'] = self.resolver.model_base_url
+        rfi_mask_model_fixed = await _resolve_model(self.resolver.model_base_url,
+                                                    'rfi_mask/current.alias')
+        init_telstate['rfi_mask_model_fixed'] = rfi_mask_model_fixed
+
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
@@ -1224,6 +1289,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                  localhost: bool,
                  image_resolver_factory: scheduler.ImageResolverFactory,
                  s3_config: dict,
+                 model_base_url: str,
                  graph_dir: str = None,
                  dashboard_url: str = None,
                  prometheus_registry: CollectorRegistry = REGISTRY,
@@ -1235,6 +1301,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.localhost = localhost
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = _normalise_s3_config(s3_config)
+        self.model_base_url = model_base_url
         self.graph_dir = graph_dir
         self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
@@ -1382,6 +1449,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.sched.http_url if self.sched else '',
             configuration.options.service_overrides,
             self.s3_config,
+            self.model_base_url,
             self.localhost)
 
         # create graph object and build physical graph from specified resources

@@ -476,8 +476,8 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         server = product_controller.DeviceServer(
             '127.0.0.1', 0, mc_client, name, None, self._args.batch_role,
-            True, self._args.localhost, self._image_resolver_factory, {},
-            shutdown_delay=0)
+            True, self._args.localhost, self._image_resolver_factory,
+            s3_config={}, model_base_url='', shutdown_delay=0)
         product = InternalProduct(name, config, asyncio.Task.current_task(), server)
         self._add_product(product)
         await product.server.start()
@@ -861,6 +861,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         port = device_server_sockname(self._server)[1]
         args.extend([
             '--s3-config=' + json.dumps(s3_config),
+            f'--model-base-url={self._args.model_base_url}',
             f'--image-tag={image_resolver.tag}',
             f'--subarray-product-id={name}',
             f'{self._args.external_hostname}:{port}',
@@ -1568,6 +1569,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         metavar='FILE',
                         help='configuration for connecting services to S3 '
                              '(loaded on each configure)')
+    parser.add_argument('--model-base-url', metavar='URL',
+                        help='Base URL for models')
     parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
                         metavar='MULTICAST-CIDR',
                         help='block of multicast addresses from which to draw internal allocation. '
@@ -1609,5 +1612,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
     if args.s3_config_file is None and not args.interface_mode:
         parser.error('--s3-config-file is required (unless --interface-mode is given)')
+    if args.model_base_url is None and not args.interface_mode:
+        parser.error('--model-base-url is required (unless --interface-mode is given)')
+    if not args.model_base_url.endswith('/'):
+        logger.warning('Adding a trailing slash to --model-base-url')
+        args.model_base_url += '/'
 
     return args

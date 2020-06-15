@@ -28,11 +28,13 @@ import netifaces
 import katsdptelstate
 import katpoint
 import katdal
+import yarl
 
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, CONSUL_URL)
+    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url,
+    CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
@@ -230,6 +232,57 @@ class TestNormaliseS3Config(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
+class TestRelativeUrl(unittest.TestCase):
+    def setUp(self):
+        self.base = yarl.URL('http://test.invalid/foo/bar/')
+
+    def test_success(self):
+        url = yarl.URL('http://test.invalid/foo/bar/baz')
+        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz'))
+        url = yarl.URL('http://test.invalid/foo/bar/baz/')
+        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz/'))
+        self.assertEqual(_relative_url(self.base, self.base), yarl.URL())
+
+    def test_root_relative(self):
+        base = yarl.URL('http://test.invalid/')
+        url = yarl.URL('http://test.invalid/foo/bar/')
+        self.assertEqual(_relative_url(base, url), yarl.URL('foo/bar/'))
+
+    def test_different_origin(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('https://test.invalid/foo/bar/baz'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://another.test.invalid/foo/bar/baz'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid:1234/foo/bar/baz'))
+
+    def test_outside_tree(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid/foo/bart'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid/'))
+
+    def test_query_strings(self):
+        qs = yarl.URL('http://test.invalid/foo/bar/?query=yes')
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, qs)
+        with self.assertRaises(ValueError):
+            _relative_url(qs, self.base)
+
+    def test_fragments(self):
+        frag = yarl.URL('http://test.invalid/foo/bar/#frag')
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, frag)
+        with self.assertRaises(ValueError):
+            _relative_url(frag, self.base)
+
+    def test_not_absolute(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('relative/url'))
+        with self.assertRaises(ValueError):
+            _relative_url(yarl.URL('relative/url'), self.base)
+
+
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
 
@@ -250,10 +303,22 @@ class BaseTestSDPController(asynctest.TestCase):
             **server_kwargs)
         # server.start will try to register with consul. Mock that out, and make sure it
         # fails (which will prevent it from trying to deregister on stop).
-        with aioresponses() as m:
-            m.put(urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
-                  status=500)
-            await self.server.start()
+        self.aioresponses = aioresponses()
+        self.aioresponses.start()
+        self.addCleanup(self.aioresponses.stop)
+        self.aioresponses.put(
+            urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
+            status=500
+        )
+        self.aioresponses.get(
+            'http://test.invalid/models/rfi_mask/current.alias',
+            body='config/2020-06-15.alias'
+        )
+        self.aioresponses.get(
+            'http://test.invalid/models/rfi_mask/config/2020-06-15.alias',
+            body='../hash/sha256_deadbeef.hdf5'
+        )
+        await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
         self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
@@ -295,7 +360,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
                                 interface_mode=True,
                                 localhost=True,
                                 image_resolver_factory=image_resolver_factory,
-                                s3_config={})
+                                s3_config={}, model_base_url='http://test.invalid/models/')
         create_patch(self, 'time.time', return_value=123456789.5)
 
     async def test_capture_init(self) -> None:
@@ -460,6 +525,7 @@ class TestSDPController(BaseTestSDPController):
         await self.setup_server(
             host='127.0.0.1', port=0, sched=self.sched,
             s3_config=json.loads(S3_CONFIG),
+            model_base_url='http://test.invalid/models/',
             image_resolver_factory=scheduler.ImageResolverFactory(
                 scheduler.SimpleImageLookup('sdp')),
             interface_mode=False,
