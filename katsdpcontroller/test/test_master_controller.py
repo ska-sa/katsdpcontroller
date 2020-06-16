@@ -219,7 +219,6 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             '--image-override', 'katsdptelstate:branch',
             '--external-hostname', 'me.invalid',
             '--s3-config-file', 's3_config.json',
-            '--model-base-url', 'http://test.invalid/models/',
             '--safe-multicast-cidr', '225.100.0.0/24',
             'zk.invalid:2181', self.singularity_server.root_url
         ])

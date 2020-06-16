@@ -96,13 +96,21 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
 
 
 def _normalise_s3_config(s3_config: dict) -> dict:
-    """Normalise s3_config to have separate `url` fields for `read` and `write`."""
+    """Normalise s3_config.
+
+    - Ensures separate `url` fields for `read` and `write`.
+    - Copies `models` to `online_models` if the latter is absent.
+    """
     s3_config = copy.deepcopy(s3_config)
     for config in s3_config.values():
         if 'url' in config:
             for mode in ['read', 'write']:
                 config.setdefault(mode, {})['url'] = config['url']
             del config['url']
+    # 'models' should always be present in production, but for interface mode
+    # we use an empty s3_config.
+    if 'online_models' not in s3_config and 'models' in s3_config:
+        s3_config['online_models'] = copy.deepcopy(s3_config['models'])
     return s3_config
 
 
@@ -227,12 +235,10 @@ class Resolver(scheduler.Resolver):
                  http_url: Optional[str],
                  service_overrides: Mapping[str, product_config.ServiceOverride],
                  s3_config: dict,
-                 model_base_url: str,
                  localhost: bool) -> None:
         super().__init__(image_resolver, task_id_allocator, http_url)
         self.service_overrides = service_overrides
         self.s3_config = s3_config
-        self.model_base_url = model_base_url
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.resources: Optional[SDPResources] = None
         self.localhost = localhost
@@ -1120,9 +1126,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     ]
 
         # Load canonical model URLs
-        init_telstate['sdp_model_base_url'] = self.resolver.model_base_url
-        rfi_mask_model_fixed = await _resolve_model(self.resolver.model_base_url,
-                                                    'rfi_mask/current.alias')
+        model_base_url = self.resolver.s3_config['online_models']['read']['url']
+        if not model_base_url.endswith('/'):
+            model_base_url += '/'      # Ensure it is a directory
+        init_telstate['sdp_model_base_url'] = model_base_url
+        rfi_mask_model_fixed = await _resolve_model(model_base_url, 'rfi_mask/current.alias')
         init_telstate['rfi_mask_model_fixed'] = rfi_mask_model_fixed
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
@@ -1289,7 +1297,6 @@ class DeviceServer(aiokatcp.DeviceServer):
                  localhost: bool,
                  image_resolver_factory: scheduler.ImageResolverFactory,
                  s3_config: dict,
-                 model_base_url: str,
                  graph_dir: str = None,
                  dashboard_url: str = None,
                  prometheus_registry: CollectorRegistry = REGISTRY,
@@ -1301,7 +1308,6 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.localhost = localhost
         self.image_resolver_factory = image_resolver_factory
         self.s3_config = _normalise_s3_config(s3_config)
-        self.model_base_url = model_base_url
         self.graph_dir = graph_dir
         self.master_controller = master_controller
         self.product: Optional[SDPSubarrayProductBase] = None
@@ -1449,7 +1455,6 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.sched.http_url if self.sched else '',
             configuration.options.service_overrides,
             self.s3_config,
-            self.model_base_url,
             self.localhost)
 
         # create graph object and build physical graph from specified resources

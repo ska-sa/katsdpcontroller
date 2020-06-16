@@ -168,6 +168,11 @@ S3_CONFIG = '''
         "read": {
             "url": "http://archive.s3.invalid/"
         }
+    },
+    "models": {
+        "read": {
+            "url": "http://models.s3.invalid/models"
+        }
     }
 }'''
 

@@ -311,11 +311,11 @@ class BaseTestSDPController(asynctest.TestCase):
             status=500
         )
         self.aioresponses.get(
-            'http://test.invalid/models/rfi_mask/current.alias',
+            'http://models.s3.invalid/models/rfi_mask/current.alias',
             body='config/2020-06-15.alias'
         )
         self.aioresponses.get(
-            'http://test.invalid/models/rfi_mask/config/2020-06-15.alias',
+            'http://models.s3.invalid/models/rfi_mask/config/2020-06-15.alias',
             body='../hash/sha256_deadbeef.hdf5'
         )
         await self.server.start()
@@ -360,7 +360,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
                                 interface_mode=True,
                                 localhost=True,
                                 image_resolver_factory=image_resolver_factory,
-                                s3_config={}, model_base_url='http://test.invalid/models/')
+                                s3_config={})
         create_patch(self, 'time.time', return_value=123456789.5)
 
     async def test_capture_init(self) -> None:
@@ -525,7 +525,6 @@ class TestSDPController(BaseTestSDPController):
         await self.setup_server(
             host='127.0.0.1', port=0, sched=self.sched,
             s3_config=json.loads(S3_CONFIG),
-            model_base_url='http://test.invalid/models/',
             image_resolver_factory=scheduler.ImageResolverFactory(
                 scheduler.SimpleImageLookup('sdp')),
             interface_mode=False,
