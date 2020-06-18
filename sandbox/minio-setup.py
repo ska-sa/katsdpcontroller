@@ -81,11 +81,15 @@ def main():
         pass
     client.put_bucket_policy(Bucket='models', Policy=json.dumps(BUCKET_POLICY))
     client.put_object(Bucket='models', Key='rfi_mask/current.alias',
+                      ContentType='text/plain',
                       Body=b'config/v1.alias\n')
     client.put_object(Bucket='models', Key='rfi_mask/config/v1.alias',
+                      ContentType='text/plain',
                       Body=f'../hash/sha256_{checksum}.hdf5\n'.encode())
     fh.seek(0)
-    client.put_object(Bucket='models', Key=f'rfi_mask/hash/sha256_{checksum}.hdf5', Body=fh)
+    client.put_object(Bucket='models',
+                      ContentType='application/x-hdf5',
+                      Key=f'rfi_mask/hash/sha256_{checksum}.hdf5', Body=fh)
 
 
 if __name__ == '__main__':
