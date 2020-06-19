@@ -1131,7 +1131,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             model_base_url += '/'      # Ensure it is a directory
         init_telstate['sdp_model_base_url'] = model_base_url
         rfi_mask_model_fixed = await _resolve_model(model_base_url, 'rfi_mask/current.alias')
-        init_telstate['rfi_mask_model_fixed'] = rfi_mask_model_fixed
+        init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_fixed
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
