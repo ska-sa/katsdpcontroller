@@ -46,7 +46,7 @@ def write_rfi_model(hdf5: h5py.File, model: katsdpmodels.rfi_mask.RFIMaskRanges)
     hdf5.attrs['model_target'] = model.target
     hdf5.attrs['model_version'] = model.version
     array = model.ranges.as_array(names=('min_frequency', 'max_frequency', 'max_baseline'))
-    hdf5.create_dataset('ranges', data=array)
+    hdf5.create_dataset('ranges', data=array, track_times=False)
 
 
 def main():
