@@ -87,11 +87,11 @@ def main():
                       Body=b'config/v1.alias\n')
     client.put_object(Bucket='models', Key='rfi_mask/config/v1.alias',
                       ContentType='text/plain',
-                      Body=f'../hash/sha256_{checksum}.hdf5\n'.encode())
+                      Body=f'../fixed/sha256_{checksum}.hdf5\n'.encode())
     fh.seek(0)
     client.put_object(Bucket='models',
                       ContentType='application/x-hdf5',
-                      Key=f'rfi_mask/hash/sha256_{checksum}.hdf5', Body=fh)
+                      Key=f'rfi_mask/fixed/sha256_{checksum}.hdf5', Body=fh)
 
 
 if __name__ == '__main__':
