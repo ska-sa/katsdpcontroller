@@ -44,6 +44,7 @@ def write_rfi_model(hdf5: h5py.File, model: katsdpmodels.rfi_mask.RFIMaskRanges)
     hdf5.attrs['model_author'] = model.author
     hdf5.attrs['model_created'] = model.created.isoformat()
     hdf5.attrs['model_target'] = model.target
+    hdf5.attrs['model_version'] = model.version
     array = model.ranges.as_array(names=('min_frequency', 'max_frequency', 'max_baseline'))
     hdf5.create_dataset('ranges', data=array)
 
@@ -59,6 +60,7 @@ def main():
     model.comment = 'RFI mask model for use in sandbox testing'
     model.target = 'MeerKAT'
     model.created = datetime(2020, 6, 15, 14, 11, tzinfo=timezone.utc)
+    model.version = 1
     fh = io.BytesIO()
     with h5py.File(fh, 'w') as hdf5:
         write_rfi_model(hdf5, model)
