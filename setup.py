@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from setuptools import setup, find_packages
 
-tests_require = ['nose', 'aioresponses', 'asynctest', 'open-mock-file']
+tests_require = ['nose', 'aioresponses>=0.6.4', 'asynctest', 'open-mock-file']
 
 setup(
     name="katsdpcontroller",
