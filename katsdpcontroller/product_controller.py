@@ -21,6 +21,7 @@ from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import yarl
 import katsdptelstate
+import katsdpmodels.fetch.aiohttp
 
 import katsdpcontroller
 from . import scheduler, product_config, generator, tasks, sensor_proxy
@@ -191,26 +192,24 @@ def _relative_url(base: yarl.URL, target: yarl.URL) -> yarl.URL:
     return rel
 
 
-async def _resolve_model(base_url: str, rel_url: str) -> str:
-    # TODO: make an asynchronous resolver/fetcher in katsdpmodels. This doesn't
-    # have dedicated unit tests because it's assumed that it'll be replaced.
-    MAX_ALIASES = 30
+async def _resolve_model(base_url: str, rel_url: str) -> Tuple[str, str]:
+    """Compute model URLs to store in katsdptelstate.
+
+    Returns
+    -------
+    config_url
+        URL relative to `base_url` that is specific to the config.
+    fixed_url
+        URL relative to `base_url` for an immutable model.
+    """
     base = yarl.URL(base_url)
-    url = base / rel_url
-    start_url = url
-    aliases = 0
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(30)) as client:
-        while url.name.endswith('.alias'):
-            aliases += 1
-            if aliases > MAX_ALIASES:
-                raise RuntimeError(
-                    f'Reached limit of {MAX_ALIASES} level of aliases when resolving {start_url}')
-            async with client.get(url) as resp:
-                resp.raise_for_status()
-                text = await resp.text()
-                new_rel = yarl.URL(text.rstrip())
-                url = resp.url.join(new_rel)
-    return str(_relative_url(base, url))
+    url = base.join(yarl.URL(rel_url))
+    async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
+        urls = await fetcher.resolve(str(url))
+    fixed = urls[-1]
+    config = urls[-2] if len(urls) >= 2 else fixed
+    return (str(_relative_url(base, yarl.URL(config))),
+            str(_relative_url(base, yarl.URL(fixed))))
 
 
 class KatcpImageLookup(scheduler.ImageLookup):
@@ -1130,8 +1129,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if not model_base_url.endswith('/'):
             model_base_url += '/'      # Ensure it is a directory
         init_telstate['sdp_model_base_url'] = model_base_url
-        rfi_mask_model_fixed = await _resolve_model(model_base_url, 'rfi_mask/current.alias')
-        init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_fixed
+        rfi_mask_model_urls = await _resolve_model(model_base_url, 'rfi_mask/current.alias')
+        init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
+        init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)

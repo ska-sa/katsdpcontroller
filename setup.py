@@ -35,6 +35,7 @@ setup(
         'netifaces',
         'aiokatcp>=0.6.1',
         'katdal',
+        'katsdpmodels[aiohttp]',
         'katsdptelstate',
         'katsdpservices',
         'katportalclient',
