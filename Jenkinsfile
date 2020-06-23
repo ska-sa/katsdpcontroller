@@ -4,7 +4,7 @@
 katsdp.killOldJobs()
 katsdp.setDependencies([
     'ska-sa/katsdpdockerbase/master',
-    'ska-sa/katsdpmodels/fetch_base',
+    'ska-sa/katsdpmodels/master',
     'ska-sa/katsdpservices/master',
     'ska-sa/katsdptelstate/master'])
 katsdp.standardBuild(docker_venv: true, push_external: true)
