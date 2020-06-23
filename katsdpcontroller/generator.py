@@ -10,12 +10,15 @@ from typing import List, Dict, Tuple, Set, Sequence, Type, Union, Optional, Any,
 import addict
 import networkx
 import numpy as np
+import astropy.units as u
 
 import katdal
 import katdal.datasources
 import katpoint
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
+import katsdpmodels.fetch.aiohttp
+from katsdpmodels.rfi_mask import RFIMask
 
 from . import scheduler, product_config, defaults
 from .tasks import (
@@ -1564,18 +1567,26 @@ def _make_continuum_imager(g: networkx.MultiDiGraph,
     view['targets'] = {target.description: target_mapper(target) for target, _ in targets}
 
 
-def _make_spectral_imager(g: networkx.MultiDiGraph,
-                          configuration: Configuration,
-                          capture_block_id: str,
-                          stream: product_config.SpectralImageStream,
-                          telstate: katsdptelstate.TelescopeState,
-                          target_mapper: TargetMapper) -> \
+async def _make_spectral_imager(g: networkx.MultiDiGraph,
+                                configuration: Configuration,
+                                capture_block_id: str,
+                                stream: product_config.SpectralImageStream,
+                                telstate: katsdptelstate.TelescopeState,
+                                target_mapper: TargetMapper) -> \
         Tuple[str, Sequence[scheduler.LogicalNode]]:
     dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate)
     band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
+    channel_freqs = data_set.channel_freqs * u.Hz
     del data_set    # Allow Python to recover the memory
+
+    rfi_mask_model_url = urllib.parse.urljoin(
+        telstate['sdp_model_base_url'], telstate['model_rfi_mask_fixed']
+    )
+    with await katsdpmodels.fetch.aiohttp.fetch_model(rfi_mask_model_url, RFIMask) as rfi_mask:
+        max_baseline = rfi_mask.max_baseline_length(channel_freqs)
+        channel_mask = max_baseline > 0 * u.m
 
     nodes = []
     for target, obs_time in targets:
@@ -1585,6 +1596,8 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                                stream.vis.n_chans,
                                stream.output_channels[1])
             if first_channel >= last_channel:
+                continue
+            if np.all(channel_mask[first_channel:last_channel]):
                 continue
 
             target_name = target_mapper(target)
@@ -1621,6 +1634,7 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                 '-i', escape_format('target={}'.format(target.description)),
                 '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
                 '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
+                '-i', 'rfi-mask=fixed',
                 '--stokes', 'IQUV',
                 '--start-channel', str(first_channel),
                 '--stop-channel', str(last_channel),
@@ -1653,9 +1667,10 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                     ', '.join(target.name for target, _ in targets))
     view = telstate.view(telstate.join(capture_block_id, stream.name))
     view['targets'] = {target.description: target_mapper(target) for target, _ in targets}
-    # While it is currently just a contiguous range, output the channels as a
-    # list to allow for applying a static mask in future.
-    view['output_channels'] = list(range(stream.output_channels[0], stream.output_channels[1]))
+    view['output_channels'] = [
+        channel for channel in range(stream.output_channels[0], stream.output_channels[1])
+        if not channel_mask[channel]
+    ]
     return data_url, nodes
 
 
@@ -1686,7 +1701,7 @@ def _make_spectral_imager_report(
     return report
 
 
-def build_postprocess_logical_graph(
+async def build_postprocess_logical_graph(
         configuration: Configuration,
         capture_block_id: str,
         telstate: katsdptelstate.TelescopeState) -> networkx.MultiDiGraph:
@@ -1706,8 +1721,8 @@ def build_postprocess_logical_graph(
         data_url, nodes = _make_spectral_imager(g, configuration, capture_block_id, sstream,
                                                 telstate, target_mapper)
         if nodes:
-            _make_spectral_imager_report(g, configuration, capture_block_id, sstream,
-                                         data_url, nodes)
+            await _make_spectral_imager_report(g, configuration, capture_block_id, sstream,
+                                               data_url, nodes)
 
     seen = set()
     for node in g:

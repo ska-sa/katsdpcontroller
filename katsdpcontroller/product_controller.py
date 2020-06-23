@@ -1066,7 +1066,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         try:
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING
-            logical_graph = generator.build_postprocess_logical_graph(
+            logical_graph = await generator.build_postprocess_logical_graph(
                 capture_block.configuration, capture_block.name, self.telstate)
             physical_graph = self._instantiate_physical_graph(
                 logical_graph, capture_block.name)
