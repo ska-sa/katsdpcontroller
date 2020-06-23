@@ -192,7 +192,8 @@ def _relative_url(base: yarl.URL, target: yarl.URL) -> yarl.URL:
     return rel
 
 
-async def _resolve_model(base_url: str, rel_url: str) -> Tuple[str, str]:
+async def _resolve_model(fetcher: katsdpmodels.fetch.aiohttp.Fetcher,
+                         base_url: str, rel_url: str) -> Tuple[str, str]:
     """Compute model URLs to store in katsdptelstate.
 
     Returns
@@ -204,8 +205,7 @@ async def _resolve_model(base_url: str, rel_url: str) -> Tuple[str, str]:
     """
     base = yarl.URL(base_url)
     url = base.join(yarl.URL(rel_url))
-    async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
-        urls = await fetcher.resolve(str(url))
+    urls = await fetcher.resolve(str(url))
     fixed = urls[-1]
     config = urls[-2] if len(urls) >= 2 else fixed
     return (str(_relative_url(base, yarl.URL(config))),
@@ -1129,9 +1129,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         if not model_base_url.endswith('/'):
             model_base_url += '/'      # Ensure it is a directory
         init_telstate['sdp_model_base_url'] = model_base_url
-        rfi_mask_model_urls = await _resolve_model(model_base_url, 'rfi_mask/current.alias')
-        init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
-        init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+        async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
+            rfi_mask_model_urls = await _resolve_model(
+                fetcher, model_base_url, 'rfi_mask/current.alias')
+            init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
+            init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
