@@ -6,7 +6,6 @@ import io
 import json
 
 import numpy as np
-import h5py
 import astropy.units as u
 import astropy.table
 import botocore.session
@@ -35,35 +34,20 @@ RFI_MASK = np.array(
 )
 
 
-def write_rfi_model(hdf5: h5py.File, model: katsdpmodels.rfi_mask.RFIMaskRanges):
-    # TODO: move this into katsdpmodels. It'll need to be more generic to
-    # ensure that it gets the units right and handles None attributes.
-    hdf5.attrs['model_type'] = 'rfi_mask'
-    hdf5.attrs['model_format'] = 'ranges'
-    hdf5.attrs['model_comment'] = model.comment
-    hdf5.attrs['model_author'] = model.author
-    hdf5.attrs['model_created'] = model.created.isoformat()
-    hdf5.attrs['model_target'] = model.target
-    hdf5.attrs['model_version'] = model.version
-    array = model.ranges.as_array(names=('min_frequency', 'max_frequency', 'max_baseline'))
-    hdf5.create_dataset('ranges', data=array, track_times=False)
-
-
 def main():
     # Prepare data
-    rfi_mask_table = astropy.table.QTable(RFI_MASK)
-    rfi_mask_table['min_frequency'] <<= u.Hz
-    rfi_mask_table['max_frequency'] <<= u.Hz
-    rfi_mask_table['max_baseline'] <<= u.m
-    model = katsdpmodels.rfi_mask.RFIMaskRanges(rfi_mask_table)
+    rfi_mask_table = astropy.table.Table(RFI_MASK)
+    rfi_mask_table['min_frequency'].unit = u.Hz
+    rfi_mask_table['max_frequency'].unit = u.Hz
+    rfi_mask_table['max_baseline'].unit = u.m
+    model = katsdpmodels.rfi_mask.RFIMaskRanges(rfi_mask_table, False)
     model.author = 'Sandbox setup script'
     model.comment = 'RFI mask model for use in sandbox testing'
     model.target = 'MeerKAT'
     model.created = datetime(2020, 6, 15, 14, 11, tzinfo=timezone.utc)
     model.version = 1
     fh = io.BytesIO()
-    with h5py.File(fh, 'w') as hdf5:
-        write_rfi_model(hdf5, model)
+    model.to_file(fh, content_type='application/x-hdf5')
     checksum = hashlib.sha256(fh.getvalue()).hexdigest()
 
     # Load it to minio
