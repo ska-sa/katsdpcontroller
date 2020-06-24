@@ -6,6 +6,7 @@ import copy
 import itertools
 import json
 import asyncio
+import io
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
@@ -15,6 +16,8 @@ from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
 
 import asynctest
 from aioresponses import aioresponses
+import astropy.table
+import astropy.units as u
 from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
@@ -28,6 +31,7 @@ import netifaces
 import katsdptelstate
 import katpoint
 import katdal
+import katsdpmodels.rfi_mask
 import yarl
 
 from ..controller import device_server_sockname
@@ -130,8 +134,9 @@ class DummyDataSet:
         }
         self.spw = 0
         self.spectral_windows = [
-            katdal.SpectralWindow(1284e6, 856e6 / 4096, 4096, 'c856M4k', 'L')
+            katdal.SpectralWindow(1284e6, 856e6 / 4096, 4096, 'c856M4k', band='L')
         ]
+        self.channel_freqs = self.spectral_windows[self.spw].channel_freqs
 
 
 def get_metric(metric):
@@ -286,6 +291,33 @@ class TestRelativeUrl(unittest.TestCase):
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
 
+    def _setup_rfi_mask_model(self) -> None:
+        model = katsdpmodels.rfi_mask.RFIMaskRanges(
+            astropy.table.Table(
+                [[0.0] * u.Hz, [0.0] * u.Hz, [0.0] * u.m],
+                names=('min_frequency', 'max_frequency', 'max_baseline')
+            ),
+            False
+        )
+        model.version = 1
+        fh = io.BytesIO()
+        model.to_file(fh, content_type='application/x-hdf5')
+        self.aioresponses.get(
+            'http://models.s3.invalid/models/rfi_mask/current.alias',
+            content_type='text/plain',
+            body='config/2020-06-15.alias'
+        )
+        self.aioresponses.get(
+            'http://models.s3.invalid/models/rfi_mask/config/2020-06-15.alias',
+            content_type='text/plain',
+            body='../fixed/test.hdf5'
+        )
+        self.aioresponses.get(
+            'http://models.s3.invalid/models/rfi_mask/fixed/test.hdf5',
+            content_type='application/x-hdf5',
+            body=fh.getvalue()
+        )
+
     async def setup_server(self, **server_kwargs) -> None:
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
@@ -310,14 +342,7 @@ class BaseTestSDPController(asynctest.TestCase):
             urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
             status=500
         )
-        self.aioresponses.get(
-            'http://models.s3.invalid/models/rfi_mask/current.alias',
-            body='config/2020-06-15.alias'
-        )
-        self.aioresponses.get(
-            'http://models.s3.invalid/models/rfi_mask/config/2020-06-15.alias',
-            body='../hash/sha256_deadbeef.hdf5'
-        )
+        self._setup_rfi_mask_model()
         await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
