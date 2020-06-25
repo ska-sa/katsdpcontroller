@@ -97,21 +97,13 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
 
 
 def _normalise_s3_config(s3_config: dict) -> dict:
-    """Normalise s3_config.
-
-    - Ensures separate `url` fields for `read` and `write`.
-    - Copies `models` to `online_models` if the latter is absent.
-    """
+    """Normalise s3_config to have separate `url` fields for `read` and `write`."""
     s3_config = copy.deepcopy(s3_config)
     for config in s3_config.values():
         if 'url' in config:
             for mode in ['read', 'write']:
                 config.setdefault(mode, {})['url'] = config['url']
             del config['url']
-    # 'models' should always be present in production, but for interface mode
-    # we use an empty s3_config.
-    if 'online_models' not in s3_config and 'models' in s3_config:
-        s3_config['online_models'] = copy.deepcopy(s3_config['models'])
     return s3_config
 
 
@@ -1125,7 +1117,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     ]
 
         # Load canonical model URLs
-        model_base_url = self.resolver.s3_config['online_models']['read']['url']
+        model_base_url = self.resolver.s3_config['models']['read']['url']
         if not model_base_url.endswith('/'):
             model_base_url += '/'      # Ensure it is a directory
         init_telstate['sdp_model_base_url'] = model_base_url
