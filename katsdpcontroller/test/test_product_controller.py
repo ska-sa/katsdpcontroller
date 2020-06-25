@@ -703,7 +703,7 @@ class TestSDPController(BaseTestSDPController):
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
         self.assertEqual(self.telstate[key], value)
-        self.assertTrue(self.telstate.is_immutable(key))
+        self.assertEqual(self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
