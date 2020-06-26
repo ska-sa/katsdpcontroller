@@ -31,6 +31,7 @@ import netifaces
 import katsdptelstate
 import katpoint
 import katdal
+import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
 import yarl
 
@@ -291,6 +292,28 @@ class TestRelativeUrl(unittest.TestCase):
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
 
+    def _setup_model(self, model: katsdpmodels.models.Model,
+                     current_path: str,
+                     config_path: str,
+                     fixed_path: str) -> None:
+        fh = io.BytesIO()
+        model.to_file(fh, content_type='application/x-hdf5')
+        self.aioresponses.get(
+            f'http://models.s3.invalid{current_path}',
+            content_type='text/plain',
+            body=f'{config_path}\n'
+        )
+        self.aioresponses.get(
+            f'http://models.s3.invalid{config_path}',
+            content_type='text/plain',
+            body=f'{fixed_path}\n'
+        )
+        self.aioresponses.get(
+            f'http://models.s3.invalid{fixed_path}',
+            content_type='application/x-hdf5',
+            body=fh.getvalue()
+        )
+
     def _setup_rfi_mask_model(self) -> None:
         model = katsdpmodels.rfi_mask.RFIMaskRanges(
             astropy.table.Table(
@@ -300,22 +323,26 @@ class BaseTestSDPController(asynctest.TestCase):
             False
         )
         model.version = 1
-        fh = io.BytesIO()
-        model.to_file(fh, content_type='application/x-hdf5')
-        self.aioresponses.get(
-            'http://models.s3.invalid/models/rfi_mask/current.alias',
-            content_type='text/plain',
-            body='config/2020-06-15.alias'
+        self._setup_model(
+            model,
+            '/models/rfi_mask/current.alias',
+            '/models/rfi_mask/config/2020-06-15.alias',
+            '/models/rfi_mask/fixed/test.h5'
         )
-        self.aioresponses.get(
-            'http://models.s3.invalid/models/rfi_mask/config/2020-06-15.alias',
-            content_type='text/plain',
-            body='../fixed/test.hdf5'
+
+    def _setup_band_mask_model(self) -> None:
+        model = katsdpmodels.band_mask.BandMaskRanges(
+            astropy.table.Table(
+                rows=[[0.0, 0.05], [0.95, 1.0]],
+                names=('min_fraction', 'max_fraction')
+            )
         )
-        self.aioresponses.get(
-            'http://models.s3.invalid/models/rfi_mask/fixed/test.hdf5',
-            content_type='application/x-hdf5',
-            body=fh.getvalue()
+        model.version = 1
+        self._setup_model(
+            model,
+            '/models/band_mask/current/l.alias',
+            '/models/band_mask/config/l/2020-06-22.alias',
+            '/models/band_mask/fixed/test.h5'
         )
 
     async def setup_server(self, **server_kwargs) -> None:
@@ -343,6 +370,7 @@ class BaseTestSDPController(asynctest.TestCase):
             status=500
         )
         self._setup_rfi_mask_model()
+        self._setup_band_mask_model()
         await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)

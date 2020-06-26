@@ -1126,6 +1126,14 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 fetcher, model_base_url, 'rfi_mask/current.alias')
             init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
             init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+            for name, stream in self.config['inputs'].items():
+                if stream['type'] == 'cbf.antenna_channelised_voltage':
+                    # TODO get from katportalclient or simulation!
+                    band = 'l'
+                    band_mask_model_urls = await _resolve_model(
+                        fetcher, model_base_url, f'band_mask/current/{band}.alias')
+                    init_telstate[(name, 'model', 'band_mask', 'config')] = band_mask_model_urls[0]
+                    init_telstate[(name, 'model', 'band_mask', 'fixed')] = band_mask_model_urls[1]
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
