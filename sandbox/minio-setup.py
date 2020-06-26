@@ -10,6 +10,7 @@ import astropy.units as u
 import astropy.table
 import botocore.session
 
+import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
 
 
@@ -34,8 +35,21 @@ RFI_MASK = np.array(
 )
 
 
-def main():
-    # Prepare data
+BAND_MASK = np.array(
+    [(0.0, 0.05), (0.95, 1.0)],
+    dtype=[('min_fraction', 'f8'), ('max_fraction', 'f8')]
+)
+
+
+def serialize_model(model):
+    fh = io.BytesIO()
+    model.to_file(fh, content_type='application/x-hdf5')
+    checksum = hashlib.sha256(fh.getvalue()).hexdigest()
+    fh.seek(0)
+    return fh, f'sha256_{checksum}.h5'
+
+
+def put_rfi_mask(client):
     rfi_mask_table = astropy.table.Table(RFI_MASK)
     rfi_mask_table['min_frequency'].unit = u.Hz
     rfi_mask_table['max_frequency'].unit = u.Hz
@@ -46,11 +60,42 @@ def main():
     model.target = 'MeerKAT'
     model.created = datetime(2020, 6, 15, 14, 11, tzinfo=timezone.utc)
     model.version = 1
-    fh = io.BytesIO()
-    model.to_file(fh, content_type='application/x-hdf5')
-    checksum = hashlib.sha256(fh.getvalue()).hexdigest()
+    fh, filename = serialize_model(model)
 
-    # Load it to minio
+    client.put_object(Bucket='models', Key='rfi_mask/current.alias',
+                      ContentType='text/plain',
+                      Body=b'config/v1.alias\n')
+    client.put_object(Bucket='models', Key='rfi_mask/config/sandbox_v1.alias',
+                      ContentType='text/plain',
+                      Body=f'../fixed/{filename}\n')
+    client.put_object(Bucket='models',
+                      ContentType='application/x-hdf5',
+                      Key=f'rfi_mask/fixed/{filename}', Body=fh)
+
+
+def put_band_mask(client):
+    band_mask_table = astropy.table.Table(BAND_MASK)
+    model = katsdpmodels.band_mask.BandMaskRanges(band_mask_table)
+    model.author = 'Sandbox setup script'
+    model.comment = 'Band mask model for use in sandbox testing'
+    model.target = 'MeerKAT, all bands'
+    model.created = datetime(2020, 6, 26, 10, 51, tzinfo=timezone.utc)
+    model.version = 1
+    fh, filename = serialize_model(model)
+
+    for band in ['l', 's', 'u', 'x']:
+        client.put_object(Bucket='models', Key=f'band_mask/current/{band}.alias',
+                          ContentType='text/plain',
+                          Body=f'../config/{band}/sandbox_v1.alias\n')
+        client.put_object(Bucket='models', Key=f'band_mask/config/{band}/sandbox_v1.alias',
+                          ContentType='text/plain',
+                          Body=f'../../fixed/{filename}\n')
+    client.put_object(Bucket='models',
+                      ContentType='application/x-hdf5',
+                      Key=f'band_mask/fixed/{filename}', Body=fh)
+
+
+def main():
     session = botocore.session.get_session()
     config = botocore.config.Config(s3={'addressing_style': 'path'})
     client = session.create_client(
@@ -66,16 +111,9 @@ def main():
     except client.exceptions.BucketAlreadyOwnedByYou:
         pass
     client.put_bucket_policy(Bucket='models', Policy=json.dumps(BUCKET_POLICY))
-    client.put_object(Bucket='models', Key='rfi_mask/current.alias',
-                      ContentType='text/plain',
-                      Body=b'config/v1.alias\n')
-    client.put_object(Bucket='models', Key='rfi_mask/config/v1.alias',
-                      ContentType='text/plain',
-                      Body=f'../fixed/sha256_{checksum}.hdf5\n'.encode())
-    fh.seek(0)
-    client.put_object(Bucket='models',
-                      ContentType='application/x-hdf5',
-                      Key=f'rfi_mask/fixed/sha256_{checksum}.hdf5', Body=fh)
+
+    put_rfi_mask(client)
+    put_band_mask(client)
 
 
 if __name__ == '__main__':
