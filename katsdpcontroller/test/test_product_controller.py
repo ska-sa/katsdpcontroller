@@ -744,7 +744,21 @@ class TestSDPController(BaseTestSDPController):
         # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
         # is covered: base_params, per node, per edge
+        assert self.telstate is not None
         self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
+        self.assert_immutable('sdp_model_base_url', 'http://models.s3.invalid/models/')
+        self.assert_immutable(
+            self.telstate.join('model', 'rfi_mask', 'config'),
+            'rfi_mask/config/2020-06-15.alias')
+        self.assert_immutable(
+            self.telstate.join('model', 'rfi_mask', 'fixed'),
+            'rfi_mask/fixed/test.h5')
+        self.assert_immutable(
+            self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'config'),
+            'band_mask/config/l/2020-06-22.alias')
+        self.assert_immutable(
+            self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
+            'band_mask/fixed/test.h5')
         self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
