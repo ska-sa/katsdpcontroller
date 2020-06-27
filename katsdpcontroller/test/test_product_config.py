@@ -165,14 +165,6 @@ class Fixture(asynctest.TestCase):
             },
             "config": {}
         }
-        self.config_v1_0 = copy.deepcopy(self.config)
-        self.config_v1_0["version"] = "1.0"
-        self.config_v1_0["outputs"]["l0"]["type"] = "sdp.l0"
-        del self.config_v1_0["outputs"]["cal"]
-        del self.config_v1_0["outputs"]["sdp_l1_flags"]
-        del self.config_v1_0["outputs"]["continuum_image"]
-        del self.config_v1_0["outputs"]["spectral_image"]
-        del self.config_v1_0["outputs"]["l0"]["archive"]
 
 
 class TestValidate(Fixture):
@@ -180,7 +172,6 @@ class TestValidate(Fixture):
 
     def test_good(self):
         product_config.validate(self.config)
-        product_config.validate(self.config_v1_0)
 
     def test_bad_version(self):
         self.config["version"] = "1.10"
@@ -355,16 +346,6 @@ class TestValidate(Fixture):
             product_config.validate(self.config)
         assert_in("has different src_streams", str(cm.exception))
 
-    def test_v1_0_sdp_cal(self):
-        self.config["version"] = "1.0"
-        with assert_raises(jsonschema.ValidationError):
-            product_config.validate(self.config)
-
-    def test_v1_0_simulate_dict(self):
-        self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
-        with assert_raises(jsonschema.ValidationError):
-            product_config.validate(self.config_v1_0)
-
 
 class TestUpdateFromSensors(Fixture):
     """Tests for :func:`~katsdpcontroller.product_config.update_from_sensors`"""
@@ -464,30 +445,6 @@ class TestUpdateFromSensors(Fixture):
 class TestNormalise(Fixture):
     """Tests for :func:`~katsdpcontroller.product_config.normalise`"""
 
-    def test_v1_0(self):
-        # Adjust some things to get full test coverage
-        del self.config_v1_0["outputs"]["l0"]["output_channels"]
-        del self.config_v1_0["outputs"]["beamformer_engineering"]["output_channels"]
-        self.config_v1_0["inputs"]["i0_baseline_correlation_products"]["simulate"] = True
-        config = product_config.normalise(self.config_v1_0)
-        expected = self.config
-        expected["inputs"]["i0_baseline_correlation_products"]["simulate"] = {
-            "clock_ratio": 1.0,
-            "sources": []
-        }
-        expected["inputs"]["i0_tied_array_channelised_voltage_0x"]["simulate"] = False
-        expected["inputs"]["i0_tied_array_channelised_voltage_0y"]["simulate"] = False
-        expected["outputs"]["l0"]["excise"] = True
-        expected["outputs"]["l0"]["output_channels"] = [0, 4096]
-        expected["outputs"]["beamformer_engineering"]["output_channels"] = [0, 4096]
-        expected["outputs"]["cal"]["parameters"] = {}
-        expected["outputs"]["cal"]["models"] = {}
-        expected["config"]["develop"] = False
-        expected["config"]["service_overrides"] = {}
-        del expected["outputs"]["continuum_image"]
-        del expected["outputs"]["spectral_image"]
-        assert_equal(config, expected)
-
     def test_latest(self):
         # Adjust some things to get full test coverage
         expected = copy.deepcopy(self.config)
@@ -522,10 +479,3 @@ class TestNormalise(Fixture):
         # with open('expected.json', 'w') as f:
         #     json.dump(expected, f, indent=2, sort_keys=True)
         assert_equal(config, expected)
-
-    def test_name_conflict(self):
-        self.config_v1_0["outputs"]["cal"] = self.config_v1_0["outputs"]["l0"]
-        config = product_config.normalise(self.config_v1_0)
-        assert_in("cal0", config["outputs"])
-        assert_equal("sdp.vis", config["outputs"]["cal"]["type"])
-        assert_equal("sdp.cal", config["outputs"]["cal0"]["type"])

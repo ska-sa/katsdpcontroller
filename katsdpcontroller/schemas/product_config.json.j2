@@ -6,19 +6,13 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["1.0", "1.1", "2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+            "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
         }
     }
 }
 {% endmacro %}
 
 {% macro validate(version) %}
-{% if version >= "2.0" %}
-{%     set sdp_vis = "sdp.vis" %}
-{% else %}
-{%     set sdp_vis = "sdp.l0" %}
-{% endif %}
-
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
@@ -72,7 +66,6 @@
             "items": {"$ref": "#/definitions/nonneg_integer"}
         },
         "simulate": {
-{% if version >= "1.1" %}
             "oneOf": [
                 {"type": "boolean"},
                 {
@@ -95,9 +88,6 @@
                     "additionalProperties": false
                 }
             ],
-{% else %}
-            "type": "boolean",
-{% endif %}
             "default": false
         },
         "simulate_bool": {
@@ -208,13 +198,9 @@
                     "properties": {
                         "type": {
                             "enum": [
-                                "{{sdp_vis}}",
-{% if version >= "1.1" %}
+                                "sdp.vis",
                                 "sdp.cal",
-{% endif %}
-{% if version >= "2.0" %}
                                 "sdp.flags",
-{% endif %}
 {% if version >= "2.2" %}
                                 "sdp.continuum_image",
 {% endif %}
@@ -230,7 +216,7 @@
                     "additionalProperties": true,
                     "allOf": [
                         {
-                            "if": {"properties": {"type": {"const": "{{sdp_vis}}"}}},
+                            "if": {"properties": {"type": {"const": "sdp.vis"}}},
                             "then": {
                                 "properties": {
                                     "type": {},
@@ -240,9 +226,7 @@
                                     "continuum_factor": {
                                         "$ref": "#/definitions/positive_integer"
                                     },
-{% if version >= "2.0" %}
                                     "archive": {"type": "boolean"},
-{% endif %}
                                     "excise": {"type": "boolean", "default": true}
                                 },
                                 "required": [
@@ -276,9 +260,7 @@
                                 "required": ["src_streams"],
                                 "additionalProperties": false
                             }
-                        }
-{% if version >= "1.1" %}
-                        ,
+                        },
                         {
                             "if": {"properties": {"type": {"const": "sdp.cal"}}},
                             "then": {
@@ -332,10 +314,7 @@
                                 "required": ["src_streams"],
                                 "additionalProperties": false
                             }
-                        }
-{% endif %}
-{% if version >= "2.0" %}
-                        ,
+                        },
                         {
                             "if": {"properties": {"type": {"const": "sdp.flags"}}},
                             "then": {
@@ -353,7 +332,6 @@
                                 "additionalProperties": false
                             }
                         }
-{% endif %}
 {% if version >= "2.2" %}
                         ,
                         {
