@@ -1,6 +1,6 @@
 {% macro validate_version() %}
 {
-    "$schema": "http://json-schema.org/draft-04/schema#",
+    "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "required": ["version"],
     "properties": {
@@ -15,7 +15,7 @@
 
 {% macro validate(version) %}
 {
-    "$schema": "http://json-schema.org/draft-04/schema#",
+    "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "additionalProperties": false,
     "required": ["version", "next_capture_block_id", "next_multicast_group", "products"],
