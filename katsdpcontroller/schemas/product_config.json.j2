@@ -123,113 +123,76 @@
                     },
                     "allOf": [
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["cbf.antenna_channelised_voltage"]},
-                                        "antennas": {
-                                            "type": "array",
-                                            "minItems": 1,
-                                            "items": {"type": "string"}
-                                        },
-                                        "n_chans": {"$ref": "#/definitions/nonneg_integer"},
-                                        "n_samples_between_spectra": {
-                                            "$ref": "#/definitions/nonneg_integer"
-                                        },
-                                        "n_pols": {"type": "integer", "enum": [1, 2]},
-                                        "adc_sample_rate": {"type": "number"},
-                                        "bandwidth": {"type": "number"},
-                                        "instrument_dev_name": {"type": "string"}
+                            "if": {"properties": {"type": {"const": "cbf.antenna_channelised_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "antennas": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "items": {"type": "string"}
                                     },
-                                    "required": [
-                                        "antennas",
-                                        "n_chans", "n_samples_between_spectra", "n_pols",
-                                        "adc_sample_rate", "bandwidth", "instrument_dev_name"
-                                    ]
+                                    "n_chans": {"$ref": "#/definitions/nonneg_integer"},
+                                    "n_samples_between_spectra": {
+                                        "$ref": "#/definitions/nonneg_integer"
+                                    },
+                                    "n_pols": {"type": "integer", "enum": [1, 2]},
+                                    "adc_sample_rate": {"type": "number"},
+                                    "bandwidth": {"type": "number"},
+                                    "instrument_dev_name": {"type": "string"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["cbf.antenna_channelised_voltage"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": [
+                                    "antennas",
+                                    "n_chans", "n_samples_between_spectra", "n_pols",
+                                    "adc_sample_rate", "bandwidth", "instrument_dev_name"
+                                ]
+                            }
                         },
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["cbf.baseline_correlation_products"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "int_time": {"type": "number"},
-                                        "n_bls": {"$ref": "#/definitions/nonneg_integer"},
-                                        "xeng_out_bits_per_sample": {"enum": [32]},
-                                        "n_chans_per_substream": {
-                                            "$ref": "#/definitions/nonneg_integer"
-                                        },
-                                        "instrument_dev_name": {"type": "string"},
-                                        "simulate": {"$ref": "#/definitions/simulate"}
+                            "if": {"properties": {"type": {"const": "cbf.baseline_correlation_products"}}},
+                            "then": {
+                                "properties": {
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "int_time": {"type": "number"},
+                                    "n_bls": {"$ref": "#/definitions/nonneg_integer"},
+                                    "xeng_out_bits_per_sample": {"enum": [32]},
+                                    "n_chans_per_substream": {
+                                        "$ref": "#/definitions/nonneg_integer"
                                     },
-                                    "required": [
-                                        "src_streams", "int_time", "n_bls",
-                                        "xeng_out_bits_per_sample", "n_chans_per_substream",
-                                        "instrument_dev_name"
-                                    ]
+                                    "instrument_dev_name": {"type": "string"},
+                                    "simulate": {"$ref": "#/definitions/simulate"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["cbf.baseline_correlation_products"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": [
+                                    "src_streams", "int_time", "n_bls",
+                                    "xeng_out_bits_per_sample", "n_chans_per_substream",
+                                    "instrument_dev_name"
+                                ]
+                            }
                         },
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["cbf.tied_array_channelised_voltage"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "beng_out_bits_per_sample": {"enum": [8]},
-                                        "spectra_per_heap": {
-                                            "$ref": "#/definitions/nonneg_integer"
-                                        },
-                                        "n_chans_per_substream": {
-                                            "$ref": "#/definitions/nonneg_integer"
-                                        },
-                                        "instrument_dev_name": {"type": "string"},
-                                        "simulate": {"$ref": "#/definitions/simulate"}
+                            "if": {"properties": {"type": {"const": "cbf.tied_array_channelised_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "beng_out_bits_per_sample": {"enum": [8]},
+                                    "spectra_per_heap": {
+                                        "$ref": "#/definitions/nonneg_integer"
                                     },
-                                    "required": [
-                                        "src_streams", "beng_out_bits_per_sample",
-                                        "spectra_per_heap",
-                                        "n_chans_per_substream", "instrument_dev_name"
-                                    ]
+                                    "n_chans_per_substream": {
+                                        "$ref": "#/definitions/nonneg_integer"
+                                    },
+                                    "instrument_dev_name": {"type": "string"},
+                                    "simulate": {"$ref": "#/definitions/simulate"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["cbf.tied_array_channelised_voltage"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": [
+                                    "src_streams", "beng_out_bits_per_sample",
+                                    "spectra_per_heap",
+                                    "n_chans_per_substream", "instrument_dev_name"
+                                ]
+                            }
                         },
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["cam.http"]}
-                                    }
-                                },
-                                {
-                                    "properties": {
-                                        "type": {"not": {"enum": ["cam.http"]}}
-                                    }
-                                }
-                            ]
+                            "if": {"properties": {"type": {"const": "cam.http"}}},
+                            "then": {}
                         }
                     ]
                 }
@@ -267,254 +230,198 @@
                     "additionalProperties": true,
                     "allOf": [
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["{{sdp_vis}}"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "output_int_time": {"type": "number"},
-                                        "output_channels": {"$ref": "#/definitions/channel_range"},
-                                        "continuum_factor": {
-                                            "$ref": "#/definitions/positive_integer"
-                                        },
+                            "if": {"properties": {"type": {"const": "{{sdp_vis}}"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "output_int_time": {"type": "number"},
+                                    "output_channels": {"$ref": "#/definitions/channel_range"},
+                                    "continuum_factor": {
+                                        "$ref": "#/definitions/positive_integer"
+                                    },
 {% if version >= "2.0" %}
-                                        "archive": {"type": "boolean"},
+                                    "archive": {"type": "boolean"},
 {% endif %}
-                                        "excise": {"type": "boolean", "default": true}
-                                    },
-                                    "required": [
-                                        "src_streams", "output_int_time", "continuum_factor"
-                                    ],
-                                    "additionalProperties": false
+                                    "excise": {"type": "boolean", "default": true}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["{{sdp_vis}}"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": [
+                                    "src_streams", "output_int_time", "continuum_factor"
+                                ],
+                                "additionalProperties": false
+                            }
                         },
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.beamformer_engineering"]},
-                                        "src_streams": {"$ref": "#/definitions/pair"},
-                                        "output_channels": {"$ref": "#/definitions/channel_range"},
-                                        "store": {
-                                            "enum": ["ram", "ssd"]
-                                        }
-                                    },
-                                    "required": ["src_streams", "store"],
-                                    "additionalProperties": false
-                                },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.beamformer_engineering"]}
-                                        }
+                            "if": {"properties": {"type": {"const": "sdp.beamformer_engineering"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/pair"},
+                                    "output_channels": {"$ref": "#/definitions/channel_range"},
+                                    "store": {
+                                        "enum": ["ram", "ssd"]
                                     }
-                                }
-                            ]
+                                },
+                                "required": ["src_streams", "store"],
+                                "additionalProperties": false
+                            }
                         },
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.beamformer"]},
-                                        "src_streams": {"$ref": "#/definitions/pair"}
-                                    },
-                                    "required": ["src_streams"],
-                                    "additionalProperties": false
+                            "if": {"properties": {"type": {"const": "sdp.beamformer"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/pair"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.beamformer"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": ["src_streams"],
+                                "additionalProperties": false
+                            }
                         }
 {% if version >= "1.1" %}
                         ,
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.cal"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "parameters": {
-                                            "type": "object",
-                                            "properties": {
-                                                "preferred_refants": {
-                                                    "type": "array",
-                                                    "items": {"type": "string"},
-                                                    "minItems": 1,
-                                                    "uniqueItems": true
-                                                },
-                                                "k_solint": {"$ref": "#/definitions/positive_number"},
-                                                "k_chan_sample": {"$ref": "#/definitions/positive_integer"},
-                                                "k_bchan": {"$ref": "#/definitions/nonneg_integer"},
-                                                "k_echan": {"$ref": "#/definitions/nonneg_integer"},
-                                                "kcross_chanave": {"$ref": "#/definitions/positive_integer"},
-                                                "bp_solint": {"$ref": "#/definitions/positive_number"},
-                                                "g_solint": {"$ref": "#/definitions/positive_number"},
-                                                "g_bchan": {"$ref": "#/definitions/nonneg_integer"},
-                                                "g_echan": {"$ref": "#/definitions/nonneg_integer"},
-                                                "rfi_calib_nsigma": {"$ref": "#/definitions/positive_number"},
-                                                "rfi_targ_nsigma": {"$ref": "#/definitions/positive_number"},
-                                                "rfi_windows_freq": {
-                                                    "type": "array",
-                                                    "items": {"$ref": "#/definitions/positive_integer"},
-                                                    "minItems": 1,
-                                                    "uniqueItems": true
-                                                },
-                                                "rfi_average_freq": {"$ref": "#/definitions/positive_integer"},
-                                                "rfi_targ_spike_width_freq": {"$ref": "#/definitions/positive_number"},
-                                                "rfi_calib_spike_width_freq": {"$ref": "#/definitions/positive_number"},
-                                                "rfi_spike_width_time": {"$ref": "#/definitions/positive_number"},
-                                                "rfi_extend_freq": {"$ref": "#/definitions/nonneg_integer"},
-                                                "rfi_freq_chunks": {"$ref": "#/definitions/positive_integer"}
+                            "if": {"properties": {"type": {"const": "sdp.cal"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "preferred_refants": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "minItems": 1,
+                                                "uniqueItems": true
                                             },
-                                            "additionalProperties": false
+                                            "k_solint": {"$ref": "#/definitions/positive_number"},
+                                            "k_chan_sample": {"$ref": "#/definitions/positive_integer"},
+                                            "k_bchan": {"$ref": "#/definitions/nonneg_integer"},
+                                            "k_echan": {"$ref": "#/definitions/nonneg_integer"},
+                                            "kcross_chanave": {"$ref": "#/definitions/positive_integer"},
+                                            "bp_solint": {"$ref": "#/definitions/positive_number"},
+                                            "g_solint": {"$ref": "#/definitions/positive_number"},
+                                            "g_bchan": {"$ref": "#/definitions/nonneg_integer"},
+                                            "g_echan": {"$ref": "#/definitions/nonneg_integer"},
+                                            "rfi_calib_nsigma": {"$ref": "#/definitions/positive_number"},
+                                            "rfi_targ_nsigma": {"$ref": "#/definitions/positive_number"},
+                                            "rfi_windows_freq": {
+                                                "type": "array",
+                                                "items": {"$ref": "#/definitions/positive_integer"},
+                                                "minItems": 1,
+                                                "uniqueItems": true
+                                            },
+                                            "rfi_average_freq": {"$ref": "#/definitions/positive_integer"},
+                                            "rfi_targ_spike_width_freq": {"$ref": "#/definitions/positive_number"},
+                                            "rfi_calib_spike_width_freq": {"$ref": "#/definitions/positive_number"},
+                                            "rfi_spike_width_time": {"$ref": "#/definitions/positive_number"},
+                                            "rfi_extend_freq": {"$ref": "#/definitions/nonneg_integer"},
+                                            "rfi_freq_chunks": {"$ref": "#/definitions/positive_integer"}
                                         },
-                                        "models": {
-                                            "type": "object",
-                                            "additionalProperties": {"type": "string"}
-                                        },
-{% if version >= "2.1" %}
-                                        "max_scans": {"$ref": "#/definitions/positive_integer"},
-{% endif %}
-                                        "buffer_time": {"$ref": "#/definitions/positive_number"}
+                                        "additionalProperties": false
                                     },
-                                    "required": ["src_streams"],
-                                    "additionalProperties": false
+                                    "models": {
+                                        "type": "object",
+                                        "additionalProperties": {"type": "string"}
+                                    },
+{% if version >= "2.1" %}
+                                    "max_scans": {"$ref": "#/definitions/positive_integer"},
+{% endif %}
+                                    "buffer_time": {"$ref": "#/definitions/positive_number"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.cal"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": ["src_streams"],
+                                "additionalProperties": false
+                            }
                         }
 {% endif %}
 {% if version >= "2.0" %}
                         ,
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.flags"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "calibration": {"$ref": "#/definitions/singleton"},
-                                        "rate_ratio": {
-                                            "type": "number",
-                                            "exclusiveMinimum": 1.0
-                                        },
-                                        "archive": {"type": "boolean"}
+                            "if": {"properties": {"type": {"const": "sdp.flags"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "calibration": {"$ref": "#/definitions/singleton"},
+                                    "rate_ratio": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 1.0
                                     },
-                                    "required": ["src_streams", "calibration", "archive"],
-                                    "additionalProperties": false
+                                    "archive": {"type": "boolean"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.flags"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": ["src_streams", "calibration", "archive"],
+                                "additionalProperties": false
+                            }
                         }
 {% endif %}
 {% if version >= "2.2" %}
                         ,
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.continuum_image"]},
-                                        "src_streams": {"$ref": "#/definitions/singleton"},
-                                        "uvblavg_parameters": {"$ref": "#/definitions/continuum_parameters"},
-                                        "mfimage_parameters": {"$ref": "#/definitions/continuum_parameters"},
+                            "if": {"properties": {"type": {"const": "sdp.continuum_image"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "uvblavg_parameters": {"$ref": "#/definitions/continuum_parameters"},
+                                    "mfimage_parameters": {"$ref": "#/definitions/continuum_parameters"},
 {% if version >= "2.5" %}
-                                        "min_time": {"$ref": "#/definitions/positive_number"},
+                                    "min_time": {"$ref": "#/definitions/positive_number"},
 {% endif %}
-                                        "max_realtime": {"$ref": "#/definitions/nonneg_number"}
-                                    },
-                                    "required": ["src_streams"],
-                                    "additionalProperties": false
+                                    "max_realtime": {"$ref": "#/definitions/nonneg_number"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.continuum_image"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": ["src_streams"],
+                                "additionalProperties": false
+                            }
                         }
 {% endif %}
 {% if version >= "2.4" %}
                         ,
                         {
-                            "oneOf": [
-                                {
-                                    "properties": {
-                                        "type": {"enum": ["sdp.spectral_image"]},
-                                        "src_streams": {
-                                            "type": "array",
-                                            "minItems": 1,
-                                            "maxItems": 2
-                                        },
+                            "if": {"properties": {"type": {"const": "sdp.spectral_image"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "maxItems": 2
+                                    },
 {% if version >= "2.5" %}
-                                        "min_time": {"$ref": "#/definitions/positive_number"},
+                                    "min_time": {"$ref": "#/definitions/positive_number"},
 {% endif %}
 {% if version >= "2.6" %}
-                                        "parameters": {
-                                            "type": "object",
-                                            "properties": {
-                                                "robustness": {"type": "number"},
-                                                "grid_oversample": {"$ref": "#/definitions/positive_integer"},
-                                                "kernel_image_oversample": {"$ref": "#/definitions/positive_integer"},
-                                                "w_slices": {"$ref": "#/definitions/positive_integer"},
-                                                "aa_width": {"$ref": "#/definitions/positive_number"},
-                                                "kernel_width": {"$ref": "#/definitions/positive_integer"},
-                                                "eps_w": {"$ref": "#/definitions/positive_number"},
-                                                "primary_beam_cutoff": {"$ref": "#/definitions/positive_number"},
-                                                "psf_cutoff": {"$ref": "#/definitions/positive_number"},
-                                                "psf_limit": {"$ref": "#/definitions/positive_number"},
-                                                "loop_gain": {"$ref": "#/definitions/positive_number"},
-                                                "major_gain": {"$ref": "#/definitions/positive_number"},
-                                                "threshold": {"$ref": "#/definitions/positive_number"},
-                                                "major": {"$ref": "#/definitions/positive_integer"},
-                                                "minor": {"$ref": "#/definitions/positive_integer"},
-                                                "border": {"$ref": "#/definitions/positive_number"},
-                                                "clean_mode": {
-                                                    "type": "string",
-                                                    "enum": ["I", "IQUV"]
-                                                }
-                                            },
-                                            "additionalProperties": false
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {
+                                            "robustness": {"type": "number"},
+                                            "grid_oversample": {"$ref": "#/definitions/positive_integer"},
+                                            "kernel_image_oversample": {"$ref": "#/definitions/positive_integer"},
+                                            "w_slices": {"$ref": "#/definitions/positive_integer"},
+                                            "aa_width": {"$ref": "#/definitions/positive_number"},
+                                            "kernel_width": {"$ref": "#/definitions/positive_integer"},
+                                            "eps_w": {"$ref": "#/definitions/positive_number"},
+                                            "primary_beam_cutoff": {"$ref": "#/definitions/positive_number"},
+                                            "psf_cutoff": {"$ref": "#/definitions/positive_number"},
+                                            "psf_limit": {"$ref": "#/definitions/positive_number"},
+                                            "loop_gain": {"$ref": "#/definitions/positive_number"},
+                                            "major_gain": {"$ref": "#/definitions/positive_number"},
+                                            "threshold": {"$ref": "#/definitions/positive_number"},
+                                            "major": {"$ref": "#/definitions/positive_integer"},
+                                            "minor": {"$ref": "#/definitions/positive_integer"},
+                                            "border": {"$ref": "#/definitions/positive_number"},
+                                            "clean_mode": {
+                                                "type": "string",
+                                                "enum": ["I", "IQUV"]
+                                            }
                                         },
-{% endif %}
-                                        "output_channels": {"$ref": "#/definitions/channel_range"}
+                                        "additionalProperties": false
                                     },
-                                    "required": ["src_streams"],
-                                    "additionalProperties": false
+{% endif %}
+                                    "output_channels": {"$ref": "#/definitions/channel_range"}
                                 },
-                                {
-                                    "properties": {
-                                        "type": {
-                                            "not": {"enum": ["sdp.spectral_image"]}
-                                        }
-                                    }
-                                }
-                            ]
+                                "required": ["src_streams"],
+                                "additionalProperties": false
+                            }
                         }
 {% endif %}
                     ]
