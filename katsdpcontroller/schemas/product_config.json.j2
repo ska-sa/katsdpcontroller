@@ -154,7 +154,7 @@
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "int_time": {"type": "number"},
                                     "n_bls": {"$ref": "#/definitions/nonneg_integer"},
-                                    "xeng_out_bits_per_sample": {"enum": [32]},
+                                    "xeng_out_bits_per_sample": {"const": 32},
                                     "n_chans_per_substream": {
                                         "$ref": "#/definitions/nonneg_integer"
                                     },
@@ -173,7 +173,7 @@
                             "then": {
                                 "properties": {
                                     "src_streams": {"$ref": "#/definitions/singleton"},
-                                    "beng_out_bits_per_sample": {"enum": [8]},
+                                    "beng_out_bits_per_sample": {"const": 8},
                                     "spectra_per_heap": {
                                         "$ref": "#/definitions/nonneg_integer"
                                     },
@@ -453,7 +453,7 @@
         },
         "version": {
             "type": "string",
-            "enum": ["{{version}}"]
+            "const": "{{version}}"
         }
     }
 }
