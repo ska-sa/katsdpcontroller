@@ -361,10 +361,12 @@
                                         },
                                         "additionalProperties": false
                                     },
+{% if version < "3.0" %}
                                     "models": {
                                         "type": "object",
                                         "additionalProperties": {"type": "string"}
                                     },
+{% endif %}
 {% if version >= "2.1" %}
                                     "max_scans": {"$ref": "#/definitions/positive_integer"},
 {% endif %}
@@ -379,8 +381,12 @@
                             "then": {
                                 "properties": {
                                     "type": {},
+{% if version < "3.0" %}
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "calibration": {"$ref": "#/definitions/singleton"},
+{% else %}
+                                    "src_streams": {"%ref": "#/definitions/pair"},
+{% endif %}
                                     "rate_ratio": {
                                         "type": "number",
                                         "exclusiveMinimum": 1.0
