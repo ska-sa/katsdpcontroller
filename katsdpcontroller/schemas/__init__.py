@@ -53,17 +53,6 @@ class MultiVersionValidator(object):
         validator = _make_validator(schema)
         validator.validate(doc)
 
-    def iter_errors(self, doc):
-        try:
-            self._version_validator.validate(doc)
-        except jsonschema.ValidationError:
-            return self._version_validator.iter_errors(doc)
-        else:
-            version = self._get_version(doc)
-            schema = json.loads(self._template.module.validate(version=version))
-            validator = _make_validator(schema)
-            return validator.iter_errors(doc)
-
 
 for name in pkg_resources.resource_listdir(__name__, '.'):
     if name.endswith('.json'):

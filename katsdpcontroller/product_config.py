@@ -185,18 +185,7 @@ def validate(config):
     """
     from . import generator     # Imported locally to break circular import
 
-    # Error messages for the oneOf parts of the schema are not helpful by
-    # default, because it doesn't know which branch is the relevant one. The
-    # "not" branches are generally just there to make validation conditional
-    # on the type.
-    def relevance(error):
-        return (error.validator == 'not',) + jsonschema.exceptions.relevance(error)
-
-    errors = schemas.PRODUCT_CONFIG.iter_errors(config)
-    error = jsonschema.exceptions.best_match(errors, key=relevance)
-    if error is not None:
-        raise error
-
+    schemas.PRODUCT_CONFIG.validate(config)
     version = StrictVersion(config['version'])
     # All stream sources must match known names, and have the right type
     src_valid_types = {
