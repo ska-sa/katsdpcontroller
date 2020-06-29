@@ -488,10 +488,11 @@
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "int_time": {"$ref": "#/definitions/positive_number"},
-                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"}
+                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"},
+                                    "n_endpoints": {"$ref": "#/definitions/positive_integer"}
                                 },
                                 "additionalProperties": false,
-                                "required": ["src_streams", "int_time"]
+                                "required": ["src_streams", "int_time", "n_endpoints"]
                             }
                         },
                         {
@@ -501,10 +502,11 @@
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "spectra_per_heap": {"$ref": "#/definitions/positive_integer"},
-                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"}
+                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"},
+                                    "n_endpoints": {"$ref": "#/definitions/positive_integer"}
                                 },
                                 "additionalProperties": false,
-                                "required": ["src_streams"]
+                                "required": ["src_streams", "n_endpoints"]
                             }
                         }
                     ]

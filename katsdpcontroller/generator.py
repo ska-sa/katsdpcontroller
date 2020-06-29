@@ -90,6 +90,8 @@ CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
 WRITER_OBJECT_SIZE = 20e6    # 20 MB
 #: Maximum channels per chunk for spectral imager
 SPECTRAL_OBJECT_CHANNELS = 128
+
+# TODO: remove these
 #: Minimum observation time for continuum imager (seconds)
 DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
 #: Minimum observation time for spectral imager (seconds)
