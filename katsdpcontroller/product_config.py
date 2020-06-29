@@ -149,7 +149,7 @@ def _input_channels(config, output):
     int
         Maximum value for the upper bound in `output_channels`
     """
-    if output['type'] in ['sdp.l0', 'sdp.vis', 'sdp.beamformer_engineering']:
+    if output['type'] in ['sdp.vis', 'sdp.beamformer_engineering']:
         limits = []
         for src_name in output['src_streams']:
             src = config['inputs'][src_name]
@@ -193,11 +193,10 @@ def validate(config):
         'cbf.baseline_correlation_products': ['cbf.antenna_channelised_voltage'],
         'cbf.antenna_channelised_voltage': [],
         'cam.http': [],
-        'sdp.l0': ['cbf.baseline_correlation_products'],
         'sdp.vis': ['cbf.baseline_correlation_products'],
         'sdp.beamformer': ['cbf.tied_array_channelised_voltage'],
         'sdp.beamformer_engineering': ['cbf.tied_array_channelised_voltage'],
-        'sdp.cal': ['sdp.l0', 'sdp.vis'],
+        'sdp.cal': ['sdp.vis'],
         'sdp.flags': ['sdp.vis'],
         'sdp.continuum_image': ['sdp.flags'],
         'sdp.spectral_image': ['sdp.flags', 'sdp.continuum_image']
@@ -251,7 +250,7 @@ def validate(config):
     # Sort the outputs so that we validate upstream outputs before the downstream
     # outputs that depend on them.
     OUTPUT_TYPE_ORDER = [
-        'sdp.l0', 'sdp.vis', 'sdp.beamformer', 'sdp.beamformer_engineering',
+        'sdp.vis', 'sdp.beamformer', 'sdp.beamformer_engineering',
         'sdp.cal', 'sdp.flags', 'sdp.continuum_image', 'sdp.spectral_image'
     ]
     output_items = sorted(
@@ -281,7 +280,7 @@ def validate(config):
                         raise ValueError('Source streams do not come from the same channeliser')
                     common_acv = acv_name
 
-            if output['type'] in ['sdp.l0', 'sdp.vis']:
+            if output['type'] == 'sdp.vis':
                 continuum_factor = output['continuum_factor']
                 src = config['inputs'][output['src_streams'][0]]
                 acv = config['inputs'][src['src_streams'][0]]
@@ -483,45 +482,7 @@ def normalise(config):
       - parameters, models
       - develop, service_overrides
     """
-    def unique_name(base, current):
-        if base not in current:
-            return base
-        seq = 0
-        while True:
-            proposed = '{}{}'.format(base, seq)
-            if proposed not in current:
-                return proposed
-            seq += 1
-
     config = copy.deepcopy(config)
-    # Upgrade to 1.1
-    if config['version'] == '1.0':
-        config['version'] = '1.1'
-        # list() because we're mutating the outputs as we go
-        for name, output in list(config['outputs'].items()):
-            if output['type'] == 'sdp.l0' and output['continuum_factor'] == 1:
-                cal = {
-                    "type": "sdp.cal",
-                    "src_streams": [name]
-                }
-                config['outputs'][unique_name('cal', config['outputs'])] = cal
-
-    # Upgrade to 2.0
-    if config['version'] == '1.1':
-        config['version'] = '2.0'
-        for name, output in list(config['outputs'].items()):
-            if output['type'] == 'sdp.l0':
-                output['type'] = 'sdp.vis'
-                output['archive'] = (output['continuum_factor'] == 1)
-            elif output['type'] == 'sdp.cal':
-                flags = {
-                    "type": "sdp.flags",
-                    "src_streams": output['src_streams'],
-                    "calibration": [name],
-                    "archive": True
-                }
-                config['outputs'][unique_name('sdp_l1_flags', config['outputs'])] = flags
-
     # Update to 2.6
     if config['version'] in ['2.0', '2.1', '2.2', '2.3', '2.4', '2.5']:
         # 2.6 is fully backwards-compatible to 2.0
