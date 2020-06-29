@@ -102,7 +102,14 @@
         }
     },
     "type": "object",
-    "required": ["inputs", "outputs", "config", "version"],
+    "required": [
+{% if version < "3.0" %}
+        "inputs",
+        "config",
+{% endif %}
+        "outputs",
+        "version"
+    ],
     "additionalProperties": false,
     "properties": {
         "inputs": {
@@ -393,7 +400,13 @@
                                     },
                                     "archive": {"type": "boolean"}
                                 },
-                                "required": ["src_streams", "calibration", "archive"],
+                                "required": [
+                                    "src_streams",
+{% if version < "3.0" %}
+                                    "calibration",
+{% endif %}
+                                    "archive"
+                                ],
                                 "additionalProperties": false
                             }
                         },
@@ -473,12 +486,12 @@
                                         "items": {"type": "string"}
                                     },
                                     "band": {"type": "string"},
-                                    "center_freq": {"$ref": "#/definitions/positive_number"},
                                     "bandwidth": {"$ref": "#/definitions/positive_number"},
-                                    "adc_sample_rate": {"$ref": "#/definitions/positive_number"}
+                                    "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
+                                    "centre_frequency": {"$ref": "#/definitions/positive_number"}
                                 },
                                 "additionalProperties": false,
-                                "required": ["n_chans", "antennas", "band", "center_freq", "bandwidth", "adc_sample_rate"]
+                                "required": ["n_chans", "antennas", "band", "bandwidth", "adc_sample_rate", "centre_frequency"]
                             }
                         },
                         {
@@ -547,7 +560,7 @@
             "antennas": {
                 "type": "array",
                 "items": {"type": "string"}
-            },
+            }
         },
 {% endif %}
         "version": {

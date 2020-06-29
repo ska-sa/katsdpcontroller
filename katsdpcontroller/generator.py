@@ -78,8 +78,6 @@ _N32_32 = 32 * 33 * 2 * 32768
 _N16_32 = 16 * 17 * 2 * 32768
 #: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 256
-#: Speed at which flags are transmitted, relative to real time
-FLAGS_RATE_RATIO = 8.0
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Like DATA_VOL, but for high speed data to be transferred to an object store
@@ -92,6 +90,8 @@ WRITER_OBJECT_SIZE = 20e6    # 20 MB
 SPECTRAL_OBJECT_CHANNELS = 128
 
 # TODO: remove these
+#: Speed at which flags are transmitted, relative to real time
+FLAGS_RATE_RATIO = 8.0
 #: Minimum observation time for continuum imager (seconds)
 DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
 #: Minimum observation time for spectral imager (seconds)
