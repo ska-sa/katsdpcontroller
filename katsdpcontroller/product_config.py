@@ -9,11 +9,12 @@ import math
 from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 from typing import (
-    Tuple, List, Mapping, AbstractSet, Sequence, Iterable,
+    Tuple, List, Dict, Mapping, AbstractSet, Sequence, Iterable,
     Union, ClassVar, Type, TypeVar, Optional, Any, cast
 )
 
 import jsonschema
+import networkx
 import yarl
 
 import katpoint
@@ -170,6 +171,27 @@ class Stream:
                     config: Mapping[str, Any],
                     src_streams: Sequence['Stream'],
                     sensors: Mapping[str, Any]) -> _S: ...   # pragma: nocover
+
+
+class CamHttpStream(Stream):
+    """A cam.http stream."""
+
+    stream_type: ClassVar[str] = 'cam.http'
+
+    def __init__(self, name: str, *, url: yarl.URL) -> None:
+        super().__init__(name, [])
+        self.url = url
+
+    @classmethod
+    def from_config(cls,
+                    options: Options,
+                    name: str,
+                    config: Mapping[str, Any],
+                    src_streams: Sequence['Stream'],
+                    sensors: Mapping[str, Any]) -> 'CamHttpStream':
+        assert not src_streams
+        assert not sensors
+        return cls(name, url=yarl.URL(config['url']))
 
 
 class AntennaChannelisedVoltageStreamBase(Stream):
@@ -900,6 +922,101 @@ class SpectralImageStream(Stream):
         )
 
 
+class Simulation:
+    # TODO: finish this class
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> 'Simulation':
+        return Simulation()
+
+
+STREAM_CLASSES: Mapping[str, Type[Stream]] = {
+    'cbf.antenna_channelised_voltage': AntennaChannelisedVoltageStream,
+    'cbf.tied_array_channelised_voltage': TiedArrayChannelisedVoltageStream,
+    'cbf.baseline_correlation_products_stream': BaselineCorrelationProductsStream,
+    'cam.http': CamHttpStream,
+    'sdp.vis': VisStream,
+    'sdp.beamformer': BeamformerStream,
+    'sdp.beamformer_engineering': BeamformerEngineeringStream,
+    'sdp.cal': CalStream,
+    'sdp.flags': FlagsStream,
+    'sdp.continuum_image': ContinuumImageStream,
+    'sdp.spectral_image': SpectralImageStream
+}
+
+
+class Configuration:
+    def __init__(self, *,
+                 options: Options,
+                 simulation: Simulation,
+                 streams: Iterable[Stream]) -> None:
+        self.options = options
+        self.simulation = simulation
+        self.streams = streams
+
+    @classmethod
+    async def from_config(cls, config: Mapping[str, Any]) -> 'Configuration':
+        # TODO: pre-validate here?
+        options = Options.from_config(config.get('config', {}))
+        simulation = Simulation.from_config(config.get('simulation', {}))
+        # First get the cam.http stream, so that sensors can be extracted
+        cam_http: Optional[CamHttpStream] = None
+        stream_configs = {**config['inputs'], **config['outputs']}
+        for name, stream_config in stream_configs.items():
+            if stream_config['type'] == 'cam.http':
+                cam_http = CamHttpStream.from_config(options, name, stream_config, [], {})
+                break
+
+        # Extract sensor values. This is pulled into a separate block rather
+        # than done as we construct each stream so that one day it can be
+        # optimised to make a single sensor_values call for all sensors.
+        sensors: Dict[str, Dict[str, Any]] = {name: {} for name in stream_configs}
+        if cam_http:
+            client = katportalclient.KATPortalClient(str(cam_http.url), None)
+            components = {}
+            for name in ['cbf', 'sub']:
+                try:
+                    components[name] = await client.sensor_subarray_lookup(name, None)
+                except Exception as exc:
+                    # There are too many possible exceptions from katportalclient to
+                    # try to list them all explicitly.
+                    raise SensorFailure(f'Could not get component name for {name}: {exc}') from exc
+            for name, stream_config in stream_configs.items():
+                stream_cls = STREAM_CLASSES[stream_config['type']]
+                instrument = stream_config['instrument_dev_name']
+                for sensor in stream_cls._class_sensors:
+                    full_name = sensor.full_name(components, name, instrument)
+                    try:
+                        sample = await client.sensor_value(full_name)
+                    except Exception as exc:
+                        raise SensorFailure(f'Could not get value for {full_name}: {exc}') from exc
+                    if sample.status not in {'nominal', 'warn', 'error'}:
+                        raise SensorFailure(f'Sensor {full_name} has status {sample.status}')
+                    sensors[name][sensor.name] = sample.value
+            client.disconnect()
+
+        # Build a dependency graph so that we build the streams in order
+        g = networkx.MultiDiGraph()
+        g.add_nodes_from(stream_configs)
+        for name, stream_config in stream_configs.items():
+            for dep in stream_config.get('src_streams', []):
+                g.add_edge(dep, name)    # Need to build dep before name
+
+        streams: Dict[str, Stream] = {}
+        # Construct the streams. Note that this will make another copy of
+        # the cam.http stream, but that is harmless.
+        for name in networkx.topological_sort(g):
+            stream_config = stream_configs[name]
+            stream_cls = STREAM_CLASSES[stream_config['type']]
+            src_streams = [streams[d] for d in stream_config['src_streams']]
+            try:
+                streams[name] = stream_cls.from_config(
+                    options, name, stream_config, src_streams, sensors[name])
+            except ValueError as exc:
+                raise ValueError(f'Configuration error for {name}: {exc}') from exc
+        return cls(options=options, simulation=simulation, streams=streams.values())
+
+
 def override(config, overrides):
     """Update a config dictionary with overrides, merging dictionaries.
 
@@ -1050,6 +1167,9 @@ def _pre_validate(config):
             if have_cam_http:
                 raise ValueError('Cannot have more than one cam.http stream')
             have_cam_http = True
+
+    if config['inputs'] and not have_cam_http:
+        raise ValueError('A cam.http stream is required if there are any inputs')
 
     has_flags = set()
     # Sort the outputs so that we validate upstream outputs before the downstream
