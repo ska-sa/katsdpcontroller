@@ -228,6 +228,16 @@ class CamHttpStream(Stream):
         return cls(name, url=yarl.URL(config['url']))
 
 
+class CbfStream:
+    """Mix-in for real CBF streams.
+
+    It exists mostly for isinstance tests.
+    """
+
+    url: yarl.URL
+    instrument_dev_name: str
+
+
 class AntennaChannelisedVoltageStreamBase(Stream):
     """Base for both simulated and real antenna-channelised-voltage streams."""
 
@@ -252,7 +262,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
             self.n_samples_between_spectra = n_samples_between_spectra
 
 
-class AntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
+class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStreamBase):
     """Real antenna-channelised-voltage stream."""
 
     stream_type: ClassVar[str] = 'cbf.antenna_channelised_voltage'
@@ -264,6 +274,27 @@ class AntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
         _SubStreamSensor('centre_frequency'),
         _SubSensor('band')
     ]
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 antennas: Iterable[str],
+                 band: str,
+                 n_channels: int,
+                 bandwidth: float,
+                 adc_sample_rate: float,
+                 centre_frequency: float,
+                 n_samples_between_spectra: int,
+                 instrument_dev_name: str) -> None:
+        super().__init__(
+            name, src_streams,
+            antennas=antennas,
+            band=band,
+            n_channels=n_channels,
+            bandwidth=bandwidth,
+            adc_sample_rate=adc_sample_rate,
+            centre_frequency=centre_frequency,
+            n_samples_between_spectra=n_samples_between_spectra
+        )
+        self.instrument_dev_name = instrument_dev_name
 
     @classmethod
     def from_config(cls,
@@ -280,7 +311,8 @@ class AntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             bandwidth=sensors['bandwidth'],
             adc_sample_rate=sensors['adc_sample_rate'],
             centre_frequency=sensors['centre_frequency'],
-            n_samples_between_spectra=sensors['n_samples_between_spectra']
+            n_samples_between_spectra=sensors['n_samples_between_spectra'],
+            instrument_dev_name=config['instrument_dev_name']
         )
 
 
@@ -338,7 +370,10 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
 
 
 class CbfPerChannelStream(Stream):
-    """Base for tied-array-channelised-voltage and baseline-correlation-products streams."""
+    """Base for tied-array-channelised-voltage and baseline-correlation-products streams.
+
+    It applies to both simulated and real streams.
+    """
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  n_endpoints: int,
@@ -375,6 +410,10 @@ class CbfPerChannelStream(Stream):
     @property
     def n_channels_per_endpoint(self) -> int:
         return self.n_channels // self.n_endpoints
+
+    @property
+    def n_substreams(self) -> int:
+        return self.n_channels // self.n_channels_per_substream
 
     @property
     def n_antennas(self) -> int:
@@ -425,7 +464,7 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
         return self.n_vis * 2 * self.bits_per_sample // 8
 
 
-class BaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
+class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsStreamBase):
     """Real baseline-correlation-products stream."""
 
     stream_type: ClassVar[str] = 'cbf.baseline-correlation-products'
@@ -442,7 +481,8 @@ class BaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
                  url: yarl.URL,
                  n_channels_per_substream: int,
                  n_baselines: int,
-                 bits_per_sample: int) -> None:
+                 bits_per_sample: int,
+                 instrument_dev_name: str) -> None:
         super().__init__(
             name, src_streams,
             int_time=int_time,
@@ -452,6 +492,7 @@ class BaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
             bits_per_sample=bits_per_sample
         )
         self.url = url
+        self.instrument_dev_name = instrument_dev_name
 
     @classmethod
     def from_config(cls,
@@ -466,7 +507,8 @@ class BaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
             url=yarl.URL(config['url']),
             n_channels_per_substream=sensors['n_chans_per_substream'],
             n_baselines=sensors['n_bls'],
-            bits_per_sample=sensors['xeng_out_bits_per_sample']
+            bits_per_sample=sensors['xeng_out_bits_per_sample'],
+            instrument_dev_name=config['instrument_dev_name']
         )
 
 
@@ -529,7 +571,7 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
         # TODO: does spectra_per_heap need any validation?
 
 
-class TiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
+class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageStreamBase):
     """Real tied-array-channelised-voltage stream."""
 
     stream_type: ClassVar[str] = 'cbf.tied_array_channelised_voltage'
@@ -544,15 +586,17 @@ class TiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
                  url: yarl.URL,
                  n_channels_per_substream: int,
                  spectra_per_heap: int,
-                 bits_per_sample: int) -> None:
+                 bits_per_sample: int,
+                 instrument_dev_name: str) -> None:
         super().__init__(
             name, src_streams,
             n_endpoints=_url_n_endpoints(url),
             n_channels_per_substream=n_channels_per_substream,
             spectra_per_heap=spectra_per_heap,
-            bits_per_sample=bits_per_sample
+            bits_per_sample=bits_per_sample,
         )
         self.url = url
+        self.instrument_dev_name = instrument_dev_name
 
     @classmethod
     def from_config(cls,
@@ -566,7 +610,8 @@ class TiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
             url=yarl.URL(config['url']),
             n_channels_per_substream=sensors['n_chans_per_substream'],
             spectra_per_heap=sensors['spectra_per_heap'],
-            bits_per_sample=sensors['beng_out_bits_per_sample']
+            bits_per_sample=sensors['beng_out_bits_per_sample'],
+            instrument_dev_name=config['instrument_dev_name']
         )
 
 
@@ -618,7 +663,7 @@ class VisStream(Stream):
     }
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 output_int_time: float,
+                 int_time: float,
                  output_channels: Optional[Tuple[int, int]],
                  continuum_factor: int,
                  excise: bool,
@@ -627,7 +672,7 @@ class VisStream(Stream):
         super().__init__(name, src_streams)
         cbf_channels = self.baseline_correlation_products.n_channels
         cbf_int_time = self.baseline_correlation_products.int_time
-        self.output_int_time = max(1, round(output_int_time / cbf_int_time)) * cbf_int_time
+        self.int_time = max(1, round(int_time / cbf_int_time)) * cbf_int_time
         c = _normalise_output_channels(cbf_channels, output_channels)
         if cbf_channels % continuum_factor != 0:
             raise ValueError(
@@ -637,6 +682,8 @@ class VisStream(Stream):
             raise ValueError(
                 f'Channel range {c[0]}:{c[1]} is not a multiple of '
                 f'continuum_factor ({continuum_factor})')
+        # TODO: review this - seems the old code would instead adjust the channel
+        # range to ensure alignment.
         if (c[1] - c[0]) % (continuum_factor * n_servers) != 0:
             raise ValueError(
                 'Number of channels is not a multiple of continuum_factor * n_servers')
@@ -654,6 +701,15 @@ class VisStream(Stream):
     def n_channels(self) -> int:
         rng = self.output_channels
         return (rng[1] - rng[0]) // self.continuum_factor
+
+    @property
+    def n_spectral_channels(self) -> int:
+        """Number of CBF channels that are in the output, before continuum averaging."""
+        return self.output_channels[1] - self.output_channels[0]
+
+    @property
+    def antennas(self) -> Sequence[str]:
+        return self.baseline_correlation_products.antennas
 
     @property
     def n_antennas(self) -> int:
@@ -684,7 +740,7 @@ class VisStream(Stream):
             output_channels = tuple(output_channels)
         return cls(
             name, src_streams,
-            output_int_time=config['output_int_time'],
+            int_time=config['output_int_time'],
             output_channels=output_channels,
             continuum_factor=config['continuum_factor'],
             excise=config.get('excise', True),
@@ -700,7 +756,7 @@ class VisStream(Stream):
         """
         return (
             self.src_streams[0] is other.src_streams[0]
-            and self.output_int_time == other.output_int_time
+            and self.int_time == other.int_time
             and self.output_channels == other.output_channels
             and self.excise == other.excise
             and self.n_servers == other.n_servers
@@ -815,7 +871,7 @@ class CalStream(Stream):
 
     @property
     def slots(self) -> int:
-        return int(math.ceil(self.buffer_time / self.vis.output_int_time))
+        return int(math.ceil(self.buffer_time / self.vis.int_time))
 
     @classmethod
     def from_config(cls,
@@ -1001,6 +1057,12 @@ class Configuration:
         self.options = options
         self.simulation = simulation
         self.streams = streams
+        self._by_class: Dict[Type[Stream], List[Stream]] = {}
+        for stream in streams:
+            self._by_class.setdefault(type(stream), []).append(stream)
+
+    def by_class(self, stream_cls: Type[_S]) -> Sequence[_S]:
+        return self._by_class.get(stream_cls, [])    # type: ignore
 
     @classmethod
     async def from_config(cls, config: Mapping[str, Any]) -> 'Configuration':

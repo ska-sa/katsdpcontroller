@@ -173,7 +173,7 @@ from abc import abstractmethod
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import Optional, Mapping, Union, ClassVar, Type
+from typing import List, Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -1354,6 +1354,13 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         command being passed to it.
     """
     RESOURCE_REQUESTS = GLOBAL_RESOURCES
+
+    # Type annotations for mypy. This are actually provided by the metaclass
+    cpus: float
+    mem: float
+    disk: float
+    ports: List[Optional[str]]
+    cores: List[Optional[str]]
 
     def __init__(self, name):
         LogicalNode.__init__(self, name)

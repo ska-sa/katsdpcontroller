@@ -168,7 +168,7 @@ class Resolver(scheduler.Resolver):
                  image_resolver: scheduler.ImageResolver,
                  task_id_allocator: scheduler.TaskIDAllocator,
                  http_url: Optional[str],
-                 service_overrides: dict,
+                 service_overrides: Mapping[str, product_config.ServiceOverride],
                  s3_config: dict,
                  localhost: bool) -> None:
         super().__init__(image_resolver, task_id_allocator, http_url)
@@ -323,18 +323,20 @@ class SDPSubarrayProductBase:
     forced deconfiguration to abort them.
     """
     def __init__(self, sched: Optional[scheduler.Scheduler],
-                 config: dict,
+                 configuration: product_config.Configuration,
+                 config_dict: dict,
                  resolver: Resolver,
                  subarray_product_id: str,
                  sdp_controller: 'DeviceServer') -> None:
         #: Current background task (can only be one)
         self._async_task: Optional[asyncio.Task] = None
         self.sched = sched
-        self.config = config
+        self.configuration = configuration
+        self.config_dict = config_dict
         self.resolver = resolver
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
-        self.logical_graph = generator.build_logical_graph(config)
+        self.logical_graph = generator.build_logical_graph(configuration)
         self.telstate_endpoint = ""
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.capture_blocks: Dict[str, CaptureBlock] = {}  # live capture blocks, indexed by name
@@ -875,10 +877,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                    for logical in logical_graph}
         return networkx.relabel_nodes(logical_graph, mapping)
 
-    def __init__(self, sched: scheduler.Scheduler, config: dict,
+    def __init__(self, sched: scheduler.Scheduler,
+                 configuration: product_config.Configuration,
+                 config_dict: dict,
                  resolver: Resolver, subarray_product_id: str,
                  sdp_controller: 'DeviceServer', telstate_name: str = 'telstate') -> None:
-        super().__init__(sched, config, resolver, subarray_product_id, sdp_controller)
+        super().__init__(sched, configuration, config_dict, resolver,
+                         subarray_product_id, sdp_controller)
         # Priority is lower (higher number) than the default queue
         self.batch_queue = scheduler.LaunchQueue(
             sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
@@ -1045,11 +1050,13 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
-        for name, stream in self.config['inputs'].items():
-            if stream['type'].startswith('cbf.'):
-                for suffix in ['src_streams', 'instrument_dev_name']:
-                    if suffix in stream:
-                        init_telstate[(name, suffix)] = stream[suffix]
+        for name, stream in self.configuration.streams:
+            if isinstance(stream, product_config.CbfStream):
+                init_telstate[(name, 'instrument_dev_name')] = stream.instrument_dev_name
+                if stream.src_streams:
+                    init_telstate[(name, 'src_streams'] = [
+                        src_stream.name for src_stream in stream.src_streams
+                    ]
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
@@ -1326,7 +1333,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.master_controller.close()
         await self.master_controller.wait_closed()
 
-    async def configure_product(self, name: str, config: dict) -> None:
+    async def configure_product(self, name: str, configuration: product_config.Configuration,
+                                config_dict: dict) -> None:
         """Configure a subarray product in response to a request.
 
         Raises
@@ -1358,10 +1366,10 @@ class DeviceServer(aiokatcp.DeviceServer):
             else:
                 self.halt(False)
 
-        logger.debug('config is %s', json.dumps(config, indent=2, sort_keys=True))
+        logger.debug('config is %s', json.dumps(config_dict, indent=2, sort_keys=True))
         logger.info("Launching subarray product.")
 
-        image_tag = config['config'].get('image_tag')
+        image_tag = configuration.options.image_tag
         if image_tag is not None:
             resolver_factory_args = dict(tag=image_tag)
         else:
@@ -1370,7 +1378,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.image_resolver_factory(**resolver_factory_args),
             scheduler.TaskIDAllocator(name + '-'),
             self.sched.http_url if self.sched else '',
-            config['config'].get('service_overrides', {}),
+            configuration.options.service_overrides,
             self.s3_config,
             self.localhost)
 
@@ -1380,7 +1388,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             product_cls = SDPSubarrayProductInterface
         else:
             product_cls = SDPSubarrayProduct
-        product = product_cls(self.sched, config, resolver, name, self)
+        product = product_cls(self.sched, configuration, config_dict, resolver, name, self)
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
@@ -1408,8 +1416,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply('Already configured or configuring')
         try:
             config_dict = load_json_dict(config)
-            product_config.validate(config_dict)
-            config_dict = product_config.normalise(config_dict)
+            configuration = await product_config.Configuration.from_config(config_dict)
         except product_config.SensorFailure as exc:
             retmsg = f"Error retrieving sensor data from CAM: {exc}"
             logger.error(retmsg)
@@ -1419,7 +1426,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg) from exc
 
-        await self.configure_product(name, config_dict)
+        await self.configure_product(name, configuration, config_dict)
 
     def _get_product(self) -> SDPSubarrayProductBase:
         """Check that self.product exists (i.e. ?product-configure has been called).
