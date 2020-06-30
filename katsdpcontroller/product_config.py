@@ -36,6 +36,14 @@ DEFAULT_CAL_BUFFER_TIME = 25 * 60.0        # 25 minutes (allows a single batch o
 DEFAULT_CAL_MAX_SCANS = 1000
 #: Speed at which flags are transmitted, relative to real time
 DEFAULT_FLAGS_RATE_RATIO = 8.0
+#: Number of bytes per complex visibility
+BYTES_PER_VIS = 8
+#: Number of bytes per per-visibility flag mask
+BYTES_PER_FLAG = 1
+#: Number of bytes per per-visibility weight
+BYTES_PER_WEIGHT = 1
+#: Number of bytes per vis-flags-weights combination
+BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
 
 
 def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
@@ -134,6 +142,23 @@ def _normalise_output_channels(
         raise ValueError(f'output_channels ({c[0]}:{c[1]}) overflows valid range 0:{n_channels}')
     else:
         return c
+
+
+def bandwidth(size: float, time: float, ratio: float = 1.05, overhead: float = 128) -> float:
+    """Convert a heap size to a bandwidth in bits per second.
+
+    Parameters
+    ----------
+    size
+        Size in bytes
+    time
+        Time between heaps in seconds
+    ratio
+        Relative overhead
+    overhead
+        Absolute overhead, in bytes
+    """
+    return (size * ratio + overhead) * 8 / time
 
 
 class ServiceOverride:
@@ -435,6 +460,21 @@ class CbfPerChannelStream(Stream):
         """Number of ADC samples between spectra."""
         return self.antenna_channelised_voltage.n_samples_between_spectra
 
+    @property
+    @abstractmethod
+    def size(self) -> int:
+        """Size of a single frame in bytes."""
+
+    @property
+    @abstractmethod
+    def int_time(self) -> float:
+        """Time between heaps, in seconds."""
+
+    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        """Network bandwidth in bits per second."""
+        heap_size = self.size / self.n_substreams
+        return bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
+
 
 class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
     """Base for both simulated and real baseline-correlation-products streams."""
@@ -451,8 +491,12 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
             n_channels_per_substream=n_channels_per_substream,
             bits_per_sample=bits_per_sample
         )
-        self.int_time = int_time
+        self._int_time = int_time
         self.n_baselines = n_baselines
+
+    @property
+    def int_time(self) -> float:
+        return self._int_time
 
     @property
     def n_vis(self) -> int:
@@ -569,6 +613,16 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
         )
         self.spectra_per_heap = spectra_per_heap
         # TODO: does spectra_per_heap need any validation?
+
+    @property
+    def size(self) -> int:
+        """Size of frame in bytes."""
+        return self.bits_per_sample * 2 * self.spectra_per_heap * self.n_channels // 8
+
+    @property
+    def int_time(self) -> float:
+        """Interval between heaps, in seconds."""
+        return self.spectra_per_heap * self.n_samples_between_spectra / self.adc_sample_rate
 
 
 class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageStreamBase):
@@ -727,6 +781,23 @@ class VisStream(Stream):
     @property
     def n_vis(self) -> int:
         return self.n_baselines * self.n_channels
+
+    @property
+    def size(self) -> int:
+        """Size of each frame in bytes."""
+        # complex64 for vis, uint8 for weights and flags, float32 for weights_channel
+        return self.n_vis * BYTES_PER_VFW + self.n_channels * 4
+
+    @property
+    def flag_size(self):
+        """Size of the flags in each frame, in bytes."""
+        return self.n_vis * BYTES_PER_FLAG
+
+    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return bandwidth(self.size, self.int_time, ratio, overhead)
+
+    def flag_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return bandwidth(self.flag_size, self.int_time, ratio, overhead)
 
     @classmethod
     def from_config(cls,
@@ -918,6 +989,21 @@ class FlagsStream(Stream):
     def cal(self) -> CalStream:
         return cast(CalStream, self.src_streams[1])
 
+    @property
+    def int_time(self) -> float:
+        return self.vis.int_time
+
+    @property
+    def n_vis(self) -> int:
+        return self.vis.n_vis
+
+    @property
+    def size(self) -> int:
+        return self.vis.flag_size
+
+    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return self.vis.flag_bandwidth(ratio, overhead)
+
     @classmethod
     def from_config(cls,
                     options: Options,
@@ -932,7 +1018,28 @@ class FlagsStream(Stream):
         )
 
 
-class ContinuumImageStream(Stream):
+class ImageStream(Stream):
+    """A base class for spectral and continuum image streams."""
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 min_time: float) -> None:
+        super().__init__(name, src_streams)
+        self.min_time = min_time
+
+    @property
+    def flags(self) -> FlagsStream:
+        return cast(FlagsStream, self.src_streams[0])
+
+    @property
+    def vis(self) -> VisStream:
+        return self.flags.vis
+
+    @property
+    def cal(self) -> CalStream:
+        return self.flags.cal
+
+
+class ContinuumImageStream(ImageStream):
     """An instance of sdp.continuum_image."""
 
     stream_type: ClassVar[str] = 'continuum_image'
@@ -943,19 +1050,10 @@ class ContinuumImageStream(Stream):
                  mfimage_parameters: Mapping[str, Any] = {},
                  max_realtime: Optional[float] = None,
                  min_time: float) -> None:
-        super().__init__(name, src_streams)
+        super().__init__(name, src_streams, min_time=min_time)
         self.uvblavg_parameters = dict(uvblavg_parameters)
         self.mfimage_parameters = dict(mfimage_parameters)
         self.max_realtime = max_realtime
-        self.min_time = min_time
-
-    @property
-    def flags(self) -> FlagsStream:
-        return cast(FlagsStream, self.src_streams[0])
-
-    @property
-    def vis(self) -> VisStream:
-        return self.flags.vis
 
     @classmethod
     def from_config(cls,
@@ -973,7 +1071,7 @@ class ContinuumImageStream(Stream):
         )
 
 
-class SpectralImageStream(Stream):
+class SpectralImageStream(ImageStream):
     """An instance of sdp.spectral_image."""
 
     stream_type: ClassVar[str] = 'spectral_image'
@@ -983,23 +1081,10 @@ class SpectralImageStream(Stream):
                  output_channels: Optional[Tuple[int, int]],
                  parameters: Mapping[str, Any],
                  min_time: float) -> None:
-        super().__init__(name, src_streams)
+        super().__init__(name, src_streams, min_time=min_time)
         self.parameters = dict(parameters)
-        self.min_time = min_time
         vis_channels = self.vis.n_channels
         self.output_channels = _normalise_output_channels(vis_channels, output_channels)
-
-    @property
-    def flags(self) -> FlagsStream:
-        return cast(FlagsStream, self.src_streams[0])
-
-    @property
-    def cal(self) -> CalStream:
-        return self.flags.cal
-
-    @property
-    def vis(self) -> VisStream:
-        return self.flags.vis
 
     @property
     def n_channels(self) -> int:
@@ -1024,11 +1109,26 @@ class SpectralImageStream(Stream):
 
 
 class Simulation:
-    # TODO: finish this class
+    def __init__(self, *, start_time: Optional[float] = None, clock_ratio: float = 1.0,
+                 sources: Iterable[katpoint.Target] = ()) -> None:
+        self.start_time = start_time
+        self.clock_ratio = clock_ratio
+        self.sources = list(sources)
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> 'Simulation':
-        return Simulation()
+        sources = []
+        for i, desc in enumerate(config.get('sources', [])):
+            try:
+                source = katpoint.Target(desc)
+            except Exception as exc:
+                raise ValueError(f'Invalid source {i}: {exc}') from exc
+            sources.append(source)
+        return Simulation(
+            start_time=config.get('start_time'),
+            clock_ratio=config.get('clock_ratio', 1.0),
+            sources=sources
+        )
 
 
 STREAM_CLASSES: Mapping[str, Type[Stream]] = {

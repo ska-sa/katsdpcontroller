@@ -1050,11 +1050,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.
-        for name, stream in self.configuration.streams:
+        for stream in self.configuration.streams:
             if isinstance(stream, product_config.CbfStream):
-                init_telstate[(name, 'instrument_dev_name')] = stream.instrument_dev_name
+                init_telstate[(stream.name, 'instrument_dev_name')] = stream.instrument_dev_name
                 if stream.src_streams:
-                    init_telstate[(name, 'src_streams'] = [
+                    init_telstate[(stream.name, 'src_streams')] = [
                         src_stream.name for src_stream in stream.src_streams
                     ]
 
@@ -1461,24 +1461,23 @@ class DeviceServer(aiokatcp.DeviceServer):
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
-        config = product_config.override(product.config, overrides)
+        config_dict = product_config.override(product.config_dict, overrides)
         # Re-validate, since the override may have broken it
         try:
-            product_config.validate(config)
+            configuration = await product_config.Configuration.from_config(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = f"Overrides make the config invalid: {error}"
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
-        config = product_config.normalise(config)
         try:
-            product_config.validate_capture_block(product.config, config)
+            product_config.validate_capture_block(product.config_dict, config_dict)
         except ValueError as error:
             retmsg = f"Invalid config override: {error}"
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
-        await product.capture_init(capture_block_id, config)
+        await product.capture_init(capture_block_id, configuration)
 
     async def request_telstate_endpoint(self, ctx) -> str:
         """Returns the endpoint for the telescope state repository.

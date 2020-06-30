@@ -16,10 +16,13 @@ import katdal.datasources
 import katpoint
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
-from katsdpcontroller import scheduler, product_config
-from katsdpcontroller.tasks import (
+from . import scheduler, product_config
+from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
     CaptureBlockState, KatcpTransition)
+from .product_config import (
+    BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, bandwidth,
+    Configuration)
 
 
 def normalise_gpu_name(name):
@@ -62,14 +65,6 @@ IMAGES = frozenset([
     'katsdpmetawriter',
     'katsdptelstate'
 ])
-#: Number of bytes per complex visibility
-BYTES_PER_VIS = 8
-#: Number of bytes per per-visibility flag mask
-BYTES_PER_FLAG = 1
-#: Number of bytes per per-visibility weight
-BYTES_PER_WEIGHT = 1
-#: Number of bytes per vis-flags-weights combination
-BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
 #: Number of bytes used by spectral imager per visibility
 BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
@@ -167,23 +162,6 @@ def _round_up(value, period):
     return _round_down(value - 1, period) + period
 
 
-def _bandwidth(size, time, ratio=1.05, overhead=128):
-    """Convert a heap size to a bandwidth in bits per second.
-
-    Parameters
-    ----------
-    size : int
-        Size in bytes
-    time : float
-        Time between heaps in seconds
-    ratio : float
-        Relative overhead
-    overhead : int
-        Absolute overhead, in bytes
-    """
-    return (size * ratio + overhead) * 8 / time
-
-
 def find_node(g: networkx.MultiDiGraph, name: str) -> scheduler.LogicalNode:
     for node in g:
         if node.name == name:
@@ -192,7 +170,7 @@ def find_node(g: networkx.MultiDiGraph, name: str) -> scheduler.LogicalNode:
 
 
 def _make_telstate(g: networkx.MultiDiGraph,
-                   configuration: product_config.Configuration) -> scheduler.LogicalNode:
+                   configuration: Configuration) -> scheduler.LogicalNode:
     # Pointing sensors can account for substantial memory per antennas over a
     # long-lived subarray.
     n_antennas = 0
@@ -222,7 +200,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
 
 
 def _make_cam2telstate(g: networkx.MultiDiGraph,
-                       configuration: product_config.Configuration,
+                       configuration: Configuration,
                        stream: product_config.CamHttpStream) -> scheduler.LogicalNode:
     cam2telstate = SDPLogicalTask('cam2telstate')
     cam2telstate.image = 'katsdpcam2telstate'
@@ -244,7 +222,7 @@ def _make_cam2telstate(g: networkx.MultiDiGraph,
 
 
 def _make_meta_writer(g: networkx.MultiDiGraph,
-                      configuration: product_config.Configuration) -> scheduler.LogicalNode:
+                      configuration: Configuration) -> scheduler.LogicalNode:
     meta_writer = SDPLogicalTask('meta_writer')
     meta_writer.image = 'katsdpmetawriter'
     meta_writer.command = ['meta_writer.py']
@@ -253,7 +231,9 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
     # meta_writer.mem = 256
     # Temporary workaround for SR-1695, until the machines can have their
     # kernels upgraded: give it the same memory as telescore state
-    meta_writer.mem = find_node(g, 'telstate').mem    # type: ignore
+    telstate = find_node(g, 'telstate')
+    assert isinstance(telstate, scheduler.LogicalTask)
+    meta_writer.mem = telstate.mem
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -278,7 +258,7 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
 
 
 def _make_cbf_simulator(g: networkx.MultiDiGraph,
-                        configuration: product_config.Configuration,
+                        configuration: Configuration,
                         stream: Union[
                             product_config.SimBaselineCorrelationProductsStream,
                             product_config.SimTiedArrayChannelisedVoltageStream
@@ -432,7 +412,7 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
 
 
 def _make_timeplot_correlator(g: networkx.MultiDiGraph,
-                              configuration: product_config.Configuration,
+                              configuration: Configuration,
                               stream: product_config.VisStream) -> scheduler.LogicalNode:
     n_ingest = stream.n_servers
 
@@ -460,13 +440,13 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
 
 def _make_timeplot_beamformer(
         g: networkx.MultiDiGraph,
-        configuration: product_config.Configuration,
+        configuration: Configuration,
         stream: product_config.TiedArrayChannelisedVoltageStreamBase) -> \
             Tuple[scheduler.LogicalNode, scheduler.LogicalNode]:
     """Make timeplot server for the beamformer, plus a beamformer capture to feed it."""
     develop = configuration.options.develop
     beamformer = _make_beamformer_engineering_pol(
-        g, stream, f'bf_ingest_timeplot.{stream.name}', stream.name, True, False, 0, develop)
+        g, None, stream, f'bf_ingest_timeplot.{stream.name}', False, 0, develop)
     beamformer.critical = False
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
@@ -519,7 +499,7 @@ def _correlator_timeplot_bandwidth(stream: product_config.VisStream) -> float:
         stream, stream.n_spectral_channels // sd_continuum_factor)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
-    return _bandwidth(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
+    return bandwidth(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
 
 
 def _beamformer_timeplot_bandwidth(
@@ -537,7 +517,7 @@ def _beamformer_timeplot_bandwidth(
     return 1e6    # 1 MB/s
 
 
-def n_cal_nodes(configuration: product_config.Configuration,
+def n_cal_nodes(configuration: Configuration,
                 stream: product_config.CalStream) -> int:
     """Number of processes used to implement cal for a particular output."""
     # Use single cal for 4K or less: it doesn't need the performance, and
@@ -588,7 +568,7 @@ def _adjust_ingest_output_channels(config, names):
         output['output_channels'] = assigned
 
 
-def _make_ingest(g: networkx.MultiDiGraph, configuration: product_config.Configuration,
+def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                  spectral: Optional[product_config.VisStream],
                  continuum: Optional[product_config.VisStream]) -> scheduler.LogicalNode:
     develop = configuration.options.develop
@@ -718,7 +698,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: product_config.Configu
 
 
 def _make_cal(g: networkx.MultiDiGraph,
-              configuration: product_config.Configuration,
+              configuration: Configuration,
               stream: product_config.CalStream,
               flags_streams: Sequence[product_config.FlagsStream]) -> scheduler.LogicalNode:
     vis = stream.vis
@@ -928,7 +908,7 @@ def _writer_max_accum_dumps(stream: product_config.VisStream,
 
 
 def _make_vis_writer(g: networkx.MultiDiGraph,
-                     configuration: product_config.Configuration,
+                     configuration: Configuration,
                      stream: product_config.VisStream,
                      s3_name: str,
                      local: bool,
@@ -951,6 +931,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
     # out.
     buffer_dumps = max(max_accum_dumps, int(math.ceil(45.0 / stream.int_time)))
     src_multicast = find_node(g, 'multicast.' + stream.name)
+    assert isinstance(src_multicast, LogicalMulticast)
     n_substreams = src_multicast.n_addresses
 
     # Double the memory allocation to be on the safe side. This gives some
@@ -1003,7 +984,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
 
 
 def _make_flag_writer(g: networkx.MultiDiGraph,
-                      configuration: product_config.Configuration,
+                      configuration: Configuration,
                       stream: product_config.FlagsStream,
                       s3_name: str,
                       local: bool,
@@ -1016,6 +997,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     flag_writer.command = ['flag_writer.py']
 
     flags_src = find_node(g, 'multicast.' + stream.name)
+    assert isinstance(flags_src, LogicalMulticast)
     n_substreams = flags_src.n_addresses
     workers = 4
     max_accum_dumps = _writer_max_accum_dumps(stream.vis, BYTES_PER_FLAG, max_channels)
@@ -1086,19 +1068,29 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     return flag_writer
 
 
-def _make_imager_writers(g, config, have_cal, s3_name, name, max_channels=None):
+def _make_imager_writers(g: networkx.MultiDiGraph,
+                         configuration: Configuration,
+                         s3_name: str,
+                         stream: product_config.ImageStream,
+                         max_channels: Optional[int] = None) -> None:
     """Make vis and flag writers for an imager output"""
     orig_flags_name = config['outputs'][name]['src_streams'][0]
     orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
     cal = config['outputs'][orig_flags_name]['calibration'][0]
-    if cal in have_cal:   # Will be false if fewer than 4 antennas for example
-        _make_vis_writer(g, config, orig_l0_name, s3_name=s3_name,
-                         local=False, prefix=name, max_channels=max_channels)
-        _make_flag_writer(g, config, orig_flags_name, orig_l0_name, s3_name=s3_name,
-                          local=False, prefix=name, max_channels=max_channels)
+    _make_vis_writer(g, configuration, stream.vis, s3_name=s3_name,
+                     local=False, prefix=stream.name, max_channels=max_channels)
+    _make_flag_writer(g, configuration, stream.flags, s3_name=s3_name,
+                      local=False, prefix=name, max_channels=max_channels)
 
 
-def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram, idx, develop):
+def _make_beamformer_engineering_pol(
+    g: networkx.MultiDiGraph,
+    stream: Optional[product_config.BeamformerEngineeringStream],
+    src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
+    node_name: str,
+    ram: bool,
+    idx: int,
+    develop: bool) -> SDPLogicalTask:
     """Generate node for a single polarisation of beamformer engineering output.
 
     This handles two cases: either it is a capture to file, associated with a
@@ -1108,22 +1100,23 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
 
     Parameters
     ----------
-    info : :class:`TiedArrayChannelisedVoltageInfo` or :class:`BeamformerInfo`
-        Info about the stream.
-    node_name : str
+    stream
+        The beamformer engineering stream, if applicable. If ``None``, this is
+        for signal displays.
+    src_stream
+        The tied-array-channelised-voltage stream
+    node_name
         Name to use for the logical node
-    src_name : str
-        Name of the tied-array-channelised-voltage stream
-    timeplot : bool
-        Whether this node is for computing signal display statistics
-    ram : bool
+    ram
         Whether this node is for writing to ramdisk (ignored if `timeplot` is true)
-    idx : int
+    idx
         Number of this source within the output (ignored if `timeplot` is true)
-    develop : bool
+    develop
         Whether this is a develop-mode config
     """
-    src_multicast = find_node(g, 'multicast.' + src_name)
+    timeplot = stream is None
+    src_multicast = find_node(g, 'multicast.' + src_stream.name)
+    assert isinstance(src_multicast, LogicalMulticast)
 
     bf_ingest = SDPLogicalTask(node_name)
     bf_ingest.image = 'katsdpbfingest'
@@ -1154,10 +1147,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
     # XXX Even when there is enough bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
     # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
-    bf_ingest.interfaces[0].bandwidth_in = max(info.net_bandwidth(), 20e9)
+    bf_ingest.interfaces[0].bandwidth_in = max(src_stream.net_bandwidth(), 20e9)
     if timeplot:
         bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
-        bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(info)
+        bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(src_stream)
     else:
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [
@@ -1171,10 +1164,10 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
             'ibv': not develop,
-            'stream_name': src_name,
+            'stream_name': src_stream.name,
             'aiomonitor': True
         }
-        if timeplot:
+        if stream is None:
             config.update({
                 'stats_interface': task.interfaces['sdp_10g'].name,
                 'stats_int_time': 1.0
@@ -1183,7 +1176,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
             config.update({
                 'file_base': '/data',
                 'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-                'channels': '{}:{}'.format(*info.output_channels)
+                'channels': '{}:{}'.format(*stream.output_channels)
             })
         return config
 
@@ -1192,7 +1185,7 @@ def _make_beamformer_engineering_pol(g, info, node_name, src_name, timeplot, ram
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     if timeplot:
-        stats_multicast = LogicalMulticast('multicast.timeplot.{}'.format(src_name), 1)
+        stats_multicast = LogicalMulticast('multicast.timeplot.{}'.format(src_stream.name), 1)
         g.add_edge(bf_ingest, stats_multicast, port='spead',
                    depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'stats': str(endpoint)})
@@ -1217,11 +1210,12 @@ def _make_beamformer_engineering(g, config, name):
     for i, src in enumerate(srcs):
         info = BeamformerInfo(config, name, src)
         nodes.append(_make_beamformer_engineering_pol(
-            g, info, 'bf_ingest.{}.{}'.format(name, i + 1), src, False, ram, i, develop))
+            g, stream, stream.tied_array_channelised_voltage,
+            'bf_ingest.{}.{}'.format(name, i + 1), src, ram, i, develop))
     return nodes
 
 
-def build_logical_graph(configuration: product_config.Configuration,
+def build_logical_graph(configuration: Configuration,
                         config_dict: dict) -> networkx.MultiDiGraph:
     # Note: a few lambdas in this function have default arguments e.g.
     # stream=stream. This is needed because capturing a loop-local variable in
