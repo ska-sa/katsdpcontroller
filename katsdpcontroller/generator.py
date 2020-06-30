@@ -14,7 +14,7 @@ import numpy as np
 import katdal
 import katdal.datasources
 import katpoint
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+from katsdptelstate.endpoint import Endpoint
 
 from . import scheduler, product_config
 from .tasks import (
@@ -271,7 +271,6 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     ibv = not configuration.options.develop
 
     def make_cbf_simulator_config(task, resolver):
-        substreams = stream.n_channels // stream.n_channels_per_substream
         conf = {
             'cbf_channels': stream.n_channels,
             'cbf_adc_sample_rate': stream.adc_sample_rate,
@@ -295,8 +294,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
                 'beamformer_timesteps': stream.spectra_per_heap,
                 'beamformer_bits': stream.out_bits_per_sample
             })
-        if 'center_freq' in settings:
-            conf['cbf_center_freq'] = float(stream.centre_frequency)
+        conf['cbf_center_freq'] = float(stream.centre_frequency)
         conf['cbf_antennas'] = [{'description': str(ant)} for ant in stream.antenna_objects]
         return conf
 
@@ -444,9 +442,8 @@ def _make_timeplot_beamformer(
         stream: product_config.TiedArrayChannelisedVoltageStreamBase) -> \
             Tuple[scheduler.LogicalNode, scheduler.LogicalNode]:
     """Make timeplot server for the beamformer, plus a beamformer capture to feed it."""
-    develop = configuration.options.develop
     beamformer = _make_beamformer_engineering_pol(
-        g, None, stream, f'bf_ingest_timeplot.{stream.name}', False, 0, develop)
+        g, configuration, None, stream, f'bf_ingest_timeplot.{stream.name}', False, 0)
     beamformer.critical = False
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
@@ -529,43 +526,6 @@ def n_cal_nodes(configuration: Configuration,
         return 1
     else:
         return 4
-
-
-def _adjust_ingest_output_channels(config, names):
-    """Modify the config dictionary to set output channels for ingest.
-
-    It is widened where necessary to meet alignment requirements.
-
-    Parameters
-    ----------
-    config : dict
-        Configuration dictionary
-    names : list of str
-        The names of the ingest output products. These must match i.e. be the
-        same other than for continuum_factor.
-    """
-    def lcm(a, b):
-        return a // math.gcd(a, b) * b
-
-    n_ingest = n_ingest_nodes(config, names[0])
-    outputs = [config['outputs'][name] for name in names]
-    src = config['inputs'][outputs[0]['src_streams'][0]]
-    acv = config['inputs'][src['src_streams'][0]]
-    n_chans = acv['n_chans']
-    requested = outputs[0]['output_channels']
-    alignment = 1
-    # This is somewhat stricter than katsdpingest actually requires, which is
-    # simply that each ingest node is aligned to the continuum factor.
-    for output in outputs:
-        alignment = lcm(alignment, n_ingest * output['continuum_factor'])
-    assigned = [_round_down(requested[0], alignment), _round_up(requested[1], alignment)]
-    # Should always succeed if product_config.validate passed
-    assert 0 <= assigned[0] < assigned[1] <= n_chans, "Aligning channels caused an overflow"
-    for name, output in zip(names, outputs):
-        if assigned != requested:
-            logger.info('Rounding output channels for %s from %s to %s',
-                        name, requested, assigned)
-        output['output_channels'] = assigned
 
 
 def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
@@ -1074,23 +1034,20 @@ def _make_imager_writers(g: networkx.MultiDiGraph,
                          stream: product_config.ImageStream,
                          max_channels: Optional[int] = None) -> None:
     """Make vis and flag writers for an imager output"""
-    orig_flags_name = config['outputs'][name]['src_streams'][0]
-    orig_l0_name = config['outputs'][orig_flags_name]['src_streams'][0]
-    cal = config['outputs'][orig_flags_name]['calibration'][0]
     _make_vis_writer(g, configuration, stream.vis, s3_name=s3_name,
                      local=False, prefix=stream.name, max_channels=max_channels)
     _make_flag_writer(g, configuration, stream.flags, s3_name=s3_name,
-                      local=False, prefix=name, max_channels=max_channels)
+                      local=False, prefix=stream.name, max_channels=max_channels)
 
 
 def _make_beamformer_engineering_pol(
-    g: networkx.MultiDiGraph,
-    stream: Optional[product_config.BeamformerEngineeringStream],
-    src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
-    node_name: str,
-    ram: bool,
-    idx: int,
-    develop: bool) -> SDPLogicalTask:
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        stream: Optional[product_config.BeamformerEngineeringStream],
+        src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
+        node_name: str,
+        ram: bool,
+        idx: int) -> SDPLogicalTask:
     """Generate node for a single polarisation of beamformer engineering output.
 
     This handles two cases: either it is a capture to file, associated with a
@@ -1100,6 +1057,10 @@ def _make_beamformer_engineering_pol(
 
     Parameters
     ----------
+    g
+        Graph under construction.
+    configuration
+        Product configuration.
     stream
         The beamformer engineering stream, if applicable. If ``None``, this is
         for signal displays.
@@ -1108,9 +1069,9 @@ def _make_beamformer_engineering_pol(
     node_name
         Name to use for the logical node
     ram
-        Whether this node is for writing to ramdisk (ignored if `timeplot` is true)
+        Whether this node is for writing to ramdisk (ignored if `stream` is ``None``)
     idx
-        Number of this source within the output (ignored if `timeplot` is true)
+        Number of this source within the output (ignored if `stream` is ``None``)
     develop
         Whether this is a develop-mode config
     """
@@ -1133,7 +1094,7 @@ def _make_beamformer_engineering_pol(
         # process, so we need more memory allocation than there is
         # space in the ramdisk. This is only used for lab testing, so
         # we just hardcode a number.
-        bf_ingest.ram = 220 * 1024
+        bf_ingest.mem = 220 * 1024
     # In general we want it on the same interface as the NIC, because
     # otherwise there is a tendency to drop packets. But for ramdisk capture
     # this won't cut it because the machine for this is dual-socket and we
@@ -1141,7 +1102,7 @@ def _make_beamformer_engineering_pol(
     # regions.
     bf_ingest.interfaces = [
         scheduler.InterfaceRequest('cbf',
-                                   infiniband=not develop,
+                                   infiniband=not configuration.options.develop,
                                    affinity=timeplot or not ram)
     ]
     # XXX Even when there is enough bandwidth, sharing a node with correlator
@@ -1163,7 +1124,7 @@ def _make_beamformer_engineering_pol(
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
-            'ibv': not develop,
+            'ibv': not configuration.options.develop,
             'stream_name': src_stream.name,
             'aiomonitor': True
         }
@@ -1193,7 +1154,10 @@ def _make_beamformer_engineering_pol(
     return bf_ingest
 
 
-def _make_beamformer_engineering(g, config, name):
+def _make_beamformer_engineering(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        stream: product_config.BeamformerEngineeringStream) -> Sequence[scheduler.LogicalTask]:
     """Generate nodes for beamformer engineering output.
 
     If `timeplot` is true, it generates services that only send data to
@@ -1201,17 +1165,12 @@ def _make_beamformer_engineering(g, config, name):
     refer to an ``sdp.beamformer`` rather than an
     ``sdp.beamformer_engineering`` stream.
     """
-    output = config['outputs'][name]
-    srcs = output['src_streams']
-    ram = output.get('store') == 'ram'
-    develop = is_develop(config)
-
+    ram = stream.store == 'ram'
     nodes = []
-    for i, src in enumerate(srcs):
-        info = BeamformerInfo(config, name, src)
+    for i, src in enumerate(stream.tied_array_channelised_voltage):
         nodes.append(_make_beamformer_engineering_pol(
-            g, stream, stream.tied_array_channelised_voltage,
-            'bf_ingest.{}.{}'.format(name, i + 1), src, ram, i, develop))
+            g, configuration, stream, src,
+            'bf_ingest.{}.{}'.format(stream.name, i + 1), ram, i))
     return nodes
 
 
@@ -1251,8 +1210,8 @@ def build_logical_graph(configuration: Configuration,
                 input_multicast.append(node)
 
     # cam2telstate node (optional: if we're simulating, we don't need it)
-    cam_http = configuration.by_class(product_config.CamHttpStream)
     cam2telstate: Optional[scheduler.LogicalNode] = None
+    cam_http = configuration.by_class(product_config.CamHttpStream)
     if cam_http:
         cam2telstate = _make_cam2telstate(g, configuration, cam_http[0])
         for node in input_multicast:
@@ -1273,13 +1232,14 @@ def build_logical_graph(configuration: Configuration,
         if stream.continuum_factor == 1:
             for stream2 in configuration.by_class(product_config.VisStream):
                 if (stream2 not in l0_done and stream2.continuum_factor > 1
-                    and stream2.compatible(stream)):
-                        _adjust_ingest_output_channels(config, [name, name2])  # TODO
-                        _make_ingest(g, configuration, stream, stream2)
-                        _make_timeplot_correlator(g, configuration, stream)
-                        l0_done.add(stream)
-                        l0_done.add(stream2)
-                        break
+                        and stream2.compatible(stream)):
+                    # TODO: restore this functionality
+                    # _adjust_ingest_output_channels(config, [name, name2])
+                    _make_ingest(g, configuration, stream, stream2)
+                    _make_timeplot_correlator(g, configuration, stream)
+                    l0_done.add(stream)
+                    l0_done.add(stream2)
+                    break
 
     l0_spectral_only = False
     l0_continuum_only = False
@@ -1289,7 +1249,8 @@ def build_logical_graph(configuration: Configuration,
             l0_spectral_only = True
         else:
             l0_continuum_only = True
-        _adjust_ingest_output_channels(configuration, [stream])
+        # TODO: restore this functionality
+        # _adjust_ingest_output_channels(configuration, [stream])
         if is_spectral:
             _make_ingest(g, configuration, stream, None)
             _make_timeplot_correlator(g, configuration, stream)
@@ -1304,7 +1265,6 @@ def build_logical_graph(configuration: Configuration,
             _make_vis_writer(g, configuration, stream, 'archive', local=True)
 
     for stream in configuration.by_class(product_config.CalStream):
-        src = stream.vis
         # Check for all corresponding flags outputs
         flags = []
         for flags_stream in configuration.by_class(product_config.FlagsStream):
@@ -1387,15 +1347,15 @@ def build_logical_graph(configuration: Configuration,
     return g
 
 
-def _continuum_imager_cpus(config):
-    return 24 if not is_develop(config) else 2
+def _continuum_imager_cpus(configuration: Configuration):
+    return 24 if not configuration.options.develop else 2
 
 
-def _spectral_imager_cpus(config):
+def _spectral_imager_cpus(configuration: Configuration):
     # Fairly arbitrary number, based on looking at typical usage during a run.
     # In practice the number of spectral imagers per box is limited by GPUs,
     # so the value doesn't make a huge difference.
-    return 2 if not is_develop(config) else 1
+    return 2 if not configuration.options.develop else 1
 
 
 def _stream_url(capture_block_id, stream_name):

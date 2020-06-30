@@ -27,6 +27,7 @@ from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, device_status_to_sensor_status, ProductState)
 from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
                     POSTPROCESSING_TIME_BUCKETS, POSTPROCESSING_REL_BUCKETS)
+from .product_config import Configuration
 
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
@@ -261,9 +262,9 @@ class CaptureBlock:
     """A capture block is book-ended by a capture-init and a capture-done,
     although processing on it continues after the capture-done."""
 
-    def __init__(self, name: str, config: dict) -> None:
+    def __init__(self, name: str, configuration: Configuration) -> None:
         self.name = name
-        self.config = config
+        self.configuration = configuration
         self._state = CaptureBlockState.INITIALISING
         self.postprocess_task: Optional[asyncio.Task] = None
         self.postprocess_physical_graph: Optional[networkx.MultiDiGraph] = None
@@ -323,7 +324,7 @@ class SDPSubarrayProductBase:
     forced deconfiguration to abort them.
     """
     def __init__(self, sched: Optional[scheduler.Scheduler],
-                 configuration: product_config.Configuration,
+                 configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver,
                  subarray_product_id: str,
@@ -336,7 +337,7 @@ class SDPSubarrayProductBase:
         self.resolver = resolver
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
-        self.logical_graph = generator.build_logical_graph(configuration)
+        self.logical_graph = generator.build_logical_graph(configuration, config_dict)
         self.telstate_endpoint = ""
         self.telstate: Optional[katsdptelstate.TelescopeState] = None
         self.capture_blocks: Dict[str, CaptureBlock] = {}  # live capture blocks, indexed by name
@@ -691,14 +692,14 @@ class SDPSubarrayProductBase:
         if task.done():
             await task
 
-    async def capture_init(self, capture_block_id: str, config: dict) -> str:
+    async def capture_init(self, capture_block_id: str, configuration: Configuration) -> str:
         self._fail_if_busy()
         if self.state != ProductState.IDLE:
             raise FailReply('Subarray product {} is currently in state {}, not IDLE as expected. '
                             'Cannot be inited.'.format(self.subarray_product_id, self.state.name))
         logger.info('Using capture block ID %s', capture_block_id)
 
-        capture_block = CaptureBlock(capture_block_id, config)
+        capture_block = CaptureBlock(capture_block_id, configuration)
         task = asyncio.get_event_loop().create_task(self._capture_init(capture_block))
         self._async_task = task
         try:
@@ -878,7 +879,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         return networkx.relabel_nodes(logical_graph, mapping)
 
     def __init__(self, sched: scheduler.Scheduler,
-                 configuration: product_config.Configuration,
+                 configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver, subarray_product_id: str,
                  sdp_controller: 'DeviceServer', telstate_name: str = 'telstate') -> None:
@@ -1001,7 +1002,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING
             logical_graph = generator.build_postprocess_logical_graph(
-                capture_block.config, capture_block.name, self.telstate)
+                capture_block.configuration, capture_block.name, self.telstate)
             physical_graph = self._instantiate_physical_graph(
                 logical_graph, capture_block.name)
             capture_block.postprocess_physical_graph = physical_graph
@@ -1333,7 +1334,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.master_controller.close()
         await self.master_controller.wait_closed()
 
-    async def configure_product(self, name: str, configuration: product_config.Configuration,
+    async def configure_product(self, name: str, configuration: Configuration,
                                 config_dict: dict) -> None:
         """Configure a subarray product in response to a request.
 
@@ -1416,7 +1417,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply('Already configured or configuring')
         try:
             config_dict = load_json_dict(config)
-            configuration = await product_config.Configuration.from_config(config_dict)
+            configuration = await Configuration.from_config(config_dict)
         except product_config.SensorFailure as exc:
             retmsg = f"Error retrieving sensor data from CAM: {exc}"
             logger.error(retmsg)
@@ -1464,7 +1465,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         config_dict = product_config.override(product.config_dict, overrides)
         # Re-validate, since the override may have broken it
         try:
-            configuration = await product_config.Configuration.from_config(config_dict)
+            configuration = await Configuration.from_config(config_dict)
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = f"Overrides make the config invalid: {error}"
             logger.error(retmsg)

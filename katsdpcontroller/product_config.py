@@ -451,6 +451,11 @@ class CbfPerChannelStream(Stream):
         return self.antenna_channelised_voltage.bandwidth
 
     @property
+    def centre_frequency(self) -> float:
+        """Sky centre frequency, in Hz."""
+        return self.antenna_channelised_voltage.centre_frequency
+
+    @property
     def adc_sample_rate(self):
         """ADC sample rate, in Hz."""
         return self.antenna_channelised_voltage.adc_sample_rate
@@ -954,7 +959,7 @@ class CalStream(Stream):
         return cls(
             name, src_streams,
             parameters=config.get('parameters', {}),
-            buffer_time=config.get('buffer_time', DEFAULT_CAL_BUFFER_TIME),  # TODO: make constant
+            buffer_time=config.get('buffer_time', DEFAULT_CAL_BUFFER_TIME),
             max_scans=config.get('max_scans', DEFAULT_CAL_MAX_SCANS)
         )
 
