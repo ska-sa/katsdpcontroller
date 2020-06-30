@@ -1095,6 +1095,13 @@ class SpectralImageStream(ImageStream):
     def n_channels(self) -> int:
         return self.output_channels[1] - self.output_channels[0]
 
+    @property
+    def continuum(self) -> Optional[ContinuumImageStream]:
+        try:
+            return cast(ContinuumImageStream, self.src_streams[1])
+        except IndexError:
+            return None
+
     @classmethod
     def from_config(cls,
                     options: Options,

@@ -998,6 +998,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
     async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
+        assert self.telstate is not None
         try:
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING
