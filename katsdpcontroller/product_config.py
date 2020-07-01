@@ -401,7 +401,7 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
                 antennas.append(katpoint.Antenna(desc))
             except Exception as exc:
                 # katpoint can throw all kinds of exceptions
-                raise ValueError('Invalid antenna description {desc!r}: {exc}') from exc
+                raise ValueError(f'Invalid antenna description {desc!r}: {exc}') from exc
         return cls(
             name, src_streams,
             antennas=antennas,
