@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "3.0"]
+            "enum": ["2.4", "2.5", "2.6", "3.0"]
         }
     }
 }
@@ -77,10 +77,8 @@
                 {
                     "type": "object",
                     "properties": {
-{% if version >= "2.4" %}
                         "clock_ratio": {"$ref": "#/definitions/clock_ratio"},
                         "start_time": {"$ref": "#/definitions/positive_number"},
-{% endif %}
                         "sources": {
                             "type": "array",
                             "items": {"type": "string"}
@@ -267,12 +265,8 @@
                                 "sdp.vis",
                                 "sdp.cal",
                                 "sdp.flags",
-{% if version >= "2.2" %}
                                 "sdp.continuum_image",
-{% endif %}
-{% if version >= "2.4" %}
                                 "sdp.spectral_image",
-{% endif %}
                                 "sdp.beamformer",
                                 "sdp.beamformer_engineering"
                             ]
@@ -374,9 +368,7 @@
                                         "additionalProperties": {"type": "string"}
                                     },
 {% endif %}
-{% if version >= "2.1" %}
                                     "max_scans": {"$ref": "#/definitions/positive_integer"},
-{% endif %}
                                     "buffer_time": {"$ref": "#/definitions/positive_number"}
                                 },
                                 "required": ["src_streams"],
@@ -540,9 +532,7 @@
                         "additionalProperties": false,
                         "properties": {
                             "config": { "type": "object" },
-{% if version >= "2.3" %}
                             "host": { "type": "string" },
-{% endif %}
                             "taskinfo": { "type": "object" }
                         }
                     }

@@ -1342,7 +1342,6 @@ def _validate(config):
     if inputs and not have_cam_http:
         raise ValueError('A cam.http stream is required if there are any inputs')
 
-    has_flags = set()
     for name, output in outputs.items():
         try:
             # Names of inputs and outputs must be disjoint
@@ -1362,14 +1361,6 @@ def _validate(config):
                         raise ValueError('calibration ({}) has wrong type {}'
                                          .format(calibration,
                                                  outputs[calibration]['type']))
-                if version < '2.2':
-                    if calibration in has_flags:
-                        raise ValueError('calibration ({}) already has a flags output'
-                                         .format(calibration))
-                    if output['src_streams'] != outputs[calibration]['src_streams']:
-                        raise ValueError('calibration ({}) has different src_streams'
-                                         .format(calibration))
-                    has_flags.add(calibration)
 
         except ValueError as error:
             raise ValueError('{}: {}'.format(name, error)) from error
@@ -1437,8 +1428,7 @@ def validate_capture_block(product, capture_block):
 def _upgrade(config):
     """Convert a config dictionary to the newest version and return it.
 
-    It is assumed to already have passed :func:`_validate`. The following
-    changes are made:
+    It is assumed to already have passed :func:`_validate`.
     """
     config = copy.deepcopy(config)
     config.setdefault('inputs', {})
