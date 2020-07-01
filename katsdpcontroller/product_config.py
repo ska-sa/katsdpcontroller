@@ -430,11 +430,12 @@ class CbfPerChannelStream(Stream):
 
         if self.n_channels % self.n_endpoints != 0:
             raise ValueError(
-                f'n_channels ({self.n_channels}) not a multiple of endpoints ({self.n_endpoints})')
+                f'n_channels ({self.n_channels}) is not '
+                f'a multiple of endpoints ({self.n_endpoints})')
         if self.n_channels_per_endpoint % self.n_channels_per_substream != 0:
             raise ValueError(
-                f'channels per endpoints ({self.n_channels_per_endpoint}) '
-                f'not a multiple of channels per substream ({self.n_channels_per_substream})'
+                f'channels per endpoint ({self.n_channels_per_endpoint}) '
+                f'is not a multiple of channels per substream ({self.n_channels_per_substream})'
             )
 
     @property
