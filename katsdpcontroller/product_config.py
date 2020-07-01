@@ -204,6 +204,29 @@ class Options:
         )
 
 
+class Simulation:
+    def __init__(self, *, start_time: Optional[float] = None, clock_ratio: float = 1.0,
+                 sources: Iterable[katpoint.Target] = ()) -> None:
+        self.start_time = start_time
+        self.clock_ratio = clock_ratio
+        self.sources = list(sources)
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> 'Simulation':
+        sources = []
+        for i, desc in enumerate(config.get('sources', [])):
+            try:
+                source = katpoint.Target(desc)
+            except Exception as exc:
+                raise ValueError(f'Invalid source {i}: {exc}') from exc
+            sources.append(source)
+        return Simulation(
+            start_time=config.get('start_time'),
+            clock_ratio=config.get('clock_ratio', 1.0),
+            sources=sources
+        )
+
+
 class Stream:
     """Base class for all streams."""
 
@@ -1141,29 +1164,6 @@ class SpectralImageStream(ImageStream):
         )
 
 
-class Simulation:
-    def __init__(self, *, start_time: Optional[float] = None, clock_ratio: float = 1.0,
-                 sources: Iterable[katpoint.Target] = ()) -> None:
-        self.start_time = start_time
-        self.clock_ratio = clock_ratio
-        self.sources = list(sources)
-
-    @classmethod
-    def from_config(cls, config: Mapping[str, Any]) -> 'Simulation':
-        sources = []
-        for i, desc in enumerate(config.get('sources', [])):
-            try:
-                source = katpoint.Target(desc)
-            except Exception as exc:
-                raise ValueError(f'Invalid source {i}: {exc}') from exc
-            sources.append(source)
-        return Simulation(
-            start_time=config.get('start_time'),
-            clock_ratio=config.get('clock_ratio', 1.0),
-            sources=sources
-        )
-
-
 STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     'cbf.antenna_channelised_voltage': AntennaChannelisedVoltageStream,
     'cbf.tied_array_channelised_voltage': TiedArrayChannelisedVoltageStream,
@@ -1393,10 +1393,11 @@ def _recursive_diff(a, b, prefix=''):
     return None
 
 
-def validate_capture_block(product, capture_block):
+def validate_capture_block(product: Dict[str, Any], capture_block: Dict[str, Any]):
     """Check that a capture block config is valid for a subarray product.
 
-    Both parameters must have already been validated and normalised.
+    Both parameters must have already been validated, in that
+    :meth:`Configuration.from_config` must have been successful.
 
     Parameters
     ----------
