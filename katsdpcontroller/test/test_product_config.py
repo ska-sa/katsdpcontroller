@@ -1,66 +1,91 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
-import jsonschema
 import copy
 import logging
 from unittest import mock
-import asynctest
 
+import asynctest
+import jsonschema
+import yarl
 import katportalclient
-from nose.tools import assert_equal, assert_in, assert_raises, assert_logs
+from nose.tools import assert_equal, assert_in, assert_raises, assert_raises_regex, assert_logs
 
 from .. import product_config
 from . import fake_katportalclient
 
 
 class TestRecursiveDiff:
-    def test_base_add(self):
+    """Test :meth:`~katsdpcontroller.product_config.override`."""
+
+    def test_base_add(self) -> None:
         out = product_config._recursive_diff({'a': 1}, {'a': 1, 'b': 2})
         assert_equal(out, 'b added')
 
-    def test_base_remove(self):
+    def test_base_remove(self) -> None:
         out = product_config._recursive_diff({'a': 1, 'b': 2}, {'a': 1})
         assert_equal(out, 'b removed')
 
-    def test_base_change(self):
+    def test_base_change(self) -> None:
         out = product_config._recursive_diff({'a': 1, 'b': 2}, {'a': 1, 'b': 3})
         assert_equal(out, 'b changed from 2 to 3')
 
-    def test_nested_add(self):
+    def test_nested_add(self) -> None:
         out = product_config._recursive_diff({'x': {}}, {'x': {'a': 1}})
         assert_equal(out, 'x.a added')
 
-    def test_nested_remove(self):
+    def test_nested_remove(self) -> None:
         out = product_config._recursive_diff({'x': {'a': 1}}, {'x': {}})
         assert_equal(out, 'x.a removed')
 
-    def test_nested_change(self):
+    def test_nested_change(self) -> None:
         out = product_config._recursive_diff({'x': {'a': 1, 'b': 2}}, {'x': {'a': 1, 'b': 3}})
         assert_equal(out, 'x.b changed from 2 to 3')
 
 
 class TestOverride:
-    """Tests for :func:`~katsdpcontroller.product_config.override`"""
+    """Test :meth:`~katsdpcontroller.product_config.override`."""
 
-    def test_add(self):
+    def test_add(self) -> None:
         out = product_config.override({"a": 1}, {"b": 2})
         assert_equal({"a": 1, "b": 2}, out)
 
-    def test_remove(self):
+    def test_remove(self) -> None:
         out = product_config.override({"a": 1, "b": 2}, {"b": None})
         assert_equal({"a": 1}, out)
         out = product_config.override(out, {"b": None})  # Already absent
         assert_equal({"a": 1}, out)
 
-    def test_replace(self):
+    def test_replace(self) -> None:
         out = product_config.override({"a": 1, "b": 2}, {"b": 3})
         assert_equal({"a": 1, "b": 3}, out)
 
-    def test_recurse(self):
+    def test_recurse(self) -> None:
         orig = {"a": {"aa": 1, "ab": 2}, "b": {"ba": {"c": 10}, "bb": [5]}}
         override = {"a": {"aa": [], "ab": None, "ac": 3}, "b": {"bb": [1, 2]}}
         out = product_config.override(orig, override)
         assert_equal({"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}, out)
+
+
+class TestUrlNEndpoints:
+    """Test :meth:`~katsdpcontroller.product_config._url_n_endpoints`."""
+
+    def test_simple(self) -> None:
+        assert_equal(product_config._url_n_endpoints('spead://239.1.2.3+7:7148'), 8)
+        assert_equal(product_config._url_n_endpoints('spead://239.1.2.3:7148'), 1)
+
+    def test_yarl_url(self) -> None:
+        assert_equal(product_config._url_n_endpoints(yarl.URL('spead://239.1.2.3+7:7148')), 8)
+        assert_equal(product_config._url_n_endpoints(yarl.URL('spead://239.1.2.3:7148')), 1)
+
+    def test_not_spead(self) -> None:
+        with assert_raises_regex(ValueError, 'non-spead URL http://239.1.2.3:7148'):
+            product_config._url_n_endpoints('http://239.1.2.3:7148')
+
+    def test_missing_part(self) -> None:
+        with assert_raises_regex(ValueError, 'URL spead:/path has no host'):
+            product_config._url_n_endpoints('spead:/path')
+        with assert_raises_regex(ValueError, 'URL spead://239.1.2.3 has no port'):
+            product_config._url_n_endpoints('spead://239.1.2.3')
 
 
 class Fixture(asynctest.TestCase):
