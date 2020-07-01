@@ -563,7 +563,7 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
         self.url = url
         self.instrument_dev_name = instrument_dev_name
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
@@ -612,7 +612,7 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
             bits_per_sample=32
         )
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
@@ -687,7 +687,7 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
         self.url = url
         self.instrument_dev_name = instrument_dev_name
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
@@ -732,7 +732,7 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
             bits_per_sample=8
         )
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
