@@ -3,12 +3,16 @@
 import copy
 import logging
 from unittest import mock
+from typing import Dict, Any
 
 import asynctest
 import jsonschema
 import yarl
 import katportalclient
-from nose.tools import assert_equal, assert_in, assert_raises, assert_raises_regex, assert_logs
+from nose.tools import (
+    assert_equal, assert_in, assert_is, assert_is_none,
+    assert_raises, assert_raises_regex, assert_logs
+)
 
 from .. import product_config
 from . import fake_katportalclient
@@ -86,6 +90,272 @@ class TestUrlNEndpoints:
             product_config._url_n_endpoints('spead:/path')
         with assert_raises_regex(ValueError, 'URL spead://239.1.2.3 has no port'):
             product_config._url_n_endpoints('spead://239.1.2.3')
+
+
+class TestNormaliseOutputChannels:
+    """Test :meth:`~katsdpcontroller.product_config.normalise_output_channels`."""
+
+    def test_given(self) -> None:
+        assert_equal(product_config._normalise_output_channels(100, (20, 80)), (20, 80))
+
+    def test_absent(self) -> None:
+        assert_equal(product_config._normalise_output_channels(100, None), (0, 100))
+
+    def test_empty(self) -> None:
+        with assert_raises_regex(ValueError, r'output_channels is empty \(50:50\)'):
+            product_config._normalise_output_channels(100, (50, 50))
+        with assert_raises_regex(ValueError, r'output_channels is empty \(60:50\)'):
+            product_config._normalise_output_channels(100, (60, 50))
+
+    def test_overflow(self) -> None:
+        with assert_raises_regex(ValueError,
+                                 r'output_channels \(0:101\) overflows valid range 0:100'):
+            product_config._normalise_output_channels(100, (0, 101))
+        with assert_raises_regex(ValueError,
+                                 r'output_channels \(-1:1\) overflows valid range 0:100'):
+            product_config._normalise_output_channels(100, (-1, 1))
+
+
+class TestServiceOverride:
+    """Test :class:`~katsdpcontroller.product_config.ServiceOverride`."""
+
+    def test_from_config(self) -> None:
+        config = {
+            'config': {'hello': 'world'},
+            'taskinfo': {'image': 'test'},
+            'host': 'test.invalid'
+        }
+        override = product_config.ServiceOverride.from_config(config)
+        assert_equal(override.config, config['config'])
+        assert_equal(override.taskinfo, config['taskinfo'])
+        assert_equal(override.host, config['host'])
+
+    def test_defaults(self) -> None:
+        override = product_config.ServiceOverride.from_config({})
+        assert_equal(override.config, {})
+        assert_equal(override.taskinfo, {})
+        assert_equal(override.host, None)
+
+
+class TestOptions:
+    """Test :class:`~katsdpcontroller.product_config.Options`."""
+
+    def test_from_config(self) -> None:
+        config = {
+            'develop': True,
+            'wrapper': 'http://test.invalid/wrapper.sh',
+            'service_overrides': {
+                'service1': {
+                    'host': 'testhost'
+                }
+            }
+        }
+        options = product_config.Options.from_config(config)
+        assert_equal(options.develop, config['develop'])
+        assert_equal(options.wrapper, config['wrapper'])
+        assert_equal(list(options.service_overrides.keys()), ['service1'])
+        assert_equal(options.service_overrides['service1'].host, 'testhost')
+
+    def test_defaults(self) -> None:
+        options = product_config.Options.from_config({})
+        assert_equal(options.develop, False)
+        assert_equal(options.wrapper, None)
+        assert_equal(options.service_overrides, {})
+
+
+class TestSimulation:
+    """Test :class:`~katsdpcontroller.product_config.Simulation`."""
+
+    def test_from_config(self) -> None:
+        config = {
+            'sources': [
+                'PKS 1934-63, radec, 19:39:25.03, -63:42:45.7, (200.0 12000.0 -11.11 7.777 -1.231)',
+                'PKS 0408-65, radec, 4:08:20.38, -65:45:09.1, (800.0 8400.0 -3.708 3.807 -0.7202)'
+            ],
+            'start_time': 1234567890.0,
+            'clock_ratio': 2.0
+        }
+        sim = product_config.Simulation.from_config(config)
+        assert_equal(sim.start_time, 1234567890.0)
+        assert_equal(sim.clock_ratio, 2.0)
+        assert_equal(len(sim.sources), 2)
+        assert_equal(sim.sources[0].name, 'PKS 1934-63')
+        assert_equal(sim.sources[1].name, 'PKS 0408-65')
+
+    def test_defaults(self) -> None:
+        sim = product_config.Simulation.from_config({})
+        assert_is_none(sim.start_time)
+        assert_equal(sim.clock_ratio, 1.0)
+        assert_equal(sim.sources, [])
+
+    def test_invalid_source(self) -> None:
+        with assert_raises_regex(ValueError, 'Invalid source 1: .* must have at least two fields'):
+            product_config.Simulation.from_config({'sources': ['blah']})
+
+
+class TestCamHttpStream:
+    """Test :class:`~katsdpcontroller.product_config.CamHttpStream`."""
+
+    def test_from_config(self) -> None:
+        config = {
+            'type': 'cam.http',
+            'url': 'http://test.invalid'
+        }
+        cam_http = product_config.CamHttpStream.from_config(
+            product_config.Options(), 'cam_data', config, [], {}
+        )
+        assert_equal(cam_http.name, 'cam_data')
+        assert_equal(cam_http.src_streams, [])
+        assert_equal(cam_http.url, yarl.URL('http://test.invalid'))
+
+
+class TestAntennaChannelisedVoltageStream:
+    """Test :class:`~katsdpcontroller.product_config.AntennaChannelisedVoltageStream`."""
+
+    def test_from_config(self) -> None:
+        config = {
+            'type': 'cbf.antenna_channelised_voltage',
+            'url': 'spead://239.0.0.0+7:7148',
+            'antennas': ['m000', 'm001'],
+            'instrument_dev_name': 'narrow1'
+        }
+        sensors = {
+            'band': 'l',
+            'adc_sample_rate': 1712e6,
+            'n_chans': 32768,
+            'bandwidth': 107e6,
+            'centre_frequency': 1284e6,
+            'n_samples_between_spectra': 524288
+        }
+        acv = product_config.AntennaChannelisedVoltageStream.from_config(
+            product_config.Options(), 'narrow1_acv', config, [], sensors
+        )
+        assert_equal(acv.name, 'narrow1_acv')
+        assert_equal(acv.src_streams, [])
+        assert_equal(acv.url, yarl.URL('spead://239.0.0.0+7:7148'))
+        assert_equal(acv.antennas, ['m000', 'm001'])
+        assert_equal(acv.band, 'l')
+        assert_equal(acv.n_channels, 32768)
+        assert_equal(acv.bandwidth, 107e6)
+        assert_equal(acv.centre_frequency, 1284e6)
+        assert_equal(acv.adc_sample_rate, 1712e6)
+        assert_equal(acv.n_samples_between_spectra, 524288)
+        assert_equal(acv.instrument_dev_name, 'narrow1')
+
+
+class TestSimAntennaChannelisedVoltageStream:
+    """Test :class:`~katsdpcontroller.product_config.SimAntennaChannelisedVoltageStream`."""
+
+    def setup(self) -> None:
+        self.config: Dict[str, Any] = {
+            'type': 'sim.cbf.antenna_channelised_voltage',
+            'antennas': [
+                'm000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14',   # noqa: E501
+                'm002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14'             # noqa: E501
+            ],
+            'band': 'l',
+            'centre_frequency': 1284e6,
+            'bandwidth': 107e6,
+            'adc_sample_rate': 1712e6,
+            'n_chans': 32768
+        }
+
+    def test_from_config(self) -> None:
+        acv = product_config.SimAntennaChannelisedVoltageStream.from_config(
+            product_config.Options(), 'narrow1_acv', self.config, [], {}
+        )
+        assert_equal(acv.name, 'narrow1_acv')
+        assert_equal(acv.src_streams, [])
+        assert_equal(acv.antennas, ['m000', 'm002'])
+        assert_equal(acv.band, 'l')
+        assert_equal(acv.n_channels, 32768)
+        assert_equal(acv.bandwidth, 107e6)
+        assert_equal(acv.centre_frequency, 1284e6)
+        assert_equal(acv.adc_sample_rate, 1712e6)
+        assert_equal(acv.n_samples_between_spectra, 524288)
+
+    def test_bad_bandwidth_ratio(self) -> None:
+        with assert_raises_regex(ValueError, 'not a multiple of bandwidth'):
+            self.config['bandwidth'] = 108e6
+            product_config.SimAntennaChannelisedVoltageStream.from_config(
+                product_config.Options(), 'narrow1_acv', self.config, [], {}
+            )
+
+    def test_bad_antenna_description(self) -> None:
+        with assert_raises_regex(ValueError, "Invalid antenna description 'bad antenna': "):
+            self.config['antennas'][0] = 'bad antenna'
+            product_config.SimAntennaChannelisedVoltageStream.from_config(
+                product_config.Options(), 'narrow1_acv', self.config, [], {}
+            )
+
+
+class TestBaselineCorrelationProductsStream:
+    """Test :class:`katsdpcontroller.product_config.BaselineCorrelationProductsStream`."""
+
+    def setup(self) -> None:
+        self.acv = product_config.AntennaChannelisedVoltageStream(
+            'narrow1_acv', [],
+            url=yarl.URL('spead2://239.0.0.0+7:7148'),
+            antennas=['m000', 'm002'],
+            band='l',
+            n_channels=32768,
+            bandwidth=107e6,
+            adc_sample_rate=1712e6,
+            centre_frequency=1284e6,
+            n_samples_between_spectra=524288,
+            instrument_dev_name='narrow1'
+        )
+        self.config = {
+            'type': 'cbf.baseline_correlation_products',
+            'src_streams': ['narrow1_acv'],
+            'url': 'spead://239.1.0.0+7:7148',
+            'instrument_dev_name': 'narrow2'
+        }
+        self.sensors = {
+            'int_time': 0.5,
+            'n_bls': 40,
+            'xeng_out_bits_per_sample': 32,
+            'n_chans_per_substream': 2048
+        }
+
+    def test_from_config(self) -> None:
+        bcp = product_config.BaselineCorrelationProductsStream.from_config(
+            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+        )
+        assert_equal(bcp.name, 'narrow2_bcp')
+        assert_equal(bcp.src_streams, [self.acv])
+        assert_equal(bcp.int_time, 0.5)
+        assert_equal(bcp.n_baselines, 40)
+        assert_equal(bcp.n_vis, 40 * 32768)
+        assert_equal(bcp.size, 40 * 32768 * 8)
+        assert_is(bcp.antenna_channelised_voltage, self.acv)
+        assert_equal(bcp.antennas, ['m000', 'm002'])
+        assert_equal(bcp.n_channels, 32768)
+        assert_equal(bcp.n_channels_per_endpoint, 4096)
+        assert_equal(bcp.n_substreams, 16)
+        assert_equal(bcp.n_antennas, 2)
+        assert_equal(bcp.bandwidth, 107e6)
+        assert_equal(bcp.centre_frequency, 1284e6)
+        assert_equal(bcp.adc_sample_rate, 1712e6)
+        assert_equal(bcp.n_samples_between_spectra, 524288)
+        assert_equal(bcp.net_bandwidth(1.0, 0), 40 * 32768 * 8 * 2 * 8)
+
+    def test_bad_endpoint_count(self) -> None:
+        self.config['url'] = 'spead://239.1.0.0+8:7148'
+        with assert_raises_regex(ValueError,
+                                 r'n_channels \(32768\) is not a multiple of endpoints \(9\)'):
+            product_config.BaselineCorrelationProductsStream.from_config(
+                product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+            )
+
+    def test_bad_substream_count(self) -> None:
+        self.config['url'] = 'spead://239.1.0.0+255:7148'
+        with assert_raises_regex(ValueError,
+                                 r'channels per endpoint \(128\) is not a multiple of '
+                                 r'channels per substream \(2048\)'):
+            product_config.BaselineCorrelationProductsStream.from_config(
+                product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+            )
 
 
 class Fixture(asynctest.TestCase):
