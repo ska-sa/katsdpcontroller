@@ -214,7 +214,7 @@ class Simulation:
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> 'Simulation':
         sources = []
-        for i, desc in enumerate(config.get('sources', [])):
+        for i, desc in enumerate(config.get('sources', []), 1):
             try:
                 source = katpoint.Target(desc)
             except Exception as exc:
