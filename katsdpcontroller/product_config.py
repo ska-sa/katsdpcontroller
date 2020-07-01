@@ -64,7 +64,7 @@ def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
     if url.scheme != 'spead':
         raise ValueError(f'non-spead URL {url}')
     if url.host is None:
-        raise ValueError(f'URL {url} has no port')
+        raise ValueError(f'URL {url} has no host')
     if url.port is None:
         raise ValueError(f'URL {url} has no port')
     return len(endpoint_list_parser(None)(url.host))
