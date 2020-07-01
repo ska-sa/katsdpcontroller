@@ -317,6 +317,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
     ]
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 url: yarl.URL,
                  antennas: Iterable[str],
                  band: str,
                  n_channels: int,
@@ -335,6 +336,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
             centre_frequency=centre_frequency,
             n_samples_between_spectra=n_samples_between_spectra
         )
+        self.url = url
         self.instrument_dev_name = instrument_dev_name
 
     @classmethod
@@ -346,6 +348,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
                     sensors: Mapping[str, Any]) -> 'AntennaChannelisedVoltageStream':
         return cls(
             name, src_streams,
+            url=yarl.URL(config['url']),
             antennas=config['antennas'],
             band=sensors['band'],
             n_channels=sensors['n_chans'],
@@ -542,8 +545,8 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
     _valid_src_types: ClassVar[_ValidTypes] = {'cbf.antenna_channelised_voltage'}
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 int_time: float,
                  url: yarl.URL,
+                 int_time: float,
                  n_channels_per_substream: int,
                  n_baselines: int,
                  bits_per_sample: int,
