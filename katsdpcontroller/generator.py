@@ -288,7 +288,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
         }
         sources = configuration.simulation.sources
         if sources:
-            conf['cbf_sim_sources'] = [{'description': str(s)} for s in sources]
+            conf['cbf_sim_sources'] = [{'description': s.description} for s in sources]
         if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
             conf.update({
                 'cbf_int_time': stream.int_time,
@@ -300,7 +300,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
                 'beamformer_bits': stream.bits_per_sample
             })
         conf['cbf_center_freq'] = float(stream.centre_frequency)
-        conf['cbf_antennas'] = [{'description': str(ant)}
+        conf['cbf_antennas'] = [{'description': ant.description}
                                 for ant in stream.antenna_channelised_voltage.antenna_objects]
         return conf
 
