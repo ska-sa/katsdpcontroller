@@ -175,7 +175,7 @@ class Dashboard:
         async def top_level(n_intervals):
             if sdp_controller.product is None:
                 return {}, {'display': 'none'}, '', '', [], [], []
-            config = json.dumps(sdp_controller.product.config, indent=2, sort_keys=True)
+            config = json.dumps(sdp_controller.product.config_dict, indent=2, sort_keys=True)
 
             tasks = _get_tasks(sdp_controller.product)
             task_data = [
