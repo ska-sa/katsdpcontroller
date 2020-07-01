@@ -545,6 +545,7 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
         self.instrument_dev_name = instrument_dev_name
 
     if TYPE_CHECKING:
+        # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
 
@@ -593,6 +594,7 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
         )
 
     if TYPE_CHECKING:
+        # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
 
@@ -667,6 +669,7 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
         self.instrument_dev_name = instrument_dev_name
 
     if TYPE_CHECKING:
+        # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
 
@@ -711,6 +714,7 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
         )
 
     if TYPE_CHECKING:
+        # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
 
