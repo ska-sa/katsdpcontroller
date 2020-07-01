@@ -10,7 +10,8 @@ from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 from typing import (
     Tuple, List, Dict, Mapping, AbstractSet, Sequence, Iterable,
-    Union, ClassVar, Type, TypeVar, Optional, Any, AnyStr, cast
+    Union, ClassVar, Type, TypeVar, Optional, Any, AnyStr, cast,
+    TYPE_CHECKING
 )
 
 import networkx
@@ -543,6 +544,10 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
         self.url = url
         self.instrument_dev_name = instrument_dev_name
 
+    if TYPE_CHECKING:
+        @property
+        def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
+
     @classmethod
     def from_config(cls,
                     options: Options,
@@ -586,6 +591,10 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
             n_baselines=n_antennas * (n_antennas + 1) * 2,
             bits_per_sample=32
         )
+
+    if TYPE_CHECKING:
+        @property
+        def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
 
     @classmethod
     def from_config(cls,
@@ -657,6 +666,10 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
         self.url = url
         self.instrument_dev_name = instrument_dev_name
 
+    if TYPE_CHECKING:
+        @property
+        def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStream: ...
+
     @classmethod
     def from_config(cls,
                     options: Options,
@@ -696,6 +709,10 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
             spectra_per_heap=spectra_per_heap,
             bits_per_sample=8
         )
+
+    if TYPE_CHECKING:
+        @property
+        def antenna_channelised_voltage(self) -> SimAntennaChannelisedVoltageStream: ...
 
     @classmethod
     def from_config(cls,

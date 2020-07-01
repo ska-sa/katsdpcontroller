@@ -5,7 +5,7 @@ import time
 import copy
 import urllib.parse
 import os.path
-from typing import List, Dict, Tuple, Set, Sequence, Type, Union, Optional, Any
+from typing import List, Dict, Tuple, Set, Sequence, Type, Union, Optional, Any, TYPE_CHECKING
 
 import addict
 import networkx
@@ -24,6 +24,9 @@ from .tasks import (
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, bandwidth,
     Configuration)
+# Import just for type annotations, but avoid at runtime due to circular imports
+if TYPE_CHECKING:
+    from . import product_controller      # noqa
 
 
 def normalise_gpu_name(name):
@@ -271,7 +274,8 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             n_sim *= 2
     ibv = not configuration.options.develop
 
-    def make_cbf_simulator_config(task, resolver):
+    def make_cbf_simulator_config(task: SDPPhysicalTask,
+                                  resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'cbf_channels': stream.n_channels,
             'cbf_adc_sample_rate': stream.adc_sample_rate,
@@ -285,7 +289,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
         sources = configuration.simulation.sources
         if sources:
             conf['cbf_sim_sources'] = [{'description': str(s)} for s in sources]
-        if isinstance(stream, product_config.SimBaselineCorrelationProducts):
+        if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
             conf.update({
                 'cbf_int_time': stream.int_time,
                 'max_packet_size': 2088
@@ -293,15 +297,17 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
         else:
             conf.update({
                 'beamformer_timesteps': stream.spectra_per_heap,
-                'beamformer_bits': stream.out_bits_per_sample
+                'beamformer_bits': stream.bits_per_sample
             })
         conf['cbf_center_freq'] = float(stream.centre_frequency)
-        conf['cbf_antennas'] = [{'description': str(ant)} for ant in stream.antenna_objects]
+        conf['cbf_antennas'] = [{'description': str(ant)}
+                                for ant in stream.antenna_channelised_voltage.antenna_objects]
         return conf
 
     sim_group = LogicalGroup('sim.' + stream.name)
     g.add_node(sim_group, config=make_cbf_simulator_config)
-    multicast = find_node(g, 'multicast.' + stream.name)
+    multicast = LogicalMulticast('multicast.' + stream.name, stream.n_endpoints)
+    g.add_node(multicast)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
@@ -554,7 +560,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         'sd_continuum_factor': sd_continuum_factor,
         'sd_spead_rate': sd_spead_rate,
         'cbf_ibv': not develop,
-        'cbf_name': src,
+        'cbf_name': src.name,
         'servers': n_ingest,
         'antenna_mask': primary.antennas,
         'output_int_time': primary.int_time,
@@ -634,7 +640,9 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
             net_bandwidth += continuum.net_bandwidth()
         ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
 
-        def make_ingest_config(task, resolver, server_id=i):
+        def make_ingest_config(task: SDPPhysicalTask,
+                               resolver: 'product_controller.Resolver',
+                               server_id: int = i) -> Dict[str, Any]:
             conf = {
                 'cbf_interface': task.interfaces['cbf'].name,
                 'server_id': server_id
@@ -782,7 +790,9 @@ def _make_cal(g: networkx.MultiDiGraph,
         cal.transitions = CAPTURE_TRANSITIONS
         cal.final_state = CaptureBlockState.POSTPROCESSING
 
-        def make_cal_config(task, resolver, server_id=i):
+        def make_cal_config(task: SDPPhysicalTask,
+                            resolver: 'product_controller.Resolver',
+                            server_id: int = i) -> Dict[str, Any]:
             cal_config = {
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
@@ -793,7 +803,9 @@ def _make_cal(g: networkx.MultiDiGraph,
             }
             for flags_stream in cal_config['flags_streams']:
                 flags_stream['interface'] = task.interfaces['sdp_10g'].name
-                flags_stream['endpoints'] = str(task.flags_endpoints[flags_stream['name']])
+                flags_stream['endpoints'] = str(
+                        task.flags_endpoints[flags_stream['name']]   # type: ignore
+                )
             return cal_config
 
         g.add_node(cal, config=make_cal_config)
@@ -803,15 +815,18 @@ def _make_cal(g: networkx.MultiDiGraph,
         g.add_edge(cal, src_multicast,
                    depends_resolve=True, depends_ready=True, depends_init=True)
 
-        for flags_name, flags_multicast in flags_multicasts.items():
+        for flags_stream, flags_multicast in flags_multicasts.items():
             # A sneaky hack to capture the endpoint information for the flag
             # streams. This is used as a config= function, but instead of
             # returning config we just stash information in the task object
             # which is retrieved by make_cal_config.
-            def add_flags_endpoint(task, resolver, endpoint, name=flags_name):
+            def add_flags_endpoint(task: SDPPhysicalTask,
+                                   resolver: 'product_controller.Resolver',
+                                   endpoint: Endpoint,
+                                   name: str = flags_stream.name) -> Dict[str, Any]:
                 if not hasattr(task, 'flags_endpoints'):
-                    task.flags_endpoints = {}
-                task.flags_endpoints[name] = endpoint
+                    task.flags_endpoints = {}                # type: ignore
+                task.flags_endpoints[name] = endpoint        # type: ignore
                 return {}
 
             g.add_edge(cal, flags_multicast, port='spead', depends_resolve=True,
@@ -914,7 +929,8 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
         ])
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
-    def make_vis_writer_config(task, resolver):
+    def make_vis_writer_config(task: SDPPhysicalTask,
+                               resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'l0_name': stream.name,
             'l0_interface': task.interfaces['sdp_10g'].name,
@@ -998,7 +1014,8 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
         ]
     }
 
-    def make_flag_writer_config(task, resolver):
+    def make_flag_writer_config(task: SDPPhysicalTask,
+                                resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'flags_name': stream.name,
             'flags_interface': task.interfaces['sdp_10g'].name,
@@ -1121,7 +1138,9 @@ def _make_beamformer_engineering_pol(
     bf_ingest.wait_ports = ['port']
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
-    def make_beamformer_engineering_pol_config(task, resolver):
+    def make_beamformer_engineering_pol_config(
+            task: SDPPhysicalTask,
+            resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,

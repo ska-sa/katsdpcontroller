@@ -1979,6 +1979,10 @@ class PhysicalTask(PhysicalNode):
         Statistics collector of the scheduler. It is only set when
         the task is being launched.
     """
+
+    cores: typing.Dict[str, int]
+    ports: typing.Dict[str, int]
+
     def __init__(self, logical_task):
         super().__init__(logical_task)
         self.interfaces = {}
