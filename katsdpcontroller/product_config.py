@@ -52,7 +52,7 @@ def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
 
     Parameters
     ----------
-    url : str
+    url
         URL of the form spead://host[+N]:port
 
     Raises
