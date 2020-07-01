@@ -238,14 +238,6 @@ class Stream:
         self.name = name
         self.src_streams = list(src_streams)
 
-    def ancestors(self, stream_class: Type[_S]) -> List[_S]:
-        ans: List[_S] = []
-        for stream in self.src_streams:
-            if isinstance(stream, stream_class):
-                ans.append(stream)
-            ans.extend(stream.ancestors(stream_class))
-        return ans
-
     @classmethod
     @abstractmethod
     def from_config(cls: Type[_S],
