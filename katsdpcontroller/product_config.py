@@ -1106,9 +1106,9 @@ class ContinuumImageStream(ImageStream):
     _valid_src_types: ClassVar[_ValidTypes] = {'sdp.flags'}
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 uvblavg_parameters: Mapping[str, Any] = {},
-                 mfimage_parameters: Mapping[str, Any] = {},
-                 max_realtime: Optional[float] = None,
+                 uvblavg_parameters: Mapping[str, Any],
+                 mfimage_parameters: Mapping[str, Any],
+                 max_realtime: Optional[float],
                  min_time: float) -> None:
         super().__init__(name, src_streams, min_time=min_time)
         self.uvblavg_parameters = dict(uvblavg_parameters)

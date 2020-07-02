@@ -799,6 +799,67 @@ class TestFlagsStream:
             FlagsStream.from_config(Options(), 'flags', self.config, [vis, self.cal], {})
 
 
+def make_flags() -> FlagsStream:
+    cal = make_cal()
+    cont_vis = VisStream(
+        'sdp_l0_continuum', [cal.vis.baseline_correlation_products],
+        int_time=cal.vis.int_time,
+        continuum_factor=32,
+        excise=cal.vis.excise,
+        archive=False,
+        n_servers=cal.vis.n_servers
+    )
+    return FlagsStream(
+        'sdp_l0_continuum_flags', [cont_vis, cal],
+        rate_ratio=8.0,
+        archive=False
+    )
+
+
+class TestContinuumImageStream:
+    """Test :class:`~.ContinuumImageStream`."""
+
+    def setup(self) -> None:
+        self.flags = make_flags()
+        self.config: Dict[str, Any] = {
+            'type': 'sdp.continuum_image',
+            'src_streams': ['sdp_l0_continuum_flags'],
+            'uvblavg_parameters': {'foo': 'bar'},
+            'mfimage_parameters': {'abc': 123},
+            'max_realtime': 10000.0,
+            'min_time': 100.0
+        }
+
+    def test_from_config(self) -> None:
+        cont = ContinuumImageStream.from_config(
+            Options(), 'continuum_image', self.config, [self.flags], {}
+        )
+        assert_equal(cont.name, 'continuum_image')
+        # Make sure that the value is copied
+        self.config['uvblavg_parameters'].clear()
+        self.config['mfimage_parameters'].clear()
+        assert_equal(cont.uvblavg_parameters, {'foo': 'bar'})
+        assert_equal(cont.mfimage_parameters, {'abc': 123})
+        assert_equal(cont.max_realtime, 10000.0)
+        assert_equal(cont.min_time, 100.0)
+        assert_equal(cont.flags, self.flags)
+        assert_equal(cont.cal, self.flags.cal)
+        assert_equal(cont.vis, self.flags.vis)
+
+    def test_defaults(self) -> None:
+        del self.config['uvblavg_parameters']
+        del self.config['mfimage_parameters']
+        del self.config['max_realtime']
+        del self.config['min_time']
+        cont = ContinuumImageStream.from_config(
+            Options(), 'continuum_image', self.config, [self.flags], {}
+        )
+        assert_equal(cont.uvblavg_parameters, {})
+        assert_equal(cont.mfimage_parameters, {})
+        assert_equal(cont.max_realtime, None)
+        assert_equal(cont.min_time, product_config.DEFAULT_CONTINUUM_MIN_TIME)
+
+
 class Fixture(asynctest.TestCase):
     """Base class providing some sample config dicts"""
 
