@@ -45,6 +45,8 @@ BYTES_PER_FLAG = 1
 BYTES_PER_WEIGHT = 1
 #: Number of bytes per vis-flags-weights combination
 BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
+#: Alignment constraint for `int_time` in katcbfsim
+KATCBFSIM_SPECTRA_PER_HEAP = 256
 
 
 def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
@@ -603,6 +605,11 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
         else:
             ncps = acv.n_channels // n_endpoints
         n_antennas = len(acv.antennas)
+        # Round the int_time the same way katcbfsim does, so that we have
+        # an accurate value.
+        heap_time = acv.n_channels / acv.bandwidth * KATCBFSIM_SPECTRA_PER_HEAP
+        acc_heaps = max(1, round(int_time / heap_time))
+        int_time = acc_heaps * heap_time
         super().__init__(
             name, src_streams,
             int_time=int_time,
@@ -647,7 +654,6 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
             bits_per_sample=bits_per_sample
         )
         self.spectra_per_heap = spectra_per_heap
-        # TODO: does spectra_per_heap need any validation?
 
     @property
     def size(self) -> int:
