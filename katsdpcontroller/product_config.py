@@ -1050,6 +1050,14 @@ class FlagsStream(Stream):
         return self.vis.n_vis
 
     @property
+    def n_channels(self) -> int:
+        return self.vis.n_channels
+
+    @property
+    def n_baselines(self) -> int:
+        return self.vis.n_baselines
+
+    @property
     def size(self) -> int:
         return self.vis.flag_size
 

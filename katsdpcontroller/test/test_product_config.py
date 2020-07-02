@@ -695,12 +695,16 @@ def make_vis(
     )
 
 
+def make_vis_4ant() -> product_config.VisStream:
+    acv = make_antenna_channelised_voltage(['m000', 'm001', 'm002', 'm003'])
+    bcp = make_baseline_correlation_products(acv)
+    return make_vis(bcp)
+
+
 class TestCalStream:
     def setup(self) -> None:
         # The default has only 2 antennas, but we need 4 to make it legal
-        acv = make_antenna_channelised_voltage(['m000', 'm001', 'm002', 'm003'])
-        bcp = make_baseline_correlation_products(acv)
-        self.vis = make_vis(bcp)
+        self.vis = make_vis_4ant()
         self.config: Dict[str, Any] = {
             'type': 'sdp.cal',
             'src_streams': ['sdp_l0'],
@@ -721,10 +725,73 @@ class TestCalStream:
         assert_equal(cal.n_antennas, 4)
         assert_equal(cal.slots, 75)
 
+    def test_defaults(self) -> None:
+        del self.config['parameters']
+        del self.config['buffer_time']
+        del self.config['max_scans']
+        cal = CalStream.from_config(Options(), 'cal', self.config, [self.vis], {})
+        assert_equal(cal.parameters, {})
+        assert_equal(cal.buffer_time, product_config.DEFAULT_CAL_BUFFER_TIME)
+        assert_equal(cal.max_scans, product_config.DEFAULT_CAL_MAX_SCANS)
+
     def test_too_few_antennas(self) -> None:
         vis = make_vis()
         with assert_raises_regex(ValueError, 'At least 4 antennas required but only 2 found'):
             CalStream.from_config(Options(), 'cal', self.config, [vis], {})
+
+
+def make_cal(vis: Optional[VisStream] = None) -> CalStream:
+    if vis is None:
+        vis = make_vis_4ant()
+    return CalStream(
+        'cal', [vis],
+        parameters={},
+        buffer_time=product_config.DEFAULT_CAL_BUFFER_TIME,
+        max_scans=product_config.DEFAULT_CAL_MAX_SCANS
+    )
+
+
+class TestFlagsStream:
+    """Test :class:`~.FlagsStream`."""
+
+    def setup(self) -> None:
+        self.cal = make_cal()
+        self.vis = self.cal.vis
+        self.config = {
+            'type': 'sdp.flags',
+            'src_streams': ['sdp_l0', 'cal'],
+            'rate_ratio': 10.0,
+            'archive': True
+        }
+
+    def test_from_config(self) -> None:
+        flags = FlagsStream.from_config(Options(), 'flags', self.config, [self.vis, self.cal], {})
+        assert_equal(flags.name, 'flags')
+        assert_equal(flags.cal, self.cal)
+        assert_equal(flags.vis, self.vis)
+        assert_equal(flags.n_channels, self.vis.n_channels)
+        assert_equal(flags.n_baselines, self.vis.n_baselines)
+        assert_equal(flags.n_vis, self.vis.n_vis)
+        assert_equal(flags.size, self.vis.flag_size)
+        assert_equal(flags.net_bandwidth(), self.vis.flag_bandwidth())
+        assert_equal(flags.int_time, self.vis.int_time)
+
+    def test_incompatible_vis(self) -> None:
+        vis = make_vis()
+        vis.name = 'bad'
+        with assert_raises_regex(ValueError, 'src_streams bad, sdp_l0 are incompatible'):
+            FlagsStream.from_config(Options(), 'flags', self.config, [vis, self.cal], {})
+
+    def test_bad_continuum_factor(self) -> None:
+        vis = make_vis_4ant()
+        # Need to have the same source stream to be compatible, not just a copy
+        vis.src_streams = list(self.vis.src_streams)
+        vis.name = 'bad'
+        self.vis.continuum_factor = 4
+        with assert_raises_regex(
+                ValueError,
+                'src_streams bad, sdp_l0 have incompatible continuum factors 1, 4'):
+            FlagsStream.from_config(Options(), 'flags', self.config, [vis, self.cal], {})
 
 
 class Fixture(asynctest.TestCase):
