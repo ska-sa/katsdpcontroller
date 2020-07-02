@@ -1062,7 +1062,7 @@ class FlagsStream(Stream):
         return self.vis.flag_size
 
     def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
-        return self.vis.flag_bandwidth(ratio, overhead)
+        return self.vis.flag_bandwidth(ratio, overhead) * self.rate_ratio
 
     @classmethod
     def from_config(cls,

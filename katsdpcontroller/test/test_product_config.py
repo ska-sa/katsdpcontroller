@@ -773,8 +773,13 @@ class TestFlagsStream:
         assert_equal(flags.n_baselines, self.vis.n_baselines)
         assert_equal(flags.n_vis, self.vis.n_vis)
         assert_equal(flags.size, self.vis.flag_size)
-        assert_equal(flags.net_bandwidth(), self.vis.flag_bandwidth())
+        assert_equal(flags.net_bandwidth(), self.vis.flag_bandwidth() * 10.0)
         assert_equal(flags.int_time, self.vis.int_time)
+
+    def test_defaults(self) -> None:
+        del self.config['rate_ratio']
+        flags = FlagsStream.from_config(Options(), 'flags', self.config, [self.vis, self.cal], {})
+        assert_equal(flags.rate_ratio, product_config.DEFAULT_FLAGS_RATE_RATIO)
 
     def test_incompatible_vis(self) -> None:
         vis = make_vis()
