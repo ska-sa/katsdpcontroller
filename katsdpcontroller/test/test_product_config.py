@@ -8,14 +8,19 @@ from typing import Dict, Any
 import asynctest
 import jsonschema
 import yarl
+import katpoint
 import katportalclient
 from nose.tools import (
-    assert_equal, assert_in, assert_is, assert_is_none,
+    assert_equal, assert_almost_equal, assert_in, assert_is, assert_is_none,
     assert_raises, assert_raises_regex, assert_logs
 )
 
 from .. import product_config
 from . import fake_katportalclient
+
+
+_M000 = katpoint.Antenna('m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14')   # noqa: E501
+_M002 = katpoint.Antenna('m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14')            # noqa: E501
 
 
 class TestRecursiveDiff:
@@ -250,8 +255,8 @@ class TestSimAntennaChannelisedVoltageStream:
         self.config: Dict[str, Any] = {
             'type': 'sim.cbf.antenna_channelised_voltage',
             'antennas': [
-                'm000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14',   # noqa: E501
-                'm002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14'             # noqa: E501
+                _M000.description,
+                _M002.description
             ],
             'band': 'l',
             'centre_frequency': 1284e6,
@@ -267,6 +272,7 @@ class TestSimAntennaChannelisedVoltageStream:
         assert_equal(acv.name, 'narrow1_acv')
         assert_equal(acv.src_streams, [])
         assert_equal(acv.antennas, ['m000', 'm002'])
+        assert_equal(acv.antenna_objects, [_M000, _M002])
         assert_equal(acv.band, 'l')
         assert_equal(acv.n_channels, 32768)
         assert_equal(acv.bandwidth, 107e6)
@@ -289,22 +295,39 @@ class TestSimAntennaChannelisedVoltageStream:
             )
 
 
+def make_antenna_channelised_voltage() -> product_config.AntennaChannelisedVoltageStream:
+    return product_config.AntennaChannelisedVoltageStream(
+        'narrow1_acv', [],
+        url=yarl.URL('spead2://239.0.0.0+7:7148'),
+        antennas=['m000', 'm002'],
+        band='l',
+        n_channels=32768,
+        bandwidth=107e6,
+        adc_sample_rate=1712e6,
+        centre_frequency=1284e6,
+        n_samples_between_spectra=524288,
+        instrument_dev_name='narrow1'
+    )
+
+
+def make_sim_antenna_channelised_voltage() -> product_config.SimAntennaChannelisedVoltageStream:
+    # Uses powers of two so that integration time can be computed exactly
+    return product_config.SimAntennaChannelisedVoltageStream(
+        'narrow1_acv', [],
+        antennas=[_M000, _M002],
+        band='l',
+        centre_frequency=1284,
+        bandwidth=256,
+        adc_sample_rate=1024,
+        n_channels=512
+    )
+
+
 class TestBaselineCorrelationProductsStream:
-    """Test :class:`katsdpcontroller.product_config.BaselineCorrelationProductsStream`."""
+    """Test :class:`~katsdpcontroller.product_config.BaselineCorrelationProductsStream`."""
 
     def setup(self) -> None:
-        self.acv = product_config.AntennaChannelisedVoltageStream(
-            'narrow1_acv', [],
-            url=yarl.URL('spead2://239.0.0.0+7:7148'),
-            antennas=['m000', 'm002'],
-            band='l',
-            n_channels=32768,
-            bandwidth=107e6,
-            adc_sample_rate=1712e6,
-            centre_frequency=1284e6,
-            n_samples_between_spectra=524288,
-            instrument_dev_name='narrow1'
-        )
+        self.acv = make_antenna_channelised_voltage()
         self.config = {
             'type': 'cbf.baseline_correlation_products',
             'src_streams': ['narrow1_acv'],
@@ -356,6 +379,96 @@ class TestBaselineCorrelationProductsStream:
             product_config.BaselineCorrelationProductsStream.from_config(
                 product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
             )
+
+
+class TestSimBaselineCorrelationProductsStream:
+    """Test :class:`~katsdpcontroller.product_config.SimBaselineCorrelationProductsStream`."""
+
+    def setup(self):
+        self.acv = make_sim_antenna_channelised_voltage()
+        self.config = {
+            'type': 'sim.cbf.baseline_correlation_products',
+            'src_streams': ['narrow1_acv'],
+            'n_endpoints': 16,
+            'int_time': 800,
+            'n_chans_per_substream': 8
+        }
+
+    def test_from_config(self):
+        bcp = product_config.SimBaselineCorrelationProductsStream.from_config(
+            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], {}
+        )
+        # Most properties are assumed to be tested via
+        # TestBaselineCorrelationProductsStream and are not re-tested here.
+        assert_equal(bcp.n_channels_per_substream, 8)
+        assert_equal(bcp.n_substreams, 64)
+        # Check that int_time is rounded to nearest multiple of 512
+        assert_equal(bcp.int_time, 1024.0)
+
+    def test_defaults(self):
+        del self.config['n_chans_per_substream']
+        bcp = product_config.SimBaselineCorrelationProductsStream.from_config(
+            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], {}
+        )
+        assert_equal(bcp.n_channels_per_substream, 32)
+        assert_equal(bcp.n_substreams, 16)
+
+
+class TestTiedArrayChannelisedVoltageStream:
+    def setup(self) -> None:
+        self.acv = make_antenna_channelised_voltage()
+        self.config = {
+            'type': 'cbf.tied_array_channelised_voltage',
+            'src_streams': ['narrow1_acv'],
+            'url': 'spead://239.2.0.0+255:7148',
+            'instrument_dev_name': 'beam'
+        }
+        self.sensors = {
+            'beng_out_bits_per_sample': 16,
+            'spectra_per_heap': 256,
+            'n_chans_per_substream': 64
+        }
+
+    def test_from_config(self) -> None:
+        tacv = product_config.TiedArrayChannelisedVoltageStream.from_config(
+            product_config.Options(), 'beam_0x', self.config, [self.acv], self.sensors
+        )
+        assert_equal(tacv.name, 'beam_0x')
+        assert_equal(tacv.bits_per_sample, 16)
+        assert_equal(tacv.n_channels_per_substream, 64)
+        assert_equal(tacv.spectra_per_heap, 256)
+        assert_equal(tacv.instrument_dev_name, 'beam')
+        assert_equal(tacv.size, 32768 * 256 * 2 * 2)
+        assert_is(tacv.antenna_channelised_voltage, self.acv)
+        assert_equal(tacv.bandwidth, 107e6)
+        assert_equal(tacv.antennas, ['m000', 'm002'])
+        assert_almost_equal(tacv.int_time * 1712e6, 524288 * 256)
+
+
+class TestSimTiedArrayChannelisedVoltageStream:
+    def setup(self) -> None:
+        self.acv = make_sim_antenna_channelised_voltage()
+        self.config = {
+            'type': 'sim.cbf.tied_array_channelised_voltage',
+            'src_streams': ['narrow1_acv'],
+            'n_endpoints': 16,
+            'spectra_per_heap': 256,
+            'n_chans_per_substream': 4
+        }
+
+    def test_from_config(self) -> None:
+        tacv = product_config.SimTiedArrayChannelisedVoltageStream.from_config(
+            product_config.Options(), 'beam_0x', self.config, [self.acv], {}
+        )
+        assert_equal(tacv.name, 'beam_0x')
+        assert_equal(tacv.bits_per_sample, 8)
+        assert_equal(tacv.n_channels_per_substream, 4)
+        assert_equal(tacv.spectra_per_heap, 256)
+        assert_equal(tacv.size, 512 * 256 * 2)
+        assert_is(tacv.antenna_channelised_voltage, self.acv)
+        assert_equal(tacv.bandwidth, 256)
+        assert_equal(tacv.antennas, ['m000', 'm002'])
+        assert_equal(tacv.int_time, 512.0)
 
 
 class Fixture(asynctest.TestCase):
