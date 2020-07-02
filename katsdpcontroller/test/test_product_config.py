@@ -3,7 +3,7 @@
 import copy
 import logging
 from unittest import mock
-from typing import Dict, Any
+from typing import Dict, Optional, Any
 
 import asynctest
 import jsonschema
@@ -16,6 +16,26 @@ from nose.tools import (
 )
 
 from .. import product_config
+from ..product_config import (
+    AntennaChannelisedVoltageStream,
+    SimAntennaChannelisedVoltageStream,
+    BaselineCorrelationProductsStream,
+    SimBaselineCorrelationProductsStream,
+    TiedArrayChannelisedVoltageStream,
+    SimTiedArrayChannelisedVoltageStream,
+    CamHttpStream,
+    VisStream,
+    BeamformerStream,
+    BeamformerEngineeringStream,
+    CalStream,
+    FlagsStream,
+    ContinuumImageStream,
+    SpectralImageStream,
+    ServiceOverride,
+    Options,
+    Simulation,
+    Configuration
+)
 from . import fake_katportalclient
 
 
@@ -24,7 +44,7 @@ _M002 = katpoint.Antenna('m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 
 
 
 class TestRecursiveDiff:
-    """Test :meth:`~katsdpcontroller.product_config.override`."""
+    """Test :meth:`~katsdpcontroller.product_config._recursive_diff`."""
 
     def test_base_add(self) -> None:
         out = product_config._recursive_diff({'a': 1}, {'a': 1, 'b': 2})
@@ -122,7 +142,7 @@ class TestNormaliseOutputChannels:
 
 
 class TestServiceOverride:
-    """Test :class:`~katsdpcontroller.product_config.ServiceOverride`."""
+    """Test :class:`~.ServiceOverride`."""
 
     def test_from_config(self) -> None:
         config = {
@@ -130,20 +150,20 @@ class TestServiceOverride:
             'taskinfo': {'image': 'test'},
             'host': 'test.invalid'
         }
-        override = product_config.ServiceOverride.from_config(config)
+        override = ServiceOverride.from_config(config)
         assert_equal(override.config, config['config'])
         assert_equal(override.taskinfo, config['taskinfo'])
         assert_equal(override.host, config['host'])
 
     def test_defaults(self) -> None:
-        override = product_config.ServiceOverride.from_config({})
+        override = ServiceOverride.from_config({})
         assert_equal(override.config, {})
         assert_equal(override.taskinfo, {})
         assert_equal(override.host, None)
 
 
 class TestOptions:
-    """Test :class:`~katsdpcontroller.product_config.Options`."""
+    """Test :class:`~.Options`."""
 
     def test_from_config(self) -> None:
         config = {
@@ -155,21 +175,21 @@ class TestOptions:
                 }
             }
         }
-        options = product_config.Options.from_config(config)
+        options = Options.from_config(config)
         assert_equal(options.develop, config['develop'])
         assert_equal(options.wrapper, config['wrapper'])
         assert_equal(list(options.service_overrides.keys()), ['service1'])
         assert_equal(options.service_overrides['service1'].host, 'testhost')
 
     def test_defaults(self) -> None:
-        options = product_config.Options.from_config({})
+        options = Options.from_config({})
         assert_equal(options.develop, False)
         assert_equal(options.wrapper, None)
         assert_equal(options.service_overrides, {})
 
 
 class TestSimulation:
-    """Test :class:`~katsdpcontroller.product_config.Simulation`."""
+    """Test :class:`~.Simulation`."""
 
     def test_from_config(self) -> None:
         config = {
@@ -180,7 +200,7 @@ class TestSimulation:
             'start_time': 1234567890.0,
             'clock_ratio': 2.0
         }
-        sim = product_config.Simulation.from_config(config)
+        sim = Simulation.from_config(config)
         assert_equal(sim.start_time, 1234567890.0)
         assert_equal(sim.clock_ratio, 2.0)
         assert_equal(len(sim.sources), 2)
@@ -188,34 +208,32 @@ class TestSimulation:
         assert_equal(sim.sources[1].name, 'PKS 0408-65')
 
     def test_defaults(self) -> None:
-        sim = product_config.Simulation.from_config({})
+        sim = Simulation.from_config({})
         assert_is_none(sim.start_time)
         assert_equal(sim.clock_ratio, 1.0)
         assert_equal(sim.sources, [])
 
     def test_invalid_source(self) -> None:
         with assert_raises_regex(ValueError, 'Invalid source 1: .* must have at least two fields'):
-            product_config.Simulation.from_config({'sources': ['blah']})
+            Simulation.from_config({'sources': ['blah']})
 
 
 class TestCamHttpStream:
-    """Test :class:`~katsdpcontroller.product_config.CamHttpStream`."""
+    """Test :class:`~.CamHttpStream`."""
 
     def test_from_config(self) -> None:
         config = {
             'type': 'cam.http',
             'url': 'http://test.invalid'
         }
-        cam_http = product_config.CamHttpStream.from_config(
-            product_config.Options(), 'cam_data', config, [], {}
-        )
+        cam_http = CamHttpStream.from_config(Options(), 'cam_data', config, [], {})
         assert_equal(cam_http.name, 'cam_data')
         assert_equal(cam_http.src_streams, [])
         assert_equal(cam_http.url, yarl.URL('http://test.invalid'))
 
 
 class TestAntennaChannelisedVoltageStream:
-    """Test :class:`~katsdpcontroller.product_config.AntennaChannelisedVoltageStream`."""
+    """Test :class:`~.AntennaChannelisedVoltageStream`."""
 
     def test_from_config(self) -> None:
         config = {
@@ -232,8 +250,8 @@ class TestAntennaChannelisedVoltageStream:
             'centre_frequency': 1284e6,
             'n_samples_between_spectra': 524288
         }
-        acv = product_config.AntennaChannelisedVoltageStream.from_config(
-            product_config.Options(), 'narrow1_acv', config, [], sensors
+        acv = AntennaChannelisedVoltageStream.from_config(
+            Options(), 'narrow1_acv', config, [], sensors
         )
         assert_equal(acv.name, 'narrow1_acv')
         assert_equal(acv.src_streams, [])
@@ -249,7 +267,7 @@ class TestAntennaChannelisedVoltageStream:
 
 
 class TestSimAntennaChannelisedVoltageStream:
-    """Test :class:`~katsdpcontroller.product_config.SimAntennaChannelisedVoltageStream`."""
+    """Test :class:`~.SimAntennaChannelisedVoltageStream`."""
 
     def setup(self) -> None:
         self.config: Dict[str, Any] = {
@@ -266,8 +284,8 @@ class TestSimAntennaChannelisedVoltageStream:
         }
 
     def test_from_config(self) -> None:
-        acv = product_config.SimAntennaChannelisedVoltageStream.from_config(
-            product_config.Options(), 'narrow1_acv', self.config, [], {}
+        acv = SimAntennaChannelisedVoltageStream.from_config(
+            Options(), 'narrow1_acv', self.config, [], {}
         )
         assert_equal(acv.name, 'narrow1_acv')
         assert_equal(acv.src_streams, [])
@@ -283,23 +301,23 @@ class TestSimAntennaChannelisedVoltageStream:
     def test_bad_bandwidth_ratio(self) -> None:
         with assert_raises_regex(ValueError, 'not a multiple of bandwidth'):
             self.config['bandwidth'] = 108e6
-            product_config.SimAntennaChannelisedVoltageStream.from_config(
-                product_config.Options(), 'narrow1_acv', self.config, [], {}
+            SimAntennaChannelisedVoltageStream.from_config(
+                Options(), 'narrow1_acv', self.config, [], {}
             )
 
     def test_bad_antenna_description(self) -> None:
         with assert_raises_regex(ValueError, "Invalid antenna description 'bad antenna': "):
             self.config['antennas'][0] = 'bad antenna'
-            product_config.SimAntennaChannelisedVoltageStream.from_config(
-                product_config.Options(), 'narrow1_acv', self.config, [], {}
+            SimAntennaChannelisedVoltageStream.from_config(
+                Options(), 'narrow1_acv', self.config, [], {}
             )
 
 
-def make_antenna_channelised_voltage() -> product_config.AntennaChannelisedVoltageStream:
-    return product_config.AntennaChannelisedVoltageStream(
+def make_antenna_channelised_voltage(antennas=('m000', 'm002')) -> AntennaChannelisedVoltageStream:
+    return AntennaChannelisedVoltageStream(
         'narrow1_acv', [],
         url=yarl.URL('spead2://239.0.0.0+7:7148'),
-        antennas=['m000', 'm002'],
+        antennas=antennas,
         band='l',
         n_channels=32768,
         bandwidth=107e6,
@@ -310,9 +328,9 @@ def make_antenna_channelised_voltage() -> product_config.AntennaChannelisedVolta
     )
 
 
-def make_sim_antenna_channelised_voltage() -> product_config.SimAntennaChannelisedVoltageStream:
+def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream:
     # Uses powers of two so that integration time can be computed exactly
-    return product_config.SimAntennaChannelisedVoltageStream(
+    return SimAntennaChannelisedVoltageStream(
         'narrow1_acv', [],
         antennas=[_M000, _M002],
         band='l',
@@ -324,7 +342,7 @@ def make_sim_antenna_channelised_voltage() -> product_config.SimAntennaChannelis
 
 
 class TestBaselineCorrelationProductsStream:
-    """Test :class:`~katsdpcontroller.product_config.BaselineCorrelationProductsStream`."""
+    """Test :class:`~.BaselineCorrelationProductsStream`."""
 
     def setup(self) -> None:
         self.acv = make_antenna_channelised_voltage()
@@ -342,8 +360,8 @@ class TestBaselineCorrelationProductsStream:
         }
 
     def test_from_config(self) -> None:
-        bcp = product_config.BaselineCorrelationProductsStream.from_config(
-            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+        bcp = BaselineCorrelationProductsStream.from_config(
+            Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
         )
         assert_equal(bcp.name, 'narrow2_bcp')
         assert_equal(bcp.src_streams, [self.acv])
@@ -367,8 +385,8 @@ class TestBaselineCorrelationProductsStream:
         self.config['url'] = 'spead://239.1.0.0+8:7148'
         with assert_raises_regex(ValueError,
                                  r'n_channels \(32768\) is not a multiple of endpoints \(9\)'):
-            product_config.BaselineCorrelationProductsStream.from_config(
-                product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+            BaselineCorrelationProductsStream.from_config(
+                Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
             )
 
     def test_bad_substream_count(self) -> None:
@@ -376,13 +394,13 @@ class TestBaselineCorrelationProductsStream:
         with assert_raises_regex(ValueError,
                                  r'channels per endpoint \(128\) is not a multiple of '
                                  r'channels per substream \(2048\)'):
-            product_config.BaselineCorrelationProductsStream.from_config(
-                product_config.Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+            BaselineCorrelationProductsStream.from_config(
+                Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
             )
 
 
 class TestSimBaselineCorrelationProductsStream:
-    """Test :class:`~katsdpcontroller.product_config.SimBaselineCorrelationProductsStream`."""
+    """Test :class:`~.SimBaselineCorrelationProductsStream`."""
 
     def setup(self):
         self.acv = make_sim_antenna_channelised_voltage()
@@ -395,8 +413,8 @@ class TestSimBaselineCorrelationProductsStream:
         }
 
     def test_from_config(self):
-        bcp = product_config.SimBaselineCorrelationProductsStream.from_config(
-            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], {}
+        bcp = SimBaselineCorrelationProductsStream.from_config(
+            Options(), 'narrow2_bcp', self.config, [self.acv], {}
         )
         # Most properties are assumed to be tested via
         # TestBaselineCorrelationProductsStream and are not re-tested here.
@@ -407,15 +425,15 @@ class TestSimBaselineCorrelationProductsStream:
 
     def test_defaults(self):
         del self.config['n_chans_per_substream']
-        bcp = product_config.SimBaselineCorrelationProductsStream.from_config(
-            product_config.Options(), 'narrow2_bcp', self.config, [self.acv], {}
+        bcp = SimBaselineCorrelationProductsStream.from_config(
+            Options(), 'narrow2_bcp', self.config, [self.acv], {}
         )
         assert_equal(bcp.n_channels_per_substream, 32)
         assert_equal(bcp.n_substreams, 16)
 
 
 class TestTiedArrayChannelisedVoltageStream:
-    """Test :class:`~katsdpcontroller.product_config.TiedArrayChannelisedVoltageStream`."""
+    """Test :class:`~.TiedArrayChannelisedVoltageStream`."""
 
     def setup(self) -> None:
         self.acv = make_antenna_channelised_voltage()
@@ -432,8 +450,8 @@ class TestTiedArrayChannelisedVoltageStream:
         }
 
     def test_from_config(self) -> None:
-        tacv = product_config.TiedArrayChannelisedVoltageStream.from_config(
-            product_config.Options(), 'beam_0x', self.config, [self.acv], self.sensors
+        tacv = TiedArrayChannelisedVoltageStream.from_config(
+            Options(), 'beam_0x', self.config, [self.acv], self.sensors
         )
         assert_equal(tacv.name, 'beam_0x')
         assert_equal(tacv.bits_per_sample, 16)
@@ -448,7 +466,7 @@ class TestTiedArrayChannelisedVoltageStream:
 
 
 class TestSimTiedArrayChannelisedVoltageStream:
-    """Test :class:`~katsdpcontroller.product_config.SimTiedArrayChannelisedVoltageStream`."""
+    """Test :class:`~.SimTiedArrayChannelisedVoltageStream`."""
 
     def setup(self) -> None:
         self.acv = make_sim_antenna_channelised_voltage()
@@ -461,8 +479,8 @@ class TestSimTiedArrayChannelisedVoltageStream:
         }
 
     def test_from_config(self) -> None:
-        tacv = product_config.SimTiedArrayChannelisedVoltageStream.from_config(
-            product_config.Options(), 'beam_0x', self.config, [self.acv], {}
+        tacv = SimTiedArrayChannelisedVoltageStream.from_config(
+            Options(), 'beam_0x', self.config, [self.acv], {}
         )
         assert_equal(tacv.name, 'beam_0x')
         assert_equal(tacv.bits_per_sample, 8)
@@ -474,11 +492,23 @@ class TestSimTiedArrayChannelisedVoltageStream:
         assert_equal(tacv.antennas, ['m000', 'm002'])
         assert_equal(tacv.int_time, 512.0)
 
+    def test_defaults(self) -> None:
+        del self.config['spectra_per_heap']
+        del self.config['n_chans_per_substream']
+        tacv = SimTiedArrayChannelisedVoltageStream.from_config(
+            Options(), 'beam_0x', self.config, [self.acv], {}
+        )
+        assert_equal(tacv.spectra_per_heap, product_config.KATCBFSIM_SPECTRA_PER_HEAP)
+        assert_equal(tacv.n_channels_per_substream, 32)
 
-def make_baseline_correlation_products() -> product_config.BaselineCorrelationProductsStream:
-    acv = make_antenna_channelised_voltage()
-    return product_config.BaselineCorrelationProductsStream(
-        'narrow1_bcp', [acv],
+
+def make_baseline_correlation_products(
+        antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None
+        ) -> BaselineCorrelationProductsStream:
+    if antenna_channelised_voltage is None:
+        antenna_channelised_voltage = make_antenna_channelised_voltage()
+    return BaselineCorrelationProductsStream(
+        'narrow1_bcp', [antenna_channelised_voltage],
         url=yarl.URL('spead://239.2.0.0+63:7148'),
         int_time=0.5,
         n_channels_per_substream=512,
@@ -489,9 +519,11 @@ def make_baseline_correlation_products() -> product_config.BaselineCorrelationPr
 
 
 def make_tied_array_channelised_voltage(
-        antenna_channelised_voltage: product_config.AntennaChannelisedVoltageStream,
-        name: str, url: yarl.URL) -> product_config.TiedArrayChannelisedVoltageStream:
-    return product_config.TiedArrayChannelisedVoltageStream(
+        antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream],
+        name: str, url: yarl.URL) -> TiedArrayChannelisedVoltageStream:
+    if antenna_channelised_voltage is None:
+        antenna_channelised_voltage = make_antenna_channelised_voltage()
+    return TiedArrayChannelisedVoltageStream(
         name, [antenna_channelised_voltage],
         url=url,
         n_channels_per_substream=128,
@@ -502,7 +534,7 @@ def make_tied_array_channelised_voltage(
 
 
 class TestVisStream:
-    """Test :class:`~katsdpcontroller.product_config.VisStream`."""
+    """Test :class:`~.VisStream`."""
 
     def setup(self) -> None:
         self.bcp = make_baseline_correlation_products()
@@ -517,8 +549,7 @@ class TestVisStream:
         }
 
     def test_from_config(self) -> None:
-        vis = product_config.VisStream.from_config(
-            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         assert_equal(vis.int_time, 1.0)   # Rounds to nearest multiple of CBF int_time
         assert_equal(vis.output_channels, (128, 4096))
         assert_equal(vis.continuum_factor, 2)
@@ -540,8 +571,7 @@ class TestVisStream:
     def test_defaults(self) -> None:
         del self.config['output_channels']
         del self.config['excise']
-        vis = product_config.VisStream.from_config(
-            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         assert_equal(vis.output_channels, (0, 32768))
         assert_equal(vis.excise, True)
 
@@ -550,38 +580,32 @@ class TestVisStream:
         with assert_raises_regex(
                 ValueError,
                 r'CBF channels \(32768\) is not a multiple of continuum_factor \(3\)'):
-            product_config.VisStream.from_config(
-                product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+            VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         self.config['continuum_factor'] = 1024
         with assert_raises_regex(
                 ValueError,
                 r'Channel range \(128:4096\) is not a multiple of continuum_factor \(1024\)'):
-            product_config.VisStream.from_config(
-                product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+            VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
 
     def test_compatible(self) -> None:
-        vis1 = product_config.VisStream.from_config(
-            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        vis1 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         self.config['continuum_factor'] = 1
         self.config['archive'] = True
-        vis2 = product_config.VisStream.from_config(
-            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        vis2 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         del self.config['output_channels']
-        vis3 = product_config.VisStream.from_config(
-            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        vis3 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
         assert_true(vis1.compatible(vis1))
         assert_true(vis1.compatible(vis2))
         assert_false(vis1.compatible(vis3))
 
     def test_develop(self) -> None:
-        options = product_config.Options(develop=True)
-        vis = product_config.VisStream.from_config(
-            options, 'sdp_l0', self.config, [self.bcp], {})
+        options = Options(develop=True)
+        vis = VisStream.from_config(options, 'sdp_l0', self.config, [self.bcp], {})
         assert_equal(vis.n_servers, 2)
 
 
 class TestBeamformerStream:
-    """Test :class:`~katsdpcontroller.product_config.BeamformerStream`."""
+    """Test :class:`~.BeamformerStream`."""
 
     def setup(self) -> None:
         self.acv = make_antenna_channelised_voltage()
@@ -597,8 +621,7 @@ class TestBeamformerStream:
         }
 
     def test_from_config(self) -> None:
-        bf = product_config.BeamformerStream.from_config(
-            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        bf = BeamformerStream.from_config(Options(), 'beamformer', self.config, self.tacv, {})
         assert_equal(bf.name, 'beamformer')
         assert_equal(bf.antenna_channelised_voltage.name, 'narrow1_acv')
         assert_equal(bf.tied_array_channelised_voltage, self.tacv)
@@ -610,8 +633,7 @@ class TestBeamformerStream:
             acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         with assert_raises_regex(ValueError,
                                  'Source streams do not come from the same channeliser'):
-            product_config.BeamformerStream.from_config(
-                product_config.Options(), 'beamformer', self.config, self.tacv, {})
+            BeamformerStream.from_config(Options(), 'beamformer', self.config, self.tacv, {})
 
 
 class TestBeamformerEngineeringStream:
@@ -631,8 +653,9 @@ class TestBeamformerEngineeringStream:
         }
 
     def test_from_config(self) -> None:
-        bf = product_config.BeamformerEngineeringStream.from_config(
-            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        bf = BeamformerEngineeringStream.from_config(
+            Options(), 'beamformer', self.config, self.tacv, {}
+        )
         assert_equal(bf.name, 'beamformer')
         assert_equal(bf.antenna_channelised_voltage.name, 'narrow1_acv')
         assert_equal(bf.tied_array_channelised_voltage, self.tacv)
@@ -642,8 +665,9 @@ class TestBeamformerEngineeringStream:
 
     def test_defaults(self) -> None:
         del self.config['output_channels']
-        bf = product_config.BeamformerEngineeringStream.from_config(
-            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        bf = BeamformerEngineeringStream.from_config(
+            Options(), 'beamformer', self.config, self.tacv, {}
+        )
         assert_equal(bf.output_channels, (0, 32768))
         assert_equal(bf.n_channels, 32768)
 
@@ -651,8 +675,56 @@ class TestBeamformerEngineeringStream:
         self.config['output_channels'] = [1, 2]
         with assert_raises_regex(ValueError,
                                  r'Channel range \(1:2\) is not aligned to the multicast streams'):
-            product_config.BeamformerEngineeringStream.from_config(
-                product_config.Options(), 'beamformer', self.config, self.tacv, {})
+            BeamformerEngineeringStream.from_config(
+                Options(), 'beamformer', self.config, self.tacv, {}
+            )
+
+
+def make_vis(
+        baseline_correlation_products: Optional[BaselineCorrelationProductsStream] = None
+        ) -> product_config.VisStream:
+    if baseline_correlation_products is None:
+        baseline_correlation_products = make_baseline_correlation_products()
+    return VisStream(
+        'sdp_l0', [baseline_correlation_products],
+        int_time=8.0,
+        continuum_factor=1,
+        excise=True,
+        archive=True,
+        n_servers=4
+    )
+
+
+class TestCalStream:
+    def setup(self) -> None:
+        # The default has only 2 antennas, but we need 4 to make it legal
+        acv = make_antenna_channelised_voltage(['m000', 'm001', 'm002', 'm003'])
+        bcp = make_baseline_correlation_products(acv)
+        self.vis = make_vis(bcp)
+        self.config: Dict[str, Any] = {
+            'type': 'sdp.cal',
+            'src_streams': ['sdp_l0'],
+            'parameters': {'g_solint': 2.0},
+            'buffer_time': 600.0,
+            'max_scans': 100
+        }
+
+    def test_from_config(self) -> None:
+        cal = CalStream.from_config(Options(), 'cal', self.config, [self.vis], {})
+        assert_equal(cal.name, 'cal')
+        assert_is(cal.vis, self.vis)
+        # Make sure it's not referencing the original
+        self.config['parameters'].clear()
+        assert_equal(cal.parameters, {'g_solint': 2.0})
+        assert_equal(cal.buffer_time, 600.0)
+        assert_equal(cal.max_scans, 100)
+        assert_equal(cal.n_antennas, 4)
+        assert_equal(cal.slots, 75)
+
+    def test_too_few_antennas(self) -> None:
+        vis = make_vis()
+        with assert_raises_regex(ValueError, 'At least 4 antennas required but only 2 found'):
+            CalStream.from_config(Options(), 'cal', self.config, [vis], {})
 
 
 class Fixture(asynctest.TestCase):

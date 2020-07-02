@@ -299,10 +299,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
         self.bandwidth = bandwidth
         self.centre_frequency = centre_frequency
         self.adc_sample_rate = adc_sample_rate
-        if n_samples_between_spectra is None:
-            self.n_samples_between_spectra: int = round(n_channels * adc_sample_rate // bandwidth)
-        else:
-            self.n_samples_between_spectra = n_samples_between_spectra
+        self.n_samples_between_spectra = n_samples_between_spectra
 
 
 class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStreamBase):
@@ -754,7 +751,7 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
             name, src_streams,
             n_endpoints=config['n_endpoints'],
             n_channels_per_substream=config.get('n_chans_per_substream'),
-            spectra_per_heap=config.get('spectra_per_heap', 256)
+            spectra_per_heap=config.get('spectra_per_heap', KATCBFSIM_SPECTRA_PER_HEAP)
         )
 
 
@@ -769,7 +766,7 @@ class VisStream(Stream):
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  int_time: float,
-                 output_channels: Optional[Tuple[int, int]],
+                 output_channels: Optional[Tuple[int, int]] = None,
                  continuum_factor: int,
                  excise: bool,
                  archive: bool,
@@ -1133,7 +1130,7 @@ class SpectralImageStream(ImageStream):
     _valid_src_types: ClassVar[_ValidTypes] = ['sdp.flags', 'sdp.continuum_image']
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 output_channels: Optional[Tuple[int, int]],
+                 output_channels: Optional[Tuple[int, int]] = None,
                  parameters: Mapping[str, Any],
                  min_time: float) -> None:
         super().__init__(name, src_streams, min_time=min_time)
