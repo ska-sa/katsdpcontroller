@@ -12,7 +12,7 @@ import katpoint
 import katportalclient
 from nose.tools import (
     assert_equal, assert_almost_equal, assert_in, assert_is, assert_is_none,
-    assert_raises, assert_raises_regex, assert_logs
+    assert_true, assert_false, assert_raises, assert_raises_regex, assert_logs
 )
 
 from .. import product_config
@@ -415,6 +415,8 @@ class TestSimBaselineCorrelationProductsStream:
 
 
 class TestTiedArrayChannelisedVoltageStream:
+    """Test :class:`~katsdpcontroller.product_config.TiedArrayChannelisedVoltageStream`."""
+
     def setup(self) -> None:
         self.acv = make_antenna_channelised_voltage()
         self.config = {
@@ -446,6 +448,8 @@ class TestTiedArrayChannelisedVoltageStream:
 
 
 class TestSimTiedArrayChannelisedVoltageStream:
+    """Test :class:`~katsdpcontroller.product_config.SimTiedArrayChannelisedVoltageStream`."""
+
     def setup(self) -> None:
         self.acv = make_sim_antenna_channelised_voltage()
         self.config = {
@@ -469,6 +473,186 @@ class TestSimTiedArrayChannelisedVoltageStream:
         assert_equal(tacv.bandwidth, 256)
         assert_equal(tacv.antennas, ['m000', 'm002'])
         assert_equal(tacv.int_time, 512.0)
+
+
+def make_baseline_correlation_products() -> product_config.BaselineCorrelationProductsStream:
+    acv = make_antenna_channelised_voltage()
+    return product_config.BaselineCorrelationProductsStream(
+        'narrow1_bcp', [acv],
+        url=yarl.URL('spead://239.2.0.0+63:7148'),
+        int_time=0.5,
+        n_channels_per_substream=512,
+        n_baselines=40,
+        bits_per_sample=32,
+        instrument_dev_name='narrow1'
+    )
+
+
+def make_tied_array_channelised_voltage(
+        antenna_channelised_voltage: product_config.AntennaChannelisedVoltageStream,
+        name: str, url: yarl.URL) -> product_config.TiedArrayChannelisedVoltageStream:
+    return product_config.TiedArrayChannelisedVoltageStream(
+        name, [antenna_channelised_voltage],
+        url=url,
+        n_channels_per_substream=128,
+        spectra_per_heap=256,
+        bits_per_sample=8,
+        instrument_dev_name='beam'
+    )
+
+
+class TestVisStream:
+    """Test :class:`~katsdpcontroller.product_config.VisStream`."""
+
+    def setup(self) -> None:
+        self.bcp = make_baseline_correlation_products()
+        self.config = {
+            'type': 'sdp.vis',
+            'src_streams': ['narrow1_bcp'],
+            'output_int_time': 1.1,
+            'output_channels': [128, 4096],
+            'continuum_factor': 2,
+            'excise': False,
+            'archive': False
+        }
+
+    def test_from_config(self) -> None:
+        vis = product_config.VisStream.from_config(
+            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        assert_equal(vis.int_time, 1.0)   # Rounds to nearest multiple of CBF int_time
+        assert_equal(vis.output_channels, (128, 4096))
+        assert_equal(vis.continuum_factor, 2)
+        assert_equal(vis.excise, False)
+        assert_equal(vis.archive, False)
+        assert_equal(vis.n_servers, 4)
+        assert_is(vis.baseline_correlation_products, self.bcp)
+        assert_equal(vis.n_channels, 1984)
+        assert_equal(vis.n_spectral_channels, 3968)
+        assert_equal(vis.antennas, ['m000', 'm002'])
+        assert_equal(vis.n_antennas, 2)
+        assert_equal(vis.n_pols, 2)
+        assert_equal(vis.n_baselines, 12)
+        assert_equal(vis.size, 1984 * (12 * 10 + 4))
+        assert_equal(vis.flag_size, 1984 * 12)
+        assert_equal(vis.net_bandwidth(1.0, 0), vis.size / vis.int_time * 8)
+        assert_equal(vis.flag_bandwidth(1.0, 0), vis.flag_size / vis.int_time * 8)
+
+    def test_defaults(self) -> None:
+        del self.config['output_channels']
+        del self.config['excise']
+        vis = product_config.VisStream.from_config(
+            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        assert_equal(vis.output_channels, (0, 32768))
+        assert_equal(vis.excise, True)
+
+    def test_bad_continuum_factor(self) -> None:
+        self.config['continuum_factor'] = 3
+        with assert_raises_regex(
+                ValueError,
+                r'CBF channels \(32768\) is not a multiple of continuum_factor \(3\)'):
+            product_config.VisStream.from_config(
+                product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        self.config['continuum_factor'] = 1024
+        with assert_raises_regex(
+                ValueError,
+                r'Channel range \(128:4096\) is not a multiple of continuum_factor \(1024\)'):
+            product_config.VisStream.from_config(
+                product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+
+    def test_compatible(self) -> None:
+        vis1 = product_config.VisStream.from_config(
+            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        self.config['continuum_factor'] = 1
+        self.config['archive'] = True
+        vis2 = product_config.VisStream.from_config(
+            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        del self.config['output_channels']
+        vis3 = product_config.VisStream.from_config(
+            product_config.Options(), 'sdp_l0', self.config, [self.bcp], {})
+        assert_true(vis1.compatible(vis1))
+        assert_true(vis1.compatible(vis2))
+        assert_false(vis1.compatible(vis3))
+
+    def test_develop(self) -> None:
+        options = product_config.Options(develop=True)
+        vis = product_config.VisStream.from_config(
+            options, 'sdp_l0', self.config, [self.bcp], {})
+        assert_equal(vis.n_servers, 2)
+
+
+class TestBeamformerStream:
+    """Test :class:`~katsdpcontroller.product_config.BeamformerStream`."""
+
+    def setup(self) -> None:
+        self.acv = make_antenna_channelised_voltage()
+        self.tacv = [
+            make_tied_array_channelised_voltage(
+                self.acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+            make_tied_array_channelised_voltage(
+                self.acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+        ]
+        self.config = {
+            'type': 'sdp.beamformer',
+            'src_streams': ['beam_0x', 'beam_0y']
+        }
+
+    def test_from_config(self) -> None:
+        bf = product_config.BeamformerStream.from_config(
+            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        assert_equal(bf.name, 'beamformer')
+        assert_equal(bf.antenna_channelised_voltage.name, 'narrow1_acv')
+        assert_equal(bf.tied_array_channelised_voltage, self.tacv)
+        assert_equal(bf.n_channels, 32768)
+
+    def test_mismatched_sources(self) -> None:
+        acv = make_antenna_channelised_voltage()
+        self.tacv[1] = make_tied_array_channelised_voltage(
+            acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+        with assert_raises_regex(ValueError,
+                                 'Source streams do not come from the same channeliser'):
+            product_config.BeamformerStream.from_config(
+                product_config.Options(), 'beamformer', self.config, self.tacv, {})
+
+
+class TestBeamformerEngineeringStream:
+    def setup(self) -> None:
+        self.acv = make_antenna_channelised_voltage()
+        self.tacv = [
+            make_tied_array_channelised_voltage(
+                self.acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+            make_tied_array_channelised_voltage(
+                self.acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+        ]
+        self.config = {
+            'type': 'sdp.beamformer_engineering',
+            'src_streams': ['beam_0x', 'beam_0y'],
+            'output_channels': [128, 1024],
+            'store': 'ram'
+        }
+
+    def test_from_config(self) -> None:
+        bf = product_config.BeamformerEngineeringStream.from_config(
+            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        assert_equal(bf.name, 'beamformer')
+        assert_equal(bf.antenna_channelised_voltage.name, 'narrow1_acv')
+        assert_equal(bf.tied_array_channelised_voltage, self.tacv)
+        assert_equal(bf.store, 'ram')
+        assert_equal(bf.output_channels, (128, 1024))
+        assert_equal(bf.n_channels, 896)
+
+    def test_defaults(self) -> None:
+        del self.config['output_channels']
+        bf = product_config.BeamformerEngineeringStream.from_config(
+            product_config.Options(), 'beamformer', self.config, self.tacv, {})
+        assert_equal(bf.output_channels, (0, 32768))
+        assert_equal(bf.n_channels, 32768)
+
+    def test_misaligned_channels(self) -> None:
+        self.config['output_channels'] = [1, 2]
+        with assert_raises_regex(ValueError,
+                                 r'Channel range \(1:2\) is not aligned to the multicast streams'):
+            product_config.BeamformerEngineeringStream.from_config(
+                product_config.Options(), 'beamformer', self.config, self.tacv, {})
 
 
 class Fixture(asynctest.TestCase):

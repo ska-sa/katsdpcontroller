@@ -781,11 +781,11 @@ class VisStream(Stream):
         c = _normalise_output_channels(cbf_channels, output_channels)
         if cbf_channels % continuum_factor != 0:
             raise ValueError(
-                f'CBF channels ({cbf_channels}) not a multiple of '
+                f'CBF channels ({cbf_channels}) is not a multiple of '
                 f'continuum_factor ({continuum_factor})')
         if c[0] % continuum_factor != 0 or c[1] % continuum_factor != 0:
             raise ValueError(
-                f'Channel range {c[0]}:{c[1]} is not a multiple of '
+                f'Channel range ({c[0]}:{c[1]}) is not a multiple of '
                 f'continuum_factor ({continuum_factor})')
         # TODO: review this - seems the old code would instead adjust the channel
         # range to ensure alignment.
@@ -945,9 +945,13 @@ class BeamformerEngineeringStream(BeamformerStreamBase):
             for ch in c:
                 if ch % tacv.n_channels_per_endpoint != 0:
                     raise ValueError(
-                        f'Channel range {c[0]}:{c[1]} is not aligned to the multicast streams')
+                        f'Channel range ({c[0]}:{c[1]}) is not aligned to the multicast streams')
         self.output_channels = c
         self.store = store
+
+    @property
+    def n_channels(self) -> int:
+        return self.output_channels[1] - self.output_channels[0]
 
     @classmethod
     def from_config(cls,
