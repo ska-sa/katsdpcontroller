@@ -84,8 +84,9 @@ class _Sensor(ABC):
     :meth:`full_name` to map the base name to the system-wide
     sensor name to query from katportal.
     """
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, type: Type) -> None:
         self.name = name
+        self.type = type
 
     @abstractmethod
     def full_name(self, components: Mapping[str, str], stream: str, instrument: str) -> str:
@@ -111,7 +112,7 @@ class _CBFSensor(_Sensor):
 
 class _CBFInstrumentSensor(_Sensor):
     def full_name(self, components: Mapping[str, str], stream: str, instrument: str) -> str:
-        return f'{components["cbf"]}_{stream}_{self.name}'
+        return f'{components["cbf"]}_{instrument}_{self.name}'
 
 
 class _SubStreamSensor(_Sensor):
@@ -307,12 +308,12 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
 
     stream_type: ClassVar[str] = 'cbf.antenna_channelised_voltage'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
-        _CBFSensor('n_chans'),
-        _CBFInstrumentSensor('adc_sample_rate'),
-        _CBFSensor('n_samples_between_spectra'),
-        _SubStreamSensor('bandwidth'),
-        _SubStreamSensor('centre_frequency'),
-        _SubSensor('band')
+        _CBFSensor('n_chans', int),
+        _CBFInstrumentSensor('adc_sample_rate', float),
+        _CBFSensor('n_samples_between_spectra', int),
+        _SubStreamSensor('bandwidth', float),
+        _SubStreamSensor('centre_frequency', float),
+        _SubSensor('band', str)
     ]
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
@@ -537,10 +538,10 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
 
     stream_type: ClassVar[str] = 'cbf.baseline-correlation-products'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
-        _CBFSensor('int_time'),
-        _CBFSensor('n_bls'),
-        _CBFSensor('xeng_out_bits_per_sample'),
-        _CBFSensor('n_chans_per_substream')
+        _CBFSensor('int_time', float),
+        _CBFSensor('n_bls', int),
+        _CBFSensor('xeng_out_bits_per_sample', int),
+        _CBFSensor('n_chans_per_substream', int)
     ]
     _valid_src_types: ClassVar[_ValidTypes] = {'cbf.antenna_channelised_voltage'}
 
@@ -668,9 +669,9 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
 
     stream_type: ClassVar[str] = 'cbf.tied_array_channelised_voltage'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
-        _CBFSensor('beng_out_bits_per_sample'),
-        _CBFSensor('spectra_per_heap'),
-        _CBFSensor('n_chans_per_substream')
+        _CBFSensor('beng_out_bits_per_sample', int),
+        _CBFSensor('spectra_per_heap', int),
+        _CBFSensor('n_chans_per_substream', int)
     ]
     _valid_src_types: ClassVar[_ValidTypes] = {'cbf.antenna_channelised_voltage'}
 
@@ -1204,7 +1205,7 @@ class Configuration:
                  streams: Iterable[Stream]) -> None:
         self.options = options
         self.simulation = simulation
-        self.streams = streams
+        self.streams = list(streams)
         self._by_class: Dict[Type[Stream], List[Stream]] = {}
         for stream in streams:
             self._by_class.setdefault(type(stream), []).append(stream)
@@ -1242,8 +1243,8 @@ class Configuration:
                     raise SensorFailure(f'Could not get component name for {name}: {exc}') from exc
             for name, stream_config in stream_configs.items():
                 stream_cls = STREAM_CLASSES[stream_config['type']]
-                instrument = stream_config['instrument_dev_name']
                 for sensor in stream_cls._class_sensors:
+                    instrument = stream_config['instrument_dev_name']
                     full_name = sensor.full_name(components, name, instrument)
                     try:
                         sample = await client.sensor_value(full_name)
@@ -1251,10 +1252,15 @@ class Configuration:
                         raise SensorFailure(f'Could not get value for {full_name}: {exc}') from exc
                     if sample.status not in {'nominal', 'warn', 'error'}:
                         raise SensorFailure(f'Sensor {full_name} has status {sample.status}')
+                    if not isinstance(sample.value, sensor.type):
+                        actual_type = type(sample.value)
+                        raise SensorFailure(
+                            f'Sensor {full_name} has type {actual_type} instead of {sensor.type}')
                     sensors[name][sensor.name] = sample.value
-            client.disconnect()
 
-        # Build a dependency graph so that we build the streams in order
+        # Build a dependency graph so that we build the streams in order.
+        # Note that _validate checks the types of source streams, which
+        # rules out cyclic dependencies.
         g = networkx.MultiDiGraph()
         g.add_nodes_from(stream_configs)
         for name, stream_config in stream_configs.items():
@@ -1335,7 +1341,7 @@ def _validate(config):
             elif src in outputs:
                 src_config = outputs[src]
             else:
-                raise ValueError('Unknown source {} in {}'.format(src, name))
+                raise ValueError(f'Unknown source {src} in {name}')
             if isinstance(valid_types, collections.abc.Set):
                 valid_type = src_config['type'] in valid_types
             else:
@@ -1465,7 +1471,10 @@ def _upgrade(config):
             elif stream['type'] == 'cam.http':
                 pass
             else:
-                continue
+                assert stream['type'] not in STREAM_CLASSES
+                # The next line is actually covered, but due to
+                # https://bugs.python.org/issue2506 is not detected.
+                continue     # pragma: nocover
             new_stream = {}
             for key in copy_keys:
                 if key in stream:
@@ -1483,7 +1492,7 @@ def _upgrade(config):
                     src = config['outputs'][src]['src_streams'][0]
                 while 'antennas' not in config['inputs'][src]:
                     src = config['inputs'][src]['src_streams'][0]
-                n_antennas = len(src['antennas'])
+                n_antennas = len(config['inputs'][src]['antennas'])
                 if n_antennas < 4:
                     to_remove.append(name)
         for name in to_remove:
