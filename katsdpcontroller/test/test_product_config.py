@@ -842,9 +842,9 @@ class TestContinuumImageStream:
         assert_equal(cont.mfimage_parameters, {'abc': 123})
         assert_equal(cont.max_realtime, 10000.0)
         assert_equal(cont.min_time, 100.0)
-        assert_equal(cont.flags, self.flags)
-        assert_equal(cont.cal, self.flags.cal)
-        assert_equal(cont.vis, self.flags.vis)
+        assert_is(cont.flags, self.flags)
+        assert_is(cont.cal, self.flags.cal)
+        assert_is(cont.vis, self.flags.vis)
 
     def test_defaults(self) -> None:
         del self.config['uvblavg_parameters']
@@ -858,6 +858,64 @@ class TestContinuumImageStream:
         assert_equal(cont.mfimage_parameters, {})
         assert_equal(cont.max_realtime, None)
         assert_equal(cont.min_time, product_config.DEFAULT_CONTINUUM_MIN_TIME)
+
+
+def make_continuum_image(flags: Optional[FlagsStream] = None) -> ContinuumImageStream:
+    if flags is None:
+        flags = make_flags()
+    return ContinuumImageStream(
+        'continuum_image', [flags],
+        uvblavg_parameters={},
+        mfimage_parameters={},
+        max_realtime=10000.0,
+        min_time=100.0
+    )
+
+
+class TestSpectralImageStream:
+    """Test :class:`~.SpectralImageStream`."""
+
+    def setup(self) -> None:
+        self.flags = make_flags()
+        self.continuum_image = make_continuum_image()
+        self.config: Dict[str, Any] = {
+            'type': 'sdp.spectral_image',
+            'src_streams': ['sdp_l0_continuum_flags', 'continuum_image'],
+            'output_channels': [64, 100],
+            'min_time': 200.0,
+            'parameters': {'q_fov': 2.0}
+        }
+
+    def test_from_config(self) -> None:
+        spec = SpectralImageStream.from_config(
+            Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
+        )
+        # Check that it gets copied
+        self.config['parameters'].clear()
+        assert_equal(spec.name, 'spectral_image')
+        assert_equal(spec.output_channels, (64, 100))
+        assert_equal(spec.parameters, {'q_fov': 2.0})
+        assert_equal(spec.n_channels, 36)
+        assert_is(spec.flags, self.flags)
+        assert_is(spec.continuum, self.continuum_image)
+
+    def test_no_continuum(self) -> None:
+        self.config['src_streams'] = ['sdp_l0_continuum_flags']
+        spec = SpectralImageStream.from_config(
+            Options(), 'spectral_image', self.config, [self.flags], {}
+        )
+        assert_is_none(spec.continuum)
+
+    def test_defaults(self) -> None:
+        del self.config['parameters']
+        del self.config['output_channels']
+        del self.config['min_time']
+        spec = SpectralImageStream.from_config(
+            Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
+        )
+        assert_equal(spec.output_channels, (0, 1024))
+        assert_equal(spec.min_time, product_config.DEFAULT_SPECTRAL_MIN_TIME)
+        assert_equal(spec.parameters, {})
 
 
 class Fixture(asynctest.TestCase):
