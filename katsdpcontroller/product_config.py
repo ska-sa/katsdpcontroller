@@ -3,15 +3,13 @@
 import collections.abc
 import logging
 import itertools
-import json
 import copy
 import math
 from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 from typing import (
     Tuple, List, Dict, Mapping, AbstractSet, Sequence, Iterable,
-    Union, ClassVar, Type, TypeVar, Optional, Any, AnyStr, cast,
-    TYPE_CHECKING
+    Union, ClassVar, Type, TypeVar, Optional, Any, cast, TYPE_CHECKING
 )
 
 import networkx
@@ -1508,19 +1506,3 @@ def _upgrade(config):
 
     _validate(config)     # Should never fail if the input was valid
     return config
-
-
-async def parse(config_bytes: AnyStr) -> Configuration:
-    """Load and validate a config dictionary.
-
-    Raises
-    ------
-    ValueError
-        if `config_bytes` is not valid JSON
-    jsonschema.ValidationError
-        if the config doesn't conform to the schema
-    ValueError
-        if semantic constraints are violated
-    """
-    config = json.loads(config_bytes)
-    return await Configuration.from_config(config)
