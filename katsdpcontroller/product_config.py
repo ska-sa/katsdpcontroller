@@ -603,7 +603,6 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
                  int_time: float,
                  n_endpoints: int,
                  n_channels_per_substream: Optional[int] = None) -> None:
-        # TODO: round int_time to nearest suitable multiple
         acv = cast(AntennaChannelisedVoltageStream, src_streams[0])
         if n_channels_per_substream is not None:
             ncps = n_channels_per_substream
