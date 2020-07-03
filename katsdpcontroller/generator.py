@@ -88,14 +88,6 @@ WRITER_OBJECT_SIZE = 20e6    # 20 MB
 #: Maximum channels per chunk for spectral imager
 SPECTRAL_OBJECT_CHANNELS = 128
 
-# TODO: remove these
-#: Speed at which flags are transmitted, relative to real time
-FLAGS_RATE_RATIO = 8.0
-#: Minimum observation time for continuum imager (seconds)
-DEFAULT_CONTINUUM_MIN_TIME = 15 * 60     # 15 minutes
-#: Minimum observation time for spectral imager (seconds)
-DEFAULT_SPECTRAL_MIN_TIME = 3600         # 1 hour
-
 logger = logging.getLogger(__name__)
 
 
@@ -805,7 +797,10 @@ def _make_cal(g: networkx.MultiDiGraph,
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         # Note: these scale the fixed overheads too, so is not strictly accurate.
         cal.interfaces[0].bandwidth_in = vis.net_bandwidth() / n_cal
-        cal.interfaces[0].bandwidth_out = vis.flag_bandwidth() * FLAGS_RATE_RATIO / n_cal
+        cal.interfaces[0].bandwidth_out = sum(
+            flags_stream.net_bandwidth() / n_cal
+            for flags in flags_streams
+        )
         cal.ports = ['port', 'dask_diagnostics', 'aiomonitor_port', 'aioconsole_port']
         cal.wait_ports = ['port']
         cal.gui_urls = [{
