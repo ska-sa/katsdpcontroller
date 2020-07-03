@@ -125,16 +125,23 @@ class _SubSensor(_Sensor):
 
 def _normalise_output_channels(
         n_channels: int,
-        output_channels: Optional[Tuple[int, int]]) -> Tuple[int, int]:
-    """Provide default for and validate `output_channels`.
+        output_channels: Optional[Tuple[int, int]],
+        alignment: int = 1) -> Tuple[int, int]:
+    """Provide default for and validate `output_channels`, and align.
 
-    If `output_channels` is ``None``, it will default to (0, `n_channels`).
+    If `output_channels` is ``None``, it will default to (0, `n_channels`). Otherwise,
+    it will be widened so that both ends are multiples of `alignment`.
 
     Raises
     ------
     ValueError
         If the output range is empty or overflows (0, `n_channels`).
+    ValueError
+        If `n_channels` is not a multiple of `alignment`
     """
+    if n_channels % alignment != 0:
+        raise ValueError(f'n_channels ({n_channels}) '
+                         f'is not a multiple of required alignment ({alignment})')
     c = output_channels    # Just for less typing
     if c is None:
         return (0, n_channels)
@@ -143,6 +150,8 @@ def _normalise_output_channels(
     elif c[0] < 0 or c[1] > n_channels:
         raise ValueError(f'output_channels ({c[0]}:{c[1]}) overflows valid range 0:{n_channels}')
     else:
+        return (c[0] // alignment * alignment,
+                (c[1] + alignment - 1) // alignment * alignment)
         return c
 
 
@@ -774,20 +783,7 @@ class VisStream(Stream):
         cbf_channels = self.baseline_correlation_products.n_channels
         cbf_int_time = self.baseline_correlation_products.int_time
         self.int_time = max(1, round(int_time / cbf_int_time)) * cbf_int_time
-        c = _normalise_output_channels(cbf_channels, output_channels)
-        if cbf_channels % continuum_factor != 0:
-            raise ValueError(
-                f'CBF channels ({cbf_channels}) is not a multiple of '
-                f'continuum_factor ({continuum_factor})')
-        if c[0] % continuum_factor != 0 or c[1] % continuum_factor != 0:
-            raise ValueError(
-                f'Channel range ({c[0]}:{c[1]}) is not a multiple of '
-                f'continuum_factor ({continuum_factor})')
-        # TODO: review this - seems the old code would instead adjust the channel
-        # range to ensure alignment.
-        if (c[1] - c[0]) % (continuum_factor * n_servers) != 0:
-            raise ValueError(
-                'Number of channels is not a multiple of continuum_factor * n_servers')
+        c = _normalise_output_channels(cbf_channels, output_channels, n_servers * continuum_factor)
         self.output_channels = c
         self.continuum_factor = continuum_factor
         self.excise = excise
@@ -938,10 +934,7 @@ class BeamformerEngineeringStream(BeamformerStreamBase):
         cbf_channels = self.antenna_channelised_voltage.n_channels
         c = _normalise_output_channels(cbf_channels, output_channels)
         for tacv in self.tied_array_channelised_voltage:
-            for ch in c:
-                if ch % tacv.n_channels_per_endpoint != 0:
-                    raise ValueError(
-                        f'Channel range ({c[0]}:{c[1]}) is not aligned to the multicast streams')
+            c = _normalise_output_channels(cbf_channels, c, tacv.n_channels_per_endpoint)
         self.output_channels = c
         self.store = store
 

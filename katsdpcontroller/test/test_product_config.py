@@ -138,6 +138,16 @@ class TestNormaliseOutputChannels:
                                  r'output_channels \(-1:1\) overflows valid range 0:100'):
             product_config._normalise_output_channels(100, (-1, 1))
 
+    def test_align(self) -> None:
+        assert_equal(product_config._normalise_output_channels(1000, (299, 301), 100), (200, 400))
+        assert_equal(product_config._normalise_output_channels(1000, (200, 400), 100), (200, 400))
+
+    def test_misalign(self) -> None:
+        with assert_raises_regex(
+                ValueError,
+                r'n_channels \(789\) is not a multiple of required alignment \(100\)'):
+            product_config._normalise_output_channels(789, (100, 200), 100)
+
 
 class TestServiceOverride:
     """Test :class:`~.ServiceOverride`."""
@@ -577,13 +587,13 @@ class TestVisStream:
         self.config['continuum_factor'] = 3
         with assert_raises_regex(
                 ValueError,
-                r'CBF channels \(32768\) is not a multiple of continuum_factor \(3\)'):
+                r'n_channels \(32768\) is not a multiple of required alignment \(12\)'):
             VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
-        self.config['continuum_factor'] = 1024
-        with assert_raises_regex(
-                ValueError,
-                r'Channel range \(128:4096\) is not a multiple of continuum_factor \(1024\)'):
-            VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+
+    def test_misaligned_output_channels(self):
+        self.config['continuum_factor'] = 2048
+        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+        assert_equal(vis.output_channels, (0, 8192))
 
     def test_compatible(self) -> None:
         vis1 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
@@ -671,11 +681,10 @@ class TestBeamformerEngineeringStream:
 
     def test_misaligned_channels(self) -> None:
         self.config['output_channels'] = [1, 2]
-        with assert_raises_regex(ValueError,
-                                 r'Channel range \(1:2\) is not aligned to the multicast streams'):
-            BeamformerEngineeringStream.from_config(
-                Options(), 'beamformer', self.config, self.tacv, {}
-            )
+        bf = BeamformerEngineeringStream.from_config(
+            Options(), 'beamformer', self.config, self.tacv, {}
+        )
+        assert_equal(bf.output_channels, (0, 128))
 
 
 def make_vis(

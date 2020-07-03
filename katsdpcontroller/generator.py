@@ -535,6 +535,33 @@ def n_cal_nodes(configuration: Configuration,
         return 4
 
 
+def _adjust_ingest_output_channels(streams: Sequence[product_config.VisStream]) -> None:
+    """Modify a group of visibility streams to set the output channels.
+
+    They are widened where necessary to meet alignment requirements.
+    """
+    def lcm(a, b):
+        return a // math.gcd(a, b) * b
+
+    src = streams[0].baseline_correlation_products
+    lo, hi = streams[0].output_channels
+    alignment = 1
+    # This is somewhat stricter than katsdpingest actually requires, which is
+    # simply that each ingest node is aligned to the continuum factor.
+    for stream in streams:
+        alignment = lcm(alignment, stream.n_servers * stream.continuum_factor)
+        lo = min(lo, stream.output_channels[0])
+        hi = max(hi, stream.output_channels[1])
+    assigned = (_round_down(lo, alignment), _round_up(hi, alignment))
+    # Should always succeed if validation passed
+    assert 0 <= assigned[0] < assigned[1] <= src.n_channels, "Aligning channels caused an overflow"
+    for stream in streams:
+        if assigned != stream.output_channels:
+            logger.info('Rounding output channels for %s from %s to %s',
+                        stream.name, stream.output_channels, assigned)
+        stream.output_channels = assigned
+
+
 def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                  spectral: Optional[product_config.VisStream],
                  continuum: Optional[product_config.VisStream]) -> scheduler.LogicalNode:
@@ -1196,6 +1223,9 @@ def _make_beamformer_engineering(
 
 def build_logical_graph(configuration: Configuration,
                         config_dict: dict) -> networkx.MultiDiGraph:
+    # We mutate the configuration to align output channels to requirements.
+    configuration = copy.deepcopy(configuration)
+
     # Note: a few lambdas in this function have default arguments e.g.
     # stream=stream. This is needed because capturing a loop-local variable in
     # a lambda captures only the final value of the variable, not the value it
@@ -1253,8 +1283,7 @@ def build_logical_graph(configuration: Configuration,
             for stream2 in configuration.by_class(product_config.VisStream):
                 if (stream2 not in l0_done and stream2.continuum_factor > 1
                         and stream2.compatible(stream)):
-                    # TODO: restore this functionality
-                    # _adjust_ingest_output_channels(config, [name, name2])
+                    _adjust_ingest_output_channels([stream, stream2])
                     _make_ingest(g, configuration, stream, stream2)
                     _make_timeplot_correlator(g, configuration, stream)
                     l0_done.add(stream)
@@ -1269,8 +1298,7 @@ def build_logical_graph(configuration: Configuration,
             l0_spectral_only = True
         else:
             l0_continuum_only = True
-        # TODO: restore this functionality
-        # _adjust_ingest_output_channels(configuration, [stream])
+        _adjust_ingest_output_channels([stream])
         if is_spectral:
             _make_ingest(g, configuration, stream, None)
             _make_timeplot_correlator(g, configuration, stream)
