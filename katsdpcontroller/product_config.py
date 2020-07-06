@@ -173,6 +173,20 @@ def data_rate(size: float, time: float, ratio: float = 1.05, overhead: float = 1
 
 
 class ServiceOverride:
+    """Debugging tool to modify how a service is run.
+
+    Parameters
+    ----------
+    config
+        Override the command-line arguments passed to the service through
+        telescope state, using :func:`override`.
+    taskinfo
+        Override the task information given to Mesos to launch it, using
+        :func:`override`.
+    host
+        Force the task to run on a specific host.
+    """
+
     def __init__(self, *,
                  config: Mapping[str, Any] = {},
                  taskinfo: Mapping[str, Any] = {},
