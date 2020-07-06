@@ -1278,7 +1278,7 @@ class Configuration:
                 streams[name] = stream_cls.from_config(
                     options, name, stream_config, src_streams, sensors[name])
             except ValueError as exc:
-                raise ValueError(f'Configuration error for {name}: {exc}') from exc
+                raise ValueError(f'Configuration error for stream {name}: {exc}') from exc
         return cls(options=options, simulation=simulation, streams=streams.values())
 
 

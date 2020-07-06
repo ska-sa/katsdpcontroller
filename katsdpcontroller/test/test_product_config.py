@@ -1317,7 +1317,7 @@ class TestConfiguration(Fixture):
 
     async def test_bad_stream(self) -> None:
         self.config['outputs']['l0']['continuum_factor'] = 3
-        with assert_raises_regex(ValueError, 'Configuration error for l0: '):
+        with assert_raises_regex(ValueError, 'Configuration error for stream l0: '):
             await Configuration.from_config(self.config)
 
     async def test_sensors(self) -> None:
