@@ -1244,7 +1244,9 @@ class Configuration:
                     except Exception as exc:
                         raise SensorFailure(f'Could not get value for {full_name}: {exc}') from exc
                     if sample.status not in {'nominal', 'warn', 'error'}:
-                        raise SensorFailure(f'Sensor {full_name} has status {sample.status}')
+                        raise SensorFailure(
+                            f'Sensor {full_name} has expected status {sample.status}'
+                        )
                     if not isinstance(sample.value, sensor.type):
                         actual_type = type(sample.value)
                         raise SensorFailure(
