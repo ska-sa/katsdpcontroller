@@ -17,7 +17,7 @@ import katpoint
 import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 
-from . import scheduler, product_config
+from . import scheduler, product_config, defaults
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
     CaptureBlockState, KatcpTransition)
@@ -46,7 +46,6 @@ def escape_format(s: str) -> str:
 # Docker doesn't support IPv6 out of the box, and on some systems 'localhost'
 # resolves to ::1, so force an IPv4 localhost.
 LOCALHOST = '127.0.0.1'
-INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
@@ -64,7 +63,7 @@ IMAGES = frozenset([
     'katsdpcontim',
     'katsdpdisp',
     'katsdpimager',
-    'katsdpingest_' + normalise_gpu_name(INGEST_GPU_NAME),
+    'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME),
     'katsdpdatawriter',
     'katsdpmetawriter',
     'katsdptelstate'
@@ -75,18 +74,12 @@ BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
-#: Maximum number of custom signals requested by (correlator) timeplot
-TIMEPLOT_MAX_CUSTOM_SIGNALS = 256
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Like DATA_VOL, but for high speed data to be transferred to an object store
 OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
-#: Target size of objects in the object store
-WRITER_OBJECT_SIZE = 20e6    # 20 MB
-#: Maximum channels per chunk for spectral imager
-SPECTRAL_OBJECT_CHANNELS = 128
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +133,7 @@ class IngestTask(SDPPhysicalTask):
             gpu = self.agent.gpus[self.allocation.gpus[0].index]
             gpu_name = normalise_gpu_name(gpu.name)
             image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
-            if gpu != INGEST_GPU_NAME:
+            if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
 
@@ -429,7 +422,7 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
         data_rate=_correlator_timeplot_data_rate(stream) * n_ingest,
         extra_config={
             'l0_name': stream.name,
-            'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS
+            'max_custom_signals': defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS
         }
     )
 
@@ -464,8 +457,8 @@ def _correlator_timeplot_frame_size(stream: product_config.VisStream,
     n_cont_chans //= stream.n_servers
     n_bls = stream.n_baselines
     # sd_data + sd_flags
-    ans = n_spec_chans * TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
-    ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
+    ans = n_spec_chans * defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
+    ans += defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
     # sd_blmxdata + sd_blmxflags
     ans += n_cont_chans * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
     ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // 2)    # sd_timeseries + sd_timeseriesabs
@@ -622,13 +615,13 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
         ingest.physical_factory = IngestTask
-        ingest.image = 'katsdpingest_' + normalise_gpu_name(INGEST_GPU_NAME)
+        ingest.image = 'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']
         ingest.gpus = [scheduler.GPURequest()]
         if not develop:
-            ingest.gpus[-1].name = INGEST_GPU_NAME
+            ingest.gpus[-1].name = defaults.INGEST_GPU_NAME
         # Scale for a full GPU for 32 antennas, 32K channels on one node
         scale = src.n_vis / _N32_32 / n_ingest
         ingest.gpus[0].compute = scale
@@ -895,7 +888,7 @@ def _writer_max_accum_dumps(stream: product_config.VisStream,
     if max_channels is not None and max_channels < n_chans:
         n_chans = max_channels
     flag_size = stream.n_baselines * n_chans
-    needed = WRITER_OBJECT_SIZE / flag_size
+    needed = defaults.WRITER_OBJECT_SIZE / flag_size
     # katsdpdatawriter only uses powers of two. While it would be legal to
     # pass a non-power-of-two as the max, we would be wasting memory.
     max_accum_dumps = 1
@@ -933,7 +926,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = _writer_mem_mb(stream.size, WRITER_OBJECT_SIZE, n_substreams,
+    vis_writer.mem = _writer_mem_mb(stream.size, defaults.WRITER_OBJECT_SIZE, n_substreams,
                                     workers, buffer_dumps, max_accum_dumps)
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
@@ -955,7 +948,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
         conf = {
             'l0_name': stream.name,
             'l0_interface': task.interfaces['sdp_10g'].name,
-            'obj_size_mb': WRITER_OBJECT_SIZE / 1e6,
+            'obj_size_mb': defaults.WRITER_OBJECT_SIZE / 1e6,
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
@@ -1007,7 +1000,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
     flag_writer.cpus = min(3, 2 * stream.n_vis / _N32_32)
-    flag_writer.mem = _writer_mem_mb(stream.size, WRITER_OBJECT_SIZE, n_substreams,
+    flag_writer.mem = _writer_mem_mb(stream.size, defaults.WRITER_OBJECT_SIZE, n_substreams,
                                      workers, buffer_dumps, max_accum_dumps)
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
@@ -1040,7 +1033,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
         conf = {
             'flags_name': stream.name,
             'flags_interface': task.interfaces['sdp_10g'].name,
-            'obj_size_mb': WRITER_OBJECT_SIZE / 1e6,
+            'obj_size_mb': defaults.WRITER_OBJECT_SIZE / 1e6,
             'obj_max_dumps': max_accum_dumps,
             'workers': workers,
             'buffer_dumps': buffer_dumps,
@@ -1327,7 +1320,8 @@ def build_logical_graph(configuration: Configuration,
     for stream in configuration.by_class(product_config.ContinuumImageStream):
         _make_imager_writers(g, configuration, 'continuum', stream)
     for stream in configuration.by_class(product_config.SpectralImageStream):
-        _make_imager_writers(g, configuration, 'spectral', stream, SPECTRAL_OBJECT_CHANNELS)
+        _make_imager_writers(g, configuration, 'spectral', stream,
+                             defaults.SPECTRAL_OBJECT_CHANNELS)
     # Imagers are mostly handled in build_postprocess_logical_graph, but we create
     # capture block-independent metadata here.
     image_classes: List[Type[product_config.Stream]] = [
@@ -1577,7 +1571,7 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                           telstate: katsdptelstate.TelescopeState,
                           target_mapper: TargetMapper) -> \
         Tuple[str, Sequence[scheduler.LogicalNode]]:
-    dump_bytes = stream.vis.n_baselines * SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
+    dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate)
     band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
@@ -1585,9 +1579,9 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
 
     nodes = []
     for target, obs_time in targets:
-        for i in range(0, stream.vis.n_chans, SPECTRAL_OBJECT_CHANNELS):
+        for i in range(0, stream.vis.n_chans, defaults.SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, stream.output_channels[0])
-            last_channel = min(i + SPECTRAL_OBJECT_CHANNELS,
+            last_channel = min(i + defaults.SPECTRAL_OBJECT_CHANNELS,
                                stream.vis.n_chans,
                                stream.output_channels[1])
             if first_channel >= last_channel:
@@ -1632,7 +1626,7 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                 '--stop-channel', str(last_channel),
                 '--major', '5',
                 '--weight-type', 'robust',
-                '--channel-batch', str(SPECTRAL_OBJECT_CHANNELS),
+                '--channel-batch', str(defaults.SPECTRAL_OBJECT_CHANNELS),
                 data_url,
                 escape_format(DATA_VOL.container_path),
                 escape_format('{}_{}_{}'.format(capture_block_id, stream.name, target_name)),

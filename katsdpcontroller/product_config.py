@@ -19,22 +19,12 @@ import katpoint
 from katsdptelstate.endpoint import endpoint_list_parser
 import katportalclient
 
-from . import schemas
+from . import schemas, defaults
 
 
 logger = logging.getLogger(__name__)
 _S = TypeVar('_S', bound='Stream')
 _ValidTypes = Union[AbstractSet[str], Sequence[str]]
-#: Minimum observation time for continuum imager (seconds)
-DEFAULT_CONTINUUM_MIN_TIME = 15 * 60.0     # 15 minutes
-#: Minimum observation time for spectral imager (seconds)
-DEFAULT_SPECTRAL_MIN_TIME = 3600.0         # 1 hour
-#: Size of cal buffer in seconds
-DEFAULT_CAL_BUFFER_TIME = 25 * 60.0        # 25 minutes (allows a single batch of 15 minutes)
-#: Maximum number of scans to include in report
-DEFAULT_CAL_MAX_SCANS = 1000
-#: Speed at which flags are transmitted, relative to real time
-DEFAULT_FLAGS_RATE_RATIO = 8.0
 #: Number of bytes per complex visibility
 BYTES_PER_VIS = 8
 #: Number of bytes per per-visibility flag mask
@@ -43,8 +33,6 @@ BYTES_PER_FLAG = 1
 BYTES_PER_WEIGHT = 1
 #: Number of bytes per vis-flags-weights combination
 BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
-#: Alignment constraint for `int_time` in katcbfsim
-KATCBFSIM_SPECTRA_PER_HEAP = 256
 
 
 def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
@@ -630,7 +618,7 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
         n_antennas = len(acv.antennas)
         # Round the int_time the same way katcbfsim does, so that we have
         # an accurate value.
-        heap_time = acv.n_chans / acv.bandwidth * KATCBFSIM_SPECTRA_PER_HEAP
+        heap_time = acv.n_chans / acv.bandwidth * defaults.KATCBFSIM_SPECTRA_PER_HEAP
         acc_heaps = max(1, round(int_time / heap_time))
         int_time = acc_heaps * heap_time
         super().__init__(
@@ -777,7 +765,7 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
             name, src_streams,
             n_endpoints=config['n_endpoints'],
             n_chans_per_substream=config.get('n_chans_per_substream'),
-            spectra_per_heap=config.get('spectra_per_heap', KATCBFSIM_SPECTRA_PER_HEAP)
+            spectra_per_heap=config.get('spectra_per_heap', defaults.KATCBFSIM_SPECTRA_PER_HEAP)
         )
 
 
@@ -1012,8 +1000,8 @@ class CalStream(Stream):
         return cls(
             name, src_streams,
             parameters=config.get('parameters', {}),
-            buffer_time=config.get('buffer_time', DEFAULT_CAL_BUFFER_TIME),
-            max_scans=config.get('max_scans', DEFAULT_CAL_MAX_SCANS)
+            buffer_time=config.get('buffer_time', defaults.CAL_BUFFER_TIME),
+            max_scans=config.get('max_scans', defaults.CAL_MAX_SCANS)
         )
 
 
@@ -1079,7 +1067,7 @@ class FlagsStream(Stream):
                     sensors: Mapping[str, Any]) -> 'FlagsStream':
         return cls(
             name, src_streams,
-            rate_ratio=config.get('rate_ratio', DEFAULT_FLAGS_RATE_RATIO),
+            rate_ratio=config.get('rate_ratio', defaults.FLAGS_RATE_RATIO),
             archive=config['archive']
         )
 
@@ -1133,7 +1121,7 @@ class ContinuumImageStream(ImageStream):
             uvblavg_parameters=config.get('uvblavg_parameters', {}),
             mfimage_parameters=config.get('mfimage_parameters', {}),
             max_realtime=config.get('max_realtime'),
-            min_time=config.get('min_time', DEFAULT_CONTINUUM_MIN_TIME)
+            min_time=config.get('min_time', defaults.CONTINUUM_MIN_TIME)
         )
 
 
@@ -1181,7 +1169,7 @@ class SpectralImageStream(ImageStream):
             name, src_streams,
             output_channels=output_channels,
             parameters=config.get('parameters', {}),
-            min_time=config.get('min_time', DEFAULT_SPECTRAL_MIN_TIME)
+            min_time=config.get('min_time', defaults.SPECTRAL_MIN_TIME)
         )
 
 

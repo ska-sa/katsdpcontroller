@@ -13,7 +13,7 @@ from nose.tools import (
     assert_true, assert_false, assert_raises, assert_raises_regex
 )
 
-from .. import product_config
+from .. import product_config, defaults
 from ..product_config import (
     AntennaChannelisedVoltageStream,
     SimAntennaChannelisedVoltageStream,
@@ -506,7 +506,7 @@ class TestSimTiedArrayChannelisedVoltageStream:
         tacv = SimTiedArrayChannelisedVoltageStream.from_config(
             Options(), 'beam_0x', self.config, [self.acv], {}
         )
-        assert_equal(tacv.spectra_per_heap, product_config.KATCBFSIM_SPECTRA_PER_HEAP)
+        assert_equal(tacv.spectra_per_heap, defaults.KATCBFSIM_SPECTRA_PER_HEAP)
         assert_equal(tacv.n_chans_per_substream, 32)
 
 
@@ -738,8 +738,8 @@ class TestCalStream:
         del self.config['max_scans']
         cal = CalStream.from_config(Options(), 'cal', self.config, [self.vis], {})
         assert_equal(cal.parameters, {})
-        assert_equal(cal.buffer_time, product_config.DEFAULT_CAL_BUFFER_TIME)
-        assert_equal(cal.max_scans, product_config.DEFAULT_CAL_MAX_SCANS)
+        assert_equal(cal.buffer_time, defaults.CAL_BUFFER_TIME)
+        assert_equal(cal.max_scans, defaults.CAL_MAX_SCANS)
 
     def test_too_few_antennas(self) -> None:
         vis = make_vis()
@@ -753,8 +753,8 @@ def make_cal(vis: Optional[VisStream] = None) -> CalStream:
     return CalStream(
         'cal', [vis],
         parameters={},
-        buffer_time=product_config.DEFAULT_CAL_BUFFER_TIME,
-        max_scans=product_config.DEFAULT_CAL_MAX_SCANS
+        buffer_time=defaults.CAL_BUFFER_TIME,
+        max_scans=defaults.CAL_MAX_SCANS
     )
 
 
@@ -786,7 +786,7 @@ class TestFlagsStream:
     def test_defaults(self) -> None:
         del self.config['rate_ratio']
         flags = FlagsStream.from_config(Options(), 'flags', self.config, [self.vis, self.cal], {})
-        assert_equal(flags.rate_ratio, product_config.DEFAULT_FLAGS_RATE_RATIO)
+        assert_equal(flags.rate_ratio, defaults.FLAGS_RATE_RATIO)
 
     def test_incompatible_vis(self) -> None:
         vis = make_vis()
@@ -864,7 +864,7 @@ class TestContinuumImageStream:
         assert_equal(cont.uvblavg_parameters, {})
         assert_equal(cont.mfimage_parameters, {})
         assert_equal(cont.max_realtime, None)
-        assert_equal(cont.min_time, product_config.DEFAULT_CONTINUUM_MIN_TIME)
+        assert_equal(cont.min_time, defaults.CONTINUUM_MIN_TIME)
 
 
 def make_continuum_image(flags: Optional[FlagsStream] = None) -> ContinuumImageStream:
@@ -921,7 +921,7 @@ class TestSpectralImageStream:
             Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
         )
         assert_equal(spec.output_channels, (0, 1024))
-        assert_equal(spec.min_time, product_config.DEFAULT_SPECTRAL_MIN_TIME)
+        assert_equal(spec.min_time, defaults.SPECTRAL_MIN_TIME)
         assert_equal(spec.parameters, {})
 
 
