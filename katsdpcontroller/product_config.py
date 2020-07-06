@@ -273,7 +273,7 @@ class Stream:
 
 
 class CamHttpStream(Stream):
-    """A cam.http stream."""
+    """A stream for obtaining sensor values from katportal."""
 
     stream_type: ClassVar[str] = 'cam.http'
 
