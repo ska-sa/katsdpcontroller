@@ -22,7 +22,7 @@ from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
     CaptureBlockState, KatcpTransition)
 from .product_config import (
-    BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, bandwidth,
+    BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
 # Import just for type annotations, but avoid at runtime due to circular imports
 if TYPE_CHECKING:
@@ -233,10 +233,9 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
     meta_writer.ports = ['port']
     meta_writer.volumes = [OBJ_DATA_VOL]
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    # Actual required bandwidth is minimal, but bursty. Use 1 Gb/s,
+    # Actual required data rate is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
-    bandwidth = 1e9 if not configuration.options.develop else 10e6
-    meta_writer.interfaces[0].bandwidth_out = bandwidth
+    meta_writer.interfaces[0].bandwidth_out = 1e9 if not configuration.options.develop else 10e6
     meta_writer.transitions = {
         CaptureBlockState.BURNDOWN: [
             KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)    # Light dump
@@ -343,7 +342,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             # 1024.
             sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
-        sim.interfaces[0].bandwidth_out = stream.net_bandwidth()
+        sim.interfaces[0].bandwidth_out = stream.data_rate()
         sim.transitions = {
             CaptureBlockState.CAPTURING: [
                 KatcpTransition('capture-start', stream.name,
@@ -367,7 +366,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
 def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
                    cpus: float,
                    timeplot_buffer_mb: float,
-                   bandwidth: float,
+                   data_rate: float,
                    extra_config: dict) -> scheduler.LogicalNode:
     """Common backend code for creating a single timeplot server."""
     multicast = find_node(g, 'multicast.timeplot.' + name)
@@ -382,7 +381,7 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
     # insufficient).
     timeplot.mem = timeplot_buffer_mb * 1.5 + 256
     timeplot.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    timeplot.interfaces[0].bandwidth_in = bandwidth
+    timeplot.interfaces[0].bandwidth_in = data_rate
     timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
@@ -427,7 +426,7 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
     return _make_timeplot(
         g, name=stream.name, description=stream.name,
         cpus=cpus, timeplot_buffer_mb=timeplot_buffer / 1024**2,
-        bandwidth=_correlator_timeplot_bandwidth(stream) * n_ingest,
+        data_rate=_correlator_timeplot_data_rate(stream) * n_ingest,
         extra_config={
             'l0_name': stream.name,
             'max_custom_signals': TIMEPLOT_MAX_CUSTOM_SIGNALS
@@ -450,7 +449,7 @@ def _make_timeplot_beamformer(
     timeplot = _make_timeplot(
         g, name=stream.name, description=stream.name,
         cpus=0.5, timeplot_buffer_mb=128,
-        bandwidth=_beamformer_timeplot_bandwidth(stream),
+        data_rate=_beamformer_timeplot_data_rate(stream),
         extra_config={'max_custom_signals': 2})
 
     return beamformer, timeplot
@@ -488,17 +487,17 @@ def _correlator_timeplot_continuum_factor(stream: product_config.VisStream) -> i
     return factor
 
 
-def _correlator_timeplot_bandwidth(stream: product_config.VisStream) -> float:
+def _correlator_timeplot_data_rate(stream: product_config.VisStream) -> float:
     """Bandwidth for the correlator timeplot stream from a single ingest"""
     sd_continuum_factor = _correlator_timeplot_continuum_factor(stream)
     sd_frame_size = _correlator_timeplot_frame_size(
         stream, stream.n_spectral_channels // sd_continuum_factor)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
-    return bandwidth(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
+    return data_rate(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
 
 
-def _beamformer_timeplot_bandwidth(
+def _beamformer_timeplot_data_rate(
         stream: product_config.TiedArrayChannelisedVoltageStreamBase) -> float:
     """Bandwidth for the beamformer timeplot stream.
 
@@ -572,7 +571,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
     ingest_group = LogicalGroup('ingest.' + name)
 
     sd_continuum_factor = _correlator_timeplot_continuum_factor(primary)
-    sd_spead_rate = _correlator_timeplot_bandwidth(primary)
+    sd_spead_rate = _correlator_timeplot_data_rate(primary)
     output_channels_str = '{}:{}'.format(*primary.output_channels)
     group_config = {
         'continuum_factor': continuum.continuum_factor if continuum is not None else 1,
@@ -651,13 +650,13 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         ingest.interfaces = [
             scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
             scheduler.InterfaceRequest('sdp_10g')]
-        ingest.interfaces[0].bandwidth_in = src.net_bandwidth() / n_ingest
-        net_bandwidth = 0.0
+        ingest.interfaces[0].bandwidth_in = src.data_rate() / n_ingest
+        data_rate_out = 0.0
         if spectral is not None:
-            net_bandwidth += spectral.net_bandwidth() + sd_spead_rate * n_ingest
+            data_rate_out += spectral.data_rate() + sd_spead_rate * n_ingest
         if continuum is not None:
-            net_bandwidth += continuum.net_bandwidth()
-        ingest.interfaces[1].bandwidth_out = net_bandwidth / n_ingest
+            data_rate_out += continuum.data_rate()
+        ingest.interfaces[1].bandwidth_out = data_rate_out / n_ingest
 
         def make_ingest_config(task: SDPPhysicalTask,
                                resolver: 'product_controller.Resolver',
@@ -796,9 +795,9 @@ def _make_cal(g: networkx.MultiDiGraph,
         cal.volumes = [DATA_VOL]
         cal.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
         # Note: these scale the fixed overheads too, so is not strictly accurate.
-        cal.interfaces[0].bandwidth_in = vis.net_bandwidth() / n_cal
+        cal.interfaces[0].bandwidth_in = vis.data_rate() / n_cal
         cal.interfaces[0].bandwidth_out = sum(
-            flags_stream.net_bandwidth() / n_cal
+            flags_stream.data_rate() / n_cal
             for flags in flags_streams
         )
         cal.ports = ['port', 'dask_diagnostics', 'aiomonitor_port', 'aioconsole_port']
@@ -939,11 +938,11 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    vis_writer.interfaces[0].bandwidth_in = stream.net_bandwidth()
+    vis_writer.interfaces[0].bandwidth_in = stream.data_rate()
     if local:
         vis_writer.volumes = [OBJ_DATA_VOL]
     else:
-        vis_writer.interfaces[0].backwidth_out = stream.net_bandwidth()
+        vis_writer.interfaces[0].backwidth_out = stream.data_rate()
         # Creds are passed on the command-line so that they are redacted from telstate.
         vis_writer.command.extend([
             '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
@@ -1013,7 +1012,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = stream.net_bandwidth() * stream.rate_ratio
+    flag_writer.interfaces[0].bandwidth_in = stream.data_rate() * stream.rate_ratio
     if local:
         flag_writer.volumes = [OBJ_DATA_VOL]
     else:
@@ -1145,13 +1144,13 @@ def _make_beamformer_engineering_pol(
                                    infiniband=not configuration.options.develop,
                                    affinity=timeplot or not ram)
     ]
-    # XXX Even when there is enough bandwidth, sharing a node with correlator
+    # XXX Even when there is enough network bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
-    # bandwidth up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
-    bf_ingest.interfaces[0].bandwidth_in = max(src_stream.net_bandwidth(), 20e9)
+    # data rate up to 20Gb/s to prevent that sharing (two pols then use all 40Gb/s).
+    bf_ingest.interfaces[0].bandwidth_in = max(src_stream.data_rate(), 20e9)
     if timeplot:
         bf_ingest.interfaces.append(scheduler.InterfaceRequest('sdp_10g'))
-        bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_bandwidth(src_stream)
+        bf_ingest.interfaces[-1].bandwidth_out = _beamformer_timeplot_data_rate(src_stream)
     else:
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [

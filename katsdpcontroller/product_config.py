@@ -155,8 +155,8 @@ def _normalise_output_channels(
         return c
 
 
-def bandwidth(size: float, time: float, ratio: float = 1.05, overhead: float = 128) -> float:
-    """Convert a heap size to a bandwidth in bits per second.
+def data_rate(size: float, time: float, ratio: float = 1.05, overhead: float = 128) -> float:
+    """Convert a heap size to a data rate in bits per second.
 
     Parameters
     ----------
@@ -502,10 +502,10 @@ class CbfPerChannelStream(Stream):
     def int_time(self) -> float:
         """Time between heaps, in seconds."""
 
-    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
         """Network bandwidth in bits per second."""
         heap_size = self.size / self.n_substreams
-        return bandwidth(heap_size, self.int_time, ratio, overhead) * self.n_substreams
+        return data_rate(heap_size, self.int_time, ratio, overhead) * self.n_substreams
 
 
 class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
@@ -835,11 +835,11 @@ class VisStream(Stream):
         """Size of the flags in each frame, in bytes."""
         return self.n_vis * BYTES_PER_FLAG
 
-    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
-        return bandwidth(self.size, self.int_time, ratio, overhead)
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return data_rate(self.size, self.int_time, ratio, overhead)
 
-    def flag_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
-        return bandwidth(self.flag_size, self.int_time, ratio, overhead)
+    def flag_data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return data_rate(self.flag_size, self.int_time, ratio, overhead)
 
     @classmethod
     def from_config(cls,
@@ -1052,8 +1052,8 @@ class FlagsStream(Stream):
     def size(self) -> int:
         return self.vis.flag_size
 
-    def net_bandwidth(self, ratio: float = 1.05, overhead: int = 128) -> float:
-        return self.vis.flag_bandwidth(ratio, overhead) * self.rate_ratio
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return self.vis.flag_data_rate(ratio, overhead) * self.rate_ratio
 
     @classmethod
     def from_config(cls,

@@ -387,7 +387,7 @@ class TestBaselineCorrelationProductsStream:
         assert_equal(bcp.centre_frequency, 1284e6)
         assert_equal(bcp.adc_sample_rate, 1712e6)
         assert_equal(bcp.n_samples_between_spectra, 524288)
-        assert_equal(bcp.net_bandwidth(1.0, 0), 40 * 32768 * 8 * 2 * 8)
+        assert_equal(bcp.data_rate(1.0, 0), 40 * 32768 * 8 * 2 * 8)
 
     def test_bad_endpoint_count(self) -> None:
         self.config['url'] = 'spead://239.1.0.0+8:7148'
@@ -573,8 +573,8 @@ class TestVisStream:
         assert_equal(vis.n_baselines, 12)
         assert_equal(vis.size, 1984 * (12 * 10 + 4))
         assert_equal(vis.flag_size, 1984 * 12)
-        assert_equal(vis.net_bandwidth(1.0, 0), vis.size / vis.int_time * 8)
-        assert_equal(vis.flag_bandwidth(1.0, 0), vis.flag_size / vis.int_time * 8)
+        assert_equal(vis.data_rate(1.0, 0), vis.size / vis.int_time * 8)
+        assert_equal(vis.flag_data_rate(1.0, 0), vis.flag_size / vis.int_time * 8)
 
     def test_defaults(self) -> None:
         del self.config['output_channels']
@@ -780,7 +780,7 @@ class TestFlagsStream:
         assert_equal(flags.n_baselines, self.vis.n_baselines)
         assert_equal(flags.n_vis, self.vis.n_vis)
         assert_equal(flags.size, self.vis.flag_size)
-        assert_equal(flags.net_bandwidth(), self.vis.flag_bandwidth() * 10.0)
+        assert_equal(flags.data_rate(), self.vis.flag_data_rate() * 10.0)
         assert_equal(flags.int_time, self.vis.int_time)
 
     def test_defaults(self) -> None:
