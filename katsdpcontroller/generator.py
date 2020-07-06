@@ -503,8 +503,8 @@ def _beamformer_timeplot_data_rate(
 
     Parameters
     ----------
-    info
-        Info about the single-pol beam.
+    stream
+        The single-pol beam stream.
     """
     # XXX The beamformer signal displays are still in development, but the
     # rates are tiny. Until the protocol is finalised we'll just hardcode a
