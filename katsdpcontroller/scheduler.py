@@ -2940,7 +2940,7 @@ class Scheduler(pymesos.Scheduler):
                     group.future.set_result(None)
                     queue.remove(group)
                     self._wakeup_launcher.set()
-                except Exception as error:
+                except BaseException as error:
                     if not group.future.done():
                         group.future.set_exception(error)
                     # Don't remove from the queue: launch() handles that
@@ -3113,7 +3113,7 @@ class Scheduler(pymesos.Scheduler):
         try:
             await asyncio.wait_for(pending.resources_future, timeout=resources_timeout)
             await pending.future
-        except Exception as error:
+        except BaseException as error:
             logger.debug('Exception in launching group', exc_info=True)
             # Could be
             # - a timeout
