@@ -884,7 +884,6 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await self.client.request('capture-init', 'product')
         reply, informs = await self.client.request('sdp-shutdown')
         self.assertEqual(reply[0], b'127.0.0.144,127.0.0.42')
-        print(poweroff_mock.mock_calls)
         poweroff_mock.assert_any_call(
             url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
         poweroff_mock.assert_any_call(
