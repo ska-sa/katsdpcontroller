@@ -878,7 +878,7 @@ class VisStream(Stream):
     def compatible(self, other: 'VisStream') -> bool:
         """Determine whether the configurations are mostly the same.
 
-        Specifically, they must be the same other than the vlaues of
+        Specifically, they must be the same other than the values of
         ``continuum_factor`` and ``archive``.
         """
         return (
