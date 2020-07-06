@@ -140,7 +140,6 @@ def _normalise_output_channels(
     else:
         return (c[0] // alignment * alignment,
                 (c[1] + alignment - 1) // alignment * alignment)
-        return c
 
 
 def data_rate(size: float, time: float, ratio: float = 1.05, overhead: float = 128) -> float:
