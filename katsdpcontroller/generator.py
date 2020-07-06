@@ -268,7 +268,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     def make_cbf_simulator_config(task: SDPPhysicalTask,
                                   resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
-            'cbf_channels': stream.n_channels,
+            'cbf_channels': stream.n_chans,
             'cbf_adc_sample_rate': stream.adc_sample_rate,
             'cbf_bandwidth': stream.bandwidth,
             'cbf_substreams': stream.n_substreams,
@@ -317,7 +317,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             scale = stream.n_vis / n_sim / _N16_32
             sim.cpus = 2 * min(1.0, scale)
             # 4 entries per Jones matrix, complex64 each
-            gains_size = stream.n_antennas * stream.n_channels * 4 * 8
+            gains_size = stream.n_antennas * stream.n_chans * 4 * 8
             # Factor of 4 is conservative; only actually double-buffered
             sim.mem = (4 * _mb(stream.size) + _mb(gains_size)) / n_sim + 512
             sim.cores = [None, None]
@@ -415,12 +415,12 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
     # Exact requirement not known (also depends on number of users). Give it
     # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
     # Lower bound (from inspection) to cater for fixed overheads.
-    cpus = max(2 * min(1.0, stream.n_baselines * stream.n_spectral_channels / _N16_32), 0.3)
+    cpus = max(2 * min(1.0, stream.n_baselines * stream.n_spectral_chans / _N16_32), 0.3)
 
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
-    timeplot_slot = stream.n_spectral_channels * (stream.n_baselines + percentiles) * 8
+    timeplot_slot = stream.n_spectral_chans * (stream.n_baselines + percentiles) * 8
     timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
 
     return _make_timeplot(
@@ -456,21 +456,21 @@ def _make_timeplot_beamformer(
 
 
 def _correlator_timeplot_frame_size(stream: product_config.VisStream,
-                                    n_cont_channels: int) -> int:
+                                    n_cont_chans: int) -> int:
     """Approximate size of the data sent from one ingest process to timeplot, per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
     n_perc_signals = 5 * 8
-    n_spec_channels = stream.n_spectral_channels // stream.n_servers
-    n_cont_channels //= stream.n_servers
+    n_spec_chans = stream.n_spectral_chans // stream.n_servers
+    n_cont_chans //= stream.n_servers
     n_bls = stream.n_baselines
     # sd_data + sd_flags
-    ans = n_spec_channels * TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
+    ans = n_spec_chans * TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
     ans += TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
     # sd_blmxdata + sd_blmxflags
-    ans += n_cont_channels * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
+    ans += n_cont_chans * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
     ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // 2)    # sd_timeseries + sd_timeseriesabs
     # sd_percspectrum + sd_percspectrumflags
-    ans += n_spec_channels * n_perc_signals * (BYTES_PER_VIS // 2 + BYTES_PER_FLAG)
+    ans += n_spec_chans * n_perc_signals * (BYTES_PER_VIS // 2 + BYTES_PER_FLAG)
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
     ans += n_bls * 10                               # bls_ordering
     ans += n_bls * 8 * 4                            # sd_flag_fraction
@@ -481,8 +481,8 @@ def _correlator_timeplot_frame_size(stream: product_config.VisStream,
 def _correlator_timeplot_continuum_factor(stream: product_config.VisStream) -> int:
     factor = 1
     # Aim for about 256 signal display coarse channels
-    while (stream.n_spectral_channels % (factor * stream.n_servers * 2) == 0
-           and stream.n_spectral_channels // factor >= 384):
+    while (stream.n_spectral_chans % (factor * stream.n_servers * 2) == 0
+           and stream.n_spectral_chans // factor >= 384):
         factor *= 2
     return factor
 
@@ -491,7 +491,7 @@ def _correlator_timeplot_data_rate(stream: product_config.VisStream) -> float:
     """Bandwidth for the correlator timeplot stream from a single ingest"""
     sd_continuum_factor = _correlator_timeplot_continuum_factor(stream)
     sd_frame_size = _correlator_timeplot_frame_size(
-        stream, stream.n_spectral_channels // sd_continuum_factor)
+        stream, stream.n_spectral_chans // sd_continuum_factor)
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     return data_rate(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
@@ -520,7 +520,7 @@ def n_cal_nodes(configuration: Configuration,
     # a unified cal report).
     if configuration.options.develop:
         return 2
-    elif stream.vis.n_channels <= 4096:
+    elif stream.vis.n_chans <= 4096:
         return 1
     else:
         return 4
@@ -545,7 +545,7 @@ def _adjust_ingest_output_channels(streams: Sequence[product_config.VisStream]) 
         hi = max(hi, stream.output_channels[1])
     assigned = (_round_down(lo, alignment), _round_up(hi, alignment))
     # Should always succeed if validation passed
-    assert 0 <= assigned[0] < assigned[1] <= src.n_channels, "Aligning channels caused an overflow"
+    assert 0 <= assigned[0] < assigned[1] <= src.n_chans, "Aligning channels caused an overflow"
     for stream in streams:
         if assigned != stream.output_channels:
             logger.info('Rounding output channels for %s from %s to %s',
@@ -637,7 +637,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         # We use slightly higher multipliers to be safe, as well as
         # conservatively using src_info instead of spectral_info.
         ingest.gpus[0].mem = \
-            (70 * src.n_vis + 168 * src.n_channels) / n_ingest / 1024**2 + 128
+            (70 * src.n_vis + 168 * src.n_chans) / n_ingest / 1024**2 + 128
         # Provide 4 CPUs for 32 antennas, 32K channels (the number in a NUMA
         # node of an ingest machine). It might not actually need this much.
         # Cores are reserved solely to get NUMA affinity with the NIC.
@@ -697,7 +697,7 @@ def _make_cal(g: networkx.MultiDiGraph,
     # (which tends to dominate runtime) scales as if there were 8K channels.
     # Longer integration times are also less efficient (because there are fixed
     # costs per scan, so we scale as if for 4s dumps if longer dumps are used.
-    effective_vis = vis.n_baselines * min(8192, vis.n_channels)
+    effective_vis = vis.n_baselines * min(8192, vis.n_chans)
     effective_int = min(vis.int_time, 4.0)
     # This scale factor gives 34 total CPUs for 64A, 32K, 4+s integration, which
     # will get clamped down slightly.
@@ -728,9 +728,9 @@ def _make_cal(g: networkx.MultiDiGraph,
     # of the HH and VV products for each scan. We allow a factor of 2 for
     # operations that work on it (which cancels the factor of 1/2 for only
     # having 2 of the 4 pol products). The scaling by n_cal is because there
-    # are 1024 channels *per node* while vis.n_channels is over all nodes.
+    # are 1024 channels *per node* while vis.n_chans is over all nodes.
     extra = max(workers / stream.slots, min(16 * workers, vis.n_baselines) / vis.n_baselines) * 4
-    extra += stream.max_scans * 1024 * n_cal / (stream.slots * vis.n_channels)
+    extra += stream.max_scans * 1024 * n_cal / (stream.slots * vis.n_chans)
 
     # Extra memory allocation for tasks that deal with bandpass calibration
     # solutions in telescope state. The exact size of these depends on how
@@ -740,7 +740,7 @@ def _make_cal(g: networkx.MultiDiGraph,
     # - 8 bytes per value (complex64)
     # - 200 solutions
     # - 3: conservative estimate of bloat from text-based pickling
-    telstate_extra = vis.n_channels * vis.n_pols * vis.n_antennas * 8 * 3 * 200
+    telstate_extra = vis.n_chans * vis.n_pols * vis.n_antennas * 8 * 3 * 200
 
     group_config = {
         'buffer_maxsize': buffer_size,
@@ -891,10 +891,10 @@ def _writer_max_accum_dumps(stream: product_config.VisStream,
     # Compute how many are needed to allow weights/flags to achieve the target
     # object size. The scaling by n_ingest_nodes is because this is also the
     # number of substreams, and katsdpdatawriter doesn't weld substreams.
-    n_channels = stream.n_channels // stream.n_servers
-    if max_channels is not None and max_channels < n_channels:
-        n_channels = max_channels
-    flag_size = stream.n_baselines * n_channels
+    n_chans = stream.n_chans // stream.n_servers
+    if max_channels is not None and max_channels < n_chans:
+        n_chans = max_channels
+    flag_size = stream.n_baselines * n_chans
     needed = WRITER_OBJECT_SIZE / flag_size
     # katsdpdatawriter only uses powers of two. While it would be legal to
     # pass a non-power-of-two as the max, we would be wasting memory.
@@ -1585,10 +1585,10 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
 
     nodes = []
     for target, obs_time in targets:
-        for i in range(0, stream.vis.n_channels, SPECTRAL_OBJECT_CHANNELS):
+        for i in range(0, stream.vis.n_chans, SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, stream.output_channels[0])
             last_channel = min(i + SPECTRAL_OBJECT_CHANNELS,
-                               stream.vis.n_channels,
+                               stream.vis.n_chans,
                                stream.output_channels[1])
             if first_channel >= last_channel:
                 continue

@@ -145,7 +145,7 @@ class TestNormaliseOutputChannels:
     def test_misalign(self) -> None:
         with assert_raises_regex(
                 ValueError,
-                r'n_channels \(789\) is not a multiple of required alignment \(100\)'):
+                r'n_chans \(789\) is not a multiple of required alignment \(100\)'):
             product_config._normalise_output_channels(789, (100, 200), 100)
 
 
@@ -266,7 +266,7 @@ class TestAntennaChannelisedVoltageStream:
         assert_equal(acv.url, yarl.URL('spead://239.0.0.0+7:7148'))
         assert_equal(acv.antennas, ['m000', 'm001'])
         assert_equal(acv.band, 'l')
-        assert_equal(acv.n_channels, 32768)
+        assert_equal(acv.n_chans, 32768)
         assert_equal(acv.bandwidth, 107e6)
         assert_equal(acv.centre_frequency, 1284e6)
         assert_equal(acv.adc_sample_rate, 1712e6)
@@ -300,7 +300,7 @@ class TestSimAntennaChannelisedVoltageStream:
         assert_equal(acv.antennas, ['m000', 'm002'])
         assert_equal(acv.antenna_objects, [_M000, _M002])
         assert_equal(acv.band, 'l')
-        assert_equal(acv.n_channels, 32768)
+        assert_equal(acv.n_chans, 32768)
         assert_equal(acv.bandwidth, 107e6)
         assert_equal(acv.centre_frequency, 1284e6)
         assert_equal(acv.adc_sample_rate, 1712e6)
@@ -327,7 +327,7 @@ def make_antenna_channelised_voltage(antennas=('m000', 'm002')) -> AntennaChanne
         url=yarl.URL('spead2://239.0.0.0+7:7148'),
         antennas=antennas,
         band='l',
-        n_channels=32768,
+        n_chans=32768,
         bandwidth=107e6,
         adc_sample_rate=1712e6,
         centre_frequency=1284e6,
@@ -345,7 +345,7 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
         centre_frequency=1284,
         bandwidth=256,
         adc_sample_rate=1024,
-        n_channels=512
+        n_chans=512
     )
 
 
@@ -379,8 +379,8 @@ class TestBaselineCorrelationProductsStream:
         assert_equal(bcp.size, 40 * 32768 * 8)
         assert_is(bcp.antenna_channelised_voltage, self.acv)
         assert_equal(bcp.antennas, ['m000', 'm002'])
-        assert_equal(bcp.n_channels, 32768)
-        assert_equal(bcp.n_channels_per_endpoint, 4096)
+        assert_equal(bcp.n_chans, 32768)
+        assert_equal(bcp.n_chans_per_endpoint, 4096)
         assert_equal(bcp.n_substreams, 16)
         assert_equal(bcp.n_antennas, 2)
         assert_equal(bcp.bandwidth, 107e6)
@@ -392,7 +392,7 @@ class TestBaselineCorrelationProductsStream:
     def test_bad_endpoint_count(self) -> None:
         self.config['url'] = 'spead://239.1.0.0+8:7148'
         with assert_raises_regex(ValueError,
-                                 r'n_channels \(32768\) is not a multiple of endpoints \(9\)'):
+                                 r'n_chans \(32768\) is not a multiple of endpoints \(9\)'):
             BaselineCorrelationProductsStream.from_config(
                 Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
             )
@@ -426,7 +426,7 @@ class TestSimBaselineCorrelationProductsStream:
         )
         # Most properties are assumed to be tested via
         # TestBaselineCorrelationProductsStream and are not re-tested here.
-        assert_equal(bcp.n_channels_per_substream, 8)
+        assert_equal(bcp.n_chans_per_substream, 8)
         assert_equal(bcp.n_substreams, 64)
         # Check that int_time is rounded to nearest multiple of 512
         assert_equal(bcp.int_time, 1024.0)
@@ -436,7 +436,7 @@ class TestSimBaselineCorrelationProductsStream:
         bcp = SimBaselineCorrelationProductsStream.from_config(
             Options(), 'narrow2_bcp', self.config, [self.acv], {}
         )
-        assert_equal(bcp.n_channels_per_substream, 32)
+        assert_equal(bcp.n_chans_per_substream, 32)
         assert_equal(bcp.n_substreams, 16)
 
 
@@ -463,7 +463,7 @@ class TestTiedArrayChannelisedVoltageStream:
         )
         assert_equal(tacv.name, 'beam_0x')
         assert_equal(tacv.bits_per_sample, 16)
-        assert_equal(tacv.n_channels_per_substream, 64)
+        assert_equal(tacv.n_chans_per_substream, 64)
         assert_equal(tacv.spectra_per_heap, 256)
         assert_equal(tacv.instrument_dev_name, 'beam')
         assert_equal(tacv.size, 32768 * 256 * 2 * 2)
@@ -492,7 +492,7 @@ class TestSimTiedArrayChannelisedVoltageStream:
         )
         assert_equal(tacv.name, 'beam_0x')
         assert_equal(tacv.bits_per_sample, 8)
-        assert_equal(tacv.n_channels_per_substream, 4)
+        assert_equal(tacv.n_chans_per_substream, 4)
         assert_equal(tacv.spectra_per_heap, 256)
         assert_equal(tacv.size, 512 * 256 * 2)
         assert_is(tacv.antenna_channelised_voltage, self.acv)
@@ -507,7 +507,7 @@ class TestSimTiedArrayChannelisedVoltageStream:
             Options(), 'beam_0x', self.config, [self.acv], {}
         )
         assert_equal(tacv.spectra_per_heap, product_config.KATCBFSIM_SPECTRA_PER_HEAP)
-        assert_equal(tacv.n_channels_per_substream, 32)
+        assert_equal(tacv.n_chans_per_substream, 32)
 
 
 def make_baseline_correlation_products(
@@ -519,7 +519,7 @@ def make_baseline_correlation_products(
         'narrow1_bcp', [antenna_channelised_voltage],
         url=yarl.URL('spead://239.2.0.0+63:7148'),
         int_time=0.5,
-        n_channels_per_substream=512,
+        n_chans_per_substream=512,
         n_baselines=40,
         bits_per_sample=32,
         instrument_dev_name='narrow1'
@@ -534,7 +534,7 @@ def make_tied_array_channelised_voltage(
     return TiedArrayChannelisedVoltageStream(
         name, [antenna_channelised_voltage],
         url=url,
-        n_channels_per_substream=128,
+        n_chans_per_substream=128,
         spectra_per_heap=256,
         bits_per_sample=8,
         instrument_dev_name='beam'
@@ -565,8 +565,8 @@ class TestVisStream:
         assert_equal(vis.archive, False)
         assert_equal(vis.n_servers, 4)
         assert_is(vis.baseline_correlation_products, self.bcp)
-        assert_equal(vis.n_channels, 1984)
-        assert_equal(vis.n_spectral_channels, 3968)
+        assert_equal(vis.n_chans, 1984)
+        assert_equal(vis.n_spectral_chans, 3968)
         assert_equal(vis.antennas, ['m000', 'm002'])
         assert_equal(vis.n_antennas, 2)
         assert_equal(vis.n_pols, 2)
@@ -587,7 +587,7 @@ class TestVisStream:
         self.config['continuum_factor'] = 3
         with assert_raises_regex(
                 ValueError,
-                r'n_channels \(32768\) is not a multiple of required alignment \(12\)'):
+                r'n_chans \(32768\) is not a multiple of required alignment \(12\)'):
             VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
 
     def test_misaligned_output_channels(self):
@@ -633,7 +633,7 @@ class TestBeamformerStream:
         assert_equal(bf.name, 'beamformer')
         assert_equal(bf.antenna_channelised_voltage.name, 'narrow1_acv')
         assert_equal(bf.tied_array_channelised_voltage, self.tacv)
-        assert_equal(bf.n_channels, 32768)
+        assert_equal(bf.n_chans, 32768)
 
     def test_mismatched_sources(self) -> None:
         acv = make_antenna_channelised_voltage()
@@ -669,7 +669,7 @@ class TestBeamformerEngineeringStream:
         assert_equal(bf.tied_array_channelised_voltage, self.tacv)
         assert_equal(bf.store, 'ram')
         assert_equal(bf.output_channels, (128, 1024))
-        assert_equal(bf.n_channels, 896)
+        assert_equal(bf.n_chans, 896)
 
     def test_defaults(self) -> None:
         del self.config['output_channels']
@@ -677,7 +677,7 @@ class TestBeamformerEngineeringStream:
             Options(), 'beamformer', self.config, self.tacv, {}
         )
         assert_equal(bf.output_channels, (0, 32768))
-        assert_equal(bf.n_channels, 32768)
+        assert_equal(bf.n_chans, 32768)
 
     def test_misaligned_channels(self) -> None:
         self.config['output_channels'] = [1, 2]
@@ -776,7 +776,7 @@ class TestFlagsStream:
         assert_equal(flags.name, 'flags')
         assert_equal(flags.cal, self.cal)
         assert_equal(flags.vis, self.vis)
-        assert_equal(flags.n_channels, self.vis.n_channels)
+        assert_equal(flags.n_chans, self.vis.n_chans)
         assert_equal(flags.n_baselines, self.vis.n_baselines)
         assert_equal(flags.n_vis, self.vis.n_vis)
         assert_equal(flags.size, self.vis.flag_size)
@@ -902,7 +902,7 @@ class TestSpectralImageStream:
         assert_equal(spec.name, 'spectral_image')
         assert_equal(spec.output_channels, (64, 100))
         assert_equal(spec.parameters, {'q_fov': 2.0})
-        assert_equal(spec.n_channels, 36)
+        assert_equal(spec.n_chans, 36)
         assert_is(spec.flags, self.flags)
         assert_is(spec.continuum, self.continuum_image)
 
@@ -1324,7 +1324,7 @@ class TestConfiguration(Fixture):
         """Test which needs to apply sensors."""
         config = await Configuration.from_config(self.config)
         bcp = config.by_class(BaselineCorrelationProductsStream)[0]
-        assert_equal(bcp.n_channels, 1024)
+        assert_equal(bcp.n_chans, 1024)
         assert_equal(bcp.bandwidth, 544e6)
         assert_equal(bcp.antenna_channelised_voltage.band, 'u')
         assert_equal(bcp.int_time, 0.25)

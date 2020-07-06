@@ -124,31 +124,31 @@ class _SubSensor(_Sensor):
 
 
 def _normalise_output_channels(
-        n_channels: int,
+        n_chans: int,
         output_channels: Optional[Tuple[int, int]],
         alignment: int = 1) -> Tuple[int, int]:
     """Provide default for and validate `output_channels`, and align.
 
-    If `output_channels` is ``None``, it will default to (0, `n_channels`). Otherwise,
+    If `output_channels` is ``None``, it will default to (0, `n_chans`). Otherwise,
     it will be widened so that both ends are multiples of `alignment`.
 
     Raises
     ------
     ValueError
-        If the output range is empty or overflows (0, `n_channels`).
+        If the output range is empty or overflows (0, `n_chans`).
     ValueError
-        If `n_channels` is not a multiple of `alignment`
+        If `n_chans` is not a multiple of `alignment`
     """
-    if n_channels % alignment != 0:
-        raise ValueError(f'n_channels ({n_channels}) '
+    if n_chans % alignment != 0:
+        raise ValueError(f'n_chans ({n_chans}) '
                          f'is not a multiple of required alignment ({alignment})')
     c = output_channels    # Just for less typing
     if c is None:
-        return (0, n_channels)
+        return (0, n_chans)
     elif c[0] >= c[1]:
         raise ValueError(f'output_channels is empty ({c[0]}:{c[1]})')
-    elif c[0] < 0 or c[1] > n_channels:
-        raise ValueError(f'output_channels ({c[0]}:{c[1]}) overflows valid range 0:{n_channels}')
+    elif c[0] < 0 or c[1] > n_chans:
+        raise ValueError(f'output_channels ({c[0]}:{c[1]}) overflows valid range 0:{n_chans}')
     else:
         return (c[0] // alignment * alignment,
                 (c[1] + alignment - 1) // alignment * alignment)
@@ -309,7 +309,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  antennas: Iterable[str],
                  band: str,
-                 n_channels: int,
+                 n_chans: int,
                  bandwidth: float,
                  adc_sample_rate: float,
                  centre_frequency: float,
@@ -317,7 +317,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
         super().__init__(name, src_streams)
         self.antennas = list(antennas)
         self.band = band
-        self.n_channels = n_channels
+        self.n_chans = n_chans
         self.bandwidth = bandwidth
         self.centre_frequency = centre_frequency
         self.adc_sample_rate = adc_sample_rate
@@ -341,7 +341,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
                  url: yarl.URL,
                  antennas: Iterable[str],
                  band: str,
-                 n_channels: int,
+                 n_chans: int,
                  bandwidth: float,
                  adc_sample_rate: float,
                  centre_frequency: float,
@@ -351,7 +351,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
             name, src_streams,
             antennas=antennas,
             band=band,
-            n_channels=n_channels,
+            n_chans=n_chans,
             bandwidth=bandwidth,
             adc_sample_rate=adc_sample_rate,
             centre_frequency=centre_frequency,
@@ -372,7 +372,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
             url=yarl.URL(config['url']),
             antennas=config['antennas'],
             band=sensors['band'],
-            n_channels=sensors['n_chans'],
+            n_chans=sensors['n_chans'],
             bandwidth=sensors['bandwidth'],
             adc_sample_rate=sensors['adc_sample_rate'],
             centre_frequency=sensors['centre_frequency'],
@@ -389,7 +389,7 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  antennas: Iterable[katpoint.Antenna],
                  band: str,
-                 n_channels: int,
+                 n_chans: int,
                  bandwidth: float,
                  adc_sample_rate: float,
                  centre_frequency: float) -> None:
@@ -397,12 +397,12 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
         ratio = adc_sample_rate / (2 * bandwidth)
         if abs(ratio - round(ratio)) > 1e-6:
             raise ValueError('ADC Nyquist frequency is not a multiple of bandwidth')
-        n_samples_between_spectra = round(n_channels * adc_sample_rate // bandwidth)
+        n_samples_between_spectra = round(n_chans * adc_sample_rate // bandwidth)
         super().__init__(
             name, src_streams,
             antennas=[antenna.name for antenna in self.antenna_objects],
             band=band,
-            n_channels=n_channels,
+            n_chans=n_chans,
             bandwidth=bandwidth,
             centre_frequency=centre_frequency,
             adc_sample_rate=adc_sample_rate,
@@ -427,7 +427,7 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             name, src_streams,
             antennas=antennas,
             band=config['band'],
-            n_channels=config['n_chans'],
+            n_chans=config['n_chans'],
             bandwidth=config['bandwidth'],
             adc_sample_rate=config['adc_sample_rate'],
             centre_frequency=config['centre_frequency']
@@ -442,21 +442,21 @@ class CbfPerChannelStream(Stream):
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  n_endpoints: int,
-                 n_channels_per_substream: int,
+                 n_chans_per_substream: int,
                  bits_per_sample: int) -> None:
         super().__init__(name, src_streams)
         self.n_endpoints = n_endpoints
-        self.n_channels_per_substream = n_channels_per_substream
+        self.n_chans_per_substream = n_chans_per_substream
         self.bits_per_sample = bits_per_sample
 
-        if self.n_channels % self.n_endpoints != 0:
+        if self.n_chans % self.n_endpoints != 0:
             raise ValueError(
-                f'n_channels ({self.n_channels}) is not '
+                f'n_chans ({self.n_chans}) is not '
                 f'a multiple of endpoints ({self.n_endpoints})')
-        if self.n_channels_per_endpoint % self.n_channels_per_substream != 0:
+        if self.n_chans_per_endpoint % self.n_chans_per_substream != 0:
             raise ValueError(
-                f'channels per endpoint ({self.n_channels_per_endpoint}) '
-                f'is not a multiple of channels per substream ({self.n_channels_per_substream})'
+                f'channels per endpoint ({self.n_chans_per_endpoint}) '
+                f'is not a multiple of channels per substream ({self.n_chans_per_substream})'
             )
 
     @property
@@ -469,17 +469,17 @@ class CbfPerChannelStream(Stream):
         return self.antenna_channelised_voltage.antennas
 
     @property
-    def n_channels(self) -> int:
+    def n_chans(self) -> int:
         """Number of channels."""
-        return self.antenna_channelised_voltage.n_channels
+        return self.antenna_channelised_voltage.n_chans
 
     @property
-    def n_channels_per_endpoint(self) -> int:
-        return self.n_channels // self.n_endpoints
+    def n_chans_per_endpoint(self) -> int:
+        return self.n_chans // self.n_endpoints
 
     @property
     def n_substreams(self) -> int:
-        return self.n_channels // self.n_channels_per_substream
+        return self.n_chans // self.n_chans_per_substream
 
     @property
     def n_antennas(self) -> int:
@@ -528,13 +528,13 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  int_time: float,
                  n_endpoints: int,
-                 n_channels_per_substream: int,
+                 n_chans_per_substream: int,
                  n_baselines: int,
                  bits_per_sample: int):
         super().__init__(
             name, src_streams,
             n_endpoints=n_endpoints,
-            n_channels_per_substream=n_channels_per_substream,
+            n_chans_per_substream=n_chans_per_substream,
             bits_per_sample=bits_per_sample
         )
         self._int_time = int_time
@@ -546,7 +546,7 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
 
     @property
     def n_vis(self) -> int:
-        return self.n_baselines * self.n_channels
+        return self.n_baselines * self.n_chans
 
     @property
     def size(self) -> int:
@@ -569,7 +569,7 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  url: yarl.URL,
                  int_time: float,
-                 n_channels_per_substream: int,
+                 n_chans_per_substream: int,
                  n_baselines: int,
                  bits_per_sample: int,
                  instrument_dev_name: str) -> None:
@@ -577,7 +577,7 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
             name, src_streams,
             int_time=int_time,
             n_endpoints=_url_n_endpoints(url),
-            n_channels_per_substream=n_channels_per_substream,
+            n_chans_per_substream=n_chans_per_substream,
             n_baselines=n_baselines,
             bits_per_sample=bits_per_sample
         )
@@ -600,7 +600,7 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
             name, src_streams,
             int_time=sensors['int_time'],
             url=yarl.URL(config['url']),
-            n_channels_per_substream=sensors['n_chans_per_substream'],
+            n_chans_per_substream=sensors['n_chans_per_substream'],
             n_baselines=sensors['n_bls'],
             bits_per_sample=sensors['xeng_out_bits_per_sample'],
             instrument_dev_name=config['instrument_dev_name']
@@ -616,23 +616,23 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  int_time: float,
                  n_endpoints: int,
-                 n_channels_per_substream: Optional[int] = None) -> None:
+                 n_chans_per_substream: Optional[int] = None) -> None:
         acv = cast(AntennaChannelisedVoltageStream, src_streams[0])
-        if n_channels_per_substream is not None:
-            ncps = n_channels_per_substream
+        if n_chans_per_substream is not None:
+            ncps = n_chans_per_substream
         else:
-            ncps = acv.n_channels // n_endpoints
+            ncps = acv.n_chans // n_endpoints
         n_antennas = len(acv.antennas)
         # Round the int_time the same way katcbfsim does, so that we have
         # an accurate value.
-        heap_time = acv.n_channels / acv.bandwidth * KATCBFSIM_SPECTRA_PER_HEAP
+        heap_time = acv.n_chans / acv.bandwidth * KATCBFSIM_SPECTRA_PER_HEAP
         acc_heaps = max(1, round(int_time / heap_time))
         int_time = acc_heaps * heap_time
         super().__init__(
             name, src_streams,
             int_time=int_time,
             n_endpoints=n_endpoints,
-            n_channels_per_substream=ncps,
+            n_chans_per_substream=ncps,
             n_baselines=n_antennas * (n_antennas + 1) * 2,
             bits_per_sample=32
         )
@@ -653,7 +653,7 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
             name, src_streams,
             int_time=config['int_time'],
             n_endpoints=config['n_endpoints'],
-            n_channels_per_substream=config.get('n_chans_per_substream')
+            n_chans_per_substream=config.get('n_chans_per_substream')
         )
 
 
@@ -662,13 +662,13 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  n_endpoints: int,
-                 n_channels_per_substream: int,
+                 n_chans_per_substream: int,
                  spectra_per_heap: int,
                  bits_per_sample: int) -> None:
         super().__init__(
             name, src_streams,
             n_endpoints=n_endpoints,
-            n_channels_per_substream=n_channels_per_substream,
+            n_chans_per_substream=n_chans_per_substream,
             bits_per_sample=bits_per_sample
         )
         self.spectra_per_heap = spectra_per_heap
@@ -676,7 +676,7 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
     @property
     def size(self) -> int:
         """Size of frame in bytes."""
-        return self.bits_per_sample * 2 * self.spectra_per_heap * self.n_channels // 8
+        return self.bits_per_sample * 2 * self.spectra_per_heap * self.n_chans // 8
 
     @property
     def int_time(self) -> float:
@@ -697,14 +697,14 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  url: yarl.URL,
-                 n_channels_per_substream: int,
+                 n_chans_per_substream: int,
                  spectra_per_heap: int,
                  bits_per_sample: int,
                  instrument_dev_name: str) -> None:
         super().__init__(
             name, src_streams,
             n_endpoints=_url_n_endpoints(url),
-            n_channels_per_substream=n_channels_per_substream,
+            n_chans_per_substream=n_chans_per_substream,
             spectra_per_heap=spectra_per_heap,
             bits_per_sample=bits_per_sample,
         )
@@ -726,7 +726,7 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
         return cls(
             name, src_streams,
             url=yarl.URL(config['url']),
-            n_channels_per_substream=sensors['n_chans_per_substream'],
+            n_chans_per_substream=sensors['n_chans_per_substream'],
             spectra_per_heap=sensors['spectra_per_heap'],
             bits_per_sample=sensors['beng_out_bits_per_sample'],
             instrument_dev_name=config['instrument_dev_name']
@@ -741,17 +741,17 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  n_endpoints: int,
-                 n_channels_per_substream: Optional[int] = None,
+                 n_chans_per_substream: Optional[int] = None,
                  spectra_per_heap: int) -> None:
         acv = cast(AntennaChannelisedVoltageStream, src_streams[0])
-        if n_channels_per_substream is not None:
-            ncps = n_channels_per_substream
+        if n_chans_per_substream is not None:
+            ncps = n_chans_per_substream
         else:
-            ncps = acv.n_channels // n_endpoints
+            ncps = acv.n_chans // n_endpoints
         super().__init__(
             name, src_streams,
             n_endpoints=n_endpoints,
-            n_channels_per_substream=ncps,
+            n_chans_per_substream=ncps,
             spectra_per_heap=spectra_per_heap,
             bits_per_sample=8
         )
@@ -771,7 +771,7 @@ class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase
         return cls(
             name, src_streams,
             n_endpoints=config['n_endpoints'],
-            n_channels_per_substream=config.get('n_chans_per_substream'),
+            n_chans_per_substream=config.get('n_chans_per_substream'),
             spectra_per_heap=config.get('spectra_per_heap', KATCBFSIM_SPECTRA_PER_HEAP)
         )
 
@@ -793,7 +793,7 @@ class VisStream(Stream):
                  archive: bool,
                  n_servers: int) -> None:
         super().__init__(name, src_streams)
-        cbf_channels = self.baseline_correlation_products.n_channels
+        cbf_channels = self.baseline_correlation_products.n_chans
         cbf_int_time = self.baseline_correlation_products.int_time
         self.int_time = max(1, round(int_time / cbf_int_time)) * cbf_int_time
         c = _normalise_output_channels(cbf_channels, output_channels, n_servers * continuum_factor)
@@ -808,12 +808,12 @@ class VisStream(Stream):
         return cast(BaselineCorrelationProductsStreamBase, self.src_streams[0])
 
     @property
-    def n_channels(self) -> int:
+    def n_chans(self) -> int:
         rng = self.output_channels
         return (rng[1] - rng[0]) // self.continuum_factor
 
     @property
-    def n_spectral_channels(self) -> int:
+    def n_spectral_chans(self) -> int:
         """Number of CBF channels that are in the output, before continuum averaging."""
         return self.output_channels[1] - self.output_channels[0]
 
@@ -836,13 +836,13 @@ class VisStream(Stream):
 
     @property
     def n_vis(self) -> int:
-        return self.n_baselines * self.n_channels
+        return self.n_baselines * self.n_chans
 
     @property
     def size(self) -> int:
         """Size of each frame in bytes."""
         # complex64 for vis, uint8 for weights and flags, float32 for weights_channel
-        return self.n_vis * BYTES_PER_VFW + self.n_channels * 4
+        return self.n_vis * BYTES_PER_VFW + self.n_chans * 4
 
     @property
     def flag_size(self):
@@ -916,8 +916,8 @@ class BeamformerStreamBase(Stream):
         ]
 
     @property
-    def n_channels(self) -> int:
-        return self.antenna_channelised_voltage.n_channels
+    def n_chans(self) -> int:
+        return self.antenna_channelised_voltage.n_chans
 
 
 class BeamformerStream(BeamformerStreamBase):
@@ -944,15 +944,15 @@ class BeamformerEngineeringStream(BeamformerStreamBase):
                  store: str,
                  output_channels: Optional[Tuple[int, int]] = None) -> None:
         super().__init__(name, src_streams)
-        cbf_channels = self.antenna_channelised_voltage.n_channels
+        cbf_channels = self.antenna_channelised_voltage.n_chans
         c = _normalise_output_channels(cbf_channels, output_channels)
         for tacv in self.tied_array_channelised_voltage:
-            c = _normalise_output_channels(cbf_channels, c, tacv.n_channels_per_endpoint)
+            c = _normalise_output_channels(cbf_channels, c, tacv.n_chans_per_endpoint)
         self.output_channels = c
         self.store = store
 
     @property
-    def n_channels(self) -> int:
+    def n_chans(self) -> int:
         return self.output_channels[1] - self.output_channels[0]
 
     @classmethod
@@ -1055,8 +1055,8 @@ class FlagsStream(Stream):
         return self.vis.n_vis
 
     @property
-    def n_channels(self) -> int:
-        return self.vis.n_channels
+    def n_chans(self) -> int:
+        return self.vis.n_chans
 
     @property
     def n_baselines(self) -> int:
@@ -1148,11 +1148,11 @@ class SpectralImageStream(ImageStream):
                  min_time: float) -> None:
         super().__init__(name, src_streams, min_time=min_time)
         self.parameters = dict(parameters)
-        vis_channels = self.vis.n_channels
+        vis_channels = self.vis.n_chans
         self.output_channels = _normalise_output_channels(vis_channels, output_channels)
 
     @property
-    def n_channels(self) -> int:
+    def n_chans(self) -> int:
         return self.output_channels[1] - self.output_channels[0]
 
     @property
