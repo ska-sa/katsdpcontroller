@@ -3406,6 +3406,8 @@ class Scheduler(pymesos.Scheduler):
                     tasks = []
                     logger.debug('Requesting implicit reconciliation')
                 self._driver.reconcileTasks(tasks)
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.warning('Exception during task reconciliation', exc_info=True)
             await asyncio.sleep(self.reconciliation_interval)
