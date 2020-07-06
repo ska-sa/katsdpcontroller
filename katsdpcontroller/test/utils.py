@@ -343,3 +343,13 @@ async def run_clocked(test_case: asynctest.ClockedTestCase, time: float,
     with Background(awaitable) as cm:
         await test_case.advance(time)
     return cm.result
+
+
+def future_return(mock: mock.Mock) -> asyncio.Future:
+    """Modify a callable mock so that it blocks on a future then returns it."""
+    async def replacement(*args, **kwargs):
+        return await future
+
+    future = asyncio.Future()         # type: asyncio.Future[Any]
+    mock.side_effect = replacement
+    return future

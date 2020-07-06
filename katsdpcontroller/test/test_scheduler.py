@@ -24,7 +24,7 @@ import aiohttp
 
 from .. import scheduler
 from ..scheduler import TaskState
-from .utils import create_patch
+from .utils import create_patch, future_return
 
 
 class AnyOrderList(list):
@@ -1490,8 +1490,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
@@ -1554,8 +1553,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             if target_state > TaskState.STARTING:
                 self.sched.resourceOffers(self.driver, offers)
                 await asynctest.exhaust_callbacks(self.loop)
@@ -1618,8 +1616,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             poll_future.set_result(None)   # Mark ports as ready
             self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
