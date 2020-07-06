@@ -1208,6 +1208,10 @@ class TestScheduler(asynctest.ClockedTestCase):
     def _dummy_random():
         return 0.0
 
+    @staticmethod
+    def _dummy_randint(a, b):
+        return a
+
     def _driver_calls(self):
         """self.driver.mock_calls, with reconcileTasks filtered out."""
         return [call for call in self.driver.mock_calls if call[0] != 'reconcileTasks']
@@ -1290,6 +1294,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Mock out the random generator so that port allocations will be
         # predictable.
         create_patch(self, 'katsdpcontroller.scheduler.Agent._random.random', self._dummy_random)
+        create_patch(self, 'katsdpcontroller.scheduler.Agent._random.randint', self._dummy_randint)
         await self.sched.start()
 
     async def test_initial_offers(self):
