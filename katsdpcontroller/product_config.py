@@ -256,6 +256,11 @@ class Stream:
 
     stream_type: ClassVar[str]
     _class_sensors: ClassVar[Sequence[_Sensor]] = []
+    # Types that are accepted for ``src_streams``. If it is a set, then any
+    # element of ``src_streams`` may have any of the types in the set. If
+    # it is a list, then the ith element of ``src_streams`` must have the
+    # ith type in the list. The list may be longer than ``src_streams``
+    # e.g. if there are optional elements.
     _valid_src_types: ClassVar[_ValidTypes] = set()
 
     def __init__(self, name: str, src_streams: Sequence['Stream']) -> None:
