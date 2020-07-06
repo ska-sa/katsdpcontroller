@@ -408,12 +408,12 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
     # Exact requirement not known (also depends on number of users). Give it
     # 2 CPUs (max it can use) for 16 antennas, 32K channels and scale from there.
     # Lower bound (from inspection) to cater for fixed overheads.
-    cpus = max(2 * min(1.0, stream.n_baselines * stream.n_spectral_chans / _N16_32), 0.3)
+    cpus = max(2 * min(1.0, stream.n_spectral_vis / _N16_32), 0.3)
 
     # Give timeplot enough memory for 256 time samples, but capped at 16GB.
     # This formula is based on data.py in katsdpdisp.
     percentiles = 5 * 8
-    timeplot_slot = stream.n_spectral_chans * (stream.n_baselines + percentiles) * 8
+    timeplot_slot = (stream.n_spectral_vis + stream.n_spectral_chans * percentiles) * 8
     timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
 
     return _make_timeplot(

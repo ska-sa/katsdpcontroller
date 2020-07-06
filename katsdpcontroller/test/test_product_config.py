@@ -567,6 +567,7 @@ class TestVisStream:
         assert_is(vis.baseline_correlation_products, self.bcp)
         assert_equal(vis.n_chans, 1984)
         assert_equal(vis.n_spectral_chans, 3968)
+        assert_equal(vis.n_spectral_vis, 3968 * 12)
         assert_equal(vis.antennas, ['m000', 'm002'])
         assert_equal(vis.n_antennas, 2)
         assert_equal(vis.n_pols, 2)

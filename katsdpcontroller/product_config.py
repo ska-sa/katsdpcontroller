@@ -811,6 +811,11 @@ class VisStream(Stream):
         return self.output_channels[1] - self.output_channels[0]
 
     @property
+    def n_spectral_vis(self) -> int:
+        """Number of visibilities per dump in the output, before continuum averaging."""
+        return self.n_spectral_chans * self.n_baselines
+
+    @property
     def antennas(self) -> Sequence[str]:
         return self.baseline_correlation_products.antennas
 
