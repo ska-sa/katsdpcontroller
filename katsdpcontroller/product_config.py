@@ -879,15 +879,11 @@ class VisStream(Stream):
         """Determine whether the configurations are mostly the same.
 
         Specifically, they must be the same other than the values of
-        ``continuum_factor`` and ``archive``.
+        ``name``, ``continuum_factor`` and ``archive``.
         """
-        return (
-            self.src_streams[0] is other.src_streams[0]
-            and self.int_time == other.int_time
-            and self.output_channels == other.output_channels
-            and self.excise == other.excise
-            and self.n_servers == other.n_servers
-        )
+        return all(getattr(self, name) == getattr(other, name)
+                   for name in vars(self)
+                   if name not in ['name', 'continuum_factor', 'archive'])
 
 
 class BeamformerStreamBase(Stream):
