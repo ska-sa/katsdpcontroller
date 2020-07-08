@@ -6,13 +6,14 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+            "enum": ["2.4", "2.5", "2.6", "3.0"]
         }
     }
 }
 {% endmacro %}
 
 {% macro validate(version) %}
+{% set input_additional = "false" if version >= "3.0" else "true" %}
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
@@ -65,16 +66,19 @@
             "$ref": "#/definitions/pair",
             "items": {"$ref": "#/definitions/nonneg_integer"}
         },
+        "clock_ratio": {
+            "type": "number",
+            "minimum": 0.0,
+            "default": 1.0
+        },
         "simulate": {
             "oneOf": [
                 {"type": "boolean"},
                 {
                     "type": "object",
                     "properties": {
-{% if version >= "2.4" %}
-                        "clock_ratio": {"type": "number", "minimum": 0.0, "default": 1.0},
+                        "clock_ratio": {"$ref": "#/definitions/clock_ratio"},
                         "start_time": {"$ref": "#/definitions/positive_number"},
-{% endif %}
                         "sources": {
                             "type": "array",
                             "items": {"type": "string"}
@@ -96,7 +100,14 @@
         }
     },
     "type": "object",
-    "required": ["inputs", "outputs", "config", "version"],
+    "required": [
+{% if version < "3.0" %}
+        "inputs",
+        "config",
+{% endif %}
+        "outputs",
+        "version"
+    ],
     "additionalProperties": false,
     "properties": {
         "inputs": {
@@ -107,7 +118,18 @@
                     "type": "object",
                     "required": ["type", "url"],
                     "properties": {
+{% if version >= "3.0" %}
+                        "type": {
+                            "enum": [
+                                "cbf.antenna_channelised_voltage",
+                                "cbf.baseline_correlation_products",
+                                "cbf.tied_array_channelised_voltage",
+                                "cam.http"
+                            ]
+                        },
+{% else %}
                         "type": {"$ref": "#/definitions/stream_type"},
+{% endif %}
                         "url": {"type": "string", "format": "uri"},
                         "src_streams": {"$ref": "#/definitions/src_streams"}
                     },
@@ -116,11 +138,14 @@
                             "if": {"properties": {"type": {"const": "cbf.antenna_channelised_voltage"}}},
                             "then": {
                                 "properties": {
+                                    "type": {},
+                                    "url": {},
                                     "antennas": {
                                         "type": "array",
                                         "minItems": 1,
                                         "items": {"type": "string"}
                                     },
+{% if version < "3.0" %}
                                     "n_chans": {"$ref": "#/definitions/nonneg_integer"},
                                     "n_samples_between_spectra": {
                                         "$ref": "#/definitions/nonneg_integer"
@@ -128,12 +153,20 @@
                                     "n_pols": {"type": "integer", "enum": [1, 2]},
                                     "adc_sample_rate": {"type": "number"},
                                     "bandwidth": {"type": "number"},
+{% endif %}
                                     "instrument_dev_name": {"type": "string"}
                                 },
+                                "additionalProperties": {{ input_additional }},
                                 "required": [
                                     "antennas",
-                                    "n_chans", "n_samples_between_spectra", "n_pols",
-                                    "adc_sample_rate", "bandwidth", "instrument_dev_name"
+{% if version < "3.0" %}
+                                    "n_chans",
+                                    "n_samples_between_spectra",
+                                    "n_pols",
+                                    "adc_sample_rate",
+                                    "bandwidth",
+{% endif %}
+                                    "instrument_dev_name"
                                 ]
                             }
                         },
@@ -141,19 +174,29 @@
                             "if": {"properties": {"type": {"const": "cbf.baseline_correlation_products"}}},
                             "then": {
                                 "properties": {
+                                    "type": {},
+                                    "url": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
+{% if version < "3.0" %}
                                     "int_time": {"type": "number"},
                                     "n_bls": {"$ref": "#/definitions/nonneg_integer"},
                                     "xeng_out_bits_per_sample": {"const": 32},
                                     "n_chans_per_substream": {
                                         "$ref": "#/definitions/nonneg_integer"
                                     },
-                                    "instrument_dev_name": {"type": "string"},
-                                    "simulate": {"$ref": "#/definitions/simulate"}
+                                    "simulate": {"$ref": "#/definitions/simulate"},
+{% endif %}
+                                    "instrument_dev_name": {"type": "string"}
                                 },
+                                "additionalProperties": {{ input_additional }},
                                 "required": [
-                                    "src_streams", "int_time", "n_bls",
-                                    "xeng_out_bits_per_sample", "n_chans_per_substream",
+                                    "src_streams",
+{% if version < "3.0" %}
+                                    "int_time",
+                                    "n_bls",
+                                    "xeng_out_bits_per_sample",
+                                    "n_chans_per_substream",
+{% endif %}
                                     "instrument_dev_name"
                                 ]
                             }
@@ -162,7 +205,10 @@
                             "if": {"properties": {"type": {"const": "cbf.tied_array_channelised_voltage"}}},
                             "then": {
                                 "properties": {
+                                    "type": {},
+                                    "url": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
+{% if version < "3.0" %}
                                     "beng_out_bits_per_sample": {"const": 8},
                                     "spectra_per_heap": {
                                         "$ref": "#/definitions/nonneg_integer"
@@ -170,19 +216,32 @@
                                     "n_chans_per_substream": {
                                         "$ref": "#/definitions/nonneg_integer"
                                     },
-                                    "instrument_dev_name": {"type": "string"},
-                                    "simulate": {"$ref": "#/definitions/simulate"}
+                                    "simulate": {"$ref": "#/definitions/simulate"},
+{% endif %}
+                                    "instrument_dev_name": {"type": "string"}
                                 },
+                                "additionalProperties": {{ input_additional }},
                                 "required": [
-                                    "src_streams", "beng_out_bits_per_sample",
+                                    "src_streams",
+{% if version < "3.0" %}
+                                    "beng_out_bits_per_sample",
                                     "spectra_per_heap",
-                                    "n_chans_per_substream", "instrument_dev_name"
+                                    "n_chans_per_substream",
+{% endif %}
+                                    "instrument_dev_name"
                                 ]
                             }
                         },
                         {
                             "if": {"properties": {"type": {"const": "cam.http"}}},
-                            "then": {}
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "url": {}
+                                },
+                                "additionalProperties": {{ input_additional }},
+                                "required": []
+                            }
                         }
                     ]
                 }
@@ -198,15 +257,16 @@
                     "properties": {
                         "type": {
                             "enum": [
+{% if version >= "3.0" %}
+                                "sim.cbf.antenna_channelised_voltage",
+                                "sim.cbf.baseline_correlation_products",
+                                "sim.cbf.tied_array_channelised_voltage",
+{% endif %}
                                 "sdp.vis",
                                 "sdp.cal",
                                 "sdp.flags",
-{% if version >= "2.2" %}
                                 "sdp.continuum_image",
-{% endif %}
-{% if version >= "2.4" %}
                                 "sdp.spectral_image",
-{% endif %}
                                 "sdp.beamformer",
                                 "sdp.beamformer_engineering"
                             ]
@@ -302,13 +362,13 @@
                                         },
                                         "additionalProperties": false
                                     },
+{% if version < "3.0" %}
                                     "models": {
                                         "type": "object",
                                         "additionalProperties": {"type": "string"}
                                     },
-{% if version >= "2.1" %}
-                                    "max_scans": {"$ref": "#/definitions/positive_integer"},
 {% endif %}
+                                    "max_scans": {"$ref": "#/definitions/positive_integer"},
                                     "buffer_time": {"$ref": "#/definitions/positive_number"}
                                 },
                                 "required": ["src_streams"],
@@ -320,20 +380,28 @@
                             "then": {
                                 "properties": {
                                     "type": {},
+{% if version < "3.0" %}
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "calibration": {"$ref": "#/definitions/singleton"},
+{% else %}
+                                    "src_streams": {"%ref": "#/definitions/pair"},
+{% endif %}
                                     "rate_ratio": {
                                         "type": "number",
                                         "exclusiveMinimum": 1.0
                                     },
                                     "archive": {"type": "boolean"}
                                 },
-                                "required": ["src_streams", "calibration", "archive"],
+                                "required": [
+                                    "src_streams",
+{% if version < "3.0" %}
+                                    "calibration",
+{% endif %}
+                                    "archive"
+                                ],
                                 "additionalProperties": false
                             }
-                        }
-{% if version >= "2.2" %}
-                        ,
+                        },
                         {
                             "if": {"properties": {"type": {"const": "sdp.continuum_image"}}},
                             "then": {
@@ -350,10 +418,7 @@
                                 "required": ["src_streams"],
                                 "additionalProperties": false
                             }
-                        }
-{% endif %}
-{% if version >= "2.4" %}
-                        ,
+                        },
                         {
                             "if": {"properties": {"type": {"const": "sdp.spectral_image"}}},
                             "then": {
@@ -400,8 +465,55 @@
                                 "required": ["src_streams"],
                                 "additionalProperties": false
                             }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "sim.cbf.antenna_channelised_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "n_chans": {"$ref": "#/definitions/positive_integer"},
+                                    "antennas": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "items": {"type": "string"}
+                                    },
+                                    "band": {"type": "string"},
+                                    "bandwidth": {"$ref": "#/definitions/positive_number"},
+                                    "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
+                                    "centre_frequency": {"$ref": "#/definitions/positive_number"}
+                                },
+                                "additionalProperties": false,
+                                "required": ["n_chans", "antennas", "band", "bandwidth", "adc_sample_rate", "centre_frequency"]
+                            }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "sim.cbf.baseline_correlation_products"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "int_time": {"$ref": "#/definitions/positive_number"},
+                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"},
+                                    "n_endpoints": {"$ref": "#/definitions/positive_integer"}
+                                },
+                                "additionalProperties": false,
+                                "required": ["src_streams", "int_time", "n_endpoints"]
+                            }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "sim.cbf.tied_array_channelised_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    "spectra_per_heap": {"$ref": "#/definitions/positive_integer"},
+                                    "n_chans_per_substream": {"$ref": "#/definitions/positive_integer"},
+                                    "n_endpoints": {"$ref": "#/definitions/positive_integer"}
+                                },
+                                "additionalProperties": false,
+                                "required": ["src_streams", "n_endpoints"]
+                            }
                         }
-{% endif %}
                     ]
                 }
             }
@@ -420,15 +532,27 @@
                         "additionalProperties": false,
                         "properties": {
                             "config": { "type": "object" },
-{% if version >= "2.3" %}
                             "host": { "type": "string" },
-{% endif %}
                             "taskinfo": { "type": "object" }
                         }
                     }
                 }
             }
         },
+{% if version >= "3.0" %}
+        "simulation": {
+            "clock_ratio": {"$ref": "#/definitions/clock_ratio"},
+            "start_time": {"$ref": "#/definitions/positive_number"},
+            "sources": {
+                "type": "array",
+                    "items": {"type": "string"}
+            },
+            "antennas": {
+                "type": "array",
+                "items": {"type": "string"}
+            }
+        },
+{% endif %}
         "version": {
             "type": "string",
             "const": "{{version}}"

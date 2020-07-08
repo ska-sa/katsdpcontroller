@@ -15,57 +15,43 @@ from nose.tools import assert_raises, assert_equal, assert_true
 _T = TypeVar('_T')
 
 CONFIG = '''{
-    "version": "2.6",
-    "inputs": {
-        "camdata": {
-            "type": "cam.http",
-            "url": "http://127.0.0.1:8999"
-        },
+    "version": "3.0",
+    "outputs": {
         "i0_antenna_channelised_voltage": {
-            "type": "cbf.antenna_channelised_voltage",
-            "url": "spead://239.102.252.0+15:7148",
-            "antennas": ["m000", "m001", "m063", "m064"],
+            "type": "sim.cbf.antenna_channelised_voltage",
+            "antennas": [
+                "m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14",
+                "m001, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, 1.126 -171.761 1.0605 5868.979 5869.998, -0:42:08.0 0 0:01:44.0 0:01:11.9 -0:00:14.0 -0:00:21.0 -0:36:13.1 0:01:36.2, 1.14",
+                "m062, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -1440.6235 -2503.7705 14.288 5932.94 5934.732, -0:15:23.0 0 0:00:04.6 -0:03:30.4 0:01:12.2 0:00:37.5 0:00:15.6 0:01:11.8, 1.14",
+                "m063, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -3419.58 -1840.4655 9.005 5684.815 5685.969, -0:59:43.2 0 0:01:58.6 0:01:49.8 0:01:23.3 0:02:04.6 -0:08:15.7 0:03:47.1, 1.14"
+            ],
             "n_chans": 4096,
-            "n_pols": 2,
             "adc_sample_rate": 1712000000.0,
             "bandwidth": 856000000.0,
-            "n_samples_between_spectra": 8192,
-            "instrument_dev_name": "i0"
+            "centre_frequency": 1284000000.0,
+            "band": "l"
         },
         "i0_baseline_correlation_products": {
-            "type": "cbf.baseline_correlation_products",
-            "url": "spead://239.102.255.0+15:7148",
+            "type": "sim.cbf.baseline_correlation_products",
+            "n_endpoints": 16,
             "src_streams": ["i0_antenna_channelised_voltage"],
             "int_time": 0.499,
-            "n_bls": 40,
-            "xeng_out_bits_per_sample": 32,
-            "n_chans_per_substream": 256,
-            "instrument_dev_name": "i0",
-            "simulate": {
-                "center_freq": 1284000000.0,
-                "sources": ["PKS 1934-638, radec, 19:39:25.03, -63:42:45.63"]
-            }
+            "n_chans_per_substream": 256
         },
         "i0_tied_array_channelised_voltage_0x": {
-            "type": "cbf.tied_array_channelised_voltage",
-            "url": "spead://239.102.254.1+15:7148",
+            "type": "sim.cbf.tied_array_channelised_voltage",
+            "n_endpoints": 16,
             "src_streams": ["i0_antenna_channelised_voltage"],
             "spectra_per_heap": 256,
-            "n_chans_per_substream": 256,
-            "beng_out_bits_per_sample": 8,
-            "instrument_dev_name": "i0"
+            "n_chans_per_substream": 256
         },
         "i0_tied_array_channelised_voltage_0y": {
-            "type": "cbf.tied_array_channelised_voltage",
-            "url": "spead://239.102.253.1+15:7148",
+            "type": "sim.cbf.tied_array_channelised_voltage",
+            "n_endpoints": 16,
             "src_streams": ["i0_antenna_channelised_voltage"],
             "spectra_per_heap": 256,
-            "n_chans_per_substream": 256,
-            "beng_out_bits_per_sample": 8,
-            "instrument_dev_name": "i0"
-        }
-    },
-    "outputs": {
+            "n_chans_per_substream": 256
+        },
         "sdp_l0": {
             "type": "sdp.vis",
             "src_streams": ["i0_baseline_correlation_products"],
@@ -127,14 +113,12 @@ CONFIG = '''{
         },
         "sdp_l1_flags": {
             "type": "sdp.flags",
-            "src_streams": ["sdp_l0"],
-            "calibration": ["cal"],
+            "src_streams": ["sdp_l0", "cal"],
             "archive": true
         },
         "sdp_l1_flags_continuum": {
             "type": "sdp.flags",
-            "src_streams": ["sdp_l0_continuum"],
-            "calibration": ["cal"],
+            "src_streams": ["sdp_l0_continuum", "cal"],
             "archive": true
         },
         "continuum_image": {
@@ -152,7 +136,7 @@ CONFIG = '''{
         }
     },
     "config": {}
-}'''
+}'''     # noqa: E501
 
 S3_CONFIG = '''
 {

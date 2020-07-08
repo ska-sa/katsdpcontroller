@@ -654,12 +654,11 @@ class TestSDPController(BaseTestSDPController):
             'continuum_factor': 16,
             'l0_continuum_spead': mock.ANY,
             'l0_continuum_name': 'sdp_l0_continuum_only',
-            'l0_spectral_name': None,
             'sd_continuum_factor': 16,
             'sd_spead_rate': mock.ANY,
             'sd_output_channels': '64:3520',
-            'sd_int_time': 1.996,
-            'output_int_time': 1.996,
+            'sd_int_time': mock.ANY,
+            'output_int_time': mock.ANY,
             'output_channels': '64:3520',
             'servers': 4,
             'clock_ratio': 1.0,
@@ -763,10 +762,14 @@ class TestSDPController(BaseTestSDPController):
         # We thus collapse them into groups of equal calls and don't worry
         # about the number, which would otherwise make the test fragile.
         katcp_client = self.sensor_proxy_client_class.return_value
-        grouped_calls = [k for k, g in itertools.groupby(katcp_client.request.mock_calls)]
+        sorted_calls = sorted(katcp_client.request.mock_calls,
+                              key=lambda call: call[1])
+        grouped_calls = [k for k, g in itertools.groupby(sorted_calls)]
         expected_calls = [
             mock.call('capture-init', CAPTURE_BLOCK),
-            mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY)
+            mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY),
+            mock.call('capture-start', 'i0_tied_array_channelised_voltage_0x', mock.ANY),
+            mock.call('capture-start', 'i0_tied_array_channelised_voltage_0y', mock.ANY)
         ]
         self.assertEqual(grouped_calls, expected_calls)
 
@@ -780,7 +783,7 @@ class TestSDPController(BaseTestSDPController):
         """Check that capture-init fails if an override makes the config illegal"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         with assert_raises(FailReply):
-            await self.client.request("capture-init", CAPTURE_BLOCK, '{"inputs": null}')
+            await self.client.request("capture-init", CAPTURE_BLOCK, '{"outputs": null}')
 
     async def test_capture_init_bad_override_change(self) -> None:
         """Check that capture-init fails if an override makes an invalid change"""

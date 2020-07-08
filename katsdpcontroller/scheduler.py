@@ -173,7 +173,7 @@ from abc import abstractmethod
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import Optional, Mapping, Union, ClassVar, Type
+from typing import List, Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -1355,6 +1355,13 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
     """
     RESOURCE_REQUESTS = GLOBAL_RESOURCES
 
+    # Type annotations for mypy. This are actually provided by the metaclass
+    cpus: float
+    mem: float
+    disk: float
+    ports: List[Optional[str]]
+    cores: List[Optional[str]]
+
     def __init__(self, name):
         LogicalNode.__init__(self, name)
         ResourceRequestsContainer.__init__(self)
@@ -1972,6 +1979,10 @@ class PhysicalTask(PhysicalNode):
         Statistics collector of the scheduler. It is only set when
         the task is being launched.
     """
+
+    cores: typing.Dict[str, int]
+    ports: typing.Dict[str, int]
+
     def __init__(self, logical_task):
         super().__init__(logical_task)
         self.interfaces = {}
