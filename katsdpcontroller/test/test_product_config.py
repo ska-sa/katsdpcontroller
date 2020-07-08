@@ -248,7 +248,7 @@ class TestAntennaChannelisedVoltageStream:
         config = {
             'type': 'cbf.antenna_channelised_voltage',
             'url': 'spead://239.0.0.0+7:7148',
-            'antennas': ['m000', 'm001'],
+            'antennas': ['m000', 'another_antenna'],
             'instrument_dev_name': 'narrow1'
         }
         sensors = {
@@ -265,7 +265,7 @@ class TestAntennaChannelisedVoltageStream:
         assert_equal(acv.name, 'narrow1_acv')
         assert_equal(acv.src_streams, [])
         assert_equal(acv.url, yarl.URL('spead://239.0.0.0+7:7148'))
-        assert_equal(acv.antennas, ['m000', 'm001'])
+        assert_equal(acv.antennas, ['m000', 'another_antenna'])
         assert_equal(acv.band, 'l')
         assert_equal(acv.n_chans, 32768)
         assert_equal(acv.bandwidth, 107e6)
@@ -322,7 +322,8 @@ class TestSimAntennaChannelisedVoltageStream:
             )
 
 
-def make_antenna_channelised_voltage(antennas=('m000', 'm002')) -> AntennaChannelisedVoltageStream:
+def make_antenna_channelised_voltage(
+        antennas=('m000', 'another_antenna')) -> AntennaChannelisedVoltageStream:
     return AntennaChannelisedVoltageStream(
         'narrow1_acv', [],
         url=yarl.URL('spead2://239.0.0.0+7:7148'),
@@ -379,7 +380,7 @@ class TestBaselineCorrelationProductsStream:
         assert_equal(bcp.n_vis, 40 * 32768)
         assert_equal(bcp.size, 40 * 32768 * 8)
         assert_is(bcp.antenna_channelised_voltage, self.acv)
-        assert_equal(bcp.antennas, ['m000', 'm002'])
+        assert_equal(bcp.antennas, ['m000', 'another_antenna'])
         assert_equal(bcp.n_chans, 32768)
         assert_equal(bcp.n_chans_per_endpoint, 4096)
         assert_equal(bcp.n_substreams, 16)
@@ -470,7 +471,7 @@ class TestTiedArrayChannelisedVoltageStream:
         assert_equal(tacv.size, 32768 * 256 * 2 * 2)
         assert_is(tacv.antenna_channelised_voltage, self.acv)
         assert_equal(tacv.bandwidth, 107e6)
-        assert_equal(tacv.antennas, ['m000', 'm002'])
+        assert_equal(tacv.antennas, ['m000', 'another_antenna'])
         assert_almost_equal(tacv.int_time * 1712e6, 524288 * 256)
 
 
@@ -569,7 +570,7 @@ class TestVisStream:
         assert_equal(vis.n_chans, 1984)
         assert_equal(vis.n_spectral_chans, 3968)
         assert_equal(vis.n_spectral_vis, 3968 * 12)
-        assert_equal(vis.antennas, ['m000', 'm002'])
+        assert_equal(vis.antennas, ['m000', 'another_antenna'])
         assert_equal(vis.n_antennas, 2)
         assert_equal(vis.n_pols, 2)
         assert_equal(vis.n_baselines, 12)
@@ -642,7 +643,7 @@ class TestBeamformerStream:
         assert_equal(bf.n_chans, 32768)
 
     def test_mismatched_sources(self) -> None:
-        acv = make_antenna_channelised_voltage(antennas=['m012', 'm013'])
+        acv = make_antenna_channelised_voltage(antennas=['m012', 's0013'])
         self.tacv[1] = make_tied_array_channelised_voltage(
             acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         with assert_raises_regex(ValueError,
@@ -709,7 +710,7 @@ def make_vis(
 
 
 def make_vis_4ant() -> product_config.VisStream:
-    acv = make_antenna_channelised_voltage(['m000', 'm001', 'm002', 'm003'])
+    acv = make_antenna_channelised_voltage(['m000', 'm001', 's0002', 'another_antenna'])
     bcp = make_baseline_correlation_products(acv)
     return make_vis(bcp)
 
@@ -946,7 +947,7 @@ class Fixture(asynctest.TestCase):
                 "i0_antenna_channelised_voltage": {
                     "type": "cbf.antenna_channelised_voltage",
                     "url": "spead://239.2.1.150+15:7148",
-                    "antennas": ["m000", "m001", "m003", "m063"],
+                    "antennas": ["m000", "m001", "s0003", "another_antenna"],
                     "instrument_dev_name": "i0"
                 },
                 "i0_baseline_correlation_products": {
@@ -1022,7 +1023,7 @@ class Fixture(asynctest.TestCase):
                 "i0_antenna_channelised_voltage": {
                     "type": "cbf.antenna_channelised_voltage",
                     "url": "spead://239.2.1.150+15:7148",
-                    "antennas": ["m000", "m001", "m003", "m063"],
+                    "antennas": ["m000", "m001", "s0003", "another_antenna"],
                     "n_chans": 4096,
                     "n_pols": 2,
                     "adc_sample_rate": 1712000000.0,
