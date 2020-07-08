@@ -811,6 +811,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             await asyncio.sleep(self.reconciliation_interval)
             try:
                 await self._reconcile_once()
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.exception('Exception in reconciliation')
 

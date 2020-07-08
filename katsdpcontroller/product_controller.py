@@ -1175,7 +1175,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
                 telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
                              immutable=True)
-            except Exception as exc:
+            except BaseException as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 await self._shutdown(force=True)
                 raise exc
@@ -1387,7 +1387,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.product.dead_callbacks.append(dead_callback)
         try:
             await product.configure()
-        except Exception:
+        except BaseException:
             self.product = None
             raise
 

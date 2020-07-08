@@ -260,10 +260,10 @@ class DelayedManager:
         mock.side_effect = self._side_effect
         self._request_task = asyncio.get_event_loop().create_task(coro)
 
-    def _side_effect(self, *args, **kwargs) -> asyncio.Future:
+    async def _side_effect(self, *args, **kwargs) -> Any:
         self._started.set_result(None)
         self.mock.side_effect = self._old_side_effect
-        return self._result
+        return await self._result
 
     async def __aenter__(self) -> 'DelayedManager':
         await self._started
@@ -343,3 +343,13 @@ async def run_clocked(test_case: asynctest.ClockedTestCase, time: float,
     with Background(awaitable) as cm:
         await test_case.advance(time)
     return cm.result
+
+
+def future_return(mock: mock.Mock) -> asyncio.Future:
+    """Modify a callable mock so that it blocks on a future then returns it."""
+    async def replacement(*args, **kwargs):
+        return await future
+
+    future = asyncio.Future()         # type: asyncio.Future[Any]
+    mock.side_effect = replacement
+    return future

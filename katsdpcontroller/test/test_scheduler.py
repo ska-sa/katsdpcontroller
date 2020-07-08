@@ -24,7 +24,7 @@ import aiohttp
 
 from .. import scheduler
 from ..scheduler import TaskState
-from .utils import create_patch
+from .utils import create_patch, future_return
 
 
 class AnyOrderList(list):
@@ -1208,6 +1208,10 @@ class TestScheduler(asynctest.ClockedTestCase):
     def _dummy_random():
         return 0.0
 
+    @staticmethod
+    def _dummy_randint(a, b):
+        return a
+
     def _driver_calls(self):
         """self.driver.mock_calls, with reconcileTasks filtered out."""
         return [call for call in self.driver.mock_calls if call[0] != 'reconcileTasks']
@@ -1290,6 +1294,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Mock out the random generator so that port allocations will be
         # predictable.
         create_patch(self, 'katsdpcontroller.scheduler.Agent._random.random', self._dummy_random)
+        create_patch(self, 'katsdpcontroller.scheduler.Agent._random.randint', self._dummy_randint)
         await self.sched.start()
 
     async def test_initial_offers(self):
@@ -1485,8 +1490,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
             assert_equal(TaskState.RUNNING, self.nodes[0].state)
@@ -1549,8 +1553,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTING, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             if target_state > TaskState.STARTING:
                 self.sched.resourceOffers(self.driver, offers)
                 await asynctest.exhaust_callbacks(self.loop)
@@ -1613,8 +1616,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         await asynctest.exhaust_callbacks(self.loop)
         assert_equal(TaskState.STARTED, self.nodes[0].state)
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
-            poll_future = asyncio.Future()
-            poll_ports.return_value = poll_future
+            poll_future = future_return(poll_ports)
             poll_future.set_result(None)   # Mark ports as ready
             self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
