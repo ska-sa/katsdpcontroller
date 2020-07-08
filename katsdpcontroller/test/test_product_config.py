@@ -1,5 +1,6 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
+import copy
 from unittest import mock
 from typing import Dict, Optional, Any
 
@@ -585,10 +586,14 @@ class TestVisStream:
         assert_equal(vis.excise, True)
 
     def test_bad_continuum_factor(self) -> None:
-        self.config['continuum_factor'] = 3
+        n_servers = 4
+        continuum_factor = 3
+        alignment = n_servers * continuum_factor
+        self.config['continuum_factor'] = continuum_factor
         with assert_raises_regex(
                 ValueError,
-                r'n_chans \(32768\) is not a multiple of required alignment \(12\)'):
+                fr'n_chans \({self.bcp.n_chans}\) is not a multiple of '
+                fr'required alignment \({alignment}\)'):
             VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
 
     def test_misaligned_output_channels(self):
@@ -637,7 +642,7 @@ class TestBeamformerStream:
         assert_equal(bf.n_chans, 32768)
 
     def test_mismatched_sources(self) -> None:
-        acv = make_antenna_channelised_voltage()
+        acv = make_antenna_channelised_voltage(antennas=['m012', 'm013'])
         self.tacv[1] = make_tied_array_channelised_voltage(
             acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         with assert_raises_regex(ValueError,
@@ -899,10 +904,11 @@ class TestSpectralImageStream:
             Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
         )
         # Check that it gets copied
+        config = copy.deepcopy(self.config)
         self.config['parameters'].clear()
         assert_equal(spec.name, 'spectral_image')
-        assert_equal(spec.output_channels, (64, 100))
-        assert_equal(spec.parameters, {'q_fov': 2.0})
+        assert_equal(spec.output_channels, tuple(config['output_channels']))
+        assert_equal(spec.parameters, config['parameters'])
         assert_equal(spec.n_chans, 36)
         assert_is(spec.flags, self.flags)
         assert_is(spec.continuum, self.continuum_image)
