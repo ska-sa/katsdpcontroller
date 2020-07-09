@@ -1455,7 +1455,7 @@ def _get_targets(configuration: Configuration,
                  capture_block_id: str,
                  stream: product_config.ImageStream,
                  telstate: katsdptelstate.TelescopeState) -> \
-        Tuple[Sequence[Tuple[katpoint.Target, float]], Optional[katdal.DataSet]]:
+        Tuple[Sequence[Tuple[katpoint.Target, float]], katdal.DataSet]:
     """Identify all the targets to image.
 
     Parameter
@@ -1477,8 +1477,7 @@ def _get_targets(configuration: Configuration,
         Each key is the unique normalised target name, and the value is the
         target and the observation time on the target.
     data_set
-        A katdal data set corresponding to the arguments. If `targets` is empty
-        then this may be ``None``.
+        A katdal data set corresponding to the arguments.
     """
     l0_stream = stream.name + '.' + stream.vis.name
     data_set = _get_data_set(telstate, capture_block_id, l0_stream)
@@ -1577,7 +1576,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
     dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate)
-    band = data_set.spectral_windows[data_set.spw].band if data_set is not None else ''
+    band = data_set.spectral_windows[data_set.spw].band
     channel_freqs = data_set.channel_freqs * u.Hz
     del data_set    # Allow Python to recover the memory
 
@@ -1718,11 +1717,11 @@ async def build_postprocess_logical_graph(
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
     for sstream in configuration.by_class(product_config.SpectralImageStream):
-        data_url, nodes = _make_spectral_imager(g, configuration, capture_block_id, sstream,
-                                                telstate, target_mapper)
+        data_url, nodes = await _make_spectral_imager(g, configuration, capture_block_id, sstream,
+                                                      telstate, target_mapper)
         if nodes:
-            await _make_spectral_imager_report(g, configuration, capture_block_id, sstream,
-                                               data_url, nodes)
+            _make_spectral_imager_report(g, configuration, capture_block_id, sstream,
+                                         data_url, nodes)
 
     seen = set()
     for node in g:
