@@ -11,7 +11,7 @@ SPECTRAL_OBJECT_CHANNELS = 128
 #: Minimum observation time for continuum imager (seconds)
 #: This, and SPECTRAL_MIN_TIME, are set to one minute
 #: less than some typical observations lengths to avoid
-#: off by one dump triggering issues. 
+#: off by one dump triggering issues.
 CONTINUUM_MIN_TIME = 14 * 60.0     # 14 minutes
 #: Minimum observation time for spectral imager (seconds)
 SPECTRAL_MIN_TIME = 44 * 60.0      # 44 minutes
