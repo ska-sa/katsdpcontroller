@@ -64,7 +64,7 @@ def put_rfi_mask(client):
 
     client.put_object(Bucket='models', Key='rfi_mask/current.alias',
                       ContentType='text/plain',
-                      Body=b'config/v1.alias\n')
+                      Body=b'config/sandbox_v1.alias\n')
     client.put_object(Bucket='models', Key='rfi_mask/config/sandbox_v1.alias',
                       ContentType='text/plain',
                       Body=f'../fixed/{filename}\n')
