@@ -9,9 +9,12 @@ WRITER_OBJECT_SIZE = 20e6    # 20 MB
 #: Maximum channels per chunk for spectral imager
 SPECTRAL_OBJECT_CHANNELS = 128
 #: Minimum observation time for continuum imager (seconds)
-CONTINUUM_MIN_TIME = 15 * 60.0     # 15 minutes
+#: This, and SPECTRAL_MIN_TIME, are set to one minute
+#: less than some typical observations lengths to avoid
+#: off by one dump triggering issues.
+CONTINUUM_MIN_TIME = 14 * 60.0     # 14 minutes
 #: Minimum observation time for spectral imager (seconds)
-SPECTRAL_MIN_TIME = 3600.0         # 1 hour
+SPECTRAL_MIN_TIME = 44 * 60.0      # 44 minutes
 #: Size of cal buffer in seconds
 CAL_BUFFER_TIME = 25 * 60.0        # 25 minutes (allows a single batch of 15 minutes)
 #: Maximum number of scans to include in report
