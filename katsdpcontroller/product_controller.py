@@ -1130,8 +1130,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             for stream in itertools.chain(
                     self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
                     self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream)):
+                ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
                 band_mask_model_urls = await _resolve_model(
-                    fetcher, model_base_url, f'band_mask/current/{stream.band}.alias')
+                    fetcher, model_base_url,
+                    f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
+                )
                 prefix = (stream.name, 'model', 'band_mask')
                 init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
                 init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]

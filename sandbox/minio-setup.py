@@ -84,15 +84,20 @@ def put_band_mask(client):
     fh, filename = serialize_model(model)
 
     for band in ['l', 's', 'u', 'x']:
-        client.put_object(Bucket='models', Key=f'band_mask/current/{band}.alias',
-                          ContentType='text/plain',
-                          Body=f'../config/{band}/sandbox_v1.alias\n')
-        client.put_object(Bucket='models', Key=f'band_mask/config/{band}/sandbox_v1.alias',
-                          ContentType='text/plain',
-                          Body=f'../../fixed/{filename}\n')
+        for ratio in [1, 8, 16]:
+            target = f'{band}/nb_ratio={ratio}'
+            client.put_object(Bucket='models',
+                              Key=f'band_mask/current/{target}.alias',
+                              ContentType='text/plain',
+                              Body=f'../../config/{target}/sandbox_v1.alias\n')
+            client.put_object(Bucket='models',
+                              Key=f'band_mask/config/{target}/sandbox_v1.alias',
+                              ContentType='text/plain',
+                              Body=f'../../../fixed/{filename}\n')
     client.put_object(Bucket='models',
+                      Key=f'band_mask/fixed/{filename}',
                       ContentType='application/x-hdf5',
-                      Key=f'band_mask/fixed/{filename}', Body=fh)
+                      Body=fh)
 
 
 def main():
