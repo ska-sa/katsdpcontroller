@@ -299,6 +299,9 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
 
+    init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
+    init_telstate[(stream.name, 'src_streams')] = [stream.antenna_channelised_voltage.name]
+
     for i in range(n_sim):
         sim = SDPLogicalTask('sim.{}.{}'.format(stream.name, i + 1))
         sim.image = 'katcbfsim'
