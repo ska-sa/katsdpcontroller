@@ -301,6 +301,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     init_telstate[(stream.name, 'src_streams')] = [stream.antenna_channelised_voltage.name]
+    init_telstate[('sub', 'band')] = stream.antenna_channelised_voltage.band
 
     for i in range(n_sim):
         sim = SDPLogicalTask('sim.{}.{}'.format(stream.name, i + 1))

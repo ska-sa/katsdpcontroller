@@ -1278,6 +1278,17 @@ class Configuration:
                     options, name, stream_config, src_streams, sensors[name])
             except ValueError as exc:
                 raise ValueError(f'Configuration error for stream {name}: {exc}') from exc
+
+        # Final validations that can only be done after sensor values are
+        # filled in.
+        bands = set()
+        for stream in streams.values():
+            if isinstance(stream, AntennaChannelisedVoltageStreamBase):
+                bands.add(stream.band)
+        if len(bands) > 1:
+            band_list = ', '.join(f'{band!r}' for band in sorted(bands))
+            raise ValueError(f'Only a single band is supported, found {band_list}')
+
         return cls(options=options, simulation=simulation, streams=streams.values())
 
 
