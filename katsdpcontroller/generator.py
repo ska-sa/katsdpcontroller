@@ -1005,7 +1005,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
-    flag_writer.interfaces[0].bandwidth_in = stream.data_rate() * stream.rate_ratio
+    flag_writer.interfaces[0].bandwidth_in = stream.data_rate()
     if local:
         flag_writer.volumes = [OBJ_DATA_VOL]
     else:
