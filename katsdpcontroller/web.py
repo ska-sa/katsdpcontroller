@@ -264,7 +264,7 @@ class _Updater:
                 continue
             logger.info('Updater woken up and updating state')
 
-            # Ensure we are subscribed to changed in gui-urls sensors
+            # Ensure we are subscribed to changes in gui-urls sensors
             # (they don't typically change, but they are only initialised
             # after we are woken up to indicate that the sensor exists).
             for sensor in self._server.sensors.values():
