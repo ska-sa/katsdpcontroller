@@ -340,8 +340,8 @@ class BaseTestSDPController(asynctest.TestCase):
         model.version = 1
         self._setup_model(
             model,
-            '/models/band_mask/current/l.alias',
-            '/models/band_mask/config/l/2020-06-22.alias',
+            '/models/band_mask/current/l/nb_ratio=1.alias',
+            '/models/band_mask/config/l/nb_ratio=1/2020-06-22.alias',
             '/models/band_mask/fixed/test.h5'
         )
 
@@ -755,7 +755,7 @@ class TestSDPController(BaseTestSDPController):
             'rfi_mask/fixed/test.h5')
         self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'config'),
-            'band_mask/config/l/2020-06-22.alias')
+            'band_mask/config/l/nb_ratio=1/2020-06-22.alias')
         self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
             'band_mask/fixed/test.h5')
