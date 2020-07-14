@@ -12,7 +12,7 @@ from socket import getaddrinfo
 import ipaddress
 from urllib.parse import urljoin
 import typing
-from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
+from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any
 
 import asynctest
 from aioresponses import aioresponses
@@ -28,7 +28,8 @@ from prometheus_client import CollectorRegistry
 import pymesos
 import networkx
 import netifaces
-import katsdptelstate
+import aioredis
+import katsdptelstate.aio.memory
 import katpoint
 import katdal
 import katsdpmodels.band_mask
@@ -545,15 +546,12 @@ class TestSDPController(BaseTestSDPController):
         create_patch(self, 'katsdpcontroller.scheduler.PhysicalTask.dependency_abort',
                      side_effect=_dependency_abort, autospec=True)
 
-        # Mock TelescopeState's constructor to create an in-memory telstate
-        orig_telstate_init = katsdptelstate.TelescopeState.__init__
-        self.telstate: Optional[katsdptelstate.TelescopeState] = None
+        # Mock RedisBackend to create an in-memory telstate instead
+        self.telstate = katsdptelstate.aio.TelescopeState()
+        create_patch(self, 'katsdptelstate.aio.redis.RedisBackend',
+                     return_value=self.telstate.backend)
+        create_patch(self, 'aioredis.create_redis_pool', autospec=True)
 
-        def _telstate_init(obj, *args, **kwargs):
-            self.telstate = obj
-            orig_telstate_init(obj)
-        create_patch(self, 'katsdptelstate.TelescopeState.__init__', side_effect=_telstate_init,
-                     autospec=True)
         self.sensor_proxy_client_class = create_patch(
             self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
@@ -599,7 +597,7 @@ class TestSDPController(BaseTestSDPController):
         self.fail_requests: Set[str] = set()
 
         # Mock out use of katdal to get the targets
-        create_patch(self, 'katsdpcontroller.generator._get_data_set',
+        create_patch(self, 'katdal.open',
                      return_value=DummyDataSet())
 
     async def _launch(self, graph: networkx.MultiDiGraph,
@@ -721,7 +719,7 @@ class TestSDPController(BaseTestSDPController):
     async def _configure_subarray(self, subarray_product: str) -> None:
         reply, informs = await self.client.request(*self._configure_args(subarray_product))
 
-    def assert_immutable(self, key: str, value: Any) -> None:
+    async def assert_immutable(self, key: str, value: Any) -> None:
         """Check the value of a telstate key and also that it is immutable"""
         assert self.telstate is not None
         # Uncomment for debugging
@@ -730,36 +728,35 @@ class TestSDPController(BaseTestSDPController):
         #     json.dump(value, f, indent=2, default=str, sort_keys=True)
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
-        self.assertEqual(self.telstate[key], value)
-        self.assertEqual(self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
+        self.assertEqual(await self.telstate[key], value)
+        self.assertEqual(await self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
         then indicate success.
         """
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
-            mock.ANY, 'host.telstate:20000')
+        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
 
         # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
         # is covered: base_params, per node, per edge
         assert self.telstate is not None
-        self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
-        self.assert_immutable('sdp_model_base_url', 'http://models.s3.invalid/models/')
-        self.assert_immutable(
+        await self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
+        await self.assert_immutable('sdp_model_base_url', 'http://models.s3.invalid/models/')
+        await self.assert_immutable(
             self.telstate.join('model', 'rfi_mask', 'config'),
             'rfi_mask/config/2020-06-15.alias')
-        self.assert_immutable(
+        await self.assert_immutable(
             self.telstate.join('model', 'rfi_mask', 'fixed'),
             'rfi_mask/fixed/test.h5')
-        self.assert_immutable(
+        await self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'config'),
             'band_mask/config/l/nb_ratio=1/2020-06-22.alias')
-        self.assert_immutable(
+        await self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
             'band_mask/fixed/test.h5')
-        self.assert_immutable('config.vis_writer.sdp_l0', {
+        await self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
             'obj_size_mb': mock.ANY,
@@ -778,7 +775,7 @@ class TestSDPController(BaseTestSDPController):
             'direct_write': True
         })
         # Test that the output channel rounding was done correctly
-        self.assert_immutable('config.ingest.sdp_l0_continuum_only', {
+        await self.assert_immutable('config.ingest.sdp_l0_continuum_only', {
             'antenna_mask': mock.ANY,
             'cbf_spead': mock.ANY,
             'cbf_ibv': True,
@@ -807,9 +804,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        katsdptelstate.TelescopeState.__init__.side_effect = (    # type: ignore
-            katsdptelstate.ConnectionError
-        )
+        aioredis.create_redis_pool.side_effect = ConnectionRefusedError
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
@@ -820,8 +815,7 @@ class TestSDPController(BaseTestSDPController):
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
-            mock.ANY, 'host.telstate:20000')
+        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
