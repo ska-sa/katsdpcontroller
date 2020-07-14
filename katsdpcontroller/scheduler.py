@@ -2196,6 +2196,9 @@ class PhysicalTask(PhysicalNode):
             self.start_time = status.timestamp
         elif status.state in TERMINAL_STATUSES and self.end_time is None:
             self.end_time = status.timestamp
+            if self.start_time is None:
+                # Can happen if the task failed to launch
+                self.start_time = status.timestamp
 
     def kill(self, driver, **kwargs):
         # The poller is stopped by set_state, so we do not need to do it here.
