@@ -300,17 +300,17 @@ class BaseTestSDPController(asynctest.TestCase):
         fh = io.BytesIO()
         model.to_file(fh, content_type='application/x-hdf5')
         self.aioresponses.get(
-            f'http://models.s3.invalid{current_path}',
+            f'https://models.s3.invalid{current_path}',
             content_type='text/plain',
             body=f'{config_path}\n'
         )
         self.aioresponses.get(
-            f'http://models.s3.invalid{config_path}',
+            f'https://models.s3.invalid{config_path}',
             content_type='text/plain',
             body=f'{fixed_path}\n'
         )
         self.aioresponses.get(
-            f'http://models.s3.invalid{fixed_path}',
+            f'https://models.s3.invalid{fixed_path}',
             content_type='application/x-hdf5',
             body=fh.getvalue()
         )
@@ -743,7 +743,7 @@ class TestSDPController(BaseTestSDPController):
         # is covered: base_params, per node, per edge
         assert self.telstate is not None
         await self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
-        await self.assert_immutable('sdp_model_base_url', 'http://models.s3.invalid/models/')
+        await self.assert_immutable('sdp_model_base_url', 'https://models.s3.invalid/models/')
         await self.assert_immutable(
             self.telstate.join('model', 'rfi_mask', 'config'),
             'rfi_mask/config/2020-06-15.alias')

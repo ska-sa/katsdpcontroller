@@ -171,7 +171,7 @@ S3_CONFIG = '''
     },
     "models": {
         "read": {
-            "url": "http://models.s3.invalid/models"
+            "url": "https://models.s3.invalid/models"
         }
     }
 }'''
