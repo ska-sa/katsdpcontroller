@@ -1552,6 +1552,7 @@ def _make_continuum_imager(g: networkx.MultiDiGraph,
             ])
         imager.command = format_args + [escape_format(arg) for arg in no_format_args] + [data_url]
         imager.katsdpservices_config = False
+        imager.metadata_katcp_sensors = False
         imager.batch_data_time = obs_time
         g.add_node(imager)
 
@@ -1641,6 +1642,7 @@ def _make_spectral_imager(g: networkx.MultiDiGraph,
                 imager.command += [f'--{key}'.replace('_', '-'), escape_format(str(value))]
 
             imager.katsdpservices_config = False
+            imager.metadata_katcp_sensors = False
             imager.batch_data_time = obs_time
             g.add_node(imager)
             nodes.append(imager)
@@ -1673,6 +1675,7 @@ def _make_spectral_imager_report(
     report.volumes = [DATA_VOL]
     report.image = 'katsdpimager'
     report.katsdpservices_config = False
+    report.metadata_katcp_sensors = False
     report.command = [
         'imager-mkat-report.py',
         data_url,
