@@ -1477,7 +1477,7 @@ def _get_targets(configuration: Configuration,
     data_set = katdal.open(
         f'redis://{telstate_endpoint}',
         capture_block_id=capture_block_id,
-        l0_stream=l0_stream,
+        stream_name=l0_stream,
         chunk_store=None
     )
     tracking = data_set.sensor.get('Observation/scan_state') == 'track'
