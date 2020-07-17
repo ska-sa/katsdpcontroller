@@ -101,10 +101,10 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
                         help='Zookeeper URL for discovering Mesos master '
                              'e.g. zk://server.domain:2181/mesos')
     add_shared_options(parser)
+    katsdpservices.add_aiomonitor_arguments(parser)
     parser.set_defaults(
         aiomonitor_port=os.environ.get('PORT2', aiomonitor.MONITOR_PORT),
         aioconsole_port=os.environ.get('PORT3', aiomonitor.CONSOLE_PORT))
-    katsdpservices.add_aiomonitor_arguments(parser)
     args = parser.parse_args()
 
     if args.localhost:
