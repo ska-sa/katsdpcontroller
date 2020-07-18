@@ -1483,7 +1483,7 @@ def _get_targets(configuration: Configuration,
     target_sensor = data_set.sensor.get('Observation/target_index')
     targets = []
     for i, target in enumerate(data_set.catalogue):
-        if 'target' not in target.tags:
+        if target.body_type != 'radec' or 'target' not in target.tags:
             continue
         observed = tracking & (target_sensor == i)
         obs_time = np.sum(observed) * data_set.dump_period
