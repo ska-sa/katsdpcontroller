@@ -653,7 +653,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             },
             "resources": {
                 "cpus": 0.2,
-                "memoryMb": 1024,
+                "memoryMb": 2048,
                 "numPorts": 5         # katcp, http, aiomonitor, aioconsole, dashboard
             }
         }
