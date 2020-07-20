@@ -31,7 +31,7 @@ Software-wise, you will need:
 You'll also need certain ports to be available on your machine:
 - Zookeeper: 2181
 - Mesos master: 5050
-- Mesos slave: 5051
+- Mesos agent: 5051
 - Singularity: 7099
 - Logstash: 9600, 12201 (UDP)
 - Elasticsearch: 9200, 9300
