@@ -1,5 +1,7 @@
 """Mock implementation of :class:`katportalclient.KATPortalClient`."""
 
+import re
+
 import tornado.gen
 import katportalclient
 
@@ -43,10 +45,18 @@ class KATPortalClient:
                                                     .format(component)) from None
 
     @tornado.gen.coroutine
-    def sensor_value(self, sensor_name, include_value_ts=False):
+    def sensor_values(self, filters, include_value_ts=False):
         assert not include_value_ts     # Not implemented and not needed
-        try:
-            return self.sensors[sensor_name]
-        except KeyError:
-            raise katportalclient.SensorNotFoundError('Value for sensor {} not found'
-                                                      .format(sensor_name)) from None
+        if isinstance(filters, str):
+            filters = [filters]
+        results = {}
+        for filt in filters:
+            pattern = re.compile(filt)
+            filt_results = {}
+            for sensor_name, sample in self.sensors.items():
+                if pattern.search(sensor_name):
+                    filt_results[sensor_name] = sample
+            if not filt_results:
+                raise katportalclient.SensorNotFoundError(f'No values for filter {filt} found')
+            results.update(filt_results)
+        return results

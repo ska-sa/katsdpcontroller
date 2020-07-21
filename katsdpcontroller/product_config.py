@@ -5,6 +5,7 @@ import logging
 import itertools
 import copy
 import math
+import re
 from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 from typing import (
@@ -1224,9 +1225,9 @@ class Configuration:
                 cam_http = CamHttpStream.from_config(options, name, stream_config, [], {})
                 break
 
-        # Extract sensor values. This is pulled into a separate block rather
-        # than done as we construct each stream so that one day it can be
-        # optimised to make a single sensor_values call for all sensors.
+        # Extract sensor values. This is pulled into a separate block that
+        # queries all sensors at once rather than done as we construct each
+        # stream because katportal has a very high overhead per query.
         sensors: Dict[str, Dict[str, Any]] = {name: {} for name in stream_configs}
         if cam_http:
             client = katportalclient.KATPortalClient(str(cam_http.url), None)
@@ -1238,15 +1239,30 @@ class Configuration:
                     # There are too many possible exceptions from katportalclient to
                     # try to list them all explicitly.
                     raise SensorFailure(f'Could not get component name for {name}: {exc}') from exc
+
+            full_names = set()
+            for name, stream_config in stream_configs.items():
+                stream_cls = STREAM_CLASSES[stream_config['type']]
+                for sensor in stream_cls._class_sensors:
+                    instrument = stream_config['instrument_dev_name']
+                    full_names.add(sensor.full_name(components, name, instrument))
+            # client.sensor_values can take a list of filters - but it then
+            # makes a separate request for each, in series, which is much
+            # slower.
+            regex = '^(' + '|'.join(re.escape(full_name) for full_name in full_names) + ')$'
+            try:
+                samples = await client.sensor_values(regex)
+            except Exception as exc:
+                raise SensorFailure(f'Could not get sensor values: {exc}') from exc
+
             for name, stream_config in stream_configs.items():
                 stream_cls = STREAM_CLASSES[stream_config['type']]
                 for sensor in stream_cls._class_sensors:
                     instrument = stream_config['instrument_dev_name']
                     full_name = sensor.full_name(components, name, instrument)
-                    try:
-                        sample = await client.sensor_value(full_name)
-                    except Exception as exc:
-                        raise SensorFailure(f'Could not get value for {full_name}: {exc}') from exc
+                    if full_name not in samples:
+                        raise SensorFailure(f'Sensor {full_name} does not exist')
+                    sample = samples[full_name]
                     if sample.status not in {'nominal', 'warn', 'error'}:
                         raise SensorFailure(
                             f'Sensor {full_name} has expected status {sample.status}'
