@@ -1014,8 +1014,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch
             # queue, but that doesn't matter because our real tasks will block too.
+            # However, because of this blocking it needs a large resources_timeout,
+            # even though it uses no resources.
             await self.sched.launch(physical_graph, self.resolver, [telstate_node],
-                                    queue=self.batch_queue)
+                                    queue=self.batch_queue,
+                                    resources_timeout=BATCH_RESOURCES_TIMEOUT)
             nodelist = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
             await self.sched.batch_run(physical_graph, self.resolver, nodelist,
                                        queue=self.batch_queue,
