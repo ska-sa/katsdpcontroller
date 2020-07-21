@@ -9,7 +9,7 @@ services:
 
   mesos-master:
     network_mode: host
-    image: mesosphere/mesos-master:1.5.0
+    image: mesos/mesos-centos:1.8.x
     depends_on:
       - exhibitor
     environment:
@@ -21,11 +21,14 @@ services:
       MESOS_REGISTRY: in_memory
       MESOS_LOG_DIR: /var/log/mesos
       MESOS_WORK_DIR: /var/tmp/mesos
+    entrypoint:
+      - /usr/bin/mesos-init-wrapper
+      - master
 
-  mesos-slave:
+  mesos-agent:
     network_mode: host
     pid: host
-    image: mesosphere/mesos-slave:1.5.0
+    image: mesos/mesos-centos:1.8.x
     depends_on:
       - exhibitor
     environment:
@@ -43,16 +46,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /sys:/sys
       - /usr/bin/docker:/usr/local/bin/docker
-      - ./etc/mesos-slave:/etc/mesos-slave:ro
+      - ./etc/mesos-agent:/etc/mesos-agent:ro
       # /var/tmp/mesos needs to be the same on the host and the container,
-      # because mesos-slave writes to the sandbox and then tells the host
+      # because mesos-agent writes to the sandbox and then tells the host
       # Docker to bind-mount it into the newly started container.
       - /var/tmp/mesos:/var/tmp/mesos
       - ./etc/passwd:/etc/passwd:ro
       - ./etc/group:/etc/group:ro
     entrypoint:
       - /usr/bin/mesos-init-wrapper
-      - slave
+      - agent
 
   singularity:
     network_mode: host
@@ -86,7 +89,7 @@ services:
 
   grafana:
     network_mode: host
-    image: grafana/grafana:6.5.1
+    image: grafana/grafana:6.5.2
     depends_on:
       - prometheus
     environment:
@@ -133,7 +136,7 @@ services:
 
   consul:
     network_mode: host
-    image: consul:1.5.2
+    image: consul:1.7.3
     command: consul agent -dev -bind=127.0.0.1 -client=127.0.0.1 -config-dir=/etc/consul.d
     volumes:
       - ./etc/consul.d:/etc/consul.d:ro
