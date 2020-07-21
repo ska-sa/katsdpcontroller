@@ -1656,6 +1656,20 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Once we abort, we should no longer be interested in offers
         assert_equal([mock.call.suppressOffers({'default'})], self._driver_calls())
 
+    async def test_launch_queue_busy(self):
+        """Test a launch failing due to tasks ahead of it blocking the queue."""
+        launch, kill = await self._transition_node0(TaskState.STARTING, nodes=[self.nodes[0]])
+        launch1 = asyncio.ensure_future(
+            self.sched.launch(self.physical_graph, self.resolver, [self.nodes[2]],
+                              resources_timeout=2))
+        await self.advance(3)
+        with assert_raises(scheduler.QueueBusyError):
+            await launch1
+        assert_false(launch.done())
+        await self.advance(30)
+        with assert_raises(scheduler.InsufficientResourcesError):
+            await launch
+
     async def test_launch_force_host(self):
         """Like test_launch_serial, but tests forcing a logical task to a node."""
         for node in self.logical_graph.nodes():
