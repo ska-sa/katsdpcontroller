@@ -1343,7 +1343,7 @@ class TestConfiguration(Fixture):
             with assert_raises(product_config.SensorFailure):
                 await Configuration.from_config(self.config)
 
-        with mock.patch.object(self.client, 'sensor_value',
+        with mock.patch.object(self.client, 'sensor_values',
                                side_effect=ConnectionRefusedError):
             with assert_raises(product_config.SensorFailure):
                 await Configuration.from_config(self.config)
