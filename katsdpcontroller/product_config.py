@@ -1227,7 +1227,8 @@ class Configuration:
 
         # Extract sensor values. This is pulled into a separate block that
         # queries all sensors at once rather than done as we construct each
-        # stream because katportal has a very high overhead per query.
+        # stream because katportal has a very high overhead per query
+        # (https://skaafrica.atlassian.net/browse/MT-1078).
         sensors: Dict[str, Dict[str, Any]] = {name: {} for name in stream_configs}
         if cam_http:
             client = katportalclient.KATPortalClient(str(cam_http.url), None)
