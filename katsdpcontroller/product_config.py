@@ -1226,7 +1226,7 @@ class Configuration:
                 break
 
         # Extract sensor values. This is pulled into a separate block that
-        # queries all sensors at once rather than done as we construct each
+        # queries all sensors at once, rather than done as we construct each
         # stream because katportal has a very high overhead per query
         # (https://skaafrica.atlassian.net/browse/MT-1078).
         sensors: Dict[str, Dict[str, Any]] = {name: {} for name in stream_configs}
