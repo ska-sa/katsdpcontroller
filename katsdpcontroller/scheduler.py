@@ -1219,6 +1219,15 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
                 "to launch all tasks ({0.needed} > {0.available})".format(self))
 
 
+class QueueBusyError(InsufficientResourcesError):
+    """The launch group did not reach the front of the queue before its timeout expired."""
+    def __init__(self, timeout):
+        self.timeout = timeout
+        super().__init__(
+            f"The launch group timeout ({timeout}s) fired before reaching the front of the queue"
+        )
+
+
 class CycleError(ValueError):
     """Raised for a graph that contains an illegal dependency cycle"""
     pass
@@ -3137,10 +3146,14 @@ class Scheduler(pymesos.Scheduler):
             for node in remaining:
                 if node.state == TaskState.STARTING:
                     node.set_state(TaskState.NOT_READY)
+            at_front = queue and queue.front() is pending
             queue.remove(pending)
             self._wakeup_launcher.set()
             if isinstance(error, asyncio.TimeoutError) and pending.last_insufficient is not None:
-                raise pending.last_insufficient from None
+                if not at_front:
+                    raise QueueBusyError(resources_timeout)
+                else:
+                    raise pending.last_insufficient from None
             else:
                 raise
         ready_futures = [node.ready_event.wait() for node in nodes]
