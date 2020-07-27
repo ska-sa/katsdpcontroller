@@ -1221,9 +1221,10 @@ class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
 
 class QueueBusyError(InsufficientResourcesError):
     """The launch group did not reach the front of the queue before its timeout expired."""
-    def __init__(self):
+    def __init__(self, timeout):
+        self.timeout = timeout
         super().__init__(
-            "The launch group did not reach the front of the queue before its timeout expired"
+            f"The launch group timeout ({timeout}s) fired before reaching the front of the queue"
         )
 
 
@@ -3150,7 +3151,7 @@ class Scheduler(pymesos.Scheduler):
             self._wakeup_launcher.set()
             if isinstance(error, asyncio.TimeoutError) and pending.last_insufficient is not None:
                 if not at_front:
-                    raise QueueBusyError()
+                    raise QueueBusyError(resources_timeout)
                 else:
                     raise pending.last_insufficient from None
             else:

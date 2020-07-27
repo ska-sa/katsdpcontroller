@@ -1663,8 +1663,10 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.sched.launch(self.physical_graph, self.resolver, [self.nodes[2]],
                               resources_timeout=2))
         await self.advance(3)
-        with assert_raises(scheduler.QueueBusyError):
+        with assert_raises(scheduler.QueueBusyError) as cm:
             await launch1
+        assert cm.exception.timeout == 2
+        assert '(2s)' in str(cm.exception)
         assert_false(launch.done())
         await self.advance(30)
         with assert_raises(scheduler.InsufficientResourcesError):
