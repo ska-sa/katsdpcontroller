@@ -14,7 +14,7 @@ SPECTRAL_OBJECT_CHANNELS = 128
 #: off by one dump triggering issues.
 CONTINUUM_MIN_TIME = 14 * 60.0     # 14 minutes
 #: Minimum observation time for spectral imager (seconds)
-SPECTRAL_MIN_TIME = 89 * 60.0      # temporary increase to 1h29
+SPECTRAL_MIN_TIME = 44 * 60.0      # 44 minutes
 #: Size of cal buffer in seconds
 CAL_BUFFER_TIME = 25 * 60.0        # 25 minutes (allows a single batch of 15 minutes)
 #: Maximum number of scans to include in report
