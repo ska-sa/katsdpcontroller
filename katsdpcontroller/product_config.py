@@ -1101,7 +1101,7 @@ class ImageStream(Stream):
 class ContinuumImageStream(ImageStream):
     """An instance of sdp.continuum_image."""
 
-    stream_type: ClassVar[str] = 'continuum_image'
+    stream_type: ClassVar[str] = 'sdp.continuum_image'
     _valid_src_types: ClassVar[_ValidTypes] = {'sdp.flags'}
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
@@ -1133,7 +1133,7 @@ class ContinuumImageStream(ImageStream):
 class SpectralImageStream(ImageStream):
     """An instance of sdp.spectral_image."""
 
-    stream_type: ClassVar[str] = 'spectral_image'
+    stream_type: ClassVar[str] = 'sdp.spectral_image'
     _valid_src_types: ClassVar[_ValidTypes] = ['sdp.flags', 'sdp.continuum_image']
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
