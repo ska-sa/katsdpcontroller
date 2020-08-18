@@ -1,5 +1,6 @@
 /katsdpcontroller.egg-info
 /.coverage
 /cover
+/.eggs
 *.pyc
 *~

@@ -1364,3 +1364,19 @@ class TestConfiguration(Fixture):
             katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
         with assert_raises(product_config.SensorFailure):
             await Configuration.from_config(self.config)
+
+    async def test_mixed_bands(self):
+        self.config['outputs']['l_band_sim'] = {
+            'type': 'sim.cbf.antenna_channelised_voltage',
+            'antennas': [
+                _M000.description,
+                _M002.description
+            ],
+            'band': 'l',
+            'centre_frequency': 1284e6,
+            'bandwidth': 107e6,
+            'adc_sample_rate': 1712e6,
+            'n_chans': 32768
+        }
+        with assert_raises_regex(ValueError, "Only a single band is supported, found 'l', 'u'"):
+            await Configuration.from_config(self.config)

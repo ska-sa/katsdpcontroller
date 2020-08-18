@@ -74,7 +74,8 @@
     "properties": {
         "continuum": {"$ref": "#/$defs/imager_store"},
         "spectral": {"$ref": "#/$defs/imager_store"},
-        "archive": {"$ref": "#/$defs/archive_store"}
+        "archive": {"$ref": "#/$defs/archive_store"},
+        "models": {"$ref": "#/$defs/archive_store"}
     },
-    "required": ["continuum", "spectral", "archive"]
+    "required": ["continuum", "spectral", "archive", "models"]
 }

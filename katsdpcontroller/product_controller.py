@@ -9,6 +9,7 @@ import re
 import copy
 import uuid
 import functools
+import itertools
 from ipaddress import IPv4Address
 from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, Mapping
 
@@ -19,7 +20,10 @@ import aiohttp
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
-import katsdptelstate
+import yarl
+import aioredis
+import katsdptelstate.aio.redis
+import katsdpmodels.fetch.aiohttp
 
 import katsdpcontroller
 from . import scheduler, product_config, generator, tasks, sensor_proxy
@@ -149,6 +153,59 @@ def _prometheus_factory(registry: CollectorRegistry,
                                        labels, registry)
 
 
+def _relative_url(base: yarl.URL, target: yarl.URL) -> yarl.URL:
+    """Produce URL `rel` such that ``base.join(rel) == target``.
+
+    It does not deal with query strings or fragments.
+
+    Raises
+    ------
+    ValueError
+        if either of the URLs are not absolute
+    ValueError
+        if either URL contains fragments or query strings
+    ValueError
+        if `target` is not nested under `base`
+    """
+    if not base.is_absolute() or not target.is_absolute():
+        raise ValueError('Absolute URLs expected')
+    if base.query_string or target.query_string:
+        raise ValueError('Query strings are not supported')
+    if base.fragment or target.fragment:
+        raise ValueError('Fragments are not supported')
+    if base.origin() != target.origin():
+        raise ValueError('URLs have different origins')
+    # Strip off the last component, which is empty if the URL ends with a /
+    # other than at the root, or the filename if it does not.
+    base_parts = base.raw_parts[:-1] if len(base.parts) > 1 else base.raw_parts
+    if target.raw_parts[:len(base_parts)] != base_parts:
+        raise ValueError('Target URL is not nested under the base')
+    rel_parts = target.raw_parts[len(base_parts):]
+    rel = yarl.URL.build(path='/'.join(rel_parts), encoded=True)
+    assert base.join(rel) == target
+    return rel
+
+
+async def _resolve_model(fetcher: katsdpmodels.fetch.aiohttp.Fetcher,
+                         base_url: str, rel_url: str) -> Tuple[str, str]:
+    """Compute model URLs to store in katsdptelstate.
+
+    Returns
+    -------
+    config_url
+        URL relative to `base_url` that is specific to the config.
+    fixed_url
+        URL relative to `base_url` for an immutable model.
+    """
+    base = yarl.URL(base_url)
+    url = base.join(yarl.URL(rel_url))
+    urls = await fetcher.resolve(str(url))
+    fixed = urls[-1]
+    config = urls[-2] if len(urls) >= 2 else fixed
+    return (str(_relative_url(base, yarl.URL(config))),
+            str(_relative_url(base, yarl.URL(fixed))))
+
+
 class KatcpImageLookup(scheduler.ImageLookup):
     """Image lookup that asks the master controller to do the work.
 
@@ -175,7 +232,7 @@ class Resolver(scheduler.Resolver):
         super().__init__(image_resolver, task_id_allocator, http_url)
         self.service_overrides = service_overrides
         self.s3_config = s3_config
-        self.telstate: Optional[katsdptelstate.TelescopeState] = None
+        self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
         self.resources: Optional[SDPResources] = None
         self.localhost = localhost
 
@@ -339,7 +396,7 @@ class SDPSubarrayProductBase:
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(configuration, config_dict)
         self.telstate_endpoint = ""
-        self.telstate: Optional[katsdptelstate.TelescopeState] = None
+        self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
         self.capture_blocks: Dict[str, CaptureBlock] = {}  # live capture blocks, indexed by name
         # set between capture_init and capture_done
         self.current_capture_block: Optional[CaptureBlock] = None
@@ -522,6 +579,9 @@ class SDPSubarrayProductBase:
             logging.info('Waiting for capture block %s to terminate', name)
             await capture_block.dead_event.wait()
             self.capture_blocks.pop(name, None)
+
+        if self.telstate is not None:
+            self.telstate.backend.close()
 
         self.state = ProductState.DEAD
         ready.set()     # In case deconfigure_impl didn't already do this
@@ -863,6 +923,7 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
+
     sched: scheduler.Scheduler     # Override Optional[] from base class
 
     def _instantiate(self, logical_node: scheduler.LogicalNode,
@@ -988,7 +1049,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
         assert self.telstate is not None
-        self.telstate.add('sdp_capture_block_id', capture_block.name)
+        await self.telstate.add('sdp_capture_block_id', capture_block.name)
         for node in self.physical_graph:
             if isinstance(node, tasks.SDPPhysicalTask):
                 node.add_capture_block(capture_block)
@@ -1002,8 +1063,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         try:
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING
-            logical_graph = generator.build_postprocess_logical_graph(
-                capture_block.configuration, capture_block.name, self.telstate)
+            logical_graph = await generator.build_postprocess_logical_graph(
+                capture_block.configuration, capture_block.name,
+                self.telstate, self.telstate_endpoint)
             physical_graph = self._instantiate_physical_graph(
                 logical_graph, capture_block.name)
             capture_block.postprocess_physical_graph = physical_graph
@@ -1044,7 +1106,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             if isinstance(node, tasks.SDPPhysicalTask):
                 node.remove_capture_block(capture_block)
 
-    async def _launch_telstate(self) -> katsdptelstate.TelescopeState:
+    async def _launch_telstate(self) -> katsdptelstate.aio.TelescopeState:
         """Make sure the telstate node is launched"""
         boot = [self.telstate_node]
 
@@ -1063,19 +1125,43 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                         src_stream.name for src_stream in stream.src_streams
                     ]
 
+        # Load canonical model URLs
+        model_base_url = self.resolver.s3_config['models']['read']['url']
+        if not model_base_url.endswith('/'):
+            model_base_url += '/'      # Ensure it is a directory
+        init_telstate['sdp_model_base_url'] = model_base_url
+        async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
+            rfi_mask_model_urls = await _resolve_model(
+                fetcher, model_base_url, 'rfi_mask/current.alias')
+            init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
+            init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+            for stream in itertools.chain(
+                    self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
+                    self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream)):
+                ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
+                band_mask_model_urls = await _resolve_model(
+                    fetcher, model_base_url,
+                    f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
+                )
+                prefix = (stream.name, 'model', 'band_mask')
+                init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
+                init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
+
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
-        telstate = katsdptelstate.TelescopeState(endpoint=self.telstate_endpoint)
+        redis_client = await aioredis.create_redis_pool(f'redis://{self.telstate_endpoint}')
+        telstate_backend = katsdptelstate.aio.redis.RedisBackend(redis_client)
+        telstate = katsdptelstate.aio.TelescopeState(telstate_backend)
         self.telstate = telstate
         self.resolver.telstate = telstate
 
         # set the configuration
         for k, v in init_telstate.items():
             key = telstate.join(*k) if isinstance(k, tuple) else k
-            telstate[key] = v
+            await telstate.set(key, v)
         return telstate
 
     def check_nodes(self) -> Tuple[bool, List[scheduler.PhysicalNode]]:
@@ -1183,10 +1269,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                             'host': task.host,
                             'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
                         }
-                telstate.add('sdp_task_details', details, immutable=True)
-                telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                             immutable=True)
+                await telstate.add('sdp_task_details', details, immutable=True)
+                await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                                   immutable=True)
             except BaseException as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 await self._shutdown(force=True)

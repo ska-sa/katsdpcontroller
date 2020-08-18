@@ -6,15 +6,18 @@ import copy
 import itertools
 import json
 import asyncio
+import io
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
 from urllib.parse import urljoin
 import typing
-from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Optional
+from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any
 
 import asynctest
 from aioresponses import aioresponses
+import astropy.table
+import astropy.units as u
 from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
@@ -25,14 +28,19 @@ from prometheus_client import CollectorRegistry
 import pymesos
 import networkx
 import netifaces
-import katsdptelstate
+import aioredis
+import katsdptelstate.aio.memory
 import katpoint
 import katdal
+import katsdpmodels.band_mask
+import katsdpmodels.rfi_mask
+import yarl
 
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, CONSUL_URL)
+    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url,
+    CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
@@ -128,8 +136,9 @@ class DummyDataSet:
         }
         self.spw = 0
         self.spectral_windows = [
-            katdal.SpectralWindow(1284e6, 856e6 / 4096, 4096, 'c856M4k', 'L')
+            katdal.SpectralWindow(1284e6, 856e6 / 4096, 4096, 'c856M4k', band='L')
         ]
+        self.channel_freqs = self.spectral_windows[self.spw].channel_freqs
 
 
 def get_metric(metric):
@@ -230,8 +239,112 @@ class TestNormaliseS3Config(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
+class TestRelativeUrl(unittest.TestCase):
+    def setUp(self):
+        self.base = yarl.URL('http://test.invalid/foo/bar/')
+
+    def test_success(self):
+        url = yarl.URL('http://test.invalid/foo/bar/baz')
+        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz'))
+        url = yarl.URL('http://test.invalid/foo/bar/baz/')
+        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz/'))
+        self.assertEqual(_relative_url(self.base, self.base), yarl.URL())
+
+    def test_root_relative(self):
+        base = yarl.URL('http://test.invalid/')
+        url = yarl.URL('http://test.invalid/foo/bar/')
+        self.assertEqual(_relative_url(base, url), yarl.URL('foo/bar/'))
+
+    def test_different_origin(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('https://test.invalid/foo/bar/baz'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://another.test.invalid/foo/bar/baz'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid:1234/foo/bar/baz'))
+
+    def test_outside_tree(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid/foo/bart'))
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('http://test.invalid/'))
+
+    def test_query_strings(self):
+        qs = yarl.URL('http://test.invalid/foo/bar/?query=yes')
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, qs)
+        with self.assertRaises(ValueError):
+            _relative_url(qs, self.base)
+
+    def test_fragments(self):
+        frag = yarl.URL('http://test.invalid/foo/bar/#frag')
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, frag)
+        with self.assertRaises(ValueError):
+            _relative_url(frag, self.base)
+
+    def test_not_absolute(self):
+        with self.assertRaises(ValueError):
+            _relative_url(self.base, yarl.URL('relative/url'))
+        with self.assertRaises(ValueError):
+            _relative_url(yarl.URL('relative/url'), self.base)
+
+
 class BaseTestSDPController(asynctest.TestCase):
     """Utilities for test classes"""
+
+    def _setup_model(self, model: katsdpmodels.models.Model,
+                     current_path: str,
+                     config_path: str,
+                     fixed_path: str) -> None:
+        fh = io.BytesIO()
+        model.to_file(fh, content_type='application/x-hdf5')
+        self.aioresponses.get(
+            f'https://models.s3.invalid{current_path}',
+            content_type='text/plain',
+            body=f'{config_path}\n'
+        )
+        self.aioresponses.get(
+            f'https://models.s3.invalid{config_path}',
+            content_type='text/plain',
+            body=f'{fixed_path}\n'
+        )
+        self.aioresponses.get(
+            f'https://models.s3.invalid{fixed_path}',
+            content_type='application/x-hdf5',
+            body=fh.getvalue()
+        )
+
+    def _setup_rfi_mask_model(self) -> None:
+        model = katsdpmodels.rfi_mask.RFIMaskRanges(
+            astropy.table.Table(
+                [[0.0] * u.Hz, [0.0] * u.Hz, [0.0] * u.m],
+                names=('min_frequency', 'max_frequency', 'max_baseline')
+            ),
+            False
+        )
+        model.version = 1
+        self._setup_model(
+            model,
+            '/models/rfi_mask/current.alias',
+            '/models/rfi_mask/config/2020-06-15.alias',
+            '/models/rfi_mask/fixed/test.h5'
+        )
+
+    def _setup_band_mask_model(self) -> None:
+        model = katsdpmodels.band_mask.BandMaskRanges(
+            astropy.table.Table(
+                rows=[[0.0, 0.05], [0.95, 1.0]],
+                names=('min_fraction', 'max_fraction')
+            )
+        )
+        model.version = 1
+        self._setup_model(
+            model,
+            '/models/band_mask/current/l/nb_ratio=1.alias',
+            '/models/band_mask/config/l/nb_ratio=1/2020-06-22.alias',
+            '/models/band_mask/fixed/test.h5'
+        )
 
     async def setup_server(self, **server_kwargs) -> None:
         mc_server = DummyMasterController('127.0.0.1', 0)
@@ -250,10 +363,16 @@ class BaseTestSDPController(asynctest.TestCase):
             **server_kwargs)
         # server.start will try to register with consul. Mock that out, and make sure it
         # fails (which will prevent it from trying to deregister on stop).
-        with aioresponses() as m:
-            m.put(urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
-                  status=500)
-            await self.server.start()
+        self.aioresponses = aioresponses()
+        self.aioresponses.start()
+        self.addCleanup(self.aioresponses.stop)
+        self.aioresponses.put(
+            urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
+            status=500
+        )
+        self._setup_rfi_mask_model()
+        self._setup_band_mask_model()
+        await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
         self.client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
@@ -427,15 +546,12 @@ class TestSDPController(BaseTestSDPController):
         create_patch(self, 'katsdpcontroller.scheduler.PhysicalTask.dependency_abort',
                      side_effect=_dependency_abort, autospec=True)
 
-        # Mock TelescopeState's constructor to create an in-memory telstate
-        orig_telstate_init = katsdptelstate.TelescopeState.__init__
-        self.telstate: Optional[katsdptelstate.TelescopeState] = None
+        # Mock RedisBackend to create an in-memory telstate instead
+        self.telstate = katsdptelstate.aio.TelescopeState()
+        create_patch(self, 'katsdptelstate.aio.redis.RedisBackend',
+                     return_value=self.telstate.backend)
+        create_patch(self, 'aioredis.create_redis_pool', autospec=True)
 
-        def _telstate_init(obj, *args, **kwargs):
-            self.telstate = obj
-            orig_telstate_init(obj)
-        create_patch(self, 'katsdptelstate.TelescopeState.__init__', side_effect=_telstate_init,
-                     autospec=True)
         self.sensor_proxy_client_class = create_patch(
             self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
         sensor_proxy_client = self.sensor_proxy_client_class.return_value
@@ -481,7 +597,7 @@ class TestSDPController(BaseTestSDPController):
         self.fail_requests: Set[str] = set()
 
         # Mock out use of katdal to get the targets
-        create_patch(self, 'katsdpcontroller.generator._get_data_set',
+        create_patch(self, 'katdal.open',
                      return_value=DummyDataSet())
 
     async def _launch(self, graph: networkx.MultiDiGraph,
@@ -603,7 +719,7 @@ class TestSDPController(BaseTestSDPController):
     async def _configure_subarray(self, subarray_product: str) -> None:
         reply, informs = await self.client.request(*self._configure_args(subarray_product))
 
-    def assert_immutable(self, key: str, value: Any) -> None:
+    async def assert_immutable(self, key: str, value: Any) -> None:
         """Check the value of a telstate key and also that it is immutable"""
         assert self.telstate is not None
         # Uncomment for debugging
@@ -612,22 +728,35 @@ class TestSDPController(BaseTestSDPController):
         #     json.dump(value, f, indent=2, default=str, sort_keys=True)
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
-        self.assertEqual(self.telstate[key], value)
-        self.assertTrue(self.telstate.is_immutable(key))
+        self.assertEqual(await self.telstate[key], value)
+        self.assertEqual(await self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
         then indicate success.
         """
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
-            mock.ANY, 'host.telstate:20000')
+        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
 
         # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
         # is covered: base_params, per node, per edge
-        self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
-        self.assert_immutable('config.vis_writer.sdp_l0', {
+        assert self.telstate is not None
+        await self.assert_immutable('subarray_product_id', SUBARRAY_PRODUCT)
+        await self.assert_immutable('sdp_model_base_url', 'https://models.s3.invalid/models/')
+        await self.assert_immutable(
+            self.telstate.join('model', 'rfi_mask', 'config'),
+            'rfi_mask/config/2020-06-15.alias')
+        await self.assert_immutable(
+            self.telstate.join('model', 'rfi_mask', 'fixed'),
+            'rfi_mask/fixed/test.h5')
+        await self.assert_immutable(
+            self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'config'),
+            'band_mask/config/l/nb_ratio=1/2020-06-22.alias')
+        await self.assert_immutable(
+            self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
+            'band_mask/fixed/test.h5')
+        await self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
             'obj_size_mb': mock.ANY,
@@ -646,7 +775,7 @@ class TestSDPController(BaseTestSDPController):
             'direct_write': True
         })
         # Test that the output channel rounding was done correctly
-        self.assert_immutable('config.ingest.sdp_l0_continuum_only', {
+        await self.assert_immutable('config.ingest.sdp_l0_continuum_only', {
             'antenna_mask': mock.ANY,
             'cbf_spead': mock.ANY,
             'cbf_ibv': True,
@@ -675,9 +804,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        katsdptelstate.TelescopeState.__init__.side_effect = (    # type: ignore
-            katsdptelstate.ConnectionError
-        )
+        aioredis.create_redis_pool.side_effect = ConnectionRefusedError
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
@@ -688,8 +815,7 @@ class TestSDPController(BaseTestSDPController):
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
-        katsdptelstate.TelescopeState.__init__.assert_called_once_with(  # type: ignore
-            mock.ANY, 'host.telstate:20000')
+        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally

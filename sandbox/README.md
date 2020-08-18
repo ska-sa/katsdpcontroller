@@ -26,7 +26,8 @@ Software-wise, you will need:
 - [katsdpcontroller](https://github.com/ska-sa/katsdpcontroller) checked out,
   but it doesn't need to be installed (unless you want to run your local copy
   instead of the Docker image)
-- Python packages `netifaces`, `psutil`, `py3nvml` and `pycuda`.
+- Python packages `netifaces`, `psutil`, `py3nvml`, `pycuda`, `botocore`, `h5py`,
+  `astropy`, `numpy` and `katsdpmodels`.
 
 You'll also need certain ports to be available on your machine:
 - Zookeeper: 2181
@@ -100,6 +101,10 @@ which will be faster since it will avoid building a number of images.
 4. Run `./grafana-setup.sh`, which will install a plugin needed for one of the
    Grafana plots. Again, this step is only needed once, unless you destroy
    the Docker volumes.
+
+5. Run `./minio-setup.py`, which will install some canned models into the MinIO
+   server. This is also only needed once, unless you wipe out the `minio-data`
+   directory.
 
 5. Sometimes Singularity doesn't realise that it should be the master if it is
    started too soon after Zookeeper. To be on the safe side, run

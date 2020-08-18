@@ -189,7 +189,7 @@ def main() -> None:
         interface_mode=args.interface_mode,
         localhost=args.localhost,
         image_resolver_factory=image_resolver_factory,
-        s3_config=args.s3_config,
+        s3_config=args.s3_config if args.s3_config is not None else {},
         graph_dir=args.write_graphs,
         dashboard_url=dashboard_url)
     if not args.interface_mode and args.dashboard_port != 0:
