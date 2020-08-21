@@ -122,8 +122,8 @@ from 0), there must be corresponding resources
 :samp:`katsdpcontroller.gpu.{i}.compute` (generally with capacity 1.0) and
 :samp:`katsdpcontroller.gpu.{i}.mem` (in MiB).
 
-The node must also provide nvidia-docker-plugin so that driver volumes can be
-loaded.
+The node must also provide nvidia-container-runtime for access to the
+devices.
 
 Agent prioritisation
 --------------------
