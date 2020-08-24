@@ -387,7 +387,6 @@ class BaseTestSDPController(asynctest.TestCase):
                 'cbf_1_i0_antenna_channelised_voltage_n_chans': 4096,
                 'cbf_1_i0_adc_sample_rate': 1712e6,
                 'cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra': 8192,
-                'subarray_1_streams_i0_antenna_channelised_voltage_bandwidth': 856e6,
                 'cbf_1_i0_baseline_correlation_products_int_time': 0.499,
                 'cbf_1_i0_baseline_correlation_products_n_bls': 40,
                 'cbf_1_i0_baseline_correlation_products_xeng_out_bits_per_sample': 32,
