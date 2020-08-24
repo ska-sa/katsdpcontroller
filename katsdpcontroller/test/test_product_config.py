@@ -912,6 +912,7 @@ class TestSpectralImageStream:
         assert_equal(spec.parameters, config['parameters'])
         assert_equal(spec.n_chans, 36)
         assert_is(spec.flags, self.flags)
+        assert_is(spec.vis, self.flags.vis)
         assert_is(spec.continuum, self.continuum_image)
 
     def test_no_continuum(self) -> None:

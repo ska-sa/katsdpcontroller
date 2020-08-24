@@ -128,7 +128,7 @@ CONFIG = '''{
         "spectral_image": {
             "type": "sdp.spectral_image",
             "src_streams": ["sdp_l1_flags"],
-            "output_channels": [120, 130],
+            "output_channels": [510, 520],
             "parameters": {
                 "major": 6,
                 "major_gain": 0.15

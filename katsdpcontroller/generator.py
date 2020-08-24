@@ -19,6 +19,7 @@ import katsdptelstate.aio
 from katsdptelstate.endpoint import Endpoint
 import katsdpmodels.fetch.aiohttp
 from katsdpmodels.rfi_mask import RFIMask
+from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .tasks import (
@@ -1578,7 +1579,8 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
     dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate_endpoint)
-    band = data_set.spectral_windows[data_set.spw].band
+    spw = data_set.spectral_windows[data_set.spw]
+    band = spw.band
     channel_freqs = data_set.channel_freqs * u.Hz
     del data_set    # Allow Python to recover the memory
 
@@ -1586,6 +1588,13 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
         rfi_mask = await fetcher.get('model_rfi_mask_fixed', RFIMask)
         max_baseline = rfi_mask.max_baseline_length(channel_freqs)
         channel_mask = max_baseline > 0 * u.m
+        acv = stream.vis.baseline_correlation_products.antenna_channelised_voltage
+        telstate_acv = telstate.view(acv.name)
+        band_mask = await fetcher.get('model_band_mask_fixed', BandMask, telstate=telstate_acv)
+        channel_mask |= band_mask.is_masked(
+            SpectralWindow(spw.bandwidth * u.Hz, spw.centre_freq * u.Hz),
+            channel_freqs
+        )
 
     nodes = []
     for target, obs_time in targets:
