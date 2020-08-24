@@ -1579,8 +1579,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
     dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate_endpoint)
-    spw = data_set.spectral_windows[data_set.spw]
-    band = spw.band
+    band = data_set.spectral_windows[data_set.spw].band
     channel_freqs = data_set.channel_freqs * u.Hz
     del data_set    # Allow Python to recover the memory
 
@@ -1592,7 +1591,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
         telstate_acv = telstate.view(acv.name)
         band_mask = await fetcher.get('model_band_mask_fixed', BandMask, telstate=telstate_acv)
         channel_mask |= band_mask.is_masked(
-            SpectralWindow(spw.bandwidth * u.Hz, spw.centre_freq * u.Hz),
+            SpectralWindow(acv.bandwidth * u.Hz, acv.centre_frequency * u.Hz),
             channel_freqs
         )
 
