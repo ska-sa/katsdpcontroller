@@ -1154,6 +1154,10 @@ class SpectralImageStream(ImageStream):
         return cast(FlagsStream, self.src_streams[0])
 
     @property
+    def vis(self) -> VisStream:
+        return self.flags.vis
+
+    @property
     def continuum(self) -> Optional[ContinuumImageStream]:
         try:
             return cast(ContinuumImageStream, self.src_streams[1])
