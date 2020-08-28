@@ -2,6 +2,7 @@ addict==2.1.1
 aioconsole                 # via aiomonitor
 aiohttp
 aiohttp-jinja2==1.1.0
+aiohttp-retry              # via katsdpmodels
 aiokatcp
 aiomonitor
 aioredis==1.3.1
