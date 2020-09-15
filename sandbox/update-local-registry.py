@@ -84,6 +84,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--upstream', default='quay.io/ska-sa', metavar='REGISTRY',
                         help='Upstream registry from which to pull pre-built images [%(default)s]')
+    parser.add_argument('--upstream-tag', default='latest', metavar='TAG',
+                        help='Docker tag for upstream images [%(default)s]')
     parser.add_argument('--downstream', default='localhost:5000', metavar='REGISTRY',
                         help='Registry to push images into [%(default)s]')
     parser.add_argument('--downstream-tag', default='latest', metavar='TAG',
@@ -107,7 +109,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def upstream_path(name: str, args: argparse.Namespace) -> str:
-    return f'{args.upstream}/{name}:latest'
+    return f'{args.upstream}/{name}:{args.upstream_tag}'
 
 
 def downstream_path(name: str, args: argparse.Namespace) -> str:
