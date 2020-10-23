@@ -342,6 +342,9 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             # file handles per stream, easily exceeding the default of
             # 1024.
             sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
+            # Need to enable cap_net_raw capability if using recent mlx5 kernel module.
+            sim.command = ['capambel', '-c', 'cap_net_raw+p', '--'] + sim.command
+            sim.capabilities.append('NET_RAW')   # For ibverbs raw QPs
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = stream.data_rate()
         sim.transitions = {
