@@ -148,10 +148,11 @@ def infiniband_devices(interface):
                 devices = ['/dev/infiniband/rdma_cm']
                 for sub in ['infiniband_cm', 'infiniband_mad', 'infiniband_verbs']:
                     path = '/sys/class/infiniband/{}/device/{}'.format(ibdev, sub)
-                    for item in os.listdir(path):
-                        device = '/dev/infiniband/' + item
-                        if os.path.exists(device):
-                            devices.append(device)
+                    if os.path.exists(path):
+                        for item in os.listdir(path):
+                            device = '/dev/infiniband/' + item
+                            if os.path.exists(device):
+                                devices.append(device)
                 return devices
     except (IOError, OSError):
         pass
