@@ -1324,6 +1324,8 @@ def build_logical_graph(configuration: Configuration,
     # Collect all tied-array-channelised-voltage streams and make signal displays for them
     for stream in configuration.by_class(product_config.TiedArrayChannelisedVoltageStream):
         _make_timeplot_beamformer(g, configuration, stream)
+    for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
+        _make_timeplot_beamformer(g, configuration, stream)
 
     for stream in configuration.by_class(product_config.ContinuumImageStream):
         _make_imager_writers(g, configuration, 'continuum', stream)
