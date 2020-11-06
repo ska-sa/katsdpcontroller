@@ -1757,6 +1757,20 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal([mock.call.declineOffer([offer0.id])], self._driver_calls())
         launch.cancel()
 
+    async def test_unavailability_forever(self):
+        """Test offers with unavailability and no end time."""
+        # TODO: once we've switched to pytest, parametrise this test with the
+        # previous one.
+        launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        # Provide an offer that would be sufficient if not for unavailability
+        offer0 = self._make_offers()[0]
+        offer0.unavailability.start.nanoseconds = int(time.time() * 1e9)
+        self.sched.resourceOffers(self.driver, [offer0])
+        await asynctest.exhaust_callbacks(self.loop)
+        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert_equal([mock.call.declineOffer([offer0.id])], self._driver_calls())
+        launch.cancel()
+
     async def test_unavailability_past(self):
         """Test offers with unavailability information in the past"""
         launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
