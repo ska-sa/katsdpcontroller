@@ -2648,8 +2648,14 @@ class Scheduler(pymesos.Scheduler):
         for offer in offers:
             if offer.unavailability:
                 start_time_ns = offer.unavailability.start.nanoseconds
-                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
                 start_time = start_time_ns / 1e9
+                if not offer.unavailability.duration:
+                    logger.debug('Declining offer %s from %s: unavailable from %s forever',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time))
+                    to_decline.append(offer.id)
+                    continue
+                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
                 end_time = end_time_ns / 1e9
                 if end_time >= time.time():
                     logger.debug('Declining offer %s from %s: unavailable from %s to %s',
