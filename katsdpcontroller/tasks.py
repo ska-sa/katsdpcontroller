@@ -514,7 +514,8 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             ])
 
         # Apply overrides to taskinfo given by the user
-        overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('taskinfo')
+        overrides = resolver.service_overrides.get(
+            self.logical_node.name, product_config.ServiceOverride()).taskinfo
         if overrides:
             self.logger.warning('Applying overrides to taskinfo of %s', self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
