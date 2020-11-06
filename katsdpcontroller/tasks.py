@@ -175,7 +175,8 @@ class SDPConfigMixin:
             config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
                 self, resolver, endpoint))
         config.update(self._graph_config(resolver, graph))
-        overrides = resolver.service_overrides.get(self.logical_node.name, {}).get('config')
+        overrides = resolver.service_overrides.get(
+            self.logical_node.name, product_config.ServiceOverride()).config
         if overrides:
             logger.warning('Overriding config for %s', self.name)
             config = product_config.override(config, overrides)
