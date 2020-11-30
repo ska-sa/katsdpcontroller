@@ -31,7 +31,6 @@ future                     # via katdal
 h5py                       # via katdal, katsdpmodels
 hiredis
 http-parser==0.8.3         # via pymesos
-humanfriendly==4.17
 idna                       # via requests
 idna-ssl                   # via aiohttp
 importlib-metadata         # via jsonschema
