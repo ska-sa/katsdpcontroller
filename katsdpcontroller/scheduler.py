@@ -1250,6 +1250,10 @@ class TaskError(RuntimeError):
     def __init__(self, node, msg=None):
         if msg is None:
             msg = "Node {} failed with status {}".format(node.name, node.status.state)
+            if hasattr(node.status, "reason"):
+                msg += f"/{node.status.reason}"
+            if hasattr(node.status, "message"):
+                msg += f" ({node.status.message})"
         super().__init__(msg)
         self.node = node
 
@@ -2104,6 +2108,8 @@ class PhysicalTask(PhysicalNode):
         taskinfo.resources = []
         for resource in self.allocation.resources.values():
             taskinfo.resources.extend(resource.info())
+        if self.logical_node.max_run_time is not None:
+            taskinfo.max_completion_time.nanoseconds = int(self.logical_node.max_run_time * 1e9)
 
         if self.allocation.resources['cores']:
             core_list = ','.join(str(core) for core in self.allocation.resources['cores'])
@@ -3169,13 +3175,9 @@ class Scheduler(pymesos.Scheduler):
                               queue, resources_timeout):
         """Single attempt for :meth:`batch_run`."""
         async def wait_one(node):
-            try:
-                await asyncio.wait_for(node.dead_event.wait(),
-                                       timeout=node.logical_node.max_run_time)
-                if node.status is not None and node.status.state != 'TASK_FINISHED':
-                    raise TaskError(node)
-            except asyncio.TimeoutError as exc:
-                raise TaskError(node, 'exceeded maximum runtime') from exc
+            await node.dead_event.wait()
+            if node.status is not None and node.status.state != 'TASK_FINISHED':
+                raise TaskError(node)
 
         for node in nodes:
             # Batch tasks die on their own
@@ -3233,8 +3235,6 @@ class Scheduler(pymesos.Scheduler):
         TaskError
             if the graph failed (any of the tasks exited with a status other
             than TASK_FINISHED) on all attempts
-        asyncio.TimeoutError
-            if the :attr:`~LogicalTask.max_run_time` is breached for some task
         """
         if nodes is None:
             nodes = list(graph.nodes())
