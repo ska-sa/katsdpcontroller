@@ -219,7 +219,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
             '--image-override', 'katsdptelstate:branch',
             '--external-hostname', 'me.invalid',
             '--s3-config-file', 's3_config.json',
-            '--safe-multicast-cidr', '225.100.0.0/24',
+            '--safe-multicast-cidr', '239.192.0.0/24',
             'zk.invalid:2181', self.singularity_server.root_url
         ])
         image_lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
@@ -491,20 +491,20 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         await self.start_manager()
         product1 = await self.start_product('product1')
         product2 = await self.start_product('product2')
-        self.assertEqual(await self.manager.get_multicast_groups(product1, 1), '225.100.0.1')
-        self.assertEqual(await self.manager.get_multicast_groups(product1, 4), '225.100.0.2+3')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 1), '239.192.0.1')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 4), '239.192.0.2+3')
         with self.assertRaises(NoAddressesError):
             await self.manager.get_multicast_groups(product1, 1000)
 
-        self.assertEqual(await self.manager.get_multicast_groups(product2, 128), '225.100.0.6+127')
+        self.assertEqual(await self.manager.get_multicast_groups(product2, 128), '239.192.0.6+127')
         # Now product1 owns .1-.5, product2 owns .6-.133.
         await self.manager.kill_product(product2)
         await self.advance(100)   # Give it time to clean up
 
         # Allocations should continue from where they left off, then cycle
         # around to reuse the space freed by product2.
-        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.134+99')
-        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '225.100.0.6+99')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '239.192.0.134+99')
+        self.assertEqual(await self.manager.get_multicast_groups(product1, 100), '239.192.0.6+99')
 
     async def test_get_multicast_groups_persist(self) -> None:
         await self.test_get_multicast_groups()
@@ -512,12 +512,12 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         product1 = self.manager.products['product1']
         expected: Set[ipaddress.IPv4Address] = set()
         for i in range(105):
-            expected.add(ipaddress.IPv4Address('225.100.0.1') + i)
+            expected.add(ipaddress.IPv4Address('239.192.0.1') + i)
         for i in range(100):
-            expected.add(ipaddress.IPv4Address('225.100.0.134') + i)
+            expected.add(ipaddress.IPv4Address('239.192.0.134') + i)
         self.assertEqual(product1.multicast_groups, expected)
         self.assertEqual(self.manager._next_multicast_group,
-                         ipaddress.IPv4Address('225.100.0.106'))
+                         ipaddress.IPv4Address('239.192.0.106'))
 
     async def test_multicast_group_out_of_range(self) -> None:
         await self.test_get_multicast_groups()
@@ -593,7 +593,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             '--port', '0',
             '--name', 'sdpmc_test',
             '--registry', 'registry.invalid:5000',
-            '--safe-multicast-cidr', '225.100.0.0/24',
+            '--safe-multicast-cidr', '239.192.0.0/24',
             'unused argument (zk)', 'unused argument (Singularity)'
         ])
         self.server = DeviceServer(self.args)
@@ -860,9 +860,9 @@ class TestDeviceServer(asynctest.ClockedTestCase):
     async def test_get_multicast_groups(self) -> None:
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
-        self.assertEqual(reply, [b'225.100.0.1+9'])
+        self.assertEqual(reply, [b'239.192.0.1+9'])
         reply, informs = await self.client.request('get-multicast-groups', 'product', 1)
-        self.assertEqual(reply, [b'225.100.0.11'])
+        self.assertEqual(reply, [b'239.192.0.11'])
         await assert_request_fails(self.client, 'get-multicast-groups', 'product', 0)
         await assert_request_fails(self.client, 'get-multicast-groups', 'wrong-product', 1)
         await assert_request_fails(self.client, 'get-multicast-groups', 'product', 1000000)

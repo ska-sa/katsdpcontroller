@@ -1568,7 +1568,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
                         metavar='FILE',
                         help='configuration for connecting services to S3 '
                              '(loaded on each configure)')
-    parser.add_argument('--safe-multicast-cidr', default='225.100.0.0/16',
+    parser.add_argument('--safe-multicast-cidr', default='239.192.0.0/18',
                         metavar='MULTICAST-CIDR',
                         help='block of multicast addresses from which to draw internal allocation. '
                              'Needs to be at least /16. [%(default)s]')
