@@ -10,7 +10,6 @@ from datetime import datetime
 
 import networkx
 import jinja2
-import humanfriendly
 
 import dash
 from dash.dependencies import Input, Output
@@ -30,7 +29,8 @@ def timestamp_utc(timestamp):
 
 def timespan(delta):
     if delta is not None:
-        return humanfriendly.format_timespan(delta)
+        delta = round(delta)
+        return f"{delta // 3600}:{delta // 60 % 60:02}:{delta % 60:02}"
     else:
         return delta
 
@@ -203,7 +203,7 @@ class Dashboard:
                     'mesos-state': task.status.state if task.status else '-',
                     'host': task.agent.host if task.agent else '-',
                     'runtime':
-                        humanfriendly.format_timespan((task.end_time or now) - task.start_time)
+                        timespan((task.end_time or now) - task.start_time)
                         if task.start_time is not None else '-'
                 } for (capture_block_id, task) in tasks
             ]
