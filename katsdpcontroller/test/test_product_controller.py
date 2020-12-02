@@ -86,7 +86,7 @@ class DummyMasterController(aiokatcp.DeviceServer):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._network = ipaddress.IPv4Network('225.100.0.0/16')
+        self._network = ipaddress.IPv4Network('239.192.0.0/18')
         self._next = self._network.network_address + 1
 
     async def request_get_multicast_groups(self, ctx: aiokatcp.RequestContext,
@@ -1194,5 +1194,5 @@ class TestSDPResources(asynctest.TestCase):
         self.resources = SDPResources(mc_client, SUBARRAY_PRODUCT)
 
     async def test_get_multicast_groups(self):
-        self.assertEqual('225.100.0.1', await self.resources.get_multicast_groups(1))
-        self.assertEqual('225.100.0.2+3', await self.resources.get_multicast_groups(4))
+        self.assertEqual('239.192.0.1', await self.resources.get_multicast_groups(1))
+        self.assertEqual('239.192.0.2+3', await self.resources.get_multicast_groups(4))
