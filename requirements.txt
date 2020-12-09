@@ -5,7 +5,7 @@ aiohttp-jinja2==1.1.0
 aiohttp-retry              # via katsdpmodels
 aiokatcp
 aiomonitor
-aioredis==1.3.1
+aioredis
 aiozk==0.14.0
 astropy                    # via katsdpmodels
 async-timeout
