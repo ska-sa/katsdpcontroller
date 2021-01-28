@@ -21,7 +21,7 @@ import os
 import weakref
 import functools
 import shutil
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Set, Tuple, Optional, Any
 
 import pkg_resources
 from aiokatcp import Sensor, Reading
@@ -76,8 +76,8 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
 
 
 @aiohttp_jinja2.template('rotate_sd.html.j2')
-def _rotate_handler(request: web.Request) -> dict:
-    defaults = {'rotate_interval': 5000, 'width': 500, 'height': 500}
+async def _rotate_handler(request: web.Request) -> dict:
+    defaults: Dict[str, Any] = {'rotate_interval': 5000, 'width': 500, 'height': 500}
     defaults.update(request.query)
     return defaults
 
