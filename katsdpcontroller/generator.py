@@ -1404,7 +1404,7 @@ def _spectral_imager_cpus(configuration: Configuration) -> int:
     # Fairly arbitrary number, based on looking at typical usage during a run.
     # In practice the number of spectral imagers per box is limited by GPUs,
     # so the value doesn't make a huge difference.
-    return 2 if not configuration.options.develop else 1
+    return 3 if not configuration.options.develop else 1
 
 
 def _stream_url(capture_block_id: str, stream_name: str) -> str:
@@ -1630,15 +1630,18 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
             # TODO: these resources are very rough estimates. The disk
             # estimate is conservative since it assumes no compression.
             dumps = int(round(obs_time / stream.vis.int_time))
-            imager.mem = 15 * 1024
+            imager.mem = 8 * 1024
             imager.disk = _mb(dump_bytes * dumps) + 1024
             imager.max_run_time = 6 * 3600     # 6 hours
             imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
-            # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
-            # it can help improve parallelism). There is no memory enforcement, so
-            # don't bother reserving memory.
-            imager.gpus[0].compute = 1.0
+            # Actual GPU utilisation is fairly low overall. This allows two
+            # imaging tasks to share a GPU, which only introduces a 10-20%
+            # overhead.
+            imager.gpus[0].compute = 0.5
+            # There is no memory enforcement, so this doesn't have a lot of
+            # padding.
+            imager.gpus[0].memory = 3.0
             imager.image = 'katsdpimager'
             imager.command = [
                 'run-and-cleanup', '--create', '--tmp', '/mnt/mesos/sandbox/tmp', '--',
