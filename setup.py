@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 from setuptools import setup, find_packages
 
-tests_require = ['nose', 'aioresponses>=0.6.4', 'asynctest', 'open-mock-file']
+tests_require = [
+    'aioresponses>=0.6.4',
+    'asynctest',
+    'nose',
+    'open-mock-file'
+]
 
 setup(
     name="katsdpcontroller",
@@ -18,37 +23,37 @@ setup(
         ],
     setup_requires=['katversion'],
     install_requires=[
-        'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
         'addict!=2.0.*,!=2.4.0',
         'aiohttp~=3.5',
         'aiohttp-jinja2',
-        'aiomonitor',
-        'aioredis',
-        'async_timeout',
-        'decorator',
-        'docker',
-        'jinja2',
-        'jsonschema>=3.0',   # Version 3 implements Draft 7
-        'rfc3987',           # Used by jsonschema to validate URLs
-        'networkx>=2.0',
-        'pydotplus',
-        'netifaces',
         'aiokatcp>=0.6.1',
-        'katdal',
-        'katsdpmodels[aiohttp]',
-        'katsdptelstate[aio]',
-        'katsdpservices',
-        'katportalclient',
-        'kazoo',
+        'aioredis',
         'aiozk',
-        'yarl',
-        'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
-        'prometheus_async',
+        'async_timeout',
         'dash',
         'dash-core-components',
         'dash-html-components',
         'dash-table',
-        'dash-dangerously-set-inner-html'
+        'dash-dangerously-set-inner-html',
+        'decorator',
+        'docker',
+        'jinja2',
+        'jsonschema>=3.0',   # Version 3 implements Draft 7
+        'katdal',
+        'katsdpmodels[aiohttp]',
+        'katsdptelstate[aio]',
+        'katsdpservices[argparse,aiomonitor]',
+        'katportalclient',
+        'kazoo',
+        'netifaces',
+        'networkx>=2.0',
+        'numpy',
+        'prometheus_async',
+        'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
+        'pydotplus',
+        'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
+        'rfc3987',           # Used by jsonschema to validate URLs
+        'yarl'
     ],
     tests_require=tests_require,
     extras_require={
