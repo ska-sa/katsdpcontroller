@@ -1,18 +1,12 @@
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+
 addict==2.1.1
-aioconsole                 # via aiomonitor
 aiohttp
 aiohttp-jinja2==1.4.2
-aiohttp-retry              # via katsdpmodels
 aiokatcp
-aiomonitor
 aioredis
 aiozk==0.14.0
-astropy                    # via katsdpmodels
 async-timeout
-attrs                      # via aiohttp, prometheus_async
-certifi                    # via requests
-chardet                    # via aiohttp, requests
-cityhash                   # via katdal
 click==7.0                 # via Flask
 dash==1.0.2
 dash-core-components==1.0.0
@@ -20,72 +14,40 @@ dash-html-components==1.0.0
 dash-table==4.0.2
 dash-dangerously-set-inner-html==0.0.2
 dash-renderer==1.0.0       # via dash
-dask                       # via katdal
 decorator
 docker-pycreds==0.3.0      # via docker
 docker==3.4.1
-ephem                      # via pyephem
 flask==1.1.1               # via dash
 flask-compress==1.4.0      # via dash
-future                     # via katdal
-h5py                       # via katdal, katsdpmodels
-hiredis
+hiredis                    # speeds up katsdptelstate
 http-parser==0.9.0         # via pymesos
-idna                       # via requests
-idna-ssl                   # via aiohttp
-importlib-metadata         # via jsonschema
 ipython-genutils==0.2.0    # via nbformat
 itsdangerous==1.1.0        # via flask
-jinja2                     # via aiohttp-jinja2
+jinja2
 jsonschema
 jupyter-core==4.4.0        # via nbformat
 katportalclient
-katversion
 kazoo==2.8.0
-llvmlite                   # via numba
-markupsafe                 # via jinja2
 monotonic==1.5             # via prometheus_async
-msgpack                    # via katsdptelstate
-multidict                  # via aiohttp, yarl
 nbformat==4.4.0            # via plotly
-numba                      # via katdal
 netifaces
 networkx==2.0
 numpy
-omnijson                   # via katportalclient
-plotly==4.0.0              # via plotly
+plotly==4.0.0              # via dash
 prometheus_async==18.1.0
 prometheus_client==0.2.0
 pydotplus==2.0.2
-pyephem                    # via katpoint
-pygelf                     # via katsdpservices
-pyjwt                      # via katdal
-pyparsing                  # via pydotplus
-pyrsistent                 # via jsonschema
 pymesos==0.3.6
-pytz                       # via plotly
-pyyaml                     # via dash
-redis                      # via katsdptelstate
-requests                   # via docker
 retrying==1.3.3            # via plotly
 rfc3987==1.3.7
-six                        # via docker, plotly and others
-strict-rfc3339             # via katsdpmodels
-terminaltables             # via aiomonitor
-toolz                      # via katdal
-tornado                    # via katportalclient
 traitlets==4.3.2           # via nbformat
-typing-extensions          # via aiohttp, katsdpmodels
-ujson                      # via katportalclient
-urllib3                    # via requests
 websocket-client==0.45.0   # via docker
 werkzeug==0.15.5           # via flask
 wrapt==1.10.11             # via prometheus_async
-yarl                       # via aiohttp
-zipp                       # via importlib-metadata
+yarl
 
 katpoint @ git+https://github.com/ska-sa/katpoint
 katdal @ git+https://github.com/ska-sa/katdal
-katsdpmodels @ git+https://github.com/ska-sa/katsdpmodels
-katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
-katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdpmodels[aiohttp] @ git+https://github.com/ska-sa/katsdpmodels
+katsdptelstate[aio] @ git+https://github.com/ska-sa/katsdptelstate
+katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
