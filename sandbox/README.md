@@ -18,6 +18,7 @@ Software-wise, you will need:
 - docker
 - nvidia-container-runtime
 - curl
+- hwloc
 - haproxy (optional)
 - [docker-compose](https://docs.docker.com/compose/)
 - [kattelmod](https://github.com/ska-sa/kattelmod)
@@ -88,12 +89,12 @@ which will be faster since it will avoid building a number of images.
    might need to delete the files in /var/tmp/mesos to clear the previous state.
    You can also edit the files generated in `./etc/mesos` e.g., to increase the
    amount of memory or CPU that Mesos thinks it has so that you can simulate
-   larger arrays (at the risk of gobbling up all the RAM in your machine!)
+   larger arrays (at the risk of gobbling up all the RAM in your machine!).
 
 2. Run `docker-compose up -d`. Use `docker-compose ps` to check that the
    processes are all starting up.
 
-3. After the system has been left to settle for a bit, run `./elk-setup.py`.
+3. After the system has been left to settle for a bit, run `./elk-setup.sh`.
    This will configure the logging systems. If it fails, give it another
    minute for the services to start up and try again. This step is only
    needed once, unless you destroy the Docker volumes from the sandbox.
@@ -165,6 +166,7 @@ option if you do not have haproxy installed.
 ```sh
 docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127.0.0.1 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller sdp_master_controller.py --gui-urls /sandbox/gui-urls/ --localhost --image-tag-file /sandbox/sdp_image_tag --s3-config-file /sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity
 ```
+(from `/katsdpcontroller/` dir)
 
 ### Local machine
 
