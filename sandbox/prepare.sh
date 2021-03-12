@@ -2,7 +2,6 @@
 set -e
 
 dir="$(realpath $(dirname $0))"
-mkdir -p "$dir/logs"
 "$dir/../scripts/agent_mkconfig.py" \
     --attributes-dir "$dir/etc/mesos-agent/attributes" \
     --resources-dir "$dir/etc/mesos-agent/resources" \
