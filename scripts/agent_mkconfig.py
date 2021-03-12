@@ -90,8 +90,10 @@ class HWLocParser(object):
         result = subprocess.check_output(cmd).decode('ascii')
         self._tree = xml.etree.ElementTree.fromstring(result)
         self._nodes = self._tree.findall(".//object[@type='NUMANode']")
-        if not self._nodes:
-            # hwloc doesn't create NUMANode for a single-socket machine
+        # On single-socket machines, hwloc either doesn't create NUMANode
+        # (older versions), or it's a stub with just page_type entries
+        # (newer versions).
+        if not self._nodes or not self._nodes[0].findall(".//object[@type='PU']"):
             self._nodes = [self._tree]
 
     def cpus_by_node(self):
