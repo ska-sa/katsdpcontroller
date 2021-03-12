@@ -18,7 +18,7 @@ Software-wise, you will need:
 - docker
 - nvidia-container-runtime
 - curl
-- hwlock
+- hwloc
 - haproxy (optional)
 - [docker-compose](https://docs.docker.com/compose/)
 - [kattelmod](https://github.com/ska-sa/kattelmod)
@@ -89,8 +89,7 @@ which will be faster since it will avoid building a number of images.
    might need to delete the files in /var/tmp/mesos to clear the previous state.
    You can also edit the files generated in `./etc/mesos` e.g., to increase the
    amount of memory or CPU that Mesos thinks it has so that you can simulate
-   larger arrays (at the risk of gobbling up all the RAM in your machine!). If 
-   necessary, you may need to `mkdir logs`.
+   larger arrays (at the risk of gobbling up all the RAM in your machine!).
 
 2. Run `docker-compose up -d`. Use `docker-compose ps` to check that the
    processes are all starting up.
