@@ -111,7 +111,7 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
         args.host = '127.0.0.1'
         args.external_hostname = '127.0.0.1'
 
-    if args.s3_config is None and not args.interface_mode:
+    if args.s3_config is None:
         parser.error('--s3-config is required (unless --interface-mode is given)')
 
     if args.http_url is None:
@@ -163,36 +163,32 @@ def main() -> None:
     framework_info.capabilities = [{'type': 'MULTI_ROLE'}, {'type': 'TASK_KILLING_STATE'}]
 
     loop = asyncio.get_event_loop()
-    if args.interface_mode:
-        sched = None
-    else:
-        sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
-                                    task_stats=product_controller.TaskStats(),
-                                    runner_kwargs=dict(access_log_class=web_utils.AccessLogger))
-        sched.app.router.add_get('/metrics', web_utils.prometheus_handler)
-        sched.app.router.add_get('/health', web_utils.health_handler)
-        driver = pymesos.MesosSchedulerDriver(
-            sched, framework_info, args.mesos_master, use_addict=True,
-            implicit_acknowledgements=False)
-        sched.set_driver(driver)
-        driver.start()
+    sched = scheduler.Scheduler(args.realtime_role, args.host, args.http_port, args.http_url,
+                                task_stats=product_controller.TaskStats(),
+                                runner_kwargs=dict(access_log_class=web_utils.AccessLogger))
+    sched.app.router.add_get('/metrics', web_utils.prometheus_handler)
+    sched.app.router.add_get('/health', web_utils.health_handler)
+    driver = pymesos.MesosSchedulerDriver(
+        sched, framework_info, args.mesos_master, use_addict=True,
+        implicit_acknowledgements=False)
+    sched.set_driver(driver)
+    driver.start()
 
     dashboard_path = f'/gui/{args.subarray_product_id}/product/dashboard/'
     dashboard_url: Optional[str] = args.dashboard_url
-    if not args.interface_mode and args.dashboard_port != 0 and dashboard_url is None:
+    if args.dashboard_port != 0 and dashboard_url is None:
         dashboard_url = str(yarl.URL.build(scheme='http', host=args.external_hostname,
                                            port=args.dashboard_port, path=dashboard_path))
 
     server = product_controller.DeviceServer(
         args.host, args.port, master_controller, args.subarray_product_id, sched,
         batch_role=args.batch_role,
-        interface_mode=args.interface_mode,
         localhost=args.localhost,
         image_resolver_factory=image_resolver_factory,
         s3_config=args.s3_config if args.s3_config is not None else {},
         graph_dir=args.write_graphs,
         dashboard_url=dashboard_url)
-    if not args.interface_mode and args.dashboard_port != 0:
+    if args.dashboard_port != 0:
         init_dashboard(server, args, dashboard_path)
 
     with katsdpservices.start_aiomonitor(loop, args, locals()):
