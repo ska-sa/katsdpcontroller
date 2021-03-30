@@ -50,7 +50,7 @@ async def run(sched, server):
 def init_dashboard(controller, opts, dashboard_path):
     from katsdpcontroller.dashboard import Dashboard
 
-    dashboard = Dashboard(controller, routes_pathname_prefix=dashboard_path)
+    dashboard = Dashboard(controller, routes_pathname_prefix=dashboard_path, update_title=None)
     dashboard.start(opts.host, opts.dashboard_port)
 
 
