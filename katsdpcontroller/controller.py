@@ -70,10 +70,6 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
     # Keep these in sync with extract_shared_options
     parser.add_argument('--localhost', action='store_true',
                         help='Bind all ports to localhost (for security on dev systems)')
-    parser.add_argument('-i', '--interface-mode', default=False,
-                        action='store_true',
-                        help='run the controller in interface only mode for testing '
-                             'integration and ICD compliance. [%(default)s]')
     parser.add_argument('--image-override', action='append',
                         default=[], metavar='NAME:IMAGE',
                         help='Override an image name lookup [none]')

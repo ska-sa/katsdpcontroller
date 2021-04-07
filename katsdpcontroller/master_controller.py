@@ -1546,6 +1546,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(usage=usage)
     parser.add_argument('-a', '--host', default="", metavar='HOST',
                         help='attach to server HOST [localhost]')
+    parser.add_argument('-i', '--interface-mode', default=False,
+                        action='store_true',
+                        help='run the controller in interface only mode for testing '
+                             'integration and ICD compliance. [%(default)s]')
     parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
                         help='katcp listen port [%(default)s]')
     parser.add_argument('-l', '--log-level', metavar='LEVEL',
