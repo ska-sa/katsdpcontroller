@@ -93,7 +93,7 @@ which will be faster since it will avoid building a number of images.
 2. Run `docker-compose up -d`. Use `docker-compose ps` to check that the
    processes are all starting up.
 
-3. After the system has been left to settle for a bit, run `./elk-setup.py`.
+3. After the system has been left to settle for a bit, run `./elk-setup.sh`.
    This will configure the logging systems. If it fails, give it another
    minute for the services to start up and try again. This step is only
    needed once, unless you destroy the Docker volumes from the sandbox.
