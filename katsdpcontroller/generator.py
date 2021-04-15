@@ -1630,15 +1630,20 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
             # TODO: these resources are very rough estimates. The disk
             # estimate is conservative since it assumes no compression.
             dumps = int(round(obs_time / stream.vis.int_time))
-            imager.mem = 8 * 1024
+            # 8 GB is usually enough, but there seem to be some rare cases
+            # where memory usage keeps going up.
+            imager.mem = 12 * 1024
             imager.disk = _mb(dump_bytes * dumps) + 1024
             imager.max_run_time = 6 * 3600     # 6 hours
             imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
-            # Actual GPU utilisation is fairly low overall. This allows two
-            # imaging tasks to share a GPU, which only introduces a 10-20%
-            # overhead.
-            imager.gpus[0].compute = 0.5
+            # Actual GPU utilisation is fairly low overall, and performance
+            # could be improved by running two (or more) per GPU. However, the
+            # imaging machines also run Ceph, and too many imagers can starve
+            # Ceph of resources (with catastrophic consequences e.g. see
+            # SPR1-904). Requesting a whole GPU is a quick-n-dirty way to limit
+            # the number of imager tasks running.
+            imager.gpus[0].compute = 1.0
             # There is no memory enforcement, so this doesn't have a lot of
             # padding.
             imager.gpus[0].memory = 3.0
