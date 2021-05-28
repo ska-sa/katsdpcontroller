@@ -34,6 +34,7 @@ import katpoint
 import katdal
 import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
+import katsdpmodels.primary_beam
 import yarl
 
 from ..controller import device_server_sockname
@@ -47,8 +48,6 @@ from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedM
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
-
-ANTENNAS = 'm000,m001,m063,m064'
 
 SUBARRAY_PRODUCT = 'array_1_0'
 CAPTURE_BLOCK = '1122334455'
@@ -346,6 +345,24 @@ class BaseTestSDPController(asynctest.TestCase):
             '/models/band_mask/fixed/test.h5'
         )
 
+    def _setup_primary_beam_model(self) -> None:
+        # Model is not used for anything, so do a minimal amount to get it working.
+        model = katsdpmodels.primary_beam.PrimaryBeamAperturePlane(
+            -1 * u.m, -1 * u.m,
+            1 * u.m, 1 * u.m,
+            [1, 2] * u.GHz,
+            np.zeros((2, 2, 2, 8, 8), np.complex64),
+            band='l')
+        model.version = 1
+        for antenna in ['m000', 'm001', 'm062', 'm063']:
+            for group in ['individual', 'cohort']:
+                self._setup_model(
+                    model,
+                    f'/models/primary_beam/current/{group}/{antenna}/l.alias',
+                    f'/models/primary_beam/config/{group}/{antenna}/l/meerkat.alias',
+                    f'/models/primary_beam/fixed/test.h5'
+                )
+
     async def setup_server(self, **server_kwargs) -> None:
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
@@ -372,6 +389,7 @@ class BaseTestSDPController(asynctest.TestCase):
         )
         self._setup_rfi_mask_model()
         self._setup_band_mask_model()
+        self._setup_primary_beam_model()
         await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
@@ -755,6 +773,16 @@ class TestSDPController(BaseTestSDPController):
         await self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
             'band_mask/fixed/test.h5')
+        await self.assert_immutable(
+            self.telstate.join(
+                'i0_antenna_channelised_voltage', 'm000', 'model',
+                'primary_beam', 'cohort', 'config'),
+            'primary_beam/config/cohort/m000/l/meerkat.alias')
+        await self.assert_immutable(
+            self.telstate.join(
+                'i0_antenna_channelised_voltage', 'm001', 'model',
+                'primary_beam', 'individual', 'fixed'),
+            'primary_beam/fixed/test.h5')
         await self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',

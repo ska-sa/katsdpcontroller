@@ -1143,9 +1143,18 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     fetcher, model_base_url,
                     f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
                 )
-                prefix = (stream.name, 'model', 'band_mask')
+                prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
                 init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
                 init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
+                for ant in stream.antennas:
+                    for group in ['individual', 'cohort']:
+                        pb_model_urls = await _resolve_model(
+                            fetcher, model_base_url,
+                            f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
+                        )
+                        prefix = (stream.name, ant, 'model', 'primary_beam', group)
+                        init_telstate[prefix + ('config',)] = pb_model_urls[0]
+                        init_telstate[prefix + ('fixed',)] = pb_model_urls[1]
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
