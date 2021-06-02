@@ -736,7 +736,9 @@ class TestSDPController(BaseTestSDPController):
     async def _configure_subarray(self, subarray_product: str) -> None:
         reply, informs = await self.client.request(*self._configure_args(subarray_product))
 
-    async def assert_immutable(self, key: str, value: Any) -> None:
+    async def assert_immutable(
+            self, key: str, value: Any,
+            key_type: katsdptelstate.KeyType = katsdptelstate.KeyType.IMMUTABLE) -> None:
         """Check the value of a telstate key and also that it is immutable"""
         assert self.telstate is not None
         # Uncomment for debugging
@@ -746,7 +748,7 @@ class TestSDPController(BaseTestSDPController):
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
         self.assertEqual(await self.telstate[key], value)
-        self.assertEqual(await self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
+        self.assertEqual(await self.telstate.key_type(key), key_type)
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
@@ -775,14 +777,23 @@ class TestSDPController(BaseTestSDPController):
             'band_mask/fixed/test.h5')
         await self.assert_immutable(
             self.telstate.join(
-                'i0_antenna_channelised_voltage', 'm000', 'model',
+                'i0_antenna_channelised_voltage', 'model',
                 'primary_beam', 'cohort', 'config'),
-            'primary_beam/config/cohort/m000/l/meerkat.alias')
+            {
+                'm000': 'primary_beam/config/cohort/m000/l/meerkat.alias',
+                'm001': 'primary_beam/config/cohort/m001/l/meerkat.alias',
+                'm062': 'primary_beam/config/cohort/m062/l/meerkat.alias',
+                'm063': 'primary_beam/config/cohort/m063/l/meerkat.alias'
+            },
+            key_type=katsdptelstate.KeyType.INDEXED
+        )
         await self.assert_immutable(
             self.telstate.join(
-                'i0_antenna_channelised_voltage', 'm001', 'model',
+                'i0_antenna_channelised_voltage', 'model',
                 'primary_beam', 'individual', 'fixed'),
-            'primary_beam/fixed/test.h5')
+            {ant: 'primary_beam/fixed/test.h5' for ant in ['m000', 'm001', 'm062', 'm063']},
+            key_type=katsdptelstate.KeyType.INDEXED
+        )
         await self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',
