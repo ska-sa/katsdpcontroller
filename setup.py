@@ -30,7 +30,7 @@ setup(
         'aioredis',
         'aiozk',
         'async_timeout',
-        'dash',
+        'dash>=1.18.*',
         'dash-core-components',
         'dash-html-components',
         'dash-table',
