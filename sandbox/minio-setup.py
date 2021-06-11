@@ -77,12 +77,18 @@ def put_rfi_mask(client):
 
 
 def copy_primary_beams(client):
+    BANDS = 'lu'    # The only bands implemented so far - update as more are added
     urls = {
         f'https://sdpmodels.kat.ac.za/primary_beam/current/{group}/{antenna}/{band}.alias'
         for group in ['individual', 'cohort']
         for antenna in [f'm{i:03d}' for i in range(64)]
-        for band in 'lsux'
+        for band in BANDS
     }
+    urls.update({
+        f'https://sdpmodels.kat.ac.za/primary_beam/current/cohort/{cohort}/{band}.alias'
+        for cohort in ['meerkat']
+        for band in BANDS
+    })
     done = set()
     with requests.Session() as session:
         while urls:

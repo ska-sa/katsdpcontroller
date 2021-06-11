@@ -49,6 +49,7 @@ from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedM
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
+ANTENNAS = ['m000', 'm001', 'm062', 'm063']
 SUBARRAY_PRODUCT = 'array_1_0'
 CAPTURE_BLOCK = '1122334455'
 
@@ -354,12 +355,12 @@ class BaseTestSDPController(asynctest.TestCase):
             np.zeros((2, 2, 2, 8, 8), np.complex64),
             band='l')
         model.version = 1
-        for antenna in ['m000', 'm001', 'm062', 'm063']:
+        for antenna in ANTENNAS:
             for group in ['individual', 'cohort']:
                 self._setup_model(
                     model,
                     f'/models/primary_beam/current/{group}/{antenna}/l.alias',
-                    f'/models/primary_beam/config/{group}/{antenna}/l/meerkat.alias',
+                    f'/models/primary_beam/config/cohort/meerkat/l/v1.alias',
                     f'/models/primary_beam/fixed/test.h5'
                 )
 
@@ -780,10 +781,8 @@ class TestSDPController(BaseTestSDPController):
                 'i0_antenna_channelised_voltage', 'model',
                 'primary_beam', 'cohort', 'config'),
             {
-                'm000': 'primary_beam/config/cohort/m000/l/meerkat.alias',
-                'm001': 'primary_beam/config/cohort/m001/l/meerkat.alias',
-                'm062': 'primary_beam/config/cohort/m062/l/meerkat.alias',
-                'm063': 'primary_beam/config/cohort/m063/l/meerkat.alias'
+                ant: 'primary_beam/config/cohort/meerkat/l/v1.alias'
+                for ant in ANTENNAS
             },
             key_type=katsdptelstate.KeyType.INDEXED
         )
