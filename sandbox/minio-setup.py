@@ -4,14 +4,17 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
+from urllib.parse import urlsplit, urljoin
 
 import numpy as np
 import astropy.units as u
 import astropy.table
 import botocore.session
+import requests
 
 import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
+import katsdpmodels.primary_beam
 
 
 BUCKET_POLICY = {
@@ -73,6 +76,39 @@ def put_rfi_mask(client):
                       Key=f'rfi_mask/fixed/{filename}', Body=fh)
 
 
+def copy_primary_beams(client):
+    BANDS = 'lu'    # The only bands implemented so far - update as more are added
+    urls = {
+        f'https://sdpmodels.kat.ac.za/primary_beam/current/{group}/{antenna}/{band}.alias'
+        for group in ['individual', 'cohort']
+        for antenna in [f'm{i:03d}' for i in range(64)]
+        for band in BANDS
+    }
+    urls.update({
+        f'https://sdpmodels.kat.ac.za/primary_beam/current/cohort/{cohort}/{band}.alias'
+        for cohort in ['meerkat']
+        for band in BANDS
+    })
+    done = set()
+    with requests.Session() as session:
+        while urls:
+            url = urls.pop()
+            done.add(url)
+            with session.get(url, timeout=20) as resp:
+                resp.raise_for_status()
+                client.put_object(Bucket='models',
+                                  ContentType=resp.headers['Content-type'],
+                                  Key=urlsplit(url)[1:],
+                                  Body=resp.data)
+                if url.endswith('.alias'):
+                    rel_path = resp.text.strip()
+                    rel_parts = urlsplit(rel_path)
+                    assert not rel_parts.scheme and not rel_parts.netloc
+                    new_url = urljoin(resp.url, rel_path)
+                    if new_url not in done:
+                        urls.add(new_url)
+
+
 def put_band_mask(client):
     band_mask_table = astropy.table.Table(BAND_MASK)
     model = katsdpmodels.band_mask.BandMaskRanges(band_mask_table)
@@ -119,6 +155,7 @@ def main():
 
     put_rfi_mask(client)
     put_band_mask(client)
+    copy_primary_beams(client)
 
 
 if __name__ == '__main__':

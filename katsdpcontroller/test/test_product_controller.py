@@ -34,6 +34,7 @@ import katpoint
 import katdal
 import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
+import katsdpmodels.primary_beam
 import yarl
 
 from ..controller import device_server_sockname
@@ -48,8 +49,7 @@ from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedM
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
-ANTENNAS = 'm000,m001,m063,m064'
-
+ANTENNAS = ['m000', 'm001', 'm062', 'm063']
 SUBARRAY_PRODUCT = 'array_1_0'
 CAPTURE_BLOCK = '1122334455'
 
@@ -346,6 +346,24 @@ class BaseTestSDPController(asynctest.TestCase):
             '/models/band_mask/fixed/test.h5'
         )
 
+    def _setup_primary_beam_model(self) -> None:
+        # Model is not used for anything, so do a minimal amount to get it working.
+        model = katsdpmodels.primary_beam.PrimaryBeamAperturePlane(
+            -1 * u.m, -1 * u.m,
+            1 * u.m, 1 * u.m,
+            [1, 2] * u.GHz,
+            np.zeros((2, 2, 2, 8, 8), np.complex64),
+            band='l')
+        model.version = 1
+        for antenna in ANTENNAS:
+            for group in ['individual', 'cohort']:
+                self._setup_model(
+                    model,
+                    f'/models/primary_beam/current/{group}/{antenna}/l.alias',
+                    f'/models/primary_beam/config/cohort/meerkat/l/v1.alias',
+                    f'/models/primary_beam/fixed/test.h5'
+                )
+
     async def setup_server(self, **server_kwargs) -> None:
         mc_server = DummyMasterController('127.0.0.1', 0)
         await mc_server.start()
@@ -372,6 +390,7 @@ class BaseTestSDPController(asynctest.TestCase):
         )
         self._setup_rfi_mask_model()
         self._setup_band_mask_model()
+        self._setup_primary_beam_model()
         await self.server.start()
         self.addCleanup(self.server.stop)
         bind_address = device_server_sockname(self.server)
@@ -718,7 +737,9 @@ class TestSDPController(BaseTestSDPController):
     async def _configure_subarray(self, subarray_product: str) -> None:
         reply, informs = await self.client.request(*self._configure_args(subarray_product))
 
-    async def assert_immutable(self, key: str, value: Any) -> None:
+    async def assert_immutable(
+            self, key: str, value: Any,
+            key_type: katsdptelstate.KeyType = katsdptelstate.KeyType.IMMUTABLE) -> None:
         """Check the value of a telstate key and also that it is immutable"""
         assert self.telstate is not None
         # Uncomment for debugging
@@ -728,7 +749,7 @@ class TestSDPController(BaseTestSDPController):
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
         self.assertEqual(await self.telstate[key], value)
-        self.assertEqual(await self.telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
+        self.assertEqual(await self.telstate.key_type(key), key_type)
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
@@ -755,6 +776,23 @@ class TestSDPController(BaseTestSDPController):
         await self.assert_immutable(
             self.telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
             'band_mask/fixed/test.h5')
+        await self.assert_immutable(
+            self.telstate.join(
+                'i0_antenna_channelised_voltage', 'model',
+                'primary_beam', 'cohort', 'config'),
+            {
+                ant: 'primary_beam/config/cohort/meerkat/l/v1.alias'
+                for ant in ANTENNAS
+            },
+            key_type=katsdptelstate.KeyType.INDEXED
+        )
+        await self.assert_immutable(
+            self.telstate.join(
+                'i0_antenna_channelised_voltage', 'model',
+                'primary_beam', 'individual', 'fixed'),
+            {ant: 'primary_beam/fixed/test.h5' for ant in ['m000', 'm001', 'm062', 'm063']},
+            key_type=katsdptelstate.KeyType.INDEXED
+        )
         await self.assert_immutable('config.vis_writer.sdp_l0', {
             'external_hostname': 'host.vis_writer.sdp_l0',
             'npy_path': '/var/kat/data',

@@ -921,6 +921,15 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         self._interface_mode_sensors.remove_sensors(self.sdp_controller)
 
 
+class _IndexedKey(dict):
+    """Wrapper class indicating that the contents form a telstate indexed key.
+
+    This is used in dictionaries containing initial values to be placed into
+    telstate.
+    """
+    pass
+
+
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
 
@@ -1143,9 +1152,22 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     fetcher, model_base_url,
                     f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
                 )
-                prefix = (stream.name, 'model', 'band_mask')
+                prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
                 init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
                 init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
+                for group in ['individual', 'cohort']:
+                    config_value = _IndexedKey()
+                    fixed_value = _IndexedKey()
+                    for ant in stream.antennas:
+                        pb_model_urls = await _resolve_model(
+                            fetcher, model_base_url,
+                            f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
+                        )
+                        config_value[ant] = pb_model_urls[0]
+                        fixed_value[ant] = pb_model_urls[1]
+                    prefix = (stream.name, 'model', 'primary_beam', group)
+                    init_telstate[prefix + ('config',)] = config_value
+                    init_telstate[prefix + ('fixed',)] = fixed_value
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
@@ -1161,7 +1183,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # set the configuration
         for k, v in init_telstate.items():
             key = telstate.join(*k) if isinstance(k, tuple) else k
-            await telstate.set(key, v)
+            if isinstance(v, _IndexedKey):
+                for sub_key, sub_value in v.items():
+                    await telstate.set_indexed(key, sub_key, sub_value)
+            else:
+                await telstate.set(key, v)
         return telstate
 
     def check_nodes(self) -> Tuple[bool, List[scheduler.PhysicalNode]]:
