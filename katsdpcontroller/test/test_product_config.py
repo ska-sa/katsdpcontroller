@@ -16,9 +16,12 @@ from nose.tools import (
 
 from .. import product_config, defaults
 from ..product_config import (
+    SimDigRawAntennaVoltageStream,
     AntennaChannelisedVoltageStream,
+    NgcAntennaChannelisedVoltageStream,
     SimAntennaChannelisedVoltageStream,
     BaselineCorrelationProductsStream,
+    NgcBaselineCorrelationProductsStream,
     SimBaselineCorrelationProductsStream,
     TiedArrayChannelisedVoltageStream,
     SimTiedArrayChannelisedVoltageStream,
@@ -242,6 +245,35 @@ class TestCamHttpStream:
         assert_equal(cam_http.url, yarl.URL('http://test.invalid'))
 
 
+class TestSimDigRawAntennaVoltageStream:
+    """Test :class:`~.SimDigRawAntennaVoltageStream`."""
+
+    def setup(self):
+        self.config: Dict[str, Any] = {
+            'type': 'sim.dig.raw_antenna_voltage',
+            'adc_sample_rate': 1712000000.0,
+            'centre_frequency': 1284000000.0,
+            'band': 'l',
+            'antenna': _M000.description
+        }
+
+    def test_from_config(self) -> None:
+        dig = SimDigRawAntennaVoltageStream.from_config(
+            Options(), 'm000h', self.config, [], {}
+        )
+        assert_equal(dig.adc_sample_rate, 1712000000.0)
+        assert_equal(dig.centre_frequency, 1284000000.0)
+        assert_equal(dig.band, 'l')
+        assert_equal(dig.antenna, _M000)
+
+    def test_bad_antenna_description(self) -> None:
+        with assert_raises_regex(ValueError, "Invalid antenna description 'bad antenna': "):
+            self.config['antenna'] = 'bad antenna'
+            SimDigRawAntennaVoltageStream.from_config(
+                Options(), 'm000h', self.config, [], {}
+            )
+
+
 class TestAntennaChannelisedVoltageStream:
     """Test :class:`~.AntennaChannelisedVoltageStream`."""
 
@@ -274,6 +306,85 @@ class TestAntennaChannelisedVoltageStream:
         assert_equal(acv.adc_sample_rate, 1712e6)
         assert_equal(acv.n_samples_between_spectra, 524288)
         assert_equal(acv.instrument_dev_name, 'narrow1')
+
+
+def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream:
+    return SimDigRawAntennaVoltageStream(
+        name, [],
+        adc_sample_rate=1712000000.0,
+        centre_frequency=1284000000.0,
+        band='l',
+        antenna=_M000 if name.startswith('m000') else _M002
+    )
+
+
+class TestNgcAntennaChanneliseVoltageStream:
+    """Test :class:`~.NgcAntennaChannelisedVoltageStream`."""
+
+    def setup(self) -> None:
+        self.config: Dict[str, Any] = {
+            'type': 'ngc.antenna_channelised_voltage',
+            'src_streams': ['m000h', 'm000v', 'm002h', 'm002v'],
+            'n_chans': 4096
+        }
+        self.src_streams = [
+            make_sim_dig_raw_antenna_voltage(name)
+            for name in self.config['src_streams']
+        ]
+
+    def test_from_config(self) -> None:
+        acv = NgcAntennaChannelisedVoltageStream.from_config(
+            Options(), 'wide1_acv', self.config, self.src_streams, {}
+        )
+        assert_equal(acv.name, 'wide1_acv')
+        assert_equal(acv.antennas, ['m000', 'm002'])
+        assert_equal(acv.band, 'l')
+        assert_equal(acv.n_chans, 4096)
+        assert_equal(acv.bandwidth, 856e6)
+        assert_equal(acv.centre_frequency, 1284e6)
+        assert_equal(acv.adc_sample_rate, 1712e6)
+        assert_equal(acv.n_samples_between_spectra, 8192)
+
+    def test_n_chans_not_power_of_two(self) -> None:
+        for n_chans in [0, 3, 17]:
+            with assert_raises(ValueError):
+                self.config['n_chans'] = n_chans
+                NgcAntennaChannelisedVoltageStream.from_config(
+                    Options(), 'wide1_acv', self.config, self.src_streams, {}
+                )
+
+    def test_src_streams_odd(self) -> None:
+        with assert_raises_regex(ValueError, 'does not have an even number of elements'):
+            del self.config['src_streams'][-1]
+            del self.src_streams[-1]
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
+
+    def test_band_mismatch(self) -> None:
+        with assert_raises_regex(ValueError, r'Inconsistent bands \(both l and u\)'):
+            self.src_streams[1].band = 'u'
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
+
+    def test_adc_sample_rate_mismatch(self) -> None:
+        with assert_raises_regex(
+                ValueError,
+                r'Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)'):
+            self.src_streams[1].adc_sample_rate = 1.0
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
+
+    def test_centre_frequency_mismatch(self) -> None:
+        with assert_raises_regex(
+                ValueError,
+                r'Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)'):
+            self.src_streams[-1].centre_frequency = 1.0
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
 
 
 class TestSimAntennaChannelisedVoltageStream:
@@ -352,6 +463,17 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
     )
 
 
+def make_ngc_antenna_channelised_voltage() -> NgcAntennaChannelisedVoltageStream:
+    src_streams = [
+        make_sim_dig_raw_antenna_voltage(name)
+        for name in ['m000h', 'm000v', 'm001h', 'm001v']
+    ]
+    return NgcAntennaChannelisedVoltageStream(
+        'wide1_acv', src_streams,
+        n_chans=4096
+    )
+
+
 class TestBaselineCorrelationProductsStream:
     """Test :class:`~.BaselineCorrelationProductsStream`."""
 
@@ -410,8 +532,45 @@ class TestBaselineCorrelationProductsStream:
             )
 
 
+class TestNgcBaselineCorrelationProductsStream:
+    """Test :class:`~.NgcBaselineCorrelationProductsStream`.
+
+    This is not as thorough as :class:`TestBaselineCorrelationProductsStream`
+    because a lot of those tests are actually testing the common base class.
+    """
+
+    def setup(self) -> None:
+        self.acv = make_ngc_antenna_channelised_voltage()
+        self.config: Dict[str, Any] = {
+            'type': 'ngc.baseline_correlation_products',
+            'src_streams': 'wide1_acv',
+            'int_time': 0.5
+        }
+
+    def test_from_config(self) -> None:
+        bcp = NgcBaselineCorrelationProductsStream.from_config(
+            Options(), 'wide2_bcp', self.config, [self.acv], {}
+        )
+        # Note: the test values will probably need to be updated as the
+        # implementation evolves.
+        assert_equal(bcp.n_chans_per_substream, 512)
+        assert_equal(bcp.n_substreams, 8)
+        assert_equal(bcp.int_time, 104448 * 4096 / 856e6)
+
+    def test_too_few_channels(self) -> None:
+        with assert_raises(ValueError):
+            self.acv.n_chans = 2
+            NgcBaselineCorrelationProductsStream.from_config(
+                Options(), 'wide2_bcp', self.config, [self.acv], {}
+            )
+
+
 class TestSimBaselineCorrelationProductsStream:
-    """Test :class:`~.SimBaselineCorrelationProductsStream`."""
+    """Test :class:`~.SimBaselineCorrelationProductsStream`.
+
+    This is not as thorough as :class:`TestBaselineCorrelationProductsStream`
+    because a lot of those tests are actually testing the common base class.
+    """
 
     def setup(self):
         self.acv = make_sim_antenna_channelised_voltage()
@@ -427,8 +586,6 @@ class TestSimBaselineCorrelationProductsStream:
         bcp = SimBaselineCorrelationProductsStream.from_config(
             Options(), 'narrow2_bcp', self.config, [self.acv], {}
         )
-        # Most properties are assumed to be tested via
-        # TestBaselineCorrelationProductsStream and are not re-tested here.
         assert_equal(bcp.n_chans_per_substream, 8)
         assert_equal(bcp.n_substreams, 64)
         # Check that int_time is rounded to nearest multiple of 512

@@ -441,11 +441,11 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             if src.adc_sample_rate != first.adc_sample_rate:
                 raise ValueError(
                     'Inconsistent ADC sample rates '
-                    f'(both {first.adc_sample_rate} and {src.adc_sample_rate}')
+                    f'(both {first.adc_sample_rate} and {src.adc_sample_rate})')
             if src.centre_frequency != first.centre_frequency:
                 raise ValueError(
                     'Inconsistent centre frequencies '
-                    f'(both {first.centre_frequency} and {src.centre_frequency}')
+                    f'(both {first.centre_frequency} and {src.centre_frequency})')
         super().__init__(
             name, src_streams,
             antennas=antenna_names,
@@ -635,6 +635,15 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
         """Size of frame in bytes"""
         return self.n_vis * 2 * self.bits_per_sample // 8
 
+    @staticmethod
+    def round_int_time(int_time: float,
+                       acv: AntennaChannelisedVoltageStreamBase,
+                       spectra_per_heap: int) -> float:
+        """Round an integration time to a positive integer number of heaps."""
+        heap_time = acv.n_chans / acv.bandwidth * spectra_per_heap
+        acc_heaps = max(1, round(int_time / heap_time))
+        return acc_heaps * heap_time
+
 
 class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsStreamBase):
     """Real baseline-correlation-products stream (old correlator)."""
@@ -697,13 +706,13 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  int_time: float) -> None:
-        # TODO: how should the number of engines be computed?
         acv = src_streams[0]
         assert isinstance(acv, AntennaChannelisedVoltageStreamBase)
         n_ants = len(acv.antennas)
-        n_engines = 8
+        n_engines = 8   # TODO: need to compute this from number of antennas
         if acv.n_chans % n_engines != 0:
             raise ValueError('Number of channels is not a multiple of the number of X-engines')
+        int_time = self.round_int_time(int_time, acv, defaults.NGC_SPECTRA_PER_HEAP)
         super().__init__(
             name, src_streams,
             int_time=int_time,
@@ -750,9 +759,7 @@ class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
         n_antennas = len(acv.antennas)
         # Round the int_time the same way katcbfsim does, so that we have
         # an accurate value.
-        heap_time = acv.n_chans / acv.bandwidth * defaults.KATCBFSIM_SPECTRA_PER_HEAP
-        acc_heaps = max(1, round(int_time / heap_time))
-        int_time = acc_heaps * heap_time
+        int_time = self.round_int_time(int_time, acv, defaults.KATCBFSIM_SPECTRA_PER_HEAP)
         super().__init__(
             name, src_streams,
             int_time=int_time,
