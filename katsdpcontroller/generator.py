@@ -1,11 +1,14 @@
 import math
+import itertools
 import logging
 import re
 import time
 import copy
 import urllib.parse
 import os.path
-from typing import List, Dict, Tuple, Set, Sequence, Type, Union, Optional, Any, TYPE_CHECKING
+from typing import (
+    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING
+)
 
 import addict
 import networkx
@@ -61,6 +64,7 @@ CAPTURE_TRANSITIONS = {
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
     'katcbfsim',
+    'katfgpu',
     'katsdpbfingest',
     'katsdpcal',
     'katsdpcam2telstate',
@@ -70,7 +74,8 @@ IMAGES = frozenset([
     'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME),
     'katsdpdatawriter',
     'katsdpmetawriter',
-    'katsdptelstate'
+    'katsdptelstate',
+    'katxgpu'
 ])
 #: Number of bytes used by spectral imager per visibility
 BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
@@ -247,6 +252,52 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
         'rdb_path': OBJ_DATA_VOL.container_path
     })
     return meta_writer
+
+
+def _make_dsim(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        streams: Iterable[product_config.SimDigRawAntennaVoltageStream]) -> scheduler.LogicalNode:
+    """Create the dsim process for a single antenna.
+
+    An antenna has a separate stream per polarisation, so `streams` will
+    normally have two elements.
+    """
+    # dsim assigns digitiser IDs positionally. According to M1000-0001-053,
+    # the least significant bit is the polarization ID with 0 = vertical, so
+    # sort by reverse of name so that if the streams are, for example,
+    # m012h and m012v then m012v comes first.
+    streams = sorted(streams, key=lambda stream: stream.name, reverse=True)
+
+    n_endpoints = 8  # Matches SKARAB digitisers
+
+    # Generate a unique name. The caller groups streams by
+    # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
+    name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
+    dsim = SDPLogicalTask(name)
+    dsim.image = 'katfgpu'
+    dsim.cpus = 1
+    dsim.mem = 128  # TODO: this is a guess. Check what it actually needs.
+    dsim.cores = [None]  # Pin to a single core
+    dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
+    dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+    dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
+    dsim.command = [
+        'capambel', '-c', 'cap_net_raw+p', '--',  # Gives NET_RAW capability to invoked command
+        'dsim',
+        '--interface', '{interfaces["cbf"].ipv4_address}',
+        '--adc-rate', str(streams[0].adc_sample_rate),
+        '--ttl', 4
+    ]
+    g.add_node(dsim)
+    for stream in streams:
+        # {{ and }} become { and } after f-string interpolation
+        dsim.command.append(f'{{endpoints[{stream.name!r}]}}')
+        multicast = LogicalMulticast('multicast.' + stream.name, n_endpoints)
+        g.add_node(multicast)
+        g.add_edge(dsim, multicast, port=stream.name, depends_resolve=True)
+        g.add_edge(multicast, dsim, depends_init=True, depends_ready=True)
+    return dsim
 
 
 def _make_cbf_simulator(g: networkx.MultiDiGraph,
@@ -1269,6 +1320,17 @@ def build_logical_graph(configuration: Configuration,
     meta_writer = _make_meta_writer(g, configuration)
 
     # Simulators
+    def dsim_key(stream: product_config.SimDigRawAntennaVoltageStream) -> Tuple[str, float]:
+        """Key for dsim streams that should be run in the same process."""
+        return (stream.antenna.name, stream.adc_sample_rate)
+
+    for _, streams in itertools.groupby(
+            sorted(
+                configuration.by_class(product_config.SimDigRawAntennaVoltageStream),
+                key=dsim_key
+            ),
+            key=dsim_key):
+        _make_dsim(g, configuration, streams)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):

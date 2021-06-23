@@ -324,6 +324,17 @@ class SimDigRawAntennaVoltageStream(Stream):
         self.antenna = antenna
         self.command_line_extra = list(command_line_extra)
 
+    @property
+    def bits_per_sample(self) -> int:
+        return 10
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        """Network bandwidth in bits per second."""
+        samples_per_heap = 4096
+        heap_size = samples_per_heap * self.bits_per_sample // 8
+        heap_time = samples_per_heap / self.adc_sample_rate
+        return data_rate(heap_size, heap_time, ratio, overhead)
+
     @classmethod
     def from_config(cls,
                     options: Options,
