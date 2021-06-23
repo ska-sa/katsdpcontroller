@@ -735,7 +735,7 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
 class SimBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
     """Simulated baseline-correlation-products stream."""
 
-    stream_type: ClassVar[str] = 'sim.cbf.baseline-correlation-products'
+    stream_type: ClassVar[str] = 'sim.cbf.baseline_correlation_products'
     _valid_src_types: ClassVar[_ValidTypes] = {'sim.cbf.antenna_channelised_voltage'}
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,

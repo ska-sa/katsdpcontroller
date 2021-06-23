@@ -33,7 +33,8 @@ from ..product_config import (
     ServiceOverride,
     Options,
     Simulation,
-    Configuration
+    Configuration,
+    STREAM_CLASSES
 )
 from . import fake_katportalclient
 
@@ -1381,3 +1382,10 @@ class TestConfiguration(Fixture):
         }
         with assert_raises_regex(ValueError, "Only a single band is supported, found 'l', 'u'"):
             await Configuration.from_config(self.config)
+
+
+def test_stream_classes():
+    """Check that each stream in :data:~.STREAM_CLASSES` has the right ``stream_type``."""
+
+    for name, cls in STREAM_CLASSES.items():
+        assert_equal(cls.stream_type, name)
