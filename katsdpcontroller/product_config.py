@@ -59,6 +59,18 @@ def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
     return len(endpoint_list_parser(None)(url.host))
 
 
+def _make_antenna(description: str) -> katpoint.Antenna:
+    """Create an antenna object from a description.
+
+    The :class:`katpoint.Antenna` constructor can throw assorted errors, so this
+    helper method always raises :exc:`ValueError` if the description is invalid.
+    """
+    try:
+        return katpoint.Antenna(description)
+    except Exception as exc:
+        raise ValueError(f'Invalid antenna description {description!r}: {exc}') from exc
+
+
 class SensorFailure(RuntimeError):
     """Failed to obtain a sensor value from katportal"""
     pass
@@ -296,6 +308,34 @@ class CbfStream:
     instrument_dev_name: str
 
 
+class SimDigRawAntennaVoltageStream(Stream):
+    stream_type: ClassVar[str] = 'sim.dig.raw_antenna_voltage'
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 adc_sample_rate: float,
+                 centre_frequency: float,
+                 band: str,
+                 antenna: katpoint.Antenna) -> None:
+        super().__init__(name, [])
+        self.adc_sample_rate = adc_sample_rate
+        self.centre_frequency = centre_frequency
+        self.band = band
+        self.antenna = antenna
+
+    @classmethod
+    def from_config(cls,
+                    options: Options,
+                    name: str,
+                    config: Mapping[str, Any],
+                    src_streams: Sequence['Stream'],
+                    sensors: Mapping[str, Any]) -> 'SimDigRawAntennaVoltageStream':
+        return cls(name, src_streams,
+                   adc_sample_rate=config['adc_sample_rate'],
+                   centre_frequency=config['centre_frequency'],
+                   band=config['band'],
+                   antenna=_make_antenna(config['antenna']))
+
+
 class AntennaChannelisedVoltageStreamBase(Stream):
     """Base for both simulated and real antenna-channelised-voltage streams."""
 
@@ -318,7 +358,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
 
 
 class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStreamBase):
-    """Real antenna-channelised-voltage stream."""
+    """Real antenna-channelised-voltage stream (old correlator)."""
 
     stream_type: ClassVar[str] = 'cbf.antenna_channelised_voltage'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
@@ -374,6 +414,62 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
         )
 
 
+class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
+    """Real antenna-channelised-voltage stream (next-gen correlator).
+
+    It currently only supports wideband.
+    """
+
+    stream_type: ClassVar[str] = 'ngc.antenna_channelised_voltage'
+    _valid_src_types: ClassVar[_ValidTypes] = {'sim.dig.raw_antenna_voltage'}
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 n_chans: int) -> None:
+        if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
+            raise ValueError('n_chans is not a power of 2')
+        if len(src_streams) % 2 != 0:
+            raise ValueError('src_streams does not have an even number of elements')
+        first = src_streams[0]
+        assert isinstance(first, SimDigRawAntennaVoltageStream)
+        antenna_names = []
+        for src in src_streams:
+            assert isinstance(src, SimDigRawAntennaVoltageStream)
+            if src.antenna.name not in antenna_names:
+                antenna_names.append(src.antenna.name)
+            if src.band != first.band:
+                raise ValueError(f'Inconsistent bands (both {first.band} and {src.band})')
+            if src.adc_sample_rate != first.adc_sample_rate:
+                raise ValueError(
+                    'Inconsistent ADC sample rates '
+                    f'(both {first.adc_sample_rate} and {src.adc_sample_rate}')
+            if src.centre_frequency != first.centre_frequency:
+                raise ValueError(
+                    'Inconsistent centre frequencies '
+                    f'(both {first.centre_frequency} and {src.centre_frequency}')
+        super().__init__(
+            name, src_streams,
+            antennas=antenna_names,
+            band=first.band,
+            n_chans=n_chans,
+            bandwidth=first.adc_sample_rate * 0.5,
+            adc_sample_rate=first.adc_sample_rate,
+            centre_frequency=first.centre_frequency,
+            n_samples_between_spectra=2 * n_chans
+        )
+
+    @classmethod
+    def from_config(cls,
+                    options: Options,
+                    name: str,
+                    config: Mapping[str, Any],
+                    src_streams: Sequence['Stream'],
+                    sensors: Mapping[str, Any]) -> 'NgcAntennaChannelisedVoltageStream':
+        return cls(
+            name, src_streams,
+            n_chans=config['n_chans']
+        )
+
+
 class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
     """Simulated antenna-channelised-voltage stream."""
 
@@ -409,16 +505,9 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
                     config: Mapping[str, Any],
                     src_streams: Sequence['Stream'],
                     sensors: Mapping[str, Any]) -> 'SimAntennaChannelisedVoltageStream':
-        antennas = []
-        for desc in config['antennas']:
-            try:
-                antennas.append(katpoint.Antenna(desc))
-            except Exception as exc:
-                # katpoint can throw all kinds of exceptions
-                raise ValueError(f'Invalid antenna description {desc!r}: {exc}') from exc
         return cls(
             name, src_streams,
-            antennas=antennas,
+            antennas=[_make_antenna(desc) for desc in config['antennas']],
             band=config['band'],
             n_chans=config['n_chans'],
             bandwidth=config['bandwidth'],
@@ -548,9 +637,9 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
 
 
 class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsStreamBase):
-    """Real baseline-correlation-products stream."""
+    """Real baseline-correlation-products stream (old correlator)."""
 
-    stream_type: ClassVar[str] = 'cbf.baseline-correlation-products'
+    stream_type: ClassVar[str] = 'cbf.baseline_correlation_products'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
         _CBFSensor('int_time', float),
         _CBFSensor('n_bls', int),
@@ -597,6 +686,49 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
             n_baselines=sensors['n_bls'],
             bits_per_sample=sensors['xeng_out_bits_per_sample'],
             instrument_dev_name=config['instrument_dev_name']
+        )
+
+
+class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
+    """Real baseline-correlation-products stream (next-gen correlator)."""
+
+    stream_type: ClassVar[str] = 'ngc.baseline_correlation_products'
+    _valid_src_types: ClassVar[_ValidTypes] = {'ngc.antenna_channelised_voltage'}
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 int_time: float) -> None:
+        # TODO: how should the number of engines be computed?
+        acv = src_streams[0]
+        assert isinstance(acv, AntennaChannelisedVoltageStreamBase)
+        n_ants = len(acv.antennas)
+        n_engines = 8
+        if acv.n_chans % n_engines != 0:
+            raise ValueError('Number of channels is not a multiple of the number of X-engines')
+        super().__init__(
+            name, src_streams,
+            int_time=int_time,
+            n_endpoints=n_engines,
+            n_chans_per_substream=acv.n_chans // n_engines,
+            # TODO: is this correct for the tensorcore xgpu?
+            n_baselines=n_ants * (n_ants + 1) * 2,
+            bits_per_sample=32
+        )
+
+    if TYPE_CHECKING:     # pragma: nocover
+        # Refine the return type for mypy
+        @property
+        def antenna_channelised_voltage(self) -> NgcAntennaChannelisedVoltageStream: ...
+
+    @classmethod
+    def from_config(cls,
+                    options: Options,
+                    name: str,
+                    config: Mapping[str, Any],
+                    src_streams: Sequence['Stream'],
+                    sensors: Mapping[str, Any]) -> 'NgcBaselineCorrelationProductsStream':
+        return cls(
+            name, src_streams,
+            int_time=config['int_time']
         )
 
 
@@ -775,6 +907,7 @@ class VisStream(Stream):
     stream_type: ClassVar[str] = 'sdp.vis'
     _valid_src_types: ClassVar[_ValidTypes] = {
         'cbf.baseline_correlation_products',
+        'ngc.baseline_correlation_products',
         'sim.cbf.baseline_correlation_products'
     }
 
@@ -1178,9 +1311,12 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     'cbf.antenna_channelised_voltage': AntennaChannelisedVoltageStream,
     'cbf.tied_array_channelised_voltage': TiedArrayChannelisedVoltageStream,
     'cbf.baseline_correlation_products': BaselineCorrelationProductsStream,
+    'ngc.antenna_channelised_voltage': NgcAntennaChannelisedVoltageStream,
+    'ngc.baseline_correlation_products': NgcBaselineCorrelationProductsStream,
     'sim.cbf.antenna_channelised_voltage': SimAntennaChannelisedVoltageStream,
     'sim.cbf.tied_array_channelised_voltage': SimTiedArrayChannelisedVoltageStream,
     'sim.cbf.baseline_correlation_products': SimBaselineCorrelationProductsStream,
+    'sim.dig.raw_antenna_voltage': SimDigRawAntennaVoltageStream,
     'cam.http': CamHttpStream,
     'sdp.vis': VisStream,
     'sdp.beamformer': BeamformerStream,
@@ -1528,6 +1664,9 @@ def _upgrade(config):
                 del output['calibration']
 
         config['version'] = '3.0'
+
+    # Upgrade to latest 3.x
+    config['version'] = '3.1'
 
     _validate(config)     # Should never fail if the input was valid
     return config

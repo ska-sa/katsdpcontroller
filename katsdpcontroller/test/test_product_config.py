@@ -939,7 +939,7 @@ class Fixture(asynctest.TestCase):
 
     def setUp(self):
         self.config = {
-            "version": "3.0",
+            "version": "3.1",
             "inputs": {
                 "camdata": {
                     "type": "cam.http",
@@ -1113,7 +1113,7 @@ class Fixture(asynctest.TestCase):
             "config": {}
         }
         self.config_sim: Dict[str, Any] = {
-            'version': '3.0',
+            'version': '3.1',
             'outputs': {
                 'acv': {
                     'type': 'sim.cbf.antenna_channelised_voltage',
