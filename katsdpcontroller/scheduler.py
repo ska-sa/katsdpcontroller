@@ -1356,7 +1356,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         following keys are available for substitution.
         - `ports` : dictionary of port numbers
         - `cores` : dictionary of reserved core IDs
-        - `interfaces` : dictionary mapping requested networks to :class:`Interface` objects
+        - `interfaces` : dictionary mapping requested networks to :class:`AgentInterface` objects
         - `endpoints` : dictionary of remote endpoints. Keys are of the form
           :samp:`{service}_{port}`, and values are :class:`Endpoint` objects.
         - `generation` : number of times task was cloned
