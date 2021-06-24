@@ -287,7 +287,7 @@ def _make_dsim(
         'dsim',
         '--interface', '{interfaces[cbf].ipv4_address}',
         '--adc-rate', str(streams[0].adc_sample_rate),
-        '--ttl', 4
+        '--ttl', '4'
     ]
     g.add_node(dsim)
     for stream in streams:
