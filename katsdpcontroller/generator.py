@@ -295,7 +295,7 @@ def _make_dsim(
         dsim.command.append(f'{{endpoints[{stream.name!r}]}}')
         multicast = LogicalMulticast('multicast.' + stream.name, n_endpoints)
         g.add_node(multicast)
-        g.add_edge(dsim, multicast, port=stream.name, depends_resolve=True)
+        g.add_edge(dsim, multicast, port='spead', depends_resolve=True)
         g.add_edge(multicast, dsim, depends_init=True, depends_ready=True)
     return dsim
 
