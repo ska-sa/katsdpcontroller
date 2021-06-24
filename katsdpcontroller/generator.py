@@ -292,7 +292,7 @@ def _make_dsim(
     g.add_node(dsim)
     for stream in streams:
         # {{ and }} become { and } after f-string interpolation
-        dsim.command.append(f'{{endpoints[{stream.name!r}]}}')
+        dsim.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
         multicast = LogicalMulticast('multicast.' + stream.name, n_endpoints)
         g.add_node(multicast)
         g.add_edge(dsim, multicast, port='spead', depends_resolve=True)
