@@ -98,8 +98,8 @@ def copy_primary_beams(client):
                 resp.raise_for_status()
                 client.put_object(Bucket='models',
                                   ContentType=resp.headers['Content-type'],
-                                  Key=urlsplit(url)[1:],
-                                  Body=resp.data)
+                                  Key=urlsplit(url).path[1:],
+                                  Body=resp.content)
                 if url.endswith('.alias'):
                     rel_path = resp.text.strip()
                     rel_parts = urlsplit(rel_path)
