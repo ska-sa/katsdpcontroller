@@ -285,7 +285,7 @@ def _make_dsim(
     dsim.command = [
         'capambel', '-c', 'cap_net_raw+p', '--',  # Gives NET_RAW capability to invoked command
         'dsim',
-        '--interface', '{interfaces["cbf"].ipv4_address}',
+        '--interface', '{interfaces[cbf].ipv4_address}',
         '--adc-rate', str(streams[0].adc_sample_rate),
         '--ttl', 4
     ]
