@@ -307,7 +307,7 @@ def _make_dsim(
 
 def _make_fgpu(g: networkx.MultiDiGraph,
                configuration: Configuration,
-               stream: product_config.NgcAntennaChannelisedVoltageStream):
+               stream: product_config.NgcAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup('fgpu.{stream.name}')
@@ -319,12 +319,11 @@ def _make_fgpu(g: networkx.MultiDiGraph,
 
     for i in range(0, n_engines):
         srcs = stream.sources(i)
-        fgpu = SDPLogicalTask(f'fgpu.{stream.name}.{i}')
+        fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
         fgpu.image = 'katfgpu'
         fgpu.cpus = 3
         fgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
         fgpu.cores = ['src0', 'src1', 'dst']
-        fgpu.capabilities.append('NET_RAW')  # For ibverbs raw QPs
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
         # up by network name.
@@ -351,7 +350,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
             fgpu.command = ['capambel', '-c', 'cap_net_raw+p', '--'] + fgpu.command
             fgpu.capabilities.append('NET_RAW')
             # Use the core numbers as completion vectors. This ensures that
-            # multiple fgpu instances on a machine will use distinct vectors.
+            # multiple instances on a machine will use distinct vectors.
             fgpu.command += [
                 '--src-ibv',
                 '--src-comp-vector', '{cores[src0]},{cores[src1]}',
@@ -377,6 +376,84 @@ def _make_fgpu(g: networkx.MultiDiGraph,
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
 
     return fgpu_group
+
+
+def _make_xgpu(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        stream: product_config.NgcBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
+    ibv = not configuration.options.develop
+    acv = stream.antenna_channelised_voltage
+    n_engines = stream.n_substreams
+    xgpu_group = LogicalGroup('xgpu.{stream.name}')
+    g.add_node(xgpu_group)
+
+    dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
+    g.add_node(dst_multicast)
+    g.add_edge(dst_multicast, xgpu_group, depends_init=True, depends_ready=True)
+
+    for i in range(0, stream.n_substreams):
+        xgpu = SDPLogicalTask(f'x.{stream.name}.{i}')
+        xgpu.image = 'katxgpu'
+        xgpu.cpus = 1    # TODO: could be less in develop mode?
+        xgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
+        xgpu.cores = ['core']
+        xgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        xgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
+        xgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+        xgpu.gpus = [scheduler.GPURequest()]
+        xgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
+        xgpu.gpus[0].mem = 1024       # TODO: check what it really needs
+        first_dig = acv.sources(0)[0]
+        # It's not necessary to set core affinity by command-line option
+        # because there is only one core reserved and the scheduler will bind
+        # it.
+        xgpu.command = [
+            'xgpu',
+            '--adc-sample-rate', str(first_dig.adc_sample_rate),
+            '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
+            '--channels-total', str(stream.n_chans),
+            '--channels-in-stream', str(stream.n_chans_per_substream),
+            '--samples-per-channel', str(acv.n_spectra_per_heap),
+            '--channel-offset-value', str(i * stream.n_chans_per_substream),
+            '--pols', '2',
+            '--sample-bits', str(acv.bits_per_sample),
+            '--src-interface-address', '{interfaces[cbf].ipv4_address}',
+            '--dest-interface-address', '{interfaces[cbf].ipv4_address}'
+            # TODO: integration time?! Is that what --heap-accumulation-threshold does?
+        ]
+        if ibv:
+            # Enable cap_net_raw capability for access to raw QPs
+            xgpu.capabilities.append('NET_RAW')
+            # Use the core number as completion vector. This ensures that
+            # multiple instances on a machine will use distinct vectors.
+            xgpu.command += [
+                '--receiver-comp-vector-affinity', '{core[core]}'
+            ]
+        # xgpu doesn't use katsdpservices or telstate
+        xgpu.katsdpservices_logging = False
+        xgpu.katsdpservices_config = False
+        xgpu.pass_telstate = False
+        g.add_node(xgpu)
+
+        # Wire it up to the multicast streams
+        src_multicast = find_node(g, f'multicast.{acv.name}')
+        g.add_edge(xgpu, src_multicast, port='spead',
+                   depends_resolve=True, depends_init=True, depends_ready=True)
+        # TODO: need to modify katxgpu to work from the multicast address of the
+        # whole stream, rather than its individual piece; or else make a new
+        # PhysicalTask subclass here to do the mapping.
+        xgpu.command += [
+            f'{{endpoints[multicast.{acv.name}_spead].host}}',
+            f'{{endpoints[multicast.{acv.name}_spead].port}}',
+            f'{{endpoints[multicast.{stream.name}_spead].host}}',
+            f'{{endpoints[multicast.{stream.name}_spead].port}}'
+        ]
+
+        # Link it to the group, so that downstream tasks need only depend on the group.
+        g.add_edge(xgpu_group, xgpu, depends_ready=True, depends_init=True)
+
+    return xgpu_group
 
 
 def _make_cbf_simulator(g: networkx.MultiDiGraph,
@@ -1418,6 +1495,8 @@ def build_logical_graph(configuration: Configuration,
     # Correlator
     for stream in configuration.by_class(product_config.NgcAntennaChannelisedVoltageStream):
         _make_fgpu(g, configuration, stream)
+    for stream in configuration.by_class(product_config.NgcBaselineCorrelationProductsStream):
+        _make_xgpu(g, configuration, stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
