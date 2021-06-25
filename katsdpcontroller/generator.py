@@ -192,6 +192,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
+    telstate.pass_telstate = False
     telstate.final_state = CaptureBlockState.DEAD
     g.add_node(telstate)
     return telstate
@@ -289,6 +290,10 @@ def _make_dsim(
         '--adc-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4'
     ]
+    # dsim doesn't use katsdpservices or telstate
+    dsim.katsdpservices_logging = False
+    dsim.katsdpservices_config = False
+    dsim.pass_telstate = False
     g.add_node(dsim)
     for stream in streams:
         # {{ and }} become { and } after f-string interpolation
@@ -1422,9 +1427,10 @@ def build_logical_graph(configuration: Configuration,
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Connect every task to telstate
             if node is not telstate:
-                node.command.extend([
-                    '--telstate', '{endpoints[telstate_telstate]}',
-                    '--name', node.name])
+                if node.pass_telstate:
+                    node.command.extend([
+                        '--telstate', '{endpoints[telstate_telstate]}',
+                        '--name', node.name])
                 node.wrapper = configuration.options.wrapper
                 g.add_edge(node, telstate, port='telstate',
                            depends_ready=True, depends_kill=True)
