@@ -265,6 +265,8 @@ class TestSimDigRawAntennaVoltageStream:
         assert_equal(dig.centre_frequency, self.config['centre_frequency'])
         assert_equal(dig.band, self.config['band'])
         assert_equal(dig.antenna, _M000)
+        assert_equal(dig.bits_per_sample, 10)
+        assert_equal(dig.data_rate(1.0, 0), 1712e7)
         assert_equal(dig.command_line_extra, [])
 
     def test_bad_antenna_description(self) -> None:
@@ -352,6 +354,9 @@ class TestNgcAntennaChanneliseVoltageStream:
         assert_equal(acv.centre_frequency, self.src_streams[0].centre_frequency)
         assert_equal(acv.adc_sample_rate, self.src_streams[0].adc_sample_rate)
         assert_equal(acv.n_samples_between_spectra, 2 * self.config['n_chans'])
+        assert_equal(acv.sources(0), tuple(self.src_streams[0:2]))
+        assert_equal(acv.sources(1), tuple(self.src_streams[2:4]))
+        assert_equal(acv.data_rate(1.0, 0), 27392e6)
         assert_equal(acv.input_labels, self.config['src_streams'])
         assert_equal(acv.command_line_extra, [])
 
@@ -362,6 +367,13 @@ class TestNgcAntennaChanneliseVoltageStream:
                 NgcAntennaChannelisedVoltageStream.from_config(
                     Options(), 'wide1_acv', self.config, self.src_streams, {}
                 )
+
+    def test_too_few_channels(self) -> None:
+        with assert_raises(ValueError):
+            self.config['n_chans'] = 2
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
 
     def test_src_streams_odd(self) -> None:
         with assert_raises_regex(ValueError, 'does not have an even number of elements'):
@@ -593,13 +605,6 @@ class TestNgcBaselineCorrelationProductsStream:
         assert_equal(bcp.n_substreams, 8)
         assert_equal(bcp.int_time, 104448 * 4096 / 856e6)
         assert_equal(bcp.command_line_extra, [])
-
-    def test_too_few_channels(self) -> None:
-        with assert_raises(ValueError):
-            self.acv.n_chans = 2
-            NgcBaselineCorrelationProductsStream.from_config(
-                Options(), 'wide2_bcp', self.config, [self.acv], {}
-            )
 
     def test_command_line_extra(self) -> None:
         self.config['command_line_extra'] = ['--extra-arg']

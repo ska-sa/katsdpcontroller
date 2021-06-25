@@ -475,6 +475,15 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
                 raise ValueError(
                     'Inconsistent centre frequencies '
                     f'(both {first.centre_frequency} and {src.centre_frequency})')
+        # TODO: this may need refinement as katxgpu evolves. For now, assume
+        # the same relation as the MeerKAT correlator i.e. 4 X-engines per
+        # F-engine, rounded up to a power of two.
+        n_substreams = 4
+        while n_substreams < 4 * (len(src_streams) // 2):
+            n_substreams *= 2
+        if n_chans % n_substreams != 0:
+            raise ValueError('Number of channels is too low')
+
         super().__init__(
             name, src_streams,
             antennas=antenna_names,
@@ -485,7 +494,35 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             centre_frequency=first.centre_frequency,
             n_samples_between_spectra=2 * n_chans
         )
+        self.n_substreams = n_substreams
+        self.bits_per_sample = 8
         self.command_line_extra = list(command_line_extra)
+
+    @property
+    def n_chans_per_substream(self) -> int:
+        return self.n_chans // self.n_substreams
+
+    @property
+    def n_spectra_per_heap(self) -> int:
+        return defaults.NGC_SPECTRA_PER_HEAP  # TODO: should maybe make this a tunable?
+
+    def sources(self, feng_id: int) \
+            -> Tuple[SimDigRawAntennaVoltageStream, SimDigRawAntennaVoltageStream]:
+        """Get the two source streams for a specific F-engine."""
+        return (
+            cast(SimDigRawAntennaVoltageStream, self.src_streams[2 * feng_id]),
+            cast(SimDigRawAntennaVoltageStream, self.src_streams[2 * feng_id + 1])
+        )
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        """Network bandwidth in bits per second."""
+        # Each item has two polarisations and real+imag
+        heap_items = self.n_spectra_per_heap * self.n_chans_per_substream
+        heap_size = heap_items * 4 * self.bits_per_sample // 8
+        time_between_spectra = (
+            self.n_samples_between_spectra * self.n_spectra_per_heap / self.adc_sample_rate
+        )
+        return data_rate(heap_size, time_between_spectra, ratio, overhead) * self.n_substreams
 
     @classmethod
     def from_config(cls,
@@ -741,17 +778,14 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
                  int_time: float,
                  command_line_extra: Iterable[str] = ()) -> None:
         acv = src_streams[0]
-        assert isinstance(acv, AntennaChannelisedVoltageStreamBase)
+        assert isinstance(acv, NgcAntennaChannelisedVoltageStream)
         n_ants = len(acv.antennas)
-        n_engines = 8   # TODO: need to compute this from number of antennas
-        if acv.n_chans % n_engines != 0:
-            raise ValueError('Number of channels is not a multiple of the number of X-engines')
-        int_time = self.round_int_time(int_time, acv, defaults.NGC_SPECTRA_PER_HEAP)
+        int_time = self.round_int_time(int_time, acv, acv.n_spectra_per_heap)
         super().__init__(
             name, src_streams,
             int_time=int_time,
-            n_endpoints=n_engines,
-            n_chans_per_substream=acv.n_chans // n_engines,
+            n_endpoints=acv.n_substreams,
+            n_chans_per_substream=acv.n_chans_per_substream,
             # TODO: is this correct for the tensorcore xgpu?
             n_baselines=n_ants * (n_ants + 1) * 2,
             bits_per_sample=32
