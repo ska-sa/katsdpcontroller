@@ -322,7 +322,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
         fgpu = SDPLogicalTask(f'fgpu.{stream.name}.{i}')
         fgpu.image = 'katfgpu'
         fgpu.cpus = 3
-        fgpu.mem = 512  # TODO: this is a guess. Check what it actually needs.
+        fgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
         fgpu.cores = ['src0', 'src1', 'dst']
         fgpu.capabilities.append('NET_RAW')  # For ibverbs raw QPs
         # TODO: could specify separate interface requests for input and
@@ -344,7 +344,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
             '--dst-packet-payload', '8192',
             '--adc-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
-            '--channels', stream.n_chans
+            '--channels', str(stream.n_chans)
         ]
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
@@ -354,7 +354,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
             # multiple fgpu instances on a machine will use distinct vectors.
             fgpu.command += [
                 '--src-ibv',
-                '--src-comp-vector', '{cores[src0], cores[src1]}',
+                '--src-comp-vector', '{cores[src0]},{cores[src1]}',
                 '--dst-ibv',
                 '--dst-comp-vector', '{cores[dst]}'
             ]
@@ -369,9 +369,9 @@ def _make_fgpu(g: networkx.MultiDiGraph,
             src_multicast = find_node(g, f'multicast.{src.name}')
             g.add_edge(fgpu, src_multicast, port='spead',
                        depends_resolve=True, depends_init=True, depends_ready=True)
-            fgpu.command += f'{{endpoint[multicast.{src.name}_spead]}}'
+            fgpu.command.append(f'{{endpoints[multicast.{src.name}_spead]}}')
         g.add_edge(fgpu, dst_multicast, port='spead', depends_resolve=True)
-        fgpu.command += f'{{endpoint[multicast.{stream.name}_spead]}}'
+        fgpu.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
@@ -1414,6 +1414,10 @@ def build_logical_graph(configuration: Configuration,
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
         _make_cbf_simulator(g, configuration, stream)
+
+    # Correlator
+    for stream in configuration.by_class(product_config.NgcAntennaChannelisedVoltageStream):
+        _make_fgpu(g, configuration, stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
