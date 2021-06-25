@@ -156,20 +156,21 @@ developing the master controller itself). **Note: even when running the
 master controller from source, the product controller is still run from a
 Docker image.**
 
-In either case, add `--registry http://localhost:5000` if you are using a
-local registry rather than the SARAO SDP registry, and omit the `--haproxy`
-option if you do not have haproxy installed.
+In either case, modify `--registry http://localhost:5000` if you are not using a
+local registry (or remove it to use the SARAO SDP registry, if you are inside
+the firewall), and omit the `--haproxy` option if you do not have haproxy
+installed.
 
 ### Docker image
 
 ```sh
-docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127.0.0.1 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller sdp_master_controller.py --gui-urls /sandbox/gui-urls/ --localhost --image-tag-file /sandbox/sdp_image_tag --s3-config-file /sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity
+docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127.0.0.1 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller sdp_master_controller.py --gui-urls /sandbox/gui-urls/ --localhost --image-tag-file /sandbox/sdp_image_tag --s3-config-file /sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity --registry http://localhost:5000 --user kat
 ```
 
 ### Local machine
 
 ```sh
-KATSDP_LOG_GELF_ADDRESS=127.0.0.1 scripts/sdp_master_controller.py --gui-urls sandbox/gui-urls/ --localhost --image-tag-file sandbox/sdp_image_tag --s3-config-file sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity
+KATSDP_LOG_GELF_ADDRESS=127.0.0.1 scripts/sdp_master_controller.py --gui-urls sandbox/gui-urls/ --localhost --image-tag-file sandbox/sdp_image_tag --s3-config-file sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity --registry http://localhost:5000 --user kat
 ```
 
 ## Running kattelmod
