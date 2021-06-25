@@ -360,8 +360,8 @@ class BaseTestSDPController(asynctest.TestCase):
                 self._setup_model(
                     model,
                     f'/models/primary_beam/current/{group}/{antenna}/l.alias',
-                    f'/models/primary_beam/config/cohort/meerkat/l/v1.alias',
-                    f'/models/primary_beam/fixed/test.h5'
+                    '/models/primary_beam/config/cohort/meerkat/l/v1.alias',
+                    '/models/primary_beam/fixed/test.h5'
                 )
 
     async def setup_server(self, **server_kwargs) -> None:
