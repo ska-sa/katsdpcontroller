@@ -428,7 +428,7 @@ def _make_xgpu(
             # Use the core number as completion vector. This ensures that
             # multiple instances on a machine will use distinct vectors.
             xgpu.command += [
-                '--receiver-comp-vector-affinity', '{core[core]}'
+                '--receiver-comp-vector-affinity', '{cores[core]}'
             ]
         # xgpu doesn't use katsdpservices or telstate
         xgpu.katsdpservices_logging = False
@@ -440,6 +440,7 @@ def _make_xgpu(
         src_multicast = find_node(g, f'multicast.{acv.name}')
         g.add_edge(xgpu, src_multicast, port='spead',
                    depends_resolve=True, depends_init=True, depends_ready=True)
+        g.add_edge(xgpu, dst_multicast, port='spead', depends_resolve=True)
         # TODO: need to modify katxgpu to work from the multicast address of the
         # whole stream, rather than its individual piece; or else make a new
         # PhysicalTask subclass here to do the mapping.
