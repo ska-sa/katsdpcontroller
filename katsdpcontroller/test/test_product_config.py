@@ -261,9 +261,9 @@ class TestSimDigRawAntennaVoltageStream:
         dig = SimDigRawAntennaVoltageStream.from_config(
             Options(), 'm000h', self.config, [], {}
         )
-        assert_equal(dig.adc_sample_rate, 1712000000.0)
-        assert_equal(dig.centre_frequency, 1284000000.0)
-        assert_equal(dig.band, 'l')
+        assert_equal(dig.adc_sample_rate, self.config['adc_sample_rate'])
+        assert_equal(dig.centre_frequency, self.config['centre_frequency'])
+        assert_equal(dig.band, self.config['band'])
         assert_equal(dig.antenna, _M000)
 
     def test_bad_antenna_description(self) -> None:
@@ -338,12 +338,12 @@ class TestNgcAntennaChanneliseVoltageStream:
         )
         assert_equal(acv.name, 'wide1_acv')
         assert_equal(acv.antennas, ['m000', 'm002'])
-        assert_equal(acv.band, 'l')
-        assert_equal(acv.n_chans, 4096)
-        assert_equal(acv.bandwidth, 856e6)
-        assert_equal(acv.centre_frequency, 1284e6)
-        assert_equal(acv.adc_sample_rate, 1712e6)
-        assert_equal(acv.n_samples_between_spectra, 8192)
+        assert_equal(acv.band, self.src_streams[0].band)
+        assert_equal(acv.n_chans, self.config['n_chans'])
+        assert_equal(acv.bandwidth, self.src_streams[0].adc_sample_rate / 2)
+        assert_equal(acv.centre_frequency, self.src_streams[0].centre_frequency)
+        assert_equal(acv.adc_sample_rate, self.src_streams[0].adc_sample_rate)
+        assert_equal(acv.n_samples_between_spectra, 2 * self.config['n_chans'])
 
     def test_n_chans_not_power_of_two(self) -> None:
         for n_chans in [0, 3, 17]:
