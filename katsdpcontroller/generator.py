@@ -19,7 +19,7 @@ import katdal
 import katdal.datasources
 import katpoint
 import katsdptelstate.aio
-from katsdptelstate.endpoint import Endpoint
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 import katsdpmodels.fetch.aiohttp
 from katsdpmodels.rfi_mask import RFIMask
 from katsdpmodels.band_mask import BandMask, SpectralWindow
@@ -145,6 +145,25 @@ class IngestTask(SDPPhysicalTask):
             if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
+
+
+class XGPUTask(SDPPhysicalTask):
+    """Hack to get the appropriate multicast addresses.
+
+    katxgpu takes the multicast groups it needs to process, rather than those
+    for the whole stream. This can only be known after the multicast addresses
+    are assigned, so can't be coded directly in the command line, and it
+    doesn't use katsdptelstate for configuration.
+    """
+
+    def subst_args(self, resolver):
+        args = super().subst_args(resolver)
+        index = int(self.name.split('.')[-1])
+        args['endpoints_vector'] = {}
+        for name, endpoint in self.endpoints.items():
+            # Split 'x.x.x.x+N' into individual endpoints
+            args['endpoints_vector'][name] = endpoint_list_parser(endpoint.port)(endpoint.host)
+        return args
 
 
 def _mb(value):
@@ -394,6 +413,7 @@ def _make_xgpu(
 
     for i in range(0, stream.n_substreams):
         xgpu = SDPLogicalTask(f'x.{stream.name}.{i}')
+        xgpu.physical_factory = XGPUTask
         xgpu.image = 'katxgpu'
         xgpu.cpus = 1    # TODO: could be less in develop mode?
         xgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
@@ -443,14 +463,11 @@ def _make_xgpu(
         g.add_edge(xgpu, src_multicast, port='spead',
                    depends_resolve=True, depends_init=True, depends_ready=True)
         g.add_edge(xgpu, dst_multicast, port='spead', depends_resolve=True)
-        # TODO: need to modify katxgpu to work from the multicast address of the
-        # whole stream, rather than its individual piece; or else make a new
-        # PhysicalTask subclass here to do the mapping.
         xgpu.command += [
-            f'{{endpoints[multicast.{acv.name}_spead].host}}',
-            f'{{endpoints[multicast.{acv.name}_spead].port}}',
-            f'{{endpoints[multicast.{stream.name}_spead].host}}',
-            f'{{endpoints[multicast.{stream.name}_spead].port}}'
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].host}}',
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].port}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].host}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].port}}'
         ]
 
         # Link it to the group, so that downstream tasks need only depend on the group.
