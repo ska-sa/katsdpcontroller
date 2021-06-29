@@ -405,9 +405,9 @@ def _make_xgpu(
         xgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
         xgpu.gpus[0].mem = 1024       # TODO: check what it really needs
         first_dig = acv.sources(0)[0]
-        # It's not necessary to set core affinity by command-line option
+        # TODO: It's not necessary to set core affinity by command-line option
         # because there is only one core reserved and the scheduler will bind
-        # it.
+        # it, but they're currently required arguments.
         xgpu.command = [
             'xgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
@@ -419,7 +419,9 @@ def _make_xgpu(
             '--pols', '2',
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface-address', '{interfaces[cbf].ipv4_address}',
-            '--dest-interface-address', '{interfaces[cbf].ipv4_address}'
+            '--dest-interface-address', '{interfaces[cbf].ipv4_address}',
+            '--receiver-thread-affinity', '{cores[core]}',
+            '--sender-thread-affinity', '{cores[core]}'
             # TODO: integration time?! Is that what --heap-accumulation-threshold does?
         ]
         if ibv:
