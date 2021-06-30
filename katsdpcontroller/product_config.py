@@ -709,7 +709,7 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
                        acv: AntennaChannelisedVoltageStreamBase,
                        spectra_per_heap: int) -> float:
         """Round an integration time to a positive integer number of heaps."""
-        heap_time = acv.n_chans / acv.bandwidth * spectra_per_heap
+        heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * spectra_per_heap
         acc_heaps = max(1, round(int_time / heap_time))
         return acc_heaps * heap_time
 

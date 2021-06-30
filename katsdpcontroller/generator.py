@@ -411,6 +411,7 @@ def _make_xgpu(
         # TODO: It's not necessary to set core affinity by command-line option
         # because there is only one core reserved and the scheduler will bind
         # it, but they're currently required arguments.
+        heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xgpu.command = [
             'xgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
@@ -424,8 +425,8 @@ def _make_xgpu(
             '--src-interface-address', '{interfaces[cbf].ipv4_address}',
             '--dest-interface-address', '{interfaces[cbf].ipv4_address}',
             '--receiver-thread-affinity', '{cores[core]}',
-            '--sender-thread-affinity', '{cores[core]}'
-            # TODO: integration time?! Is that what --heap-accumulation-threshold does?
+            '--sender-thread-affinity', '{cores[core]}',
+            '--heap-accumulation-threshold', str(round(stream.int_time / heap_time))
         ]
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
