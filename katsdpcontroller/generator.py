@@ -158,7 +158,6 @@ class XGPUTask(SDPPhysicalTask):
 
     def subst_args(self, resolver):
         args = super().subst_args(resolver)
-        index = int(self.name.split('.')[-1])
         args['endpoints_vector'] = {}
         for name, endpoint in self.endpoints.items():
             # Split 'x.x.x.x+N' into individual endpoints
