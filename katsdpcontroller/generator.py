@@ -359,7 +359,8 @@ def _make_fgpu(g: networkx.MultiDiGraph,
             '--src-affinity', '{cores[src0]},{cores[src1]}',
             '--dst-interface', '{interfaces[cbf].name}',
             '--dst-affinity', '{cores[dst]}',
-            '--dst-packet-payload', '8192',
+            # TODO: reenable once katxgpu can handle it
+            # '--dst-packet-payload', '8192',
             '--adc-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
             '--channels', str(stream.n_chans)
