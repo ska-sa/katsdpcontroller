@@ -308,6 +308,7 @@ def _make_dsim(
         '--adc-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4'
     ]
+    dsim.command += streams[0].command_line_extra
     # dsim doesn't use katsdpservices or telstate
     dsim.katsdpservices_logging = False
     dsim.katsdpservices_config = False
@@ -376,6 +377,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
                 '--dst-ibv',
                 '--dst-comp-vector', '{cores[dst]}'
             ]
+        fgpu.command += stream.command_line_extra
         # fgpu doesn't use katsdpservices or telstate
         fgpu.katsdpservices_logging = False
         fgpu.katsdpservices_config = False
@@ -452,6 +454,7 @@ def _make_xgpu(
             xgpu.command += [
                 '--receiver-comp-vector-affinity', '{cores[core]}'
             ]
+        xgpu.command += stream.command_line_extra
         # xgpu doesn't use katsdpservices or telstate
         xgpu.katsdpservices_logging = False
         xgpu.katsdpservices_config = False
