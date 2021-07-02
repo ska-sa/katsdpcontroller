@@ -258,7 +258,8 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
 def _make_dsim(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
-        streams: Iterable[product_config.SimDigRawAntennaVoltageStream]) -> scheduler.LogicalNode:
+        streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
+        sync_time: float) -> scheduler.LogicalNode:
     """Create the dsim process for a single antenna.
 
     An antenna has a separate stream per polarisation, so `streams` will
@@ -288,7 +289,8 @@ def _make_dsim(
         'dsim',
         '--interface', '{interfaces[cbf].ipv4_address}',
         '--adc-rate', str(streams[0].adc_sample_rate),
-        '--ttl', '4'
+        '--ttl', '4',
+        '--sync-time', str(sync_time)
     ]
     dsim.command += streams[0].command_line_extra
     # dsim doesn't use katsdpservices or telstate
@@ -1484,13 +1486,14 @@ def build_logical_graph(configuration: Configuration,
         """Key for dsim streams that should be run in the same process."""
         return (stream.antenna.name, stream.adc_sample_rate)
 
+    sync_time = time.time()
     for _, streams in itertools.groupby(
             sorted(
                 configuration.by_class(product_config.SimDigRawAntennaVoltageStream),
                 key=dsim_key
             ),
             key=dsim_key):
-        _make_dsim(g, configuration, streams)
+        _make_dsim(g, configuration, streams, sync_time)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
