@@ -360,8 +360,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
                 '--dst-comp-vector', '{cores[dst]}'
             ]
         fgpu.command += stream.command_line_extra
-        # fgpu doesn't use katsdpservices or telstate
-        fgpu.katsdpservices_logging = False
+        # fgpu doesn't use katsdpservices or telstate for config, but does use logging
         fgpu.katsdpservices_config = False
         fgpu.pass_telstate = False
         g.add_node(fgpu)
