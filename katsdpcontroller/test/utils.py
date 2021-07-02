@@ -14,9 +14,36 @@ from nose.tools import assert_raises, assert_equal, assert_true
 
 _T = TypeVar('_T')
 
+# The "ngc" correlator components are not connected up to any SDP components.
+# They're there just as a smoke test for generator.py.
 CONFIG = '''{
-    "version": "3.0",
+    "version": "3.1",
     "outputs": {
+        "ngc_m900v": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
+        },
+        "ngc_m900h": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
+        },
+        "ngc_antenna_channelised_voltage": {
+            "type": "ngc.antenna_channelised_voltage",
+            "src_streams": ["ngc_m900v", "ngc_m900h"],
+            "n_chans": 4096
+        },
+        "ngc_baseline_correlation_products": {
+            "type": "ngc.baseline_correlation_products",
+            "src_streams": ["ngc_antenna_channelised_voltage"],
+            "int_time": 0.5
+        },
+
         "i0_antenna_channelised_voltage": {
             "type": "sim.cbf.antenna_channelised_voltage",
             "antennas": [
