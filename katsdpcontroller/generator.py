@@ -313,7 +313,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
                stream: product_config.NgcAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     n_engines = len(stream.src_streams) // 2
-    fgpu_group = LogicalGroup('fgpu.{stream.name}')
+    fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
     g.add_node(fgpu_group)
 
     dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
@@ -389,7 +389,7 @@ def _make_xgpu(
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
-    xgpu_group = LogicalGroup('xgpu.{stream.name}')
+    xgpu_group = LogicalGroup(f'xgpu.{stream.name}')
     g.add_node(xgpu_group)
 
     dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
