@@ -408,6 +408,14 @@ def _make_xgpu(
         xgpu.gpus = [scheduler.GPURequest()]
         xgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
         xgpu.gpus[0].mem = 1024       # TODO: check what it really needs
+        # Minimum capability as a function of bits-per-sample, based on
+        # tensor_core_correlation_kernel.mako from katxgpu.
+        min_compute_capability = {
+            4: (7, 3),
+            8: (7, 2),
+            16: (7, 0)
+        }
+        xgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
         # TODO: It's not necessary to set core affinity by command-line option
         # because there is only one core reserved and the scheduler will bind

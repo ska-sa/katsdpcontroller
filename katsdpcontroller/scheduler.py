@@ -727,16 +727,23 @@ class GPURequest(ResourceRequestsContainer):
         cores (ignored if no CPU cores are reserved).
     name : str, optional
         If specified, the name of the GPU must match this.
+    min_compute_capability : Tuple[int], optional
+        If specified, the minimum CUDA compute capability
     """
+
     RESOURCE_REQUESTS = GPU_RESOURCES
 
     def __init__(self):
         super().__init__()
         self.affinity = False
         self.name = None
+        self.min_compute_capability = None
 
     def matches(self, agent_gpu, numa_node):
         if self.name is not None and self.name != agent_gpu.name:
+            return False
+        if (self.min_compute_capability is not None
+                and agent_gpu.compute_capability < self.min_compute_capability):
             return False
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
