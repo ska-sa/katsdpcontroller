@@ -50,7 +50,7 @@ setup(
         'numpy',
         'prometheus_async',
         'prometheus_client<0.4.0',   # 0.4.0 forces _total suffix
-        'pydotplus',
+        'pydot',             # For networkx.drawing.nx_pydot
         'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
         'rfc3987',           # Used by jsonschema to validate URLs
         'yarl'
