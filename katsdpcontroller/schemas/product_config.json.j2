@@ -527,7 +527,11 @@
                                     "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
                                     "centre_frequency": {"$ref": "#/definitions/positive_number"},
                                     "band": {"type": "string"},
-                                    "antenna": {"type": "string"}
+                                    "antenna": {"type": "string"},
+                                    "command_line_extra": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
                                 },
                                 "additionalProperties": false,
                                 "required": ["adc_sample_rate", "centre_frequency", "band", "antenna"]
@@ -539,10 +543,26 @@
                                 "properties": {
                                     "type": {},
                                     "src_streams": {"minItems": 2},
-                                    "n_chans": {"$ref": "#/definitions/positive_integer"}
+                                    "n_chans": {"$ref": "#/definitions/positive_integer"},
+                                    "input_labels": {
+                                        "type": "array",
+                                        "items": {"$ref": "#/definitions/stream_name"},
+                                        "uniqueItems": true
+                                    },
+                                    "command_line_extra": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
                                 },
                                 "additionalProperties": false,
-                                "required": ["src_streams", "n_chans"]
+                                "required": ["src_streams", "n_chans"],
+{# If input_labels is absent, src_streams must contain unique elements #}
+                                "if": {"not": {"required": ["input_labels"]}},
+                                "then": {
+                                    "properties": {
+                                        "src_streams": {"uniqueItems": true}
+                                    }
+                                }
                             }
                         },
                         {
@@ -551,7 +571,11 @@
                                 "properties": {
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
-                                    "int_time": {"$ref": "#/definitions/positive_number"}
+                                    "int_time": {"$ref": "#/definitions/positive_number"},
+                                    "command_line_extra": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
                                 },
                                 "additionalProperties": false,
                                 "required": ["src_streams", "int_time"]

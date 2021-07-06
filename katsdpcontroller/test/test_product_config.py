@@ -265,6 +265,7 @@ class TestSimDigRawAntennaVoltageStream:
         assert_equal(dig.centre_frequency, self.config['centre_frequency'])
         assert_equal(dig.band, self.config['band'])
         assert_equal(dig.antenna, _M000)
+        assert_equal(dig.command_line_extra, [])
 
     def test_bad_antenna_description(self) -> None:
         with assert_raises_regex(ValueError, "Invalid antenna description 'bad antenna': "):
@@ -272,6 +273,13 @@ class TestSimDigRawAntennaVoltageStream:
             SimDigRawAntennaVoltageStream.from_config(
                 Options(), 'm000h', self.config, [], {}
             )
+
+    def test_command_line_extra(self) -> None:
+        self.config['command_line_extra'] = ['--extra-arg']
+        dig = SimDigRawAntennaVoltageStream.from_config(
+            Options(), 'm000h', self.config, [], {}
+        )
+        assert_equal(dig.command_line_extra, self.config['command_line_extra'])
 
 
 class TestAntennaChannelisedVoltageStream:
@@ -344,6 +352,8 @@ class TestNgcAntennaChanneliseVoltageStream:
         assert_equal(acv.centre_frequency, self.src_streams[0].centre_frequency)
         assert_equal(acv.adc_sample_rate, self.src_streams[0].adc_sample_rate)
         assert_equal(acv.n_samples_between_spectra, 2 * self.config['n_chans'])
+        assert_equal(acv.input_labels, self.config['src_streams'])
+        assert_equal(acv.command_line_extra, [])
 
     def test_n_chans_not_power_of_two(self) -> None:
         for n_chans in [0, 3, 17]:
@@ -385,6 +395,32 @@ class TestNgcAntennaChanneliseVoltageStream:
             NgcAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
+
+    def test_input_labels(self) -> None:
+        self.config['input_labels'] = ['m900h', 'm900v', 'm901h', 'm901v']
+        acv = NgcAntennaChannelisedVoltageStream.from_config(
+            Options(), 'wide1_acv', self.config, self.src_streams, {}
+        )
+        assert_equal(acv.input_labels, self.config['input_labels'])
+
+    def test_bad_input_labels(self) -> None:
+        self.config['input_labels'] = ['m900h']
+        with assert_raises_regex(ValueError, 'input_labels has 1 elements, expected 4'):
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
+        self.config['input_labels'] = ['m900h'] * 4
+        with assert_raises_regex(ValueError, 'are not unique'):
+            NgcAntennaChannelisedVoltageStream.from_config(
+                Options(), 'wide1_acv', self.config, self.src_streams, {}
+            )
+
+    def test_command_line_extra(self) -> None:
+        self.config['command_line_extra'] = ['--extra-arg']
+        acv = NgcAntennaChannelisedVoltageStream.from_config(
+            Options(), 'wide1_acv', self.config, self.src_streams, {}
+        )
+        assert_equal(acv.command_line_extra, self.config['command_line_extra'])
 
 
 class TestSimAntennaChannelisedVoltageStream:
@@ -556,6 +592,7 @@ class TestNgcBaselineCorrelationProductsStream:
         assert_equal(bcp.n_chans_per_substream, 512)
         assert_equal(bcp.n_substreams, 8)
         assert_equal(bcp.int_time, 104448 * 4096 / 856e6)
+        assert_equal(bcp.command_line_extra, [])
 
     def test_too_few_channels(self) -> None:
         with assert_raises(ValueError):
@@ -563,6 +600,13 @@ class TestNgcBaselineCorrelationProductsStream:
             NgcBaselineCorrelationProductsStream.from_config(
                 Options(), 'wide2_bcp', self.config, [self.acv], {}
             )
+
+    def test_command_line_extra(self) -> None:
+        self.config['command_line_extra'] = ['--extra-arg']
+        bcp = NgcBaselineCorrelationProductsStream.from_config(
+            Options(), 'wide2_bcp', self.config, [self.acv], {}
+        )
+        assert_equal(bcp.command_line_extra, self.config['command_line_extra'])
 
 
 class TestSimBaselineCorrelationProductsStream:

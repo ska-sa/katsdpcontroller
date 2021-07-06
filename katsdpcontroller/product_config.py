@@ -315,12 +315,14 @@ class SimDigRawAntennaVoltageStream(Stream):
                  adc_sample_rate: float,
                  centre_frequency: float,
                  band: str,
-                 antenna: katpoint.Antenna) -> None:
+                 antenna: katpoint.Antenna,
+                 command_line_extra: Iterable[str] = ()) -> None:
         super().__init__(name, [])
         self.adc_sample_rate = adc_sample_rate
         self.centre_frequency = centre_frequency
         self.band = band
         self.antenna = antenna
+        self.command_line_extra = list(command_line_extra)
 
     @classmethod
     def from_config(cls,
@@ -333,7 +335,8 @@ class SimDigRawAntennaVoltageStream(Stream):
                    adc_sample_rate=config['adc_sample_rate'],
                    centre_frequency=config['centre_frequency'],
                    band=config['band'],
-                   antenna=_make_antenna(config['antenna']))
+                   antenna=_make_antenna(config['antenna']),
+                   command_line_extra=config.get('command_line_extra', []))
 
 
 class AntennaChannelisedVoltageStreamBase(Stream):
@@ -423,12 +426,27 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
     stream_type: ClassVar[str] = 'ngc.antenna_channelised_voltage'
     _valid_src_types: ClassVar[_ValidTypes] = {'sim.dig.raw_antenna_voltage'}
 
-    def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 n_chans: int) -> None:
+    def __init__(
+            self,
+            name: str,
+            src_streams: Sequence[Stream], *,
+            n_chans: int,
+            input_labels: Optional[Iterable[str]] = None,
+            command_line_extra: Iterable[str] = ()) -> None:
         if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
             raise ValueError('n_chans is not a power of 2')
         if len(src_streams) % 2 != 0:
             raise ValueError('src_streams does not have an even number of elements')
+        self.input_labels = (
+            [stream.name for stream in src_streams]
+            if input_labels is None else list(input_labels)
+        )
+        if len(self.input_labels) != len(src_streams):
+            raise ValueError(
+                f'input_labels has {len(self.input_labels)} elements, expected {len(src_streams)}'
+            )
+        if len(set(self.input_labels)) != len(src_streams):
+            raise ValueError('input labels are not unique')
         first = src_streams[0]
         assert isinstance(first, SimDigRawAntennaVoltageStream)
         antenna_names = []
@@ -456,6 +474,7 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             centre_frequency=first.centre_frequency,
             n_samples_between_spectra=2 * n_chans
         )
+        self.command_line_extra = list(command_line_extra)
 
     @classmethod
     def from_config(cls,
@@ -466,7 +485,9 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
                     sensors: Mapping[str, Any]) -> 'NgcAntennaChannelisedVoltageStream':
         return cls(
             name, src_streams,
-            n_chans=config['n_chans']
+            n_chans=config['n_chans'],
+            input_labels=config.get('input_labels'),
+            command_line_extra=config.get('command_line_extra', [])
         )
 
 
@@ -704,8 +725,10 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
     stream_type: ClassVar[str] = 'ngc.baseline_correlation_products'
     _valid_src_types: ClassVar[_ValidTypes] = {'ngc.antenna_channelised_voltage'}
 
-    def __init__(self, name: str, src_streams: Sequence[Stream], *,
-                 int_time: float) -> None:
+    def __init__(self, name: str,
+                 src_streams: Sequence[Stream], *,
+                 int_time: float,
+                 command_line_extra: Iterable[str] = ()) -> None:
         acv = src_streams[0]
         assert isinstance(acv, AntennaChannelisedVoltageStreamBase)
         n_ants = len(acv.antennas)
@@ -722,6 +745,7 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
             n_baselines=n_ants * (n_ants + 1) * 2,
             bits_per_sample=32
         )
+        self.command_line_extra = list(command_line_extra)
 
     if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
@@ -737,7 +761,8 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
                     sensors: Mapping[str, Any]) -> 'NgcBaselineCorrelationProductsStream':
         return cls(
             name, src_streams,
-            int_time=config['int_time']
+            int_time=config['int_time'],
+            command_line_extra=config.get('command_line_extra', [])
         )
 
 
