@@ -405,7 +405,7 @@ class TestNgcAntennaChanneliseVoltageStream:
 
     def test_bad_input_labels(self) -> None:
         self.config['input_labels'] = ['m900h']
-        with assert_raises_regex(ValueError, 'input_labels has the wrong number of elements'):
+        with assert_raises_regex(ValueError, 'input_labels has 1 elements, expected 4'):
             NgcAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )

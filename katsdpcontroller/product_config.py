@@ -442,7 +442,9 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
             if input_labels is None else list(input_labels)
         )
         if len(self.input_labels) != len(src_streams):
-            raise ValueError('input_labels has the wrong number of elements')
+            raise ValueError(
+                f'input_labels has {len(self.input_labels)} elements, expected {len(src_streams)}'
+            )
         if len(set(self.input_labels)) != len(src_streams):
             raise ValueError('input labels are not unique')
         first = src_streams[0]
