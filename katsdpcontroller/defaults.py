@@ -24,4 +24,4 @@ FLAGS_RATE_RATIO = 8.0
 #: Alignment constraint for `int_time` in katcbfsim
 KATCBFSIM_SPECTRA_PER_HEAP = 256
 #: Alignment constraint for `int_time` in katxgpu
-NGC_SPECTRA_PER_HEAP = 256
+GPUCBF_SPECTRA_PER_HEAP = 256

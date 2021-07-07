@@ -369,7 +369,7 @@ class AntennaChannelisedVoltageStreamBase(Stream):
 
 
 class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStreamBase):
-    """Real antenna-channelised-voltage stream (old correlator)."""
+    """Real antenna-channelised-voltage stream (external correlator)."""
 
     stream_type: ClassVar[str] = 'cbf.antenna_channelised_voltage'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
@@ -425,13 +425,13 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
         )
 
 
-class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
-    """Real antenna-channelised-voltage stream (next-gen correlator).
+class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
+    """Real antenna-channelised-voltage stream (GPU correlator).
 
     It currently only supports wideband.
     """
 
-    stream_type: ClassVar[str] = 'ngc.antenna_channelised_voltage'
+    stream_type: ClassVar[str] = 'gpucbf.antenna_channelised_voltage'
     _valid_src_types: ClassVar[_ValidTypes] = {'sim.dig.raw_antenna_voltage'}
 
     def __init__(
@@ -501,7 +501,7 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
 
     @property
     def n_spectra_per_heap(self) -> int:
-        return defaults.NGC_SPECTRA_PER_HEAP  # TODO: should maybe make this a tunable?
+        return defaults.GPUCBF_SPECTRA_PER_HEAP  # TODO: should maybe make this a tunable?
 
     def sources(self, feng_id: int) \
             -> Tuple[SimDigRawAntennaVoltageStream, SimDigRawAntennaVoltageStream]:
@@ -527,7 +527,7 @@ class NgcAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
                     name: str,
                     config: Mapping[str, Any],
                     src_streams: Sequence['Stream'],
-                    sensors: Mapping[str, Any]) -> 'NgcAntennaChannelisedVoltageStream':
+                    sensors: Mapping[str, Any]) -> 'GpucbfAntennaChannelisedVoltageStream':
         return cls(
             name, src_streams,
             n_chans=config['n_chans'],
@@ -712,7 +712,7 @@ class BaselineCorrelationProductsStreamBase(CbfPerChannelStream):
 
 
 class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsStreamBase):
-    """Real baseline-correlation-products stream (old correlator)."""
+    """Real baseline-correlation-products stream (external correlator)."""
 
     stream_type: ClassVar[str] = 'cbf.baseline_correlation_products'
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
@@ -764,18 +764,18 @@ class BaselineCorrelationProductsStream(CbfStream, BaselineCorrelationProductsSt
         )
 
 
-class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
-    """Real baseline-correlation-products stream (next-gen correlator)."""
+class GpucbfBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase):
+    """Real baseline-correlation-products stream (GPU correlator)."""
 
-    stream_type: ClassVar[str] = 'ngc.baseline_correlation_products'
-    _valid_src_types: ClassVar[_ValidTypes] = {'ngc.antenna_channelised_voltage'}
+    stream_type: ClassVar[str] = 'gpucbf.baseline_correlation_products'
+    _valid_src_types: ClassVar[_ValidTypes] = {'gpucbf.antenna_channelised_voltage'}
 
     def __init__(self, name: str,
                  src_streams: Sequence[Stream], *,
                  int_time: float,
                  command_line_extra: Iterable[str] = ()) -> None:
         acv = src_streams[0]
-        assert isinstance(acv, NgcAntennaChannelisedVoltageStream)
+        assert isinstance(acv, GpucbfAntennaChannelisedVoltageStream)
         n_ants = len(acv.antennas)
         int_time = self.round_int_time(int_time, acv, acv.n_spectra_per_heap)
         super().__init__(
@@ -792,7 +792,7 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
     if TYPE_CHECKING:     # pragma: nocover
         # Refine the return type for mypy
         @property
-        def antenna_channelised_voltage(self) -> NgcAntennaChannelisedVoltageStream: ...
+        def antenna_channelised_voltage(self) -> GpucbfAntennaChannelisedVoltageStream: ...
 
     @classmethod
     def from_config(cls,
@@ -800,7 +800,7 @@ class NgcBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamBase
                     name: str,
                     config: Mapping[str, Any],
                     src_streams: Sequence['Stream'],
-                    sensors: Mapping[str, Any]) -> 'NgcBaselineCorrelationProductsStream':
+                    sensors: Mapping[str, Any]) -> 'GpucbfBaselineCorrelationProductsStream':
         return cls(
             name, src_streams,
             int_time=config['int_time'],
@@ -981,7 +981,7 @@ class VisStream(Stream):
     stream_type: ClassVar[str] = 'sdp.vis'
     _valid_src_types: ClassVar[_ValidTypes] = {
         'cbf.baseline_correlation_products',
-        'ngc.baseline_correlation_products',
+        'gpucbf.baseline_correlation_products',
         'sim.cbf.baseline_correlation_products'
     }
 
@@ -1385,8 +1385,8 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     'cbf.antenna_channelised_voltage': AntennaChannelisedVoltageStream,
     'cbf.tied_array_channelised_voltage': TiedArrayChannelisedVoltageStream,
     'cbf.baseline_correlation_products': BaselineCorrelationProductsStream,
-    'ngc.antenna_channelised_voltage': NgcAntennaChannelisedVoltageStream,
-    'ngc.baseline_correlation_products': NgcBaselineCorrelationProductsStream,
+    'gpucbf.antenna_channelised_voltage': GpucbfAntennaChannelisedVoltageStream,
+    'gpucbf.baseline_correlation_products': GpucbfBaselineCorrelationProductsStream,
     'sim.cbf.antenna_channelised_voltage': SimAntennaChannelisedVoltageStream,
     'sim.cbf.tied_array_channelised_voltage': SimTiedArrayChannelisedVoltageStream,
     'sim.cbf.baseline_correlation_products': SimBaselineCorrelationProductsStream,

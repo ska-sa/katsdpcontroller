@@ -18,10 +18,10 @@ from .. import product_config, defaults
 from ..product_config import (
     SimDigRawAntennaVoltageStream,
     AntennaChannelisedVoltageStream,
-    NgcAntennaChannelisedVoltageStream,
+    GpucbfAntennaChannelisedVoltageStream,
     SimAntennaChannelisedVoltageStream,
     BaselineCorrelationProductsStream,
-    NgcBaselineCorrelationProductsStream,
+    GpucbfBaselineCorrelationProductsStream,
     SimBaselineCorrelationProductsStream,
     TiedArrayChannelisedVoltageStream,
     SimTiedArrayChannelisedVoltageStream,
@@ -328,12 +328,12 @@ def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream
     )
 
 
-class TestNgcAntennaChanneliseVoltageStream:
-    """Test :class:`~.NgcAntennaChannelisedVoltageStream`."""
+class TestGpucbfAntennaChanneliseVoltageStream:
+    """Test :class:`~.GpucbfAntennaChannelisedVoltageStream`."""
 
     def setup(self) -> None:
         self.config: Dict[str, Any] = {
-            'type': 'ngc.antenna_channelised_voltage',
+            'type': 'gpucbf.antenna_channelised_voltage',
             'src_streams': ['m000h', 'm000v', 'm002h', 'm002v'],
             'n_chans': 4096
         }
@@ -343,7 +343,7 @@ class TestNgcAntennaChanneliseVoltageStream:
         ]
 
     def test_from_config(self) -> None:
-        acv = NgcAntennaChannelisedVoltageStream.from_config(
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
             Options(), 'wide1_acv', self.config, self.src_streams, {}
         )
         assert_equal(acv.name, 'wide1_acv')
@@ -364,14 +364,14 @@ class TestNgcAntennaChanneliseVoltageStream:
         for n_chans in [0, 3, 17]:
             with assert_raises(ValueError):
                 self.config['n_chans'] = n_chans
-                NgcAntennaChannelisedVoltageStream.from_config(
+                GpucbfAntennaChannelisedVoltageStream.from_config(
                     Options(), 'wide1_acv', self.config, self.src_streams, {}
                 )
 
     def test_too_few_channels(self) -> None:
         with assert_raises(ValueError):
             self.config['n_chans'] = 2
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
@@ -379,14 +379,14 @@ class TestNgcAntennaChanneliseVoltageStream:
         with assert_raises_regex(ValueError, 'does not have an even number of elements'):
             del self.config['src_streams'][-1]
             del self.src_streams[-1]
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
     def test_band_mismatch(self) -> None:
         with assert_raises_regex(ValueError, r'Inconsistent bands \(both l and u\)'):
             self.src_streams[1].band = 'u'
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
@@ -395,7 +395,7 @@ class TestNgcAntennaChanneliseVoltageStream:
                 ValueError,
                 r'Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)'):
             self.src_streams[1].adc_sample_rate = 1.0
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
@@ -404,13 +404,13 @@ class TestNgcAntennaChanneliseVoltageStream:
                 ValueError,
                 r'Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)'):
             self.src_streams[-1].centre_frequency = 1.0
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
     def test_input_labels(self) -> None:
         self.config['input_labels'] = ['m900h', 'm900v', 'm901h', 'm901v']
-        acv = NgcAntennaChannelisedVoltageStream.from_config(
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
             Options(), 'wide1_acv', self.config, self.src_streams, {}
         )
         assert_equal(acv.input_labels, self.config['input_labels'])
@@ -418,18 +418,18 @@ class TestNgcAntennaChanneliseVoltageStream:
     def test_bad_input_labels(self) -> None:
         self.config['input_labels'] = ['m900h']
         with assert_raises_regex(ValueError, 'input_labels has 1 elements, expected 4'):
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
         self.config['input_labels'] = ['m900h'] * 4
         with assert_raises_regex(ValueError, 'are not unique'):
-            NgcAntennaChannelisedVoltageStream.from_config(
+            GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
 
     def test_command_line_extra(self) -> None:
         self.config['command_line_extra'] = ['--extra-arg']
-        acv = NgcAntennaChannelisedVoltageStream.from_config(
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
             Options(), 'wide1_acv', self.config, self.src_streams, {}
         )
         assert_equal(acv.command_line_extra, self.config['command_line_extra'])
@@ -511,12 +511,12 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
     )
 
 
-def make_ngc_antenna_channelised_voltage() -> NgcAntennaChannelisedVoltageStream:
+def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
         make_sim_dig_raw_antenna_voltage(name)
         for name in ['m000h', 'm000v', 'm001h', 'm001v']
     ]
-    return NgcAntennaChannelisedVoltageStream(
+    return GpucbfAntennaChannelisedVoltageStream(
         'wide1_acv', src_streams,
         n_chans=4096
     )
@@ -580,23 +580,23 @@ class TestBaselineCorrelationProductsStream:
             )
 
 
-class TestNgcBaselineCorrelationProductsStream:
-    """Test :class:`~.NgcBaselineCorrelationProductsStream`.
+class TestGpucbfBaselineCorrelationProductsStream:
+    """Test :class:`~.GpucbfBaselineCorrelationProductsStream`.
 
     This is not as thorough as :class:`TestBaselineCorrelationProductsStream`
     because a lot of those tests are actually testing the common base class.
     """
 
     def setup(self) -> None:
-        self.acv = make_ngc_antenna_channelised_voltage()
+        self.acv = make_gpucbf_antenna_channelised_voltage()
         self.config: Dict[str, Any] = {
-            'type': 'ngc.baseline_correlation_products',
+            'type': 'gpucbf.baseline_correlation_products',
             'src_streams': 'wide1_acv',
             'int_time': 0.5
         }
 
     def test_from_config(self) -> None:
-        bcp = NgcBaselineCorrelationProductsStream.from_config(
+        bcp = GpucbfBaselineCorrelationProductsStream.from_config(
             Options(), 'wide2_bcp', self.config, [self.acv], {}
         )
         # Note: the test values will probably need to be updated as the
@@ -608,7 +608,7 @@ class TestNgcBaselineCorrelationProductsStream:
 
     def test_command_line_extra(self) -> None:
         self.config['command_line_extra'] = ['--extra-arg']
-        bcp = NgcBaselineCorrelationProductsStream.from_config(
+        bcp = GpucbfBaselineCorrelationProductsStream.from_config(
             Options(), 'wide2_bcp', self.config, [self.acv], {}
         )
         assert_equal(bcp.command_line_extra, self.config['command_line_extra'])

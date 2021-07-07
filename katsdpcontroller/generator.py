@@ -308,9 +308,10 @@ def _make_dsim(
     return dsim
 
 
-def _make_fgpu(g: networkx.MultiDiGraph,
-               configuration: Configuration,
-               stream: product_config.NgcAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
+def _make_fgpu(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        stream: product_config.GpucbfAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
@@ -385,7 +386,7 @@ def _make_fgpu(g: networkx.MultiDiGraph,
 def _make_xgpu(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
-        stream: product_config.NgcBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
+        stream: product_config.GpucbfBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
@@ -1508,9 +1509,9 @@ def build_logical_graph(configuration: Configuration,
         _make_cbf_simulator(g, configuration, stream)
 
     # Correlator
-    for stream in configuration.by_class(product_config.NgcAntennaChannelisedVoltageStream):
+    for stream in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
         _make_fgpu(g, configuration, stream)
-    for stream in configuration.by_class(product_config.NgcBaselineCorrelationProductsStream):
+    for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
         _make_xgpu(g, configuration, stream)
 
     # Pair up spectral and continuum L0 outputs
