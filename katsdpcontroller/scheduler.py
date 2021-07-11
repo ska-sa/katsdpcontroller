@@ -727,7 +727,7 @@ class GPURequest(ResourceRequestsContainer):
         cores (ignored if no CPU cores are reserved).
     name : str, optional
         If specified, the name of the GPU must match this.
-    min_compute_capability : Tuple[int], optional
+    min_compute_capability : Tuple[int, int], optional
         If specified, the minimum CUDA compute capability
     """
 

@@ -192,7 +192,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
-    telstate.pass_telstate = False
+    telstate.pass_telstate = False  # Don't pass --telstate to telstate itself
     telstate.final_state = CaptureBlockState.DEAD
     g.add_node(telstate)
     return telstate
@@ -271,7 +271,7 @@ def _make_dsim(
     # m012h and m012v then m012v comes first.
     streams = sorted(streams, key=lambda stream: stream.name, reverse=True)
 
-    n_endpoints = 8  # Matches SKARAB digitisers
+    n_endpoints = 8  # Matches MeerKAT digitisers
 
     # Generate a unique name. The caller groups streams by
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
