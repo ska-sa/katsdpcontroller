@@ -10,7 +10,7 @@ import async_timeout
 import aiokatcp
 from aiokatcp import FailReply, InvalidReply, Sensor
 from prometheus_client import Histogram
-from katsdptelstate.endpoint import Endpoint
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from . import scheduler, sensor_proxy, product_config
 
@@ -142,6 +142,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Set to true if the image uses katsdpservices.setup_logging() and hence
         # can log directly to logstash without logspout.
         self.katsdpservices_logging = True
+        # Set to true if the task should receive --telstate on the command line.
+        self.pass_telstate = True
         # Set to a time in seconds to indicate time spent collecting the data
         # to be processed.
         self.batch_data_time = None
@@ -324,9 +326,26 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         self.device_status_observer = None
 
     def subst_args(self, resolver):
+        """Add extra values for substitution into command lines.
+
+        The extra keys are:
+
+        capture_block_id
+            If this task is specific to a single capture block, contains the
+            capture block ID. Otherwise it is absent.
+        endpoints_vector
+            A dictionary with the same keys as ``endpoints``, but where each
+            value is an array of endpoints. Typically this will just be a
+            singleton array, but where the endpoint address has the form
+            x.x.x.x+n, it will be expanded to n+1 sequential IP addresses.
+        """
         args = super().subst_args(resolver)
         if self.capture_block_id is not None:
             args['capture_block_id'] = self.capture_block_id
+        args['endpoints_vector'] = {
+            name: endpoint_list_parser(endpoint.port)(endpoint.host)
+            for name, endpoint in self.endpoints.items()
+        }
         return args
 
     @property

@@ -1,11 +1,14 @@
 import math
+import itertools
 import logging
 import re
 import time
 import copy
 import urllib.parse
 import os.path
-from typing import List, Dict, Tuple, Set, Sequence, Type, Union, Optional, Any, TYPE_CHECKING
+from typing import (
+    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING
+)
 
 import addict
 import networkx
@@ -61,6 +64,7 @@ CAPTURE_TRANSITIONS = {
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
 IMAGES = frozenset([
     'katcbfsim',
+    'katfgpu',
     'katsdpbfingest',
     'katsdpcal',
     'katsdpcam2telstate',
@@ -70,7 +74,8 @@ IMAGES = frozenset([
     'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME),
     'katsdpdatawriter',
     'katsdpmetawriter',
-    'katsdptelstate'
+    'katsdptelstate',
+    'katxgpu'
 ])
 #: Number of bytes used by spectral imager per visibility
 BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
@@ -187,6 +192,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
+    telstate.pass_telstate = False  # Don't pass --telstate to telstate itself
     telstate.final_state = CaptureBlockState.DEAD
     g.add_node(telstate)
     return telstate
@@ -247,6 +253,221 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
         'rdb_path': OBJ_DATA_VOL.container_path
     })
     return meta_writer
+
+
+def _make_dsim(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
+        sync_time: float) -> scheduler.LogicalNode:
+    """Create the dsim process for a single antenna.
+
+    An antenna has a separate stream per polarisation, so `streams` will
+    normally have two elements.
+    """
+    # dsim assigns digitiser IDs positionally. According to M1000-0001-053,
+    # the least significant bit is the polarization ID with 0 = vertical, so
+    # sort by reverse of name so that if the streams are, for example,
+    # m012h and m012v then m012v comes first.
+    streams = sorted(streams, key=lambda stream: stream.name, reverse=True)
+
+    n_endpoints = 8  # Matches MeerKAT digitisers
+
+    # Generate a unique name. The caller groups streams by
+    # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
+    name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
+    dsim = SDPLogicalTask(name)
+    dsim.image = 'katfgpu'
+    dsim.cpus = 1   # TODO: scale it according to bandwidth.
+    dsim.mem = 128  # TODO: this is a guess. Check what it actually needs.
+    dsim.cores = [None]  # Pin to a single core (TODO: maybe don't in develop mode)
+    dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
+    dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+    dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
+    dsim.command = [
+        'capambel', '-c', 'cap_net_raw+p', '--',  # Gives NET_RAW capability to invoked command
+        'dsim',
+        '--interface', '{interfaces[cbf].ipv4_address}',
+        '--adc-rate', str(streams[0].adc_sample_rate),
+        '--ttl', '4',
+        '--sync-time', str(sync_time)
+    ]
+    dsim.command += streams[0].command_line_extra
+    # dsim doesn't use katsdpservices or telstate
+    dsim.katsdpservices_logging = False
+    dsim.katsdpservices_config = False
+    dsim.pass_telstate = False
+    g.add_node(dsim)
+    for stream in streams:
+        # {{ and }} become { and } after f-string interpolation
+        dsim.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
+        multicast = LogicalMulticast('multicast.' + stream.name, n_endpoints)
+        g.add_node(multicast)
+        g.add_edge(dsim, multicast, port='spead', depends_resolve=True)
+        g.add_edge(multicast, dsim, depends_init=True, depends_ready=True)
+    return dsim
+
+
+def _make_fgpu(g: networkx.MultiDiGraph,
+               configuration: Configuration,
+               stream: product_config.NgcAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
+    ibv = not configuration.options.develop
+    n_engines = len(stream.src_streams) // 2
+    fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
+    g.add_node(fgpu_group)
+
+    dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
+    g.add_node(dst_multicast)
+    g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
+
+    for i in range(0, n_engines):
+        srcs = stream.sources(i)
+        fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
+        fgpu.image = 'katfgpu'
+        fgpu.cpus = 3
+        fgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
+        fgpu.cores = ['src0', 'src1', 'dst']
+        # TODO: could specify separate interface requests for input and
+        # output. Currently that's not possible because interfaces are looked
+        # up by network name.
+        fgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        fgpu.interfaces[0].bandwidth_in = sum(src.data_rate() for src in srcs)
+        # stream.data_rate() is sum over all the engines
+        fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+        fgpu.gpus = [scheduler.GPURequest()]
+        fgpu.gpus[0].compute = 0.5  # TODO: scale according to bandwidth
+        fgpu.gpus[0].mem = 1024     # TODO: check what it really needs
+        fgpu.command = [
+            'fgpu',
+            '--src-interface', '{interfaces[cbf].name}',
+            '--src-affinity', '{cores[src0]},{cores[src1]}',
+            '--dst-interface', '{interfaces[cbf].name}',
+            '--dst-affinity', '{cores[dst]}',
+            # TODO: reenable once katxgpu can handle it
+            # '--dst-packet-payload', '8192',
+            '--adc-rate', str(srcs[0].adc_sample_rate),
+            '--feng-id', str(i),
+            '--channels', str(stream.n_chans)
+        ]
+        if ibv:
+            # Enable cap_net_raw capability for access to raw QPs
+            fgpu.command = ['capambel', '-c', 'cap_net_raw+p', '--'] + fgpu.command
+            fgpu.capabilities.append('NET_RAW')
+            # Use the core numbers as completion vectors. This ensures that
+            # multiple instances on a machine will use distinct vectors.
+            fgpu.command += [
+                '--src-ibv',
+                '--src-comp-vector', '{cores[src0]},{cores[src1]}',
+                '--dst-ibv',
+                '--dst-comp-vector', '{cores[dst]}'
+            ]
+        fgpu.command += stream.command_line_extra
+        # fgpu doesn't use katsdpservices or telstate for config, but does use logging
+        fgpu.katsdpservices_config = False
+        fgpu.pass_telstate = False
+        g.add_node(fgpu)
+
+        # Wire it up to the multicast streams
+        for src in srcs:
+            src_multicast = find_node(g, f'multicast.{src.name}')
+            g.add_edge(fgpu, src_multicast, port='spead',
+                       depends_resolve=True, depends_init=True, depends_ready=True)
+            fgpu.command.append(f'{{endpoints[multicast.{src.name}_spead]}}')
+        g.add_edge(fgpu, dst_multicast, port='spead', depends_resolve=True)
+        fgpu.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
+
+        # Link it to the group, so that downstream tasks need only depend on the group.
+        g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
+
+    return fgpu_group
+
+
+def _make_xgpu(
+        g: networkx.MultiDiGraph,
+        configuration: Configuration,
+        stream: product_config.NgcBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
+    ibv = not configuration.options.develop
+    acv = stream.antenna_channelised_voltage
+    n_engines = stream.n_substreams
+    xgpu_group = LogicalGroup(f'xgpu.{stream.name}')
+    g.add_node(xgpu_group)
+
+    dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
+    g.add_node(dst_multicast)
+    g.add_edge(dst_multicast, xgpu_group, depends_init=True, depends_ready=True)
+
+    for i in range(0, stream.n_substreams):
+        xgpu = SDPLogicalTask(f'x.{stream.name}.{i}')
+        xgpu.image = 'katxgpu'
+        xgpu.cpus = 1    # TODO: could be less in develop mode?
+        xgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
+        xgpu.cores = ['core']
+        xgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        xgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
+        xgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+        xgpu.gpus = [scheduler.GPURequest()]
+        xgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
+        xgpu.gpus[0].mem = 1024       # TODO: check what it really needs
+        # Minimum capability as a function of bits-per-sample, based on
+        # tensor_core_correlation_kernel.mako from katxgpu.
+        min_compute_capability = {
+            4: (7, 3),
+            8: (7, 2),
+            16: (7, 0)
+        }
+        xgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
+        first_dig = acv.sources(0)[0]
+        # TODO: It's not necessary to set core affinity by command-line option
+        # because there is only one core reserved and the scheduler will bind
+        # it, but they're currently required arguments.
+        heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
+        xgpu.command = [
+            'xgpu',
+            '--adc-sample-rate', str(first_dig.adc_sample_rate),
+            '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
+            '--channels-total', str(stream.n_chans),
+            '--channels-in-stream', str(stream.n_chans_per_substream),
+            '--samples-per-channel', str(acv.n_spectra_per_heap),
+            '--channel-offset-value', str(i * stream.n_chans_per_substream),
+            '--pols', '2',
+            '--sample-bits', str(acv.bits_per_sample),
+            '--src-interface-address', '{interfaces[cbf].ipv4_address}',
+            '--dest-interface-address', '{interfaces[cbf].ipv4_address}',
+            '--receiver-thread-affinity', '{cores[core]}',
+            '--sender-thread-affinity', '{cores[core]}',
+            '--heap-accumulation-threshold', str(round(stream.int_time / heap_time))
+        ]
+        if ibv:
+            # Enable cap_net_raw capability for access to raw QPs
+            xgpu.capabilities.append('NET_RAW')
+            # Use the core number as completion vector. This ensures that
+            # multiple instances on a machine will use distinct vectors.
+            xgpu.command += [
+                '--receiver-comp-vector-affinity', '{cores[core]}'
+            ]
+        xgpu.command += stream.command_line_extra
+        # xgpu doesn't use katsdpservices or telstate
+        xgpu.katsdpservices_logging = False
+        xgpu.katsdpservices_config = False
+        xgpu.pass_telstate = False
+        g.add_node(xgpu)
+
+        # Wire it up to the multicast streams
+        src_multicast = find_node(g, f'multicast.{acv.name}')
+        g.add_edge(xgpu, src_multicast, port='spead',
+                   depends_resolve=True, depends_init=True, depends_ready=True)
+        g.add_edge(xgpu, dst_multicast, port='spead', depends_resolve=True)
+        xgpu.command += [
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].host}}',
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].port}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].host}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].port}}'
+        ]
+
+        # Link it to the group, so that downstream tasks need only depend on the group.
+        g.add_edge(xgpu_group, xgpu, depends_ready=True, depends_init=True)
+
+    return xgpu_group
 
 
 def _make_cbf_simulator(g: networkx.MultiDiGraph,
@@ -1269,10 +1490,28 @@ def build_logical_graph(configuration: Configuration,
     meta_writer = _make_meta_writer(g, configuration)
 
     # Simulators
+    def dsim_key(stream: product_config.SimDigRawAntennaVoltageStream) -> Tuple[str, float]:
+        """Key for dsim streams that should be run in the same process."""
+        return (stream.antenna.name, stream.adc_sample_rate)
+
+    sync_time = time.time()
+    for _, streams in itertools.groupby(
+            sorted(
+                configuration.by_class(product_config.SimDigRawAntennaVoltageStream),
+                key=dsim_key
+            ),
+            key=dsim_key):
+        _make_dsim(g, configuration, streams, sync_time)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
         _make_cbf_simulator(g, configuration, stream)
+
+    # Correlator
+    for stream in configuration.by_class(product_config.NgcAntennaChannelisedVoltageStream):
+        _make_fgpu(g, configuration, stream)
+    for stream in configuration.by_class(product_config.NgcBaselineCorrelationProductsStream):
+        _make_xgpu(g, configuration, stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -1360,9 +1599,10 @@ def build_logical_graph(configuration: Configuration,
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Connect every task to telstate
             if node is not telstate:
-                node.command.extend([
-                    '--telstate', '{endpoints[telstate_telstate]}',
-                    '--name', node.name])
+                if node.pass_telstate:
+                    node.command.extend([
+                        '--telstate', '{endpoints[telstate_telstate]}',
+                        '--name', node.name])
                 node.wrapper = configuration.options.wrapper
                 g.add_edge(node, telstate, port='telstate',
                            depends_ready=True, depends_kill=True)
