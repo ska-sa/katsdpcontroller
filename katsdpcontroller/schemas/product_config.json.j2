@@ -264,8 +264,8 @@
 {% endif %}
 {% if version >= "3.1" %}
                                 "sim.dig.raw_antenna_voltage",
-                                "ngc.antenna_channelised_voltage",
-                                "ngc.baseline_correlation_products",
+                                "gpucbf.antenna_channelised_voltage",
+                                "gpucbf.baseline_correlation_products",
 {% endif %}
                                 "sdp.vis",
                                 "sdp.cal",
@@ -538,7 +538,7 @@
                             }
                         },
                         {
-                            "if": {"properties": {"type": {"const": "ngc.antenna_channelised_voltage"}}},
+                            "if": {"properties": {"type": {"const": "gpucbf.antenna_channelised_voltage"}}},
                             "then": {
                                 "properties": {
                                     "type": {},
@@ -566,7 +566,7 @@
                             }
                         },
                         {
-                            "if": {"properties": {"type": {"const": "ngc.baseline_correlation_products"}}},
+                            "if": {"properties": {"type": {"const": "gpucbf.baseline_correlation_products"}}},
                             "then": {
                                 "properties": {
                                     "type": {},
