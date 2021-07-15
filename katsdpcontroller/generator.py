@@ -409,7 +409,7 @@ def _make_xbgpu(
         xbgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
         xbgpu.gpus[0].mem = 1024       # TODO: check what it really needs
         # Minimum capability as a function of bits-per-sample, based on
-        # tensor_core_correlation_kernel.mako from katxbgpu.
+        # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
         min_compute_capability = {
             4: (7, 3),
             8: (7, 2),
