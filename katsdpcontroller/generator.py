@@ -82,6 +82,8 @@ BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
 _N16_32 = 16 * 17 * 2 * 32768
+#: Maximum sample rate for supported bands (S-band)
+_MAX_ADC_SAMPLE_RATE = 1750e6
 #: Volume serviced by katsdptransfer to transfer results to the archive
 DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 #: Like DATA_VOL, but for high speed data to be transferred to an object store
@@ -277,9 +279,17 @@ def _make_dsim(
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
     dsim = SDPLogicalTask(name)
     dsim.image = 'katgpucbf'
-    dsim.cpus = 1   # TODO: scale it according to bandwidth.
-    dsim.mem = 128  # TODO: this is a guess. Check what it actually needs.
-    dsim.cores = [None]  # Pin to a single core (TODO: maybe don't in develop mode)
+    if configuration.options.develop:
+        # In develop mode, scale down reservation for low bandwidths to allow
+        # testing low-bandwidth arrays on a single machine. Use a full core
+        # for the maximum sample rate (which is generous - it only needs
+        # about 50% for S-band, depending on the CPU).
+        total_adc_sample_rate = sum(stream.adc_sample_rate for stream in streams)
+        dsim.cpus = min(1.0, total_adc_sample_rate / (2 * _MAX_ADC_SAMPLE_RATE))
+    else:
+        dsim.cpus = 1
+        dsim.cores = [None]  # Pin to a single core for more reliable timing
+    dsim.mem = 64
     dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
     dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
@@ -324,7 +334,7 @@ def _make_fgpu(
         fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
         fgpu.image = 'katgpucbf'
         fgpu.cpus = 3
-        fgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
+        fgpu.mem = 3072  # Actual use is currently around 2.2 GB
         fgpu.cores = ['src0', 'src1', 'dst']
         fgpu.ports = ['port']
         # TODO: could specify separate interface requests for input and
@@ -335,8 +345,10 @@ def _make_fgpu(
         # stream.data_rate() is sum over all the engines
         fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         fgpu.gpus = [scheduler.GPURequest()]
-        fgpu.gpus[0].compute = 0.5  # TODO: scale according to bandwidth
-        fgpu.gpus[0].mem = 1024     # TODO: check what it really needs
+        # Run at least 2 per GPU, scaling with bandwidth. This will
+        # likely need to be revised based on the GPU model selected.
+        fgpu.gpus[0].compute = 0.5 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+        fgpu.gpus[0].mem = 3072     # Actual use is about 2.5GB, independent of channel count
         fgpu.command = [
             'fgpu',
             '--src-interface', '{interfaces[cbf].name}',
