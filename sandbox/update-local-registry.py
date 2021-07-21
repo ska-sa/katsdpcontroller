@@ -45,7 +45,8 @@ IMAGE_INFO = {
     'katsdpingest_geforce_gtx_titan_x': ImageInfo(action=Action.TUNE, repo='katsdpingest'),
     'katsdpingest': ImageInfo(action=Action.BUILD),
     'katsdpimager': ImageInfo(action=Action.BUILD),
-    'katcbfsim': ImageInfo(action=Action.BUILD)
+    'katcbfsim': ImageInfo(action=Action.BUILD),
+    'katgpucbf': ImageInfo(action=Action.BUILD)
 }
 
 
