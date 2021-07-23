@@ -266,6 +266,7 @@ def _make_dsim(
     An antenna has a separate stream per polarisation, so `streams` will
     normally have two elements.
     """
+    ibv = not configuration.options.develop
     # dsim assigns digitiser IDs positionally. According to M1000-0001-053,
     # the least significant bit is the polarization ID with 0 = vertical, so
     # sort by reverse of name so that if the streams are, for example,
@@ -290,8 +291,7 @@ def _make_dsim(
         dsim.cpus = 1
         dsim.cores = [None]  # Pin to a single core for more reliable timing
     dsim.mem = 64
-    dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
-    dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=True)]
+    dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         'dsim',
@@ -300,6 +300,9 @@ def _make_dsim(
         '--ttl', '4',
         '--sync-time', str(sync_time)
     ]
+    if ibv:
+        dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
+        dsim.command += ['--ibv']
     dsim.command += streams[0].command_line_extra
     # dsim doesn't use katsdpservices or telstate
     dsim.katsdpservices_logging = False
