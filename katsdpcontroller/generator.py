@@ -260,7 +260,7 @@ def _make_dsim(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
         streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
-        sync_time: float) -> scheduler.LogicalNode:
+        sync_time: int) -> scheduler.LogicalNode:
     """Create the dsim process for a single antenna.
 
     An antenna has a separate stream per polarisation, so `streams` will
@@ -319,7 +319,8 @@ def _make_dsim(
 def _make_fgpu(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
-        stream: product_config.GpucbfAntennaChannelisedVoltageStream) -> scheduler.LogicalNode:
+        stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+        sync_time: int) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
@@ -360,6 +361,7 @@ def _make_fgpu(
             '--adc-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
             '--channels', str(stream.n_chans),
+            '--sync-epoch', str(sync_time),
             '--katcp-port', '{ports[port]}'
         ]
         if ibv:
@@ -1506,7 +1508,7 @@ def build_logical_graph(configuration: Configuration,
         """Key for dsim streams that should be run in the same process."""
         return (stream.antenna.name, stream.adc_sample_rate)
 
-    sync_time = time.time()
+    sync_time = int(time.time())
     for _, streams in itertools.groupby(
             sorted(
                 configuration.by_class(product_config.SimDigRawAntennaVoltageStream),
@@ -1521,7 +1523,7 @@ def build_logical_graph(configuration: Configuration,
 
     # Correlator
     for stream in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
-        _make_fgpu(g, configuration, stream)
+        _make_fgpu(g, configuration, stream, sync_time)
     for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
         _make_xbgpu(g, configuration, stream)
 
