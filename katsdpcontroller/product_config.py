@@ -208,10 +208,12 @@ class Options:
     def __init__(self, *, develop: bool = False,
                  wrapper: Optional[str] = None,
                  image_tag: Optional[str] = None,
+                 image_overrides: Mapping[str, str] = {},
                  service_overrides: Mapping[str, ServiceOverride] = {}) -> None:
         self.develop = develop
         self.wrapper = wrapper
         self.image_tag = image_tag
+        self.image_overrides = dict(image_overrides)
         self.service_overrides = dict(service_overrides)
 
     @classmethod
@@ -224,6 +226,7 @@ class Options:
             develop=config.get('develop', False),
             wrapper=config.get('wrapper'),
             image_tag=config.get('image_tag'),
+            image_overrides=config.get('image_overrides', {}),
             service_overrides=service_overrides
         )
 

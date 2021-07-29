@@ -1491,8 +1491,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             resolver_factory_args = dict(tag=image_tag)
         else:
             resolver_factory_args = {}
+        image_resolver = self.image_resolver_factory(**resolver_factory_args)
+        for image_name, image_path in configuration.options.image_overrides.items():
+            image_resolver.override(image_name, image_path)
         resolver = Resolver(
-            self.image_resolver_factory(**resolver_factory_args),
+            image_resolver,
             scheduler.TaskIDAllocator(name + '-'),
             self.sched.http_url if self.sched else '',
             configuration.options.service_overrides,
