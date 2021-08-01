@@ -23,7 +23,6 @@ import numpy as np
 from addict import Dict
 import aiokatcp
 from aiokatcp import Message, FailReply, Sensor
-from aiokatcp.test.test_utils import timelimit
 from prometheus_client import CollectorRegistry
 import pymesos
 import networkx
@@ -44,7 +43,7 @@ from ..product_controller import (
     CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import (create_patch, assert_request_fails, assert_sensors, DelayedManager,
+from .utils import (create_patch, assert_request_fails, assert_sensors, timelimit, DelayedManager,
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 

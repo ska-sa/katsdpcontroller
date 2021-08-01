@@ -17,13 +17,13 @@ from typing import Dict, Mapping, Any, Optional
 
 import aiokatcp
 from aiokatcp import Sensor, SensorSet, Address
-from aiokatcp.test.test_utils import timelimit
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 import asynctest
 
 from ..sensor_proxy import SensorProxyClient, PrometheusInfo, PrometheusWatcher
 from ..controller import device_server_sockname
+from .utils import timelimit
 
 
 class MyEnum(enum.Enum):
