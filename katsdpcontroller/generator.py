@@ -463,8 +463,7 @@ def _make_xbgpu(
                 '--receiver-comp-vector-affinity', '{cores[core]}'
             ]
         xbgpu.command += stream.command_line_extra
-        # xbgpu doesn't use katsdpservices or telstate
-        xbgpu.katsdpservices_logging = False
+        # xbgpu doesn't use katsdpservices for configuration, or telstate
         xbgpu.katsdpservices_config = False
         xbgpu.pass_telstate = False
         g.add_node(xbgpu)
