@@ -419,6 +419,7 @@ def _make_xbgpu(
         xbgpu.cpus = 1    # TODO: could be less in develop mode?
         xbgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
         xbgpu.cores = ['core']
+        xbgpu.ports = ['port']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
@@ -452,7 +453,8 @@ def _make_xbgpu(
             '--dest-interface-address', '{interfaces[cbf].ipv4_address}',
             '--receiver-thread-affinity', '{cores[core]}',
             '--sender-thread-affinity', '{cores[core]}',
-            '--heap-accumulation-threshold', str(round(stream.int_time / heap_time))
+            '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
+            '--katcp-port', '{ports[port]}'
         ]
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
