@@ -413,19 +413,22 @@ def _make_xbgpu(
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
+    bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+    # * 4 is for 2 polarisations, each with real+complex
+    batch_size = len(acv.antennas) * stream.n_chans_per_endpoint * 4 * acv.bits_per_sample // 8
     for i in range(0, stream.n_substreams):
         xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
         xbgpu.image = 'katgpucbf'
-        xbgpu.cpus = 1    # TODO: could be less in develop mode?
-        xbgpu.mem = 4096  # TODO: this is a guess. Check what it actually needs.
+        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.0
+        xbgpu.mem = 800 + _mb(64 * batch_size)
         xbgpu.cores = ['core']
         xbgpu.ports = ['port']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
-        xbgpu.gpus[0].compute = 0.125  # TODO: scale according to problem size
-        xbgpu.gpus[0].mem = 1024       # TODO: check what it really needs
+        xbgpu.gpus[0].compute = 0.08 * bw_scale
+        xbgpu.gpus[0].mem = 512 + _mb(32 * batch_size)
         # Minimum capability as a function of bits-per-sample, based on
         # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
         min_compute_capability = {

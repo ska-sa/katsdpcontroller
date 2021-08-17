@@ -786,7 +786,6 @@ class GpucbfBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamB
             int_time=int_time,
             n_endpoints=acv.n_substreams,
             n_chans_per_substream=acv.n_chans_per_substream,
-            # TODO: is this correct for the tensorcore xgpu?
             n_baselines=n_ants * (n_ants + 1) * 2,
             bits_per_sample=32
         )
