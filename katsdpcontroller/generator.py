@@ -428,7 +428,7 @@ def _make_xbgpu(
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
         xbgpu.gpus[0].compute = 0.08 * bw_scale
-        xbgpu.gpus[0].mem = 512 + _mb(32 * batch_size)
+        xbgpu.gpus[0].mem = 100 + _mb(32 * batch_size)
         # Minimum capability as a function of bits-per-sample, based on
         # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
         min_compute_capability = {
