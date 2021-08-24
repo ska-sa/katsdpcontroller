@@ -363,6 +363,7 @@ def _make_fgpu(
             # '--dst-packet-payload', '8192',
             '--adc-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
+            '--array-size', str(n_engines),
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
             '--katcp-port', '{ports[port]}'
