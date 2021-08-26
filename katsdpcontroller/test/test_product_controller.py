@@ -837,6 +837,21 @@ class TestSDPController(BaseTestSDPController):
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
 
+        # Verify static katcp sensors.
+        # Baseline ordering
+        _reply, informs = await self.client.request("sensor-value", f"bls-ordering")
+        bls_ordering = informs[0].arguments[4].decode("ascii")
+        expected_bls_ordering = "[('gpucbf_m900v', 'gpucbf_m900v'), " \
+                                "('gpucbf_m900v', 'gpucbf_m900h'), " \
+                                "('gpucbf_m900h', 'gpucbf_m900v'), " \
+                                "('gpucbf_m900h', 'gpucbf_m900h')]"
+        self.assertEqual(bls_ordering, expected_bls_ordering)
+
+        _reply, informs = await self.client.request("sensor-value", f"n-bls")
+        n_bls = int(informs[0].arguments[4].decode("ascii"))
+        expected_n_bls = 4
+        self.assertEqual(n_bls, expected_n_bls)
+
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
