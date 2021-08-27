@@ -844,18 +844,25 @@ class TestSDPController(BaseTestSDPController):
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
             "('gpucbf_m900h', 'gpucbf_m900v'), "
             "('gpucbf_m900v', 'gpucbf_m900h'), "
-            "('gpucbf_m900h', 'gpucbf_m900h')]"
+            "('gpucbf_m900h', 'gpucbf_m900h'), "
+            "('gpucbf_m900v', 'gpucbf_m901v'), "
+            "('gpucbf_m900h', 'gpucbf_m901v'), "
+            "('gpucbf_m900v', 'gpucbf_m901h'), "
+            "('gpucbf_m900h', 'gpucbf_m901h'), "
+            "('gpucbf_m901v', 'gpucbf_m901v'), "
+            "('gpucbf_m901h', 'gpucbf_m901v'), "
+            "('gpucbf_m901v', 'gpucbf_m901h'), "
+            "('gpucbf_m901h', 'gpucbf_m901h')]"
         )
         await assert_sensor_value(
             self.client,
             "gpucbf_baseline_correlation_products-bls-ordering",
             expected_bls_ordering
         )
-        expected_n_bls = 4
         await assert_sensor_value(
             self.client,
             "gpucbf_baseline_correlation_products-n-bls",
-            expected_n_bls
+            12
         )
 
     async def test_product_configure_telstate_fail(self) -> None:
