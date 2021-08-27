@@ -840,7 +840,33 @@ class TestSDPController(BaseTestSDPController):
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
 
-        # Test that multicast stream addresses are advertised as sensors
+        # Verify katcp sensors.
+        # Baseline ordering
+        expected_bls_ordering = (
+            "[('gpucbf_m900v', 'gpucbf_m900v'), "
+            "('gpucbf_m900h', 'gpucbf_m900v'), "
+            "('gpucbf_m900v', 'gpucbf_m900h'), "
+            "('gpucbf_m900h', 'gpucbf_m900h'), "
+            "('gpucbf_m900v', 'gpucbf_m901v'), "
+            "('gpucbf_m900h', 'gpucbf_m901v'), "
+            "('gpucbf_m900v', 'gpucbf_m901h'), "
+            "('gpucbf_m900h', 'gpucbf_m901h'), "
+            "('gpucbf_m901v', 'gpucbf_m901v'), "
+            "('gpucbf_m901h', 'gpucbf_m901v'), "
+            "('gpucbf_m901v', 'gpucbf_m901h'), "
+            "('gpucbf_m901h', 'gpucbf_m901h')]"
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-bls-ordering",
+            expected_bls_ordering
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-bls",
+            12
+        )
+        # Test a multicast stream destination sensor
         stream_name = 'gpucbf_baseline_correlation_products'
         node = product._nodes[f'multicast.{stream_name}']
         await assert_sensor_value(

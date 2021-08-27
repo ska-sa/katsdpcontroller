@@ -1274,6 +1274,11 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             try:
                 resolver = self.resolver
                 resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+
+                # Register static KATCP sensors.
+                for ss in self.physical_graph.graph["static_sensors"].values():
+                    self.add_sensor(ss)
+
                 # launch the telescope state for this graph
                 telstate = await self._launch_telstate()
                 # launch containers for those nodes that require them
