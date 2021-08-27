@@ -29,6 +29,7 @@ import networkx
 import netifaces
 import aioredis
 import katsdptelstate.aio.memory
+from katsdptelstate.endpoint import Endpoint
 import katpoint
 import katdal
 import katsdpmodels.band_mask
@@ -43,7 +44,8 @@ from ..product_controller import (
     CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import (create_patch, assert_request_fails, assert_sensors, timelimit, DelayedManager,
+from .utils import (create_patch, assert_request_fails, assert_sensor_value,
+                    assert_sensors, timelimit, DelayedManager,
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
@@ -834,8 +836,18 @@ class TestSDPController(BaseTestSDPController):
         # Verify the state of the subarray
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert isinstance(product, SDPSubarrayProduct)  # For mypy's benefit
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
+
+        # Test that multicast stream addresses are advertised as sensors
+        stream_name = 'gpucbf_baseline_correlation_products'
+        node = product._nodes[f'multicast.{stream_name}']
+        await assert_sensor_value(
+            self.client,
+            f'{stream_name}-destination',
+            str(Endpoint(node.host, node.ports['spead']))
+        )
 
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
