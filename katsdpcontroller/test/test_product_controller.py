@@ -842,8 +842,8 @@ class TestSDPController(BaseTestSDPController):
         # Baseline ordering
         expected_bls_ordering = (
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
-            "('gpucbf_m900v', 'gpucbf_m900h'), "
             "('gpucbf_m900h', 'gpucbf_m900v'), "
+            "('gpucbf_m900v', 'gpucbf_m900h'), "
             "('gpucbf_m900h', 'gpucbf_m900h')]"
         )
         await assert_sensor_value(

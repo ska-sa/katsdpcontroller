@@ -431,7 +431,7 @@ def _make_xbgpu(
         for a1 in range(a2 + 1):
             for p1 in range(2):
                 for p2 in range(2):
-                    idx = get_baseline_index(a1, a2) * 4 + p1 * 2 + p2
+                    idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     static_sensors = [
         Sensor(str, f"{stream.name}-bls-ordering",
