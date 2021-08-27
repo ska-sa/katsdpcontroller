@@ -43,7 +43,8 @@ from ..product_controller import (
     CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import (create_patch, assert_request_fails, assert_sensors, timelimit, DelayedManager,
+from .utils import (create_patch, assert_request_fails, assert_sensor_value,
+                    assert_sensors, timelimit, DelayedManager,
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
@@ -836,6 +837,33 @@ class TestSDPController(BaseTestSDPController):
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
+
+        # Verify static katcp sensors.
+        # Baseline ordering
+        expected_bls_ordering = (
+            "[('gpucbf_m900v', 'gpucbf_m900v'), "
+            "('gpucbf_m900h', 'gpucbf_m900v'), "
+            "('gpucbf_m900v', 'gpucbf_m900h'), "
+            "('gpucbf_m900h', 'gpucbf_m900h'), "
+            "('gpucbf_m900v', 'gpucbf_m901v'), "
+            "('gpucbf_m900h', 'gpucbf_m901v'), "
+            "('gpucbf_m900v', 'gpucbf_m901h'), "
+            "('gpucbf_m900h', 'gpucbf_m901h'), "
+            "('gpucbf_m901v', 'gpucbf_m901v'), "
+            "('gpucbf_m901h', 'gpucbf_m901v'), "
+            "('gpucbf_m901v', 'gpucbf_m901h'), "
+            "('gpucbf_m901h', 'gpucbf_m901h')]"
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-bls-ordering",
+            expected_bls_ordering
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-bls",
+            12
+        )
 
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""

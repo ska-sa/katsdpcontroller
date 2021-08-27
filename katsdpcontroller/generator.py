@@ -15,6 +15,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
+from aiokatcp.sensor import Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -413,6 +414,37 @@ def _make_xbgpu(
     dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
+
+    # Input labels list `h` and `v` pols separately so the reshape is to
+    # make the process a bit smoother.
+    ants = np.array(acv.input_labels).reshape(-1, 2)
+    n_ants = ants.shape[0]
+
+    def get_baseline_index(a1, a2):
+        return a2 * (a2 + 1) // 2 + a1
+
+    # Calculating the inputs given the index is hard. So we iterate through
+    # combinations of inputs instead, and calculate the index, and update the
+    # relevant entry in a LUT.
+    bls_ordering = [None] * stream.n_baselines
+    for a2 in range(n_ants):
+        for a1 in range(a2 + 1):
+            for p1 in range(2):
+                for p2 in range(2):
+                    idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
+                    bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
+    static_sensors = [
+        Sensor(str, f"{stream.name}-bls-ordering",
+               "A string showing the output ordering of baseline data "
+               "produced by the X-engines in this instrument, as a list "
+               "of correlation pairs given by input label.",
+               default=str(bls_ordering), initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-bls", "The number of baselines produced by "
+               "this correlator instrument.",
+               default=stream.n_baselines, initial_status=Sensor.Status.NOMINAL)
+    ]
+    for ss in static_sensors:
+        g.graph["static_sensors"].add(ss)
 
     bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
     # * 4 is for 2 polarisations, each with real+complex
@@ -1480,10 +1512,16 @@ def build_logical_graph(configuration: Configuration,
         'sdp_archived_streams': archived_streams,
         'sdp_config': config_dict
     }
+
+    # Static sensors that are created for individual streams and managed by the
+    # product controller.
+    static_sensors = SensorSet()
+
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
-        config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {})
+        config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {}),
+        static_sensors=static_sensors
     )
 
     # telstate node
