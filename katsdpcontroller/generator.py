@@ -419,28 +419,29 @@ def _make_xbgpu(
     # make the process a bit smoother.
     ants = np.array(acv.input_labels).reshape(-1, 2)
     n_ants = ants.shape[0]
-    num_bls = num_ants*(num_ants + 1)*2  # In agreement with how it's calculated in katgpucbf.
 
     def get_baseline_index(a1, a2):
-        # This is the inverse of the function in katgpucbf.xbgpu, because SDP
-        # wants the other half of the visibilities matrix.
         return a2 * (a2 + 1) // 2 + a1
 
     # Calculating the inputs given the index is hard. So we iterate through
     # combinations of inputs instead, and calculate the index, and update the
     # relevant entry in a LUT.
-    bls_ordering = [None] * num_bls
-    for a2 in range(num_ants):
+    bls_ordering = [None] * stream.n_baselines
+    for a2 in range(n_ants):
         for a1 in range(a2 + 1):
             for p1 in range(2):
                 for p2 in range(2):
                     idx = get_baseline_index(a1, a2) * 4 + p1 * 2 + p2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     static_sensors = [
-        Sensor(str, "bls-ordering", "Output ordering of baseline data produced by X-engines.",
+        Sensor(str, f"{stream.name}-bls-ordering",
+               "A string showing the output ordering of baseline data "
+               "produced by the X-engines in this instrument, as a list "
+               "of correlation pairs given by input label.",
                default=str(bls_ordering), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, "n-bls", "The number of baselines produced by this correlator instrument.",
-               default=num_bls, initial_status=Sensor.Status.NOMINAL)
+        Sensor(int, f"{stream.name}-n-bls", "The number of baselines produced by "
+               "this correlator instrument.",
+               default=stream.n_baselines, initial_status=Sensor.Status.NOMINAL)
     ]
     for ss in static_sensors:
         g.graph["static_sensors"].add(ss)
@@ -1512,9 +1513,8 @@ def build_logical_graph(configuration: Configuration,
         'sdp_config': config_dict
     }
 
-    # In order to be able to add product-level static sensors required by gpucbf
-    # to the product controller. This may not be required anymore if cbf ends up
-    # using telstate.
+    # Static sensors that are created for individual streams and managed by the
+    # product controller.
     static_sensors = SensorSet()
 
     g = networkx.MultiDiGraph(

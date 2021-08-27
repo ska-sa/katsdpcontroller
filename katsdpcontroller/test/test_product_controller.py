@@ -43,7 +43,8 @@ from ..product_controller import (
     CONSUL_URL)
 from .. import scheduler
 from . import fake_katportalclient
-from .utils import (create_patch, assert_request_fails, assert_sensors, timelimit, DelayedManager,
+from .utils import (create_patch, assert_request_fails, assert_sensor_value,
+                    assert_sensors, timelimit, DelayedManager,
                     CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
@@ -839,18 +840,14 @@ class TestSDPController(BaseTestSDPController):
 
         # Verify static katcp sensors.
         # Baseline ordering
-        _reply, informs = await self.client.request("sensor-value", f"bls-ordering")
-        bls_ordering = informs[0].arguments[4].decode("ascii")
         expected_bls_ordering = "[('gpucbf_m900v', 'gpucbf_m900v'), " \
                                 "('gpucbf_m900v', 'gpucbf_m900h'), " \
                                 "('gpucbf_m900h', 'gpucbf_m900v'), " \
                                 "('gpucbf_m900h', 'gpucbf_m900h')]"
-        self.assertEqual(bls_ordering, expected_bls_ordering)
+        await assert_sensor_value(self.client, "bls-ordering", expected_bls_ordering)
 
-        _reply, informs = await self.client.request("sensor-value", f"n-bls")
-        n_bls = int(informs[0].arguments[4].decode("ascii"))
         expected_n_bls = 4
-        self.assertEqual(n_bls, expected_n_bls)
+        await assert_sensor_value(self.client, "n-bls", expected_n_bls)
 
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
