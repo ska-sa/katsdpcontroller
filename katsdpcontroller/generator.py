@@ -310,7 +310,7 @@ def _make_dsim(
     dsim.command = [
         'dsim',
         '--interface', '{interfaces[cbf].ipv4_address}',
-        '--adc-rate', str(streams[0].adc_sample_rate),
+        '--adc-sample-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4',
         '--sync-time', str(sync_time)
     ]
@@ -375,7 +375,7 @@ def _make_fgpu(
             '--dst-affinity', '{cores[dst]}',
             # TODO: reenable once katgpucbf.xbgpu can handle it
             # '--dst-packet-payload', '8192',
-            '--adc-rate', str(srcs[0].adc_sample_rate),
+            '--adc-sample-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
             '--array-size', str(n_engines),
             '--channels', str(stream.n_chans),
