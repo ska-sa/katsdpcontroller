@@ -418,29 +418,29 @@ def _make_xbgpu(
     # Input labels list `h` and `v` pols separately so the reshape is to
     # make the process a bit smoother.
     ants = np.array(acv.input_labels).reshape(-1, 2)
-    num_ants = ants.shape[0]
+    n_ants = ants.shape[0]
     num_bls = num_ants*(num_ants + 1)*2  # In agreement with how it's calculated in katgpucbf.
 
     def get_baseline_index(a1, a2):
         # This is the inverse of the function in katgpucbf.xbgpu, because SDP
         # wants the other half of the visibilities matrix.
-        return a2*(a2 + 1) // 2 + a1
+        return a2 * (a2 + 1) // 2 + a1
 
     # Calculating the inputs given the index is hard. So we iterate through
     # combinations of inputs instead, and calculate the index, and update the
     # relevant entry in a LUT.
-    bls_ordering = [None]*num_bls
+    bls_ordering = [None] * num_bls
     for a2 in range(num_ants):
         for a1 in range(a2 + 1):
             for p1 in range(2):
                 for p2 in range(2):
-                    idx = get_baseline_index(a1, a2)*4 + 2*p1 + p2
+                    idx = get_baseline_index(a1, a2) * 4 + p1 * 2 + p2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     static_sensors = [
         Sensor(str, "bls-ordering", "Output ordering of baseline data produced by X-engines.",
                default=str(bls_ordering), initial_status=Sensor.Status.NOMINAL),
         Sensor(int, "n-bls", "The number of baselines produced by this correlator instrument.",
-               default=num_bls, initial_status=Sensor.Status.NOMINAL),
+               default=num_bls, initial_status=Sensor.Status.NOMINAL)
     ]
     for ss in static_sensors:
         g.graph["static_sensors"].add(ss)
@@ -1521,7 +1521,7 @@ def build_logical_graph(configuration: Configuration,
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
         config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {}),
-        static_sensors=static_sensors,
+        static_sensors=static_sensors
     )
 
     # telstate node

@@ -1276,7 +1276,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
 
                 # Register static KATCP sensors.
-                for ss in self.logical_graph.graph["static_sensors"].values():
+                for ss in self.physical_graph.graph["static_sensors"].values():
                     self.add_sensor(ss)
 
                 # launch the telescope state for this graph
