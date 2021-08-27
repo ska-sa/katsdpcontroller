@@ -846,10 +846,17 @@ class TestSDPController(BaseTestSDPController):
             "('gpucbf_m900h', 'gpucbf_m900v'), "
             "('gpucbf_m900h', 'gpucbf_m900h')]"
         )
-        await assert_sensor_value(self.client, "bls-ordering", expected_bls_ordering)
-
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-bls-ordering",
+            expected_bls_ordering
+        )
         expected_n_bls = 4
-        await assert_sensor_value(self.client, "n-bls", expected_n_bls)
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-bls",
+            expected_n_bls
+        )
 
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
