@@ -15,7 +15,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp.sensor import Sensor, SensorSet
+from aiokatcp import Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -96,9 +96,11 @@ logger = logging.getLogger(__name__)
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
-    def __init__(self, name, n_addresses=None, endpoint=None):
-        super().__init__(name)
+    def __init__(self, stream_name, n_addresses=None, endpoint=None):
+        super().__init__('multicast.' + stream_name)
+        self.stream_name = stream_name
         self.physical_factory = PhysicalMulticast
+        self.sdp_physical_factory = True
         self.n_addresses = n_addresses
         self.endpoint = endpoint
         if (self.n_addresses is None) == (self.endpoint is None):
@@ -106,6 +108,16 @@ class LogicalMulticast(scheduler.LogicalExternal):
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
+    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+        super().__init__(logical_task)
+        stream_name = logical_task.stream_name
+        self._endpoint_sensor = Sensor(
+            str,
+            f'{stream_name}-destination',
+            f'The IP address, range and port to which data for stream {stream_name} is sent'
+        )
+        subarray_product.add_sensor(self._endpoint_sensor)
+
     async def resolve(self, resolver, graph):
         await super().resolve(resolver, graph)
         if self.logical_node.endpoint is not None:
@@ -114,6 +126,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         else:
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
             self.ports = {'spead': await resolver.resources.get_port()}
+        self._endpoint_sensor.value = str(Endpoint(self.host, self.ports['spead']))
 
 
 class TelstateTask(SDPPhysicalTask):
@@ -313,7 +326,7 @@ def _make_dsim(
     for stream in streams:
         # {{ and }} become { and } after f-string interpolation
         dsim.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
-        multicast = LogicalMulticast('multicast.' + stream.name, n_endpoints)
+        multicast = LogicalMulticast(stream.name, n_endpoints)
         g.add_node(multicast)
         g.add_edge(dsim, multicast, port='spead', depends_resolve=True)
         g.add_edge(multicast, dsim, depends_init=True, depends_ready=True)
@@ -330,7 +343,7 @@ def _make_fgpu(
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
     g.add_node(fgpu_group)
 
-    dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
+    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
@@ -411,7 +424,7 @@ def _make_xbgpu(
     xbgpu_group = LogicalGroup(f'xbgpu.{stream.name}')
     g.add_node(xbgpu_group)
 
-    dst_multicast = LogicalMulticast(f'multicast.{stream.name}', stream.n_substreams)
+    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
@@ -569,7 +582,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
 
     sim_group = LogicalGroup('sim.' + stream.name)
     g.add_node(sim_group, config=make_cbf_simulator_config)
-    multicast = LogicalMulticast('multicast.' + stream.name, stream.n_endpoints)
+    multicast = LogicalMulticast(stream.name, stream.n_endpoints)
     g.add_node(multicast)
     g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
@@ -876,19 +889,19 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
     g.add_node(ingest_group, config=lambda task, resolver: group_config)
 
     if spectral is not None:
-        spectral_multicast = LogicalMulticast('multicast.' + spectral.name, n_ingest)
+        spectral_multicast = LogicalMulticast(spectral.name, n_ingest)
         g.add_node(spectral_multicast)
         g.add_edge(ingest_group, spectral_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
         g.add_edge(spectral_multicast, ingest_group, depends_init=True, depends_ready=True)
         # Signal display stream
-        timeplot_multicast = LogicalMulticast('multicast.timeplot.' + name, 1)
+        timeplot_multicast = LogicalMulticast('timeplot.' + name, 1)
         g.add_node(timeplot_multicast)
         g.add_edge(ingest_group, timeplot_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
         g.add_edge(timeplot_multicast, ingest_group, depends_init=True, depends_ready=True)
     if continuum is not None:
-        continuum_multicast = LogicalMulticast('multicast.' + continuum.name, n_ingest)
+        continuum_multicast = LogicalMulticast(continuum.name, n_ingest)
         g.add_node(continuum_multicast)
         g.add_edge(ingest_group, continuum_multicast, port='spead', depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
@@ -1059,7 +1072,7 @@ def _make_cal(g: networkx.MultiDiGraph,
             'rate_ratio': flags_stream.rate_ratio
         })
 
-        flags_multicast = LogicalMulticast('multicast.' + flags_stream.name, n_cal)
+        flags_multicast = LogicalMulticast(flags_stream.name, n_cal)
         flags_multicasts[flags_stream] = flags_multicast
         g.add_node(flags_multicast)
         g.add_edge(flags_multicast, cal_group, depends_init=True, depends_ready=True)
@@ -1466,7 +1479,7 @@ def _make_beamformer_engineering_pol(
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     if timeplot:
-        stats_multicast = LogicalMulticast('multicast.timeplot.{}'.format(src_stream.name), 1)
+        stats_multicast = LogicalMulticast('timeplot.{}'.format(src_stream.name), 1)
         g.add_edge(bf_ingest, stats_multicast, port='spead',
                    depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'stats': str(endpoint)})
@@ -1533,8 +1546,7 @@ def build_logical_graph(configuration: Configuration,
         if isinstance(stream, product_config.CbfStream):
             url = stream.url
             if url.scheme == 'spead':
-                node = LogicalMulticast('multicast.' + stream.name,
-                                        endpoint=Endpoint(url.host, url.port))
+                node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
                 g.add_node(node)
                 input_multicast.append(node)
 

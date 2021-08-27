@@ -937,7 +937,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
 
     def _instantiate(self, logical_node: scheduler.LogicalNode,
                      capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
-        if isinstance(logical_node, tasks.SDPLogicalTask):
+        if getattr(logical_node, 'sdp_physical_factory', False):
             return logical_node.physical_factory(
                 logical_node, self.sdp_controller, self, capture_block_id)
         return logical_node.physical_factory(logical_node)

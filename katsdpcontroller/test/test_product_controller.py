@@ -29,6 +29,7 @@ import networkx
 import netifaces
 import aioredis
 import katsdptelstate.aio.memory
+from katsdptelstate.endpoint import Endpoint
 import katpoint
 import katdal
 import katsdpmodels.band_mask
@@ -835,10 +836,11 @@ class TestSDPController(BaseTestSDPController):
         # Verify the state of the subarray
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert isinstance(product, SDPSubarrayProduct)  # For mypy's benefit
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
 
-        # Verify static katcp sensors.
+        # Verify katcp sensors.
         # Baseline ordering
         expected_bls_ordering = (
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
@@ -863,6 +865,14 @@ class TestSDPController(BaseTestSDPController):
             self.client,
             "gpucbf_baseline_correlation_products-n-bls",
             12
+        )
+        # Test a multicast stream destination sensor
+        stream_name = 'gpucbf_baseline_correlation_products'
+        node = product._nodes[f'multicast.{stream_name}']
+        await assert_sensor_value(
+            self.client,
+            f'{stream_name}-destination',
+            str(Endpoint(node.host, node.ports['spead']))
         )
 
     async def test_product_configure_telstate_fail(self) -> None:

@@ -147,6 +147,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # Set to a time in seconds to indicate time spent collecting the data
         # to be processed.
         self.batch_data_time = None
+        # Tell the product controller to pass extra arguments to the physical_factory.
+        self.sdp_physical_factory = True
 
 
 class SDPConfigMixin:
