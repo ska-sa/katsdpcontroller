@@ -3528,6 +3528,7 @@ __all__ = [
     'GroupInsufficientGPUResourcesError',
     'GroupInsufficientInterfaceResourcesError',
     'InterfaceRequest', 'GPURequest',
+    'ImageLookup', 'SimpleImageLookup', 'HTTPImageLookup',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Agent', 'AgentGPU', 'AgentInterface',
     'Scheduler', 'instantiate']
