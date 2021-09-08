@@ -173,7 +173,7 @@ from abc import abstractmethod, ABC
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import List, Optional, Mapping, Union, ClassVar, Type
+from typing import List, Tuple, Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -888,22 +888,39 @@ class ImageLookup(ABC):
     async def __call__(self, repo: str, tag: str) -> str: pass
 
 
-class SimpleImageLookup(ImageLookup):
-    """Resolver that simply concatenates registry, repo and tag."""
+class _RegistryImageLookup(ImageLookup):
+    """Utility class for ImageLookup implementations that store a default private registry."""
+
     def __init__(self, private_registry: str) -> None:
         self._private_registry = private_registry
 
+    def _split_repo_name(self, name: str) -> Tuple[str, str]:
+        """Like docker.auth.split_repo_name, but defaults to the private registry."""
+        # This implementation is an adapted version of docker.auth.split_repo_name.
+        parts = name.split('/', 1)
+        if len(parts) == 1 or (
+                '.' not in parts[0] and ':' not in parts[0] and parts[0] != 'localhost'):
+            registry = self._private_registry
+            repo = name
+        else:
+            registry, repo = parts
+        return registry, repo
+
+
+class SimpleImageLookup(_RegistryImageLookup):
+    """Resolver that simply concatenates registry, repo and tag."""
+
     async def __call__(self, repo: str, tag: str) -> str:
-        return _strip_scheme(f'{self._private_registry}/{repo}:{tag}')
+        registry, repo = self._split_repo_name(repo)
+        return _strip_scheme(f'{registry}/{repo}:{tag}')
 
 
-class HTTPImageLookup(ImageLookup):
+class HTTPImageLookup(_RegistryImageLookup):
     """Resolve digests from tags by directly contacting registry."""
-    _private_registry: str
     _auth: Optional[aiohttp.BasicAuth]
 
     def __init__(self, private_registry: str) -> None:
-        self._private_registry = private_registry
+        super().__init__(private_registry)
         authconfig = docker.auth.load_config()
         authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
         if authdata is None:
@@ -915,7 +932,9 @@ class HTTPImageLookup(ImageLookup):
         # TODO: see if it's possible to do some connection pooling
         # here. That probably requires the caller to initiate a
         # Session and close it when done.
-        url = '{}/v2/{}/manifests/{}'.format(self._private_registry, repo, tag)
+
+        registry, repo = self._split_repo_name(repo)
+        url = '{}/v2/{}/manifests/{}'.format(registry, repo, tag)
         if not url.startswith('http'):
             # If no scheme is specified, assume https
             url = 'https://' + url
@@ -939,7 +958,7 @@ class HTTPImageLookup(ImageLookup):
                     from error
             except KeyError:
                 raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
-        return _strip_scheme(f'{self._private_registry}/{repo}@{digest}')
+        return _strip_scheme(f'{registry}/{repo}@{digest}')
 
 
 class ImageResolver:
@@ -995,19 +1014,18 @@ class ImageResolver:
 
     async def __call__(self, name: str) -> str:
         if name in self._overrides:
-            return self._overrides[name]
-        elif name in self._cache:
+            name = self._overrides[name]
+        if name in self._cache:
             return self._cache[name]
 
-        colon = name.rfind(':')
-        if colon != -1:
-            # A tag was already specified in the graph
+        # Use split_repo_name to avoid being confused by a :port in the registry part
+        if ':' in docker.auth.split_repo_name(name)[1]:
+            # A tag was already specified in the graph or the override
             logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
-            tag = name[colon + 1:]
-            repo = name[:colon]
+            repo, tag = name.rsplit(':', 1)
         else:
-            tag = self._tag
             repo = name
+            tag = self._tag
 
         resolved = await self._lookup(repo, tag)
         if name in self._cache:

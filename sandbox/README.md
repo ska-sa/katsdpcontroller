@@ -198,7 +198,7 @@ In an edit-debug cycle, it's not always convenient to rebuild the container
 and the subarray on every edit. If the service uses `setup_restart` from
 [katsdpservices](https://github.com/ska-sa/katsdpservices), then you can send
 the process SIGHUP to have it restart itself. Use `docker exec` to enter the
-container and modify the code in `/home/kat/ve3/lib/python3.6/site-packages`,
+container and modify the code in `/home/kat/ve3/lib/python3.8/site-packages`,
 use `ps` to find the PID, and then `kill -HUP <PID>`.
 
 Note that `docker restart` is *not* your friend any more: Mesos thinks the
@@ -215,5 +215,5 @@ local copy of the image if it exists. Note that this can easily lead to using
 very old copies of images.
 
 For overriding individual images, one can use `--image-override NAME:IMAGE` to
-specify the specific image to use for NAME. This will not be force-pulled, so a
-locally-built image will be used.
+specify the specific image to use for NAME. The IMAGE can specify an
+alternative registry, or can omit it to the default one.
