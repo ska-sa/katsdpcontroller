@@ -169,7 +169,7 @@ import decimal
 from decimal import Decimal
 import time
 import io
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
@@ -882,7 +882,7 @@ def _strip_scheme(image: str) -> str:
     return re.sub(r'^https?://', '', image)
 
 
-class ImageLookup:
+class ImageLookup(ABC):
     """Abstract base class to get a full image name from a repo and tag."""
     @abstractmethod
     async def __call__(self, repo: str, tag: str) -> str: pass
