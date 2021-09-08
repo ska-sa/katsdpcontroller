@@ -492,16 +492,16 @@ def _make_xbgpu(
             'xbgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
-            '--channels-total', str(stream.n_chans),
-            '--channels-in-stream', str(stream.n_chans_per_substream),
+            '--channels', str(stream.n_chans),
+            '--channels-per-substream', str(stream.n_chans_per_substream),
             '--samples-per-channel', str(acv.n_spectra_per_heap),
             '--channel-offset-value', str(i * stream.n_chans_per_substream),
             '--pols', '2',
             '--sample-bits', str(acv.bits_per_sample),
-            '--src-interface-address', '{interfaces[cbf].ipv4_address}',
-            '--dest-interface-address', '{interfaces[cbf].ipv4_address}',
-            '--receiver-thread-affinity', '{cores[core]}',
-            '--sender-thread-affinity', '{cores[core]}',
+            '--src-interface', '{interfaces[cbf].name}',
+            '--dst-interface', '{interfaces[cbf].name}',
+            '--src-affinity', '{cores[core]}',
+            '--dst-affinity', '{cores[core]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
             '--katcp-port', '{ports[port]}'
         ]
@@ -511,7 +511,7 @@ def _make_xbgpu(
             # Use the core number as completion vector. This ensures that
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
-                '--receiver-comp-vector-affinity', '{cores[core]}'
+                '--src-comp-vector', '{cores[core]}'
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
@@ -525,10 +525,10 @@ def _make_xbgpu(
                    depends_resolve=True, depends_init=True, depends_ready=True)
         g.add_edge(xbgpu, dst_multicast, port='spead', depends_resolve=True)
         xbgpu.command += [
-            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].host}}',
-            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].port}}',
-            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].host}}',
-            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].port}}'
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].host}}:\
+                {{endpoints_vector[multicast.{acv.name}_spead][{i}].port}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].host}}:\
+                {{endpoints_vector[multicast.{stream.name}_spead][{i}].port}}'
         ]
 
         # Link it to the group, so that downstream tasks need only depend on the group.
