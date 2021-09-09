@@ -347,6 +347,53 @@ def _make_fgpu(
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
+    static_sensors = [
+        Sensor(float, f"{stream.name}-adc-sample-rate",
+               "Sample rate of the ADC",
+               "Hz",
+               default=stream.adc_sample_rate, initial_status=Sensor.Status.NOMINAL),
+        Sensor(float, f"{stream.name}-bandwidth",
+               "The analogue bandwidth of the digitised band",
+               "Hz",
+               default=stream.bandwidth, initial_status=Sensor.Status.NOMINAL),
+        # The timestamps are simply ADC sample counts
+        Sensor(float, f"{stream.name}-scale-factor-timestamp",
+               "Factor by which to divide instrument timestamps to convert to unix seconds",
+               "Hz",
+               default=stream.adc_sample_rate, initial_status=Sensor.Status.NOMINAL),
+        Sensor(float, f"{stream.name}-sync-time",
+               "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+               "s",
+               default=float(sync_time), initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-ants",
+               "The number of antennas in the instrument",
+               default=len(stream.antennas), initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-inputs",
+               "The number of single polarisation inputs to the instrument",
+               default=len(stream.src_streams), initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-fengs",
+               "The number of F-engines in the instrument",
+               default=n_engines, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-feng-out-bits-per-sample",
+               "F-engine output bits per sample. Per number, not complex pair. "
+               "Real and imaginary parts are both this wide",
+               default=stream.bits_per_sample, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-chans",
+               "Number of channels in the output spectrum",
+               default=stream.n_chans, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-chans-per-substream",
+               "Number of channels in each substream for this f-engine stream",
+               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-samples-between-spectra",
+               "Number of samples between spectra",
+               default=stream.n_samples_between_spectra, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-spectra-per-heap",
+               "Number of spectrum chunks per heap",
+               default=stream.n_spectra_per_heap, initial_status=Sensor.Status.NOMINAL)
+    ]
+    for ss in static_sensors:
+        g.graph["static_sensors"].add(ss)
+
     for i in range(0, n_engines):
         srcs = stream.sources(i)
         fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
@@ -447,14 +494,35 @@ def _make_xbgpu(
                     idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     static_sensors = [
+        Sensor(int, f"{stream.name}-n-xengs",
+               "The number of X-engines in the instrument",
+               default=n_engines, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-accs",
+               "The number of spectra that are accumulated per X-engine output",
+               default=round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra),
+               initial_status=Sensor.Status.NOMINAL),
+        Sensor(float, f"{stream.name}-int-time",
+               "The time, in seconds, for which the X-engines accumulate.",
+               "s",
+               default=stream.int_time, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-xeng-out-bits-per-sample",
+               "X-engine output bits per sample. Per number, not complex pair- "
+               "Real and imaginary parts are both this wide",
+               default=stream.bits_per_sample, initial_status=Sensor.Status.NOMINAL),
         Sensor(str, f"{stream.name}-bls-ordering",
                "A string showing the output ordering of baseline data "
                "produced by the X-engines in this instrument, as a list "
                "of correlation pairs given by input label.",
                default=str(bls_ordering), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-bls", "The number of baselines produced by "
-               "this correlator instrument.",
-               default=stream.n_baselines, initial_status=Sensor.Status.NOMINAL)
+        Sensor(int, f"{stream.name}-n-bls",
+               "The number of baselines produced by this correlator instrument.",
+               default=stream.n_baselines, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-chans",
+               "The number of frequency channels in an integration",
+               default=stream.n_chans, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-n-chans-per-substream",
+               "Number of channels in each substream for this x-engine stream",
+               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL)
     ]
     for ss in static_sensors:
         g.graph["static_sensors"].add(ss)

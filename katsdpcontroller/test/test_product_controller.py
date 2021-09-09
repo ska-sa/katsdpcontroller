@@ -841,7 +841,71 @@ class TestSDPController(BaseTestSDPController):
         self.assertEqual(ProductState.IDLE, product.state)
 
         # Verify katcp sensors.
-        # Baseline ordering
+
+        n_xengs = 8  # Update if sizing logic changes
+        # antenna-channelised-voltage sensors
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-adc-sample-rate",
+            1712e6
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-bandwidth",
+            856e6
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-scale-factor-timestamp",
+            1712e6
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-n-ants",
+            2
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-n-inputs",
+            4
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-n-fengs",
+            2
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-feng-out-bits-per-sample",
+            8
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-n-chans",
+            4096
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_antenna_channelised_voltage-n-chans-per-substream",
+            4096 // n_xengs
+        )
+
+        # baseline-correlation-products sensors
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-accs",
+            408 * 256
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-int-time",
+            408 * 256 * 4096 / 856e6
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-xeng-out-bits-per-sample",
+            32
+        )
         expected_bls_ordering = (
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
             "('gpucbf_m900h', 'gpucbf_m900v'), "
@@ -865,6 +929,16 @@ class TestSDPController(BaseTestSDPController):
             self.client,
             "gpucbf_baseline_correlation_products-n-bls",
             12
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-chans",
+            4096
+        )
+        await assert_sensor_value(
+            self.client,
+            "gpucbf_baseline_correlation_products-n-chans-per-substream",
+            4096 // n_xengs
         )
         # Test a multicast stream destination sensor
         stream_name = 'gpucbf_baseline_correlation_products'
