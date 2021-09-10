@@ -494,7 +494,7 @@ def _make_xbgpu(
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
             '--channels', str(stream.n_chans),
             '--channels-per-substream', str(stream.n_chans_per_substream),
-            '--spectra-per-heap-in', str(acv.n_spectra_per_heap),
+            '--spectra-per-heap', str(acv.n_spectra_per_heap),
             '--channel-offset-value', str(i * stream.n_chans_per_substream),
             '--pols', '2',
             '--sample-bits', str(acv.bits_per_sample),
@@ -525,10 +525,8 @@ def _make_xbgpu(
                    depends_resolve=True, depends_init=True, depends_ready=True)
         g.add_edge(xbgpu, dst_multicast, port='spead', depends_resolve=True)
         xbgpu.command += [
-            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}].host}}:\
-                {{endpoints_vector[multicast.{acv.name}_spead][{i}].port}}',
-            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}].host}}:\
-                {{endpoints_vector[multicast.{stream.name}_spead][{i}].port}}'
+            f'{{endpoints_vector[multicast.{acv.name}_spead][{i}]}}',
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}'
         ]
 
         # Link it to the group, so that downstream tasks need only depend on the group.
