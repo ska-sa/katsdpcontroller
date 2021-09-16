@@ -564,7 +564,6 @@ def _make_xbgpu(
             '--channels-per-substream', str(stream.n_chans_per_substream),
             '--spectra-per-heap', str(acv.n_spectra_per_heap),
             '--channel-offset-value', str(i * stream.n_chans_per_substream),
-            '--pols', '2',
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface', '{interfaces[cbf].name}',
             '--dst-interface', '{interfaces[cbf].name}',
