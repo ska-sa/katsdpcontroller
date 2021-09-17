@@ -856,6 +856,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         # and throw away the cache immediately after this function.
         try:
             image_resolver = self._image_resolver_factory(**image_resolver_kwargs)
+            for image_name, image in config.get('config', {}).get('image_overrides', {}).items():
+                image_resolver.override(image_name, image)
         except Exception as exc:
             raise ProductFailed(f'Could not load image tag file: {exc}')
         port = device_server_sockname(self._server)[1]

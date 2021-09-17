@@ -349,7 +349,8 @@ class TestSimpleImageLookup(asynctest.TestCase):
 class TestHTTPImageLookup(asynctest.TestCase):
     @mock.patch('docker.auth.load_config', autospec=True)
     async def test(self, load_config_mock) -> None:
-        digest = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
+        digest1 = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
+        digest2 = "sha256:2345678123456781234567812345678123456781234567812345678123456781"""
         # Response headers are modelled on an actual registry response
         with aioresponses.aioresponses() as rmock:
             rmock.head(
@@ -357,9 +358,20 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 headers={
                     'Content-Length': '1234',
                     'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
-                    'Docker-Content-Digest': digest,
+                    'Docker-Content-Digest': digest1,
                     'Docker-Distribution-Api-Version': 'registry/2.0',
-                    'Etag': '"{}"'.format(digest),
+                    'Etag': '"{}"'.format(digest1),
+                    'X-Content-Type-Options': 'nosniff',
+                    'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
+                })
+            rmock.head(
+                'https://registry2.invalid:5000/v2/anotherimage/manifests/custom',
+                headers={
+                    'Content-Length': '1234',
+                    'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
+                    'Docker-Content-Digest': digest2,
+                    'Docker-Distribution-Api-Version': 'registry/2.0',
+                    'Etag': '"{}"'.format(digest2),
                     'X-Content-Type-Options': 'nosniff',
                     'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
                 })
@@ -370,11 +382,19 @@ class TestHTTPImageLookup(asynctest.TestCase):
                     'username': 'myuser',
                     'password': 'mypassword',
                     'serveraddress': 'registry.invalid:5000'
+                },
+                'registry2.invalid:5000': {
+                    'email': None,
+                    'username': 'myuser2',
+                    'password': 'mypassword2',
+                    'serveraddress': 'registry2.invalid:5000'
                 }
             }
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            image = await lookup('myimage', 'latest')
-        assert_equal('registry.invalid:5000/myimage@' + digest, image)
+            image1 = await lookup('myimage', 'latest')
+            image2 = await lookup('registry2.invalid:5000/anotherimage', 'custom')
+        assert_equal('registry.invalid:5000/myimage@' + digest1, image1)
+        assert_equal('registry2.invalid:5000/anotherimage@' + digest2, image2)
 
 
 class TestImageResolver(asynctest.TestCase):
@@ -387,18 +407,22 @@ class TestImageResolver(asynctest.TestCase):
         """Test the base case"""
         resolver = scheduler.ImageResolver(self.lookup)
         resolver.override('foo', 'my-registry:5000/bar:custom')
+        resolver.override('baz', 'baz:mytag')
         assert_equal('registry.invalid:5000/test1:latest', await resolver('test1'))
         assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', await(resolver('foo')))
+        assert_equal('registry.invalid:5000/baz:mytag', await(resolver('baz')))
 
     async def test_tag_file(self) -> None:
         """Test with a tag file"""
         self._open_mock.set_read_data_for('tag_file', 'tag1\n')
         resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
+        resolver.override('baz', 'baz:mytag')
         assert_equal('registry.invalid:5000/test1:tag1', await resolver('test1'))
         assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
         assert_equal('my-registry:5000/bar:custom', await resolver('foo'))
+        assert_equal('registry.invalid:5000/baz:mytag', await(resolver('baz')))
 
     async def test_bad_tag_file(self) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
