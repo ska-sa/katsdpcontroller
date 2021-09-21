@@ -420,8 +420,7 @@ def _make_fgpu(
             '--src-affinity', '{cores[src0]},{cores[src1]}',
             '--dst-interface', '{interfaces[cbf].name}',
             '--dst-affinity', '{cores[dst]}',
-            # TODO: reenable once katgpucbf.xbgpu can handle it
-            # '--dst-packet-payload', '8192',
+            '--dst-packet-payload', '8192',
             '--adc-sample-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
             '--array-size', str(n_engines),
