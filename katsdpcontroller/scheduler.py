@@ -182,7 +182,7 @@ import jsonschema
 from decorator import decorator
 from addict import Dict
 import pymesos
-
+import www_authenticate
 import aiohttp.web
 
 from katsdptelstate.endpoint import Endpoint
@@ -917,16 +917,58 @@ class SimpleImageLookup(_RegistryImageLookup):
 
 class HTTPImageLookup(_RegistryImageLookup):
     """Resolve digests from tags by directly contacting registry."""
-    _auth: Optional[aiohttp.BasicAuth]
 
     def __init__(self, private_registry: str) -> None:
         super().__init__(private_registry)
-        authconfig = docker.auth.load_config()
-        authdata = docker.auth.resolve_authconfig(authconfig, private_registry)
-        if authdata is None:
-            self._auth = None
-        else:
-            self._auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
+        self._authconfig = docker.auth.load_config()
+
+    @staticmethod
+    async def _get_digest(
+            session: aiohttp.ClientSession,
+            url: str,
+            ssl_context: Optional[ssl.SSLContext],
+            auth_header: Optional[str]) -> str:
+        """Make a single attempt to get the digest.
+
+        This fails if there is an authorization error, leaving the caller to
+        obtain a token and try again.
+        """
+        headers = {aiohttp.hdrs.ACCEPT: 'application/vnd.docker.distribution.manifest.v2+json'}
+        if auth_header:
+            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
+        try:
+            # Use a lowish timeout, so that we don't wedge the entire launch if
+            # there is a connection problem.
+            async with session.head(
+                    url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
+                response.raise_for_status()
+                return response.headers['Docker-Content-Digest']
+        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+            raise ImageError('Failed to get digest from {}: {}'.format(url, error)) from error
+        except KeyError:
+            raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+
+    async def _get_token(
+            self,
+            session: aiohttp.ClientSession,
+            realm: str,
+            service: str,
+            scope: str,
+            auth: Optional[aiohttp.BasicAuth]) -> str:
+        headers = {aiohttp.hdrs.ACCEPT: 'application/json'}
+        params = {'scope': scope, 'service': service, 'client_id': 'katsdpcontroller'}
+        try:
+            async with session.get(
+                    realm, params=params, headers=headers, timeout=15, auth=auth) as resp:
+                resp.raise_for_status()
+                content = await resp.json()
+                token = content['token']
+                # Valid syntax determined by RFC 6750
+                if not re.fullmatch('[-A-Za-z0-9._~+/]+=*', token):
+                    raise ValueError('Invalid syntax for authentication token')
+                return token
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as error:
+            raise ImageError(f'Failed to get authentication token from {realm}: {error}') from error
 
     async def __call__(self, repo: str, tag: str) -> str:
         # TODO: see if it's possible to do some connection pooling
@@ -934,6 +976,12 @@ class HTTPImageLookup(_RegistryImageLookup):
         # Session and close it when done.
 
         registry, repo = self._split_repo_name(repo)
+        authdata = docker.auth.resolve_authconfig(self._authconfig, registry)
+        if authdata is None:
+            auth = None
+        else:
+            auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
+
         url = '{}/v2/{}/manifests/{}'.format(registry, repo, tag)
         if not url.startswith('http'):
             # If no scheme is specified, assume https
@@ -944,20 +992,32 @@ class HTTPImageLookup(_RegistryImageLookup):
             ssl_context = ssl.create_default_context(cafile=cafile)
         else:
             ssl_context = None
-        async with aiohttp.ClientSession(
-                headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'},
-                auth=self._auth) as session:
+        async with aiohttp.ClientSession() as session:
             try:
-                # Use a lowish timeout, so that we don't wedge the entire launch if
-                # there is a connection problem.
-                async with session.head(url, timeout=15, ssl_context=ssl_context) as response:
-                    response.raise_for_status()
-                    digest = response.headers['Docker-Content-Digest']
-            except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-                raise ImageError('Failed to get digest from {}: {}'.format(url, error)) \
-                    from error
-            except KeyError:
-                raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+                auth_header = auth.encode() if auth else None
+                digest = await self._get_digest(session, url, ssl_context, auth_header)
+            except ImageError as error:
+                cause = error.__cause__
+                # If it's an authorization error, see if we can get a bearer token
+                # (see https://docs.docker.com/registry/spec/auth/token/).
+                if isinstance(cause, aiohttp.client.ClientResponseError) and cause.status == 401:
+                    try:
+                        assert cause.headers is not None
+                        hdr = cause.headers[aiohttp.hdrs.WWW_AUTHENTICATE]
+                        challenge = www_authenticate.parse(hdr)['Bearer']
+                        realm = challenge['realm']
+                        service = challenge['service']
+                        scope = challenge['scope']
+                    except (ValueError, KeyError):
+                        raise error from None  # Raise the original error if we can't parse
+                    # Note: since we're running images from this registry, we
+                    # trust it, and don't bother checking the realm for CSRF.
+                    token = await self._get_token(session, realm, service, scope, auth)
+                    auth_header = f'Bearer {token}'
+                    digest = await self._get_digest(session, url, ssl_context, auth_header)
+                else:
+                    raise
+
         return _strip_scheme(f'{registry}/{repo}@{digest}')
 
 

@@ -43,6 +43,7 @@ traitlets==4.3.2           # via nbformat
 websocket-client==0.45.0   # via docker
 werkzeug==0.15.5           # via flask
 wrapt==1.10.11             # via prometheus_async
+www-authenticate==0.9.2
 yarl
 
 katpoint @ git+https://github.com/ska-sa/katpoint
