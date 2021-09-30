@@ -10,6 +10,7 @@ from unittest import mock
 import time
 from decimal import Decimal
 from collections import Counter
+from typing import Optional, Callable
 
 from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
                         assert_is, assert_is_not, assert_is_none, assert_is_instance,
@@ -21,6 +22,7 @@ import asynctest
 import aioresponses
 import open_file_mock
 import aiohttp
+from yarl import URL
 
 from .. import scheduler
 from ..scheduler import TaskState
@@ -347,54 +349,227 @@ class TestSimpleImageLookup(asynctest.TestCase):
 
 
 class TestHTTPImageLookup(asynctest.TestCase):
-    @mock.patch('docker.auth.load_config', autospec=True)
-    async def test(self, load_config_mock) -> None:
-        digest1 = "sha256:1234567812345678123456781234567812345678123456781234567812345678"""
-        digest2 = "sha256:2345678123456781234567812345678123456781234567812345678123456781"""
-        # Response headers are modelled on an actual registry response
-        with aioresponses.aioresponses() as rmock:
-            rmock.head(
-                'https://registry.invalid:5000/v2/myimage/manifests/latest',
-                headers={
-                    'Content-Length': '1234',
-                    'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
-                    'Docker-Content-Digest': digest1,
-                    'Docker-Distribution-Api-Version': 'registry/2.0',
-                    'Etag': '"{}"'.format(digest1),
-                    'X-Content-Type-Options': 'nosniff',
-                    'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
-                })
-            rmock.head(
-                'https://registry2.invalid:5000/v2/anotherimage/manifests/custom',
-                headers={
-                    'Content-Length': '1234',
-                    'Content-Type': 'application/vnd.docker.distribution.manifest.v2+json',
-                    'Docker-Content-Digest': digest2,
-                    'Docker-Distribution-Api-Version': 'registry/2.0',
-                    'Etag': '"{}"'.format(digest2),
-                    'X-Content-Type-Options': 'nosniff',
-                    'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
-                })
-            # This format isn't documented, but inferred from examining the real value
-            load_config_mock.return_value = {
+    def setUp(self) -> None:
+        self.digest1 = "sha256:1234567812345678123456781234567812345678123456781234567812345678"
+        self.digest2 = "sha256:2345678123456781234567812345678123456781234567812345678123456781"
+        self.auth1 = aiohttp.BasicAuth('myuser', 'mypassword')
+        self.auth2 = aiohttp.BasicAuth('myuser2', 'mypassword2')
+        patcher = mock.patch('docker.auth.load_config', autospec=True)
+        # This format isn't documented, but inferred from examining the real value
+        load_config_mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        load_config_mock.return_value = {
+            'auths': {
                 'registry.invalid:5000': {
                     'email': None,
-                    'username': 'myuser',
-                    'password': 'mypassword',
+                    'username': self.auth1.login,
+                    'password': self.auth1.password,
                     'serveraddress': 'registry.invalid:5000'
                 },
                 'registry2.invalid:5000': {
                     'email': None,
-                    'username': 'myuser2',
-                    'password': 'mypassword2',
+                    'username': self.auth2.login,
+                    'password': self.auth2.password,
                     'serveraddress': 'registry2.invalid:5000'
                 }
             }
+        }
+
+    def _prepare_image(self, rmock, url, digest, **kwargs) -> None:
+        # Response headers are modelled on some actual registry responses
+        rmock.head(
+            url,
+            content_type='application/vnd.docker.distribution.manifest.v2+json',
+            headers={
+                'Content-Length': '1234',
+                'Docker-Content-Digest': digest,
+                'Docker-Distribution-Api-Version': 'registry/2.0',
+                'Etag': f'"{url}"',
+                'X-Content-Type-Options': 'nosniff',
+                'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
+            },
+            **kwargs
+        )
+
+    def _prepare_image_auth_required(self, rmock, url, realm, scope, **kwargs) -> None:
+        # Response headers are loosely based on Harbor 1.8
+        rmock.head(
+            url,
+            status=401,
+            content_type='application/json; charset=utf-8',
+            headers={
+                'WWW-Authenticate': (
+                    'Bearer '
+                    f'realm="{realm}",'
+                    'service="harbor-registry",'
+                    f'scope="{scope}"'
+                )
+            },
+            **kwargs)
+
+    @staticmethod
+    def _check_basic(auth: aiohttp.BasicAuth) -> Callable:
+        """Create aioresponses callback to ensure that basic auth credentials were provided."""
+        def check(url, **kwargs) -> Optional[aioresponses.CallbackResult]:
+            # We get the raw parameters to aiohttp rather than what it puts on
+            # the wire, so we have to cater for different possible ways to
+            # pass authentication.
+            # Returning None tells aioresponses to use its normal mechanisms
+            # to formulate the result.
+            if kwargs.get('auth') == auth:
+                return None
+            header = kwargs.get('headers', {}).get(aiohttp.hdrs.AUTHORIZATION, '')
+            if header == auth.encode():
+                return None
+            return aioresponses.CallbackResult(status=401, reason='Basic auth failed')
+
+        return check
+
+    @staticmethod
+    def _check_token(url, headers, **kwargs):
+        """aioresponses callback to check for bearer token."""
+        if headers.get(aiohttp.hdrs.AUTHORIZATION) != 'Bearer helloiamatoken':
+            return aioresponses.CallbackResult(status=401, reason='Token not found')
+        return None  # Tells aioresponses to use its normal mechanisms
+
+    async def test_relative(self) -> None:
+        """Resolve an image without a registry, using the default registry."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                self.digest1,
+                callback=self._check_basic(self.auth1))
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            image1 = await lookup('myimage', 'latest')
-            image2 = await lookup('registry2.invalid:5000/anotherimage', 'custom')
-        assert_equal('registry.invalid:5000/myimage@' + digest1, image1)
-        assert_equal('registry2.invalid:5000/anotherimage@' + digest2, image2)
+            image = await lookup('myimage', 'latest')
+        assert_equal('registry.invalid:5000/myimage@' + self.digest1, image)
+
+    async def test_absolute(self) -> None:
+        """Resolve an image with an explicit registry."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image(
+                rmock,
+                'https://registry2.invalid:5000/v2/anotherimage/manifests/custom',
+                self.digest2,
+                callback=self._check_basic(self.auth2))
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            image = await lookup('registry2.invalid:5000/anotherimage', 'custom')
+        assert_equal('registry2.invalid:5000/anotherimage@' + self.digest2, image)
+
+    async def test_anonymous(self) -> None:
+        """Resolve an image with a registry having no authentication information."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image(
+                rmock,
+                'https://anon.invalid:5000/v2/myimage/manifests/latest',
+                self.digest2)
+            lookup = scheduler.HTTPImageLookup('anon.invalid:5000')
+            image = await lookup('myimage', 'latest')
+        assert_equal('anon.invalid:5000/myimage@' + self.digest2, image)
+
+    async def test_token_service(self) -> None:
+        """Test redirection via a token service."""
+
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image_auth_required(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                'https://tokenservice.invalid/service/token',
+                'repository:myimage:pull')
+            rmock.get(
+                URL('https://tokenservice.invalid/service/token').with_query({
+                    'client_id': 'katsdpcontroller',
+                    'scope': 'repository:myimage:pull',
+                    'service': 'harbor-registry'
+                }),
+                content_type='application/json; charset=utf-8',
+                payload={
+                    'token': 'helloiamatoken',
+                    'expires_in': 1800,
+                    'issued_at': '2021-09-29T11:01:59Z'
+                },
+                callback=self._check_basic(self.auth1))
+            self._prepare_image(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                self.digest1,
+                callback=self._check_token)
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            image = await lookup('myimage', 'latest')
+        assert_equal('registry.invalid:5000/myimage@' + self.digest1, image)
+
+    async def test_http_fail(self) -> None:
+        """Test that appropriate error is raised if bad HTTP status is returned."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                self.digest1,
+                status=403)  # unauthorized
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            with assert_raises(scheduler.ImageError):
+                await lookup('myimage', 'latest')
+
+    async def test_no_token(self):
+        """Test that appropriate error is raised if token service doesn't return a token."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image_auth_required(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                'https://tokenservice.invalid/service/token',
+                'repository:myimage:pull')
+            rmock.get(
+                URL('https://tokenservice.invalid/service/token').with_query({
+                    'client_id': 'katsdpcontroller',
+                    'scope': 'repository:myimage:pull',
+                    'service': 'harbor-registry'
+                }),
+                content_type='application/json; charset=utf-8',
+                payload={},
+                callback=self._check_basic(self.auth1))
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            with assert_raises(scheduler.ImageError):
+                await lookup('myimage', 'latest')
+
+    async def test_invalid_token(self):
+        """Test that appropriate error is raised if token isn't valid base64."""
+        with aioresponses.aioresponses() as rmock:
+            self._prepare_image_auth_required(
+                rmock,
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                'https://tokenservice.invalid/service/token',
+                'repository:myimage:pull')
+            rmock.get(
+                URL('https://tokenservice.invalid/service/token').with_query({
+                    'client_id': 'katsdpcontroller',
+                    'scope': 'repository:myimage:pull',
+                    'service': 'harbor-registry'
+                }),
+                content_type='application/json; charset=utf-8',
+                payload={
+                    'token': 'this is not a valid token\n',
+                    'expires_in': 1800,
+                    'issued_at': '2021-09-29T11:01:59Z'
+                },
+                callback=self._check_basic(self.auth1))
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            with assert_raises(scheduler.ImageError):
+                await lookup('myimage', 'latest')
+
+    async def test_missing_authenticate_fields(self):
+        """Test error if WWW-Authenticate header is missing required fields."""
+        with aioresponses.aioresponses() as rmock:
+            rmock.head(
+                'https://registry.invalid:5000/v2/myimage/manifests/latest',
+                status=401,
+                content_type='application/json; charset=utf-8',
+                headers={
+                    'WWW-Authenticate': 'Bearer service="harbor-registry"'
+                }
+            )
+            lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
+            with assert_raises(scheduler.ImageError):
+                await lookup('myimage', 'latest')
 
 
 class TestImageResolver(asynctest.TestCase):

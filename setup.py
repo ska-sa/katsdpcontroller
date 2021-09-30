@@ -53,7 +53,8 @@ setup(
         'pydot',             # For networkx.drawing.nx_pydot
         'pymesos>=0.3.6',    # 0.3.6 implements reviveOffers with roles
         'rfc3987',           # Used by jsonschema to validate URLs
-        'yarl'
+        'yarl',
+        'www-authenticate'
     ],
     tests_require=tests_require,
     extras_require={
