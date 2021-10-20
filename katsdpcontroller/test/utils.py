@@ -124,6 +124,7 @@ CONFIG = '''{
             "output_int_time": 2.1,
             "continuum_factor": 16,
             "output_channels": [117, 3472],
+            "excise": false,
             "archive": true
         },
         "sdp_beamformer": {
