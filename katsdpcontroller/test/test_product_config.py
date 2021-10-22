@@ -355,7 +355,7 @@ def make_dig_raw_antenna_voltage(name: str) -> DigRawAntennaVoltageStream:
     }
     return DigRawAntennaVoltageStream(
         name, [],
-        url=urls[name],
+        url=yarl.URL(urls[name]),
         adc_sample_rate=1712000000.0,
         centre_frequency=1284000000.0,
         band='l',
