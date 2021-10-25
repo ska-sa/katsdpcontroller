@@ -121,6 +121,9 @@
 {% if version >= "3.0" %}
                         "type": {
                             "enum": [
+{% if version >= "3.1" %}
+                                "dig.raw_antenna_voltage",
+{% endif %}
                                 "cbf.antenna_channelised_voltage",
                                 "cbf.baseline_correlation_products",
                                 "cbf.tied_array_channelised_voltage",
@@ -134,6 +137,23 @@
                         "src_streams": {"$ref": "#/definitions/src_streams"}
                     },
                     "allOf": [
+{% if version >= "3.1" %}
+                        {
+                            "if": {"properties": {"type": {"const": "dig.raw_antenna_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "url": {},
+                                    "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
+                                    "centre_frequency": {"$ref": "#/definitions/positive_number"},
+                                    "band": {"type": "string"},
+                                    "antenna": {"type": "string"}
+                                },
+                                "additionalProperties": {{ input_additional }},
+                                "required": ["adc_sample_rate", "centre_frequency", "band", "antenna"]
+                            }
+                        },
+{% endif %}
                         {
                             "if": {"properties": {"type": {"const": "cbf.antenna_channelised_voltage"}}},
                             "then": {

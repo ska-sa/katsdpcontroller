@@ -311,21 +311,19 @@ class CbfStream:
     instrument_dev_name: str
 
 
-class SimDigRawAntennaVoltageStream(Stream):
-    stream_type: ClassVar[str] = 'sim.dig.raw_antenna_voltage'
+class DigRawAntennaVoltageStreamBase(Stream):
+    """Common base class for dig.raw_antenna_voltage and sim.dig.raw_antenna_voltage."""
 
     def __init__(self, name: str, src_streams: Sequence[Stream], *,
                  adc_sample_rate: float,
                  centre_frequency: float,
                  band: str,
-                 antenna: katpoint.Antenna,
-                 command_line_extra: Iterable[str] = ()) -> None:
+                 antenna_name: str) -> None:
         super().__init__(name, [])
         self.adc_sample_rate = adc_sample_rate
         self.centre_frequency = centre_frequency
         self.band = band
-        self.antenna = antenna
-        self.command_line_extra = list(command_line_extra)
+        self.antenna_name = antenna_name
         self.bits_per_sample = 10
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
@@ -334,6 +332,60 @@ class SimDigRawAntennaVoltageStream(Stream):
         heap_size = samples_per_heap * self.bits_per_sample // 8
         heap_time = samples_per_heap / self.adc_sample_rate
         return data_rate(heap_size, heap_time, ratio, overhead)
+
+
+class DigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
+    stream_type: ClassVar[str] = 'dig.raw_antenna_voltage'
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 url: yarl.URL,
+                 adc_sample_rate: float,
+                 centre_frequency: float,
+                 band: str,
+                 antenna_name: str) -> None:
+        super().__init__(
+            name, [],
+            adc_sample_rate=adc_sample_rate,
+            centre_frequency=centre_frequency,
+            band=band,
+            antenna_name=antenna_name)
+        self.url = url
+
+    @classmethod
+    def from_config(cls,
+                    options: Options,
+                    name: str,
+                    config: Mapping[str, Any],
+                    src_streams: Sequence['Stream'],
+                    sensors: Mapping[str, Any]) -> 'DigRawAntennaVoltageStream':
+        return cls(
+            name, src_streams,
+            url=yarl.URL(config['url']),
+            adc_sample_rate=config['adc_sample_rate'],
+            centre_frequency=config['centre_frequency'],
+            band=config['band'],
+            antenna_name=config['antenna']
+        )
+
+
+class SimDigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
+    stream_type: ClassVar[str] = 'sim.dig.raw_antenna_voltage'
+
+    def __init__(self, name: str, src_streams: Sequence[Stream], *,
+                 adc_sample_rate: float,
+                 centre_frequency: float,
+                 band: str,
+                 antenna: katpoint.Antenna,
+                 command_line_extra: Iterable[str] = ()) -> None:
+        super().__init__(
+            name, [],
+            adc_sample_rate=adc_sample_rate,
+            centre_frequency=centre_frequency,
+            band=band,
+            antenna_name=antenna.name
+        )
+        self.antenna = antenna
+        self.command_line_extra = list(command_line_extra)
 
     @classmethod
     def from_config(cls,
@@ -435,7 +487,10 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
     """
 
     stream_type: ClassVar[str] = 'gpucbf.antenna_channelised_voltage'
-    _valid_src_types: ClassVar[_ValidTypes] = {'sim.dig.raw_antenna_voltage'}
+    _valid_src_types: ClassVar[_ValidTypes] = {
+        'dig.raw_antenna_voltage',
+        'sim.dig.raw_antenna_voltage'
+    }
 
     def __init__(
             self,
@@ -459,12 +514,12 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         if len(set(self.input_labels)) != len(src_streams):
             raise ValueError('input labels are not unique')
         first = src_streams[0]
-        assert isinstance(first, SimDigRawAntennaVoltageStream)
+        assert isinstance(first, DigRawAntennaVoltageStreamBase)
         antenna_names = []
         for src in src_streams:
-            assert isinstance(src, SimDigRawAntennaVoltageStream)
-            if src.antenna.name not in antenna_names:
-                antenna_names.append(src.antenna.name)
+            assert isinstance(src, DigRawAntennaVoltageStreamBase)
+            if src.antenna_name not in antenna_names:
+                antenna_names.append(src.antenna_name)
             if src.band != first.band:
                 raise ValueError(f'Inconsistent bands (both {first.band} and {src.band})')
             if src.adc_sample_rate != first.adc_sample_rate:
@@ -1387,6 +1442,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     'cbf.antenna_channelised_voltage': AntennaChannelisedVoltageStream,
     'cbf.tied_array_channelised_voltage': TiedArrayChannelisedVoltageStream,
     'cbf.baseline_correlation_products': BaselineCorrelationProductsStream,
+    'dig.raw_antenna_voltage': DigRawAntennaVoltageStream,
     'gpucbf.antenna_channelised_voltage': GpucbfAntennaChannelisedVoltageStream,
     'gpucbf.baseline_correlation_products': GpucbfBaselineCorrelationProductsStream,
     'sim.cbf.antenna_channelised_voltage': SimAntennaChannelisedVoltageStream,
@@ -1595,8 +1651,13 @@ def _validate(config):
                 raise ValueError('Cannot have more than one cam.http stream')
             have_cam_http = True
 
-    if inputs and not have_cam_http:
-        raise ValueError('A cam.http stream is required if there are any inputs')
+    if not have_cam_http:
+        for name, stream in itertools.chain(inputs.items(), outputs.items()):
+            stream_cls = STREAM_CLASSES[stream['type']]
+            if stream_cls._class_sensors:
+                raise ValueError(
+                    f'A cam.http stream is required for {name} of type {stream["type"]}'
+                )
 
     for name, output in outputs.items():
         try:

@@ -1607,7 +1607,8 @@ def build_logical_graph(configuration: Configuration,
     # Add SPEAD endpoints to the graph.
     input_multicast = []
     for stream in configuration.streams:
-        if isinstance(stream, product_config.CbfStream):
+        if isinstance(stream, (product_config.CbfStream,
+                               product_config.DigRawAntennaVoltageStream)):
             url = stream.url
             if url.scheme == 'spead':
                 node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))

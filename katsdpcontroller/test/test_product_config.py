@@ -16,6 +16,7 @@ from nose.tools import (
 
 from .. import product_config, defaults
 from ..product_config import (
+    DigRawAntennaVoltageStream,
     SimDigRawAntennaVoltageStream,
     AntennaChannelisedVoltageStream,
     GpucbfAntennaChannelisedVoltageStream,
@@ -245,6 +246,32 @@ class TestCamHttpStream:
         assert_equal(cam_http.url, yarl.URL('http://test.invalid'))
 
 
+class TestDigRawAntennaVoltageStream:
+    """Test :class:`~.DigRawAntennaVoltageStream`."""
+
+    def setup(self):
+        self.config: Dict[str, Any] = {
+            'type': 'sim.dig.raw_antenna_voltage',
+            'url': 'spead://239.0.0.0+7:7148',
+            'adc_sample_rate': 1712000000.0,
+            'centre_frequency': 1284000000.0,
+            'band': 'l',
+            'antenna': 'm000'
+        }
+
+    def test_from_config(self) -> None:
+        dig = DigRawAntennaVoltageStream.from_config(
+            Options(), 'm000h', self.config, [], {}
+        )
+        assert_equal(dig.url, yarl.URL(self.config['url']))
+        assert_equal(dig.adc_sample_rate, self.config['adc_sample_rate'])
+        assert_equal(dig.centre_frequency, self.config['centre_frequency'])
+        assert_equal(dig.band, self.config['band'])
+        assert_equal(dig.antenna_name, self.config['antenna'])
+        assert_equal(dig.bits_per_sample, 10)
+        assert_equal(dig.data_rate(1.0, 0), 1712e7)
+
+
 class TestSimDigRawAntennaVoltageStream:
     """Test :class:`~.SimDigRawAntennaVoltageStream`."""
 
@@ -265,6 +292,7 @@ class TestSimDigRawAntennaVoltageStream:
         assert_equal(dig.centre_frequency, self.config['centre_frequency'])
         assert_equal(dig.band, self.config['band'])
         assert_equal(dig.antenna, _M000)
+        assert_equal(dig.antenna_name, 'm000')
         assert_equal(dig.bits_per_sample, 10)
         assert_equal(dig.data_rate(1.0, 0), 1712e7)
         assert_equal(dig.command_line_extra, [])
@@ -318,6 +346,23 @@ class TestAntennaChannelisedVoltageStream:
         assert_equal(acv.instrument_dev_name, 'narrow1')
 
 
+def make_dig_raw_antenna_voltage(name: str) -> DigRawAntennaVoltageStream:
+    urls = {
+        'm000h': 'spead2://239.1.2.0+7:7148',
+        'm000v': 'spead2://239.1.2.8+7:7148',
+        'm002h': 'spead2://239.1.2.16+7:7148',
+        'm002v': 'spead2://239.1.2.24+7:7148'
+    }
+    return DigRawAntennaVoltageStream(
+        name, [],
+        url=yarl.URL(urls[name]),
+        adc_sample_rate=1712000000.0,
+        centre_frequency=1284000000.0,
+        band='l',
+        antenna_name=name[:-1]
+    )
+
+
 def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream:
     return SimDigRawAntennaVoltageStream(
         name, [],
@@ -337,8 +382,13 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             'src_streams': ['m000h', 'm000v', 'm002h', 'm002v'],
             'n_chans': 4096
         }
+        # Use a real digitiser for one of them, to test mixing
         self.src_streams = [
-            make_sim_dig_raw_antenna_voltage(name)
+            (
+                make_sim_dig_raw_antenna_voltage(name)
+                if name != 'm002h'
+                else make_dig_raw_antenna_voltage(name)
+            )
             for name in self.config['src_streams']
         ]
 
