@@ -942,6 +942,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         'output_channels': output_channels_str,
         'sd_output_channels': output_channels_str,
         'use_data_suspect': True,
+        'excise': primary.excise,
         'aiomonitor': True
     }
     if spectral is not None:

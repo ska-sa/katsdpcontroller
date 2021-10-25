@@ -830,6 +830,7 @@ class TestSDPController(BaseTestSDPController):
             'servers': 4,
             'clock_ratio': 1.0,
             'use_data_suspect': True,
+            'excise': False,
             'aiomonitor': True
         })
 
