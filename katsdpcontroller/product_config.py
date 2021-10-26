@@ -834,14 +834,19 @@ class GpucbfBaselineCorrelationProductsStream(BaselineCorrelationProductsStreamB
                  command_line_extra: Iterable[str] = ()) -> None:
         acv = src_streams[0]
         assert isinstance(acv, GpucbfAntennaChannelisedVoltageStream)
-        n_ants = len(acv.antennas)
+        # Note: do not use len(acv.antennas), as it is possible that antennas
+        # are repeated between F-engines, in which case they are only counted
+        # once.
+        n_inputs = len(acv.src_streams)
+        # + 2 not + 1, because a pair of dual-pol antennas produces 4 baselines.
+        n_baselines = n_inputs * (n_inputs + 2) // 2
         int_time = self.round_int_time(int_time, acv, acv.n_spectra_per_heap)
         super().__init__(
             name, src_streams,
             int_time=int_time,
             n_endpoints=acv.n_substreams,
             n_chans_per_substream=acv.n_chans_per_substream,
-            n_baselines=n_ants * (n_ants + 1) * 2,
+            n_baselines=n_baselines,
             bits_per_sample=32
         )
         self.command_line_extra = list(command_line_extra)
