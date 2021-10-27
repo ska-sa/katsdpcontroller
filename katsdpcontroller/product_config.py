@@ -577,7 +577,8 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         time_between_spectra = (
             self.n_samples_between_spectra * self.n_spectra_per_heap / self.adc_sample_rate
         )
-        return data_rate(heap_size, time_between_spectra, ratio, overhead) * self.n_substreams
+        ant_rate = data_rate(heap_size, time_between_spectra, ratio, overhead) * self.n_substreams
+        return ant_rate * (len(self.src_streams) // 2)
 
     @classmethod
     def from_config(cls,
