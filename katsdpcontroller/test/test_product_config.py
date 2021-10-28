@@ -406,7 +406,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert_equal(acv.n_samples_between_spectra, 2 * self.config['n_chans'])
         assert_equal(acv.sources(0), tuple(self.src_streams[0:2]))
         assert_equal(acv.sources(1), tuple(self.src_streams[2:4]))
-        assert_equal(acv.data_rate(1.0, 0), 27392e6)
+        assert_equal(acv.data_rate(1.0, 0), 27392e6 * 2)
         assert_equal(acv.input_labels, self.config['src_streams'])
         assert_equal(acv.command_line_extra, [])
 
