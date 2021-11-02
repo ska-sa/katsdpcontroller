@@ -527,13 +527,22 @@ def _make_xbgpu(
         g.graph["static_sensors"].add(ss)
 
     bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-    # * 4 is for 2 polarisations, each with real+complex
-    batch_size = len(acv.antennas) * stream.n_chans_per_endpoint * 4 * acv.bits_per_sample // 8
+    # * 2 is for real+complex
+    batch_size = (
+        len(acv.src_streams) * acv.n_spectra_per_heap
+        * stream.n_chans_per_endpoint * 4 * acv.bits_per_sample // 8
+    )
+    rx_reorder_tol = 536870912  # Default of --rx-reorder-tol option
+    # Memory allocated for buffering and reordering incoming data
+    # (no *2 for real+complex here: it cancels out).
+    recv_buffer = round(
+        rx_reorder_tol * len(acv.src_streams) * acv.bits_per_sample / 8 / stream.n_substreams
+    )
     for i in range(0, stream.n_substreams):
         xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
-        xbgpu.mem = 800 + _mb(64 * batch_size)
+        xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
         xbgpu.cores = ['src', 'dst']
         xbgpu.ports = ['port']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
