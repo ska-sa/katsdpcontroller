@@ -532,9 +532,9 @@ def _make_xbgpu(
     for i in range(0, stream.n_substreams):
         xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
         xbgpu.image = 'katgpucbf'
-        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.0
+        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 800 + _mb(64 * batch_size)
-        xbgpu.cores = ['core']
+        xbgpu.cores = ['src', 'dst']
         xbgpu.ports = ['port']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
@@ -551,9 +551,7 @@ def _make_xbgpu(
         }
         xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
-        # TODO: It's not necessary to set core affinity by command-line option
-        # because there is only one core reserved and the scheduler will bind
-        # it, but they're currently required arguments.
+        # TODO: ensure that the main thread runs on cores[dst]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = [
             'xbgpu',
@@ -566,8 +564,8 @@ def _make_xbgpu(
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface', '{interfaces[cbf].name}',
             '--dst-interface', '{interfaces[cbf].name}',
-            '--src-affinity', '{cores[core]}',
-            '--dst-affinity', '{cores[core]}',
+            '--src-affinity', '{cores[src]}',
+            '--dst-affinity', '{cores[dst]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
             '--katcp-port', '{ports[port]}'
         ]
@@ -577,7 +575,7 @@ def _make_xbgpu(
             # Use the core number as completion vector. This ensures that
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
-                '--src-comp-vector', '{cores[core]}'
+                '--src-comp-vector', '{cores[src]}'
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
