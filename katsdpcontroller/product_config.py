@@ -531,13 +531,11 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                     'Inconsistent centre frequencies '
                     f'(both {first.centre_frequency} and {src.centre_frequency})')
         # Determine how fine to divide the stream, i.e., the number of xgpu
-        # processes to run. The constant is the data rate that one engine can
-        # handle, and is sufficient for S-band with 80 antennas to be handled
-        # by 64 engines.
-        max_engine_data_rate = 4.375e9  # in bytes per second
-        # The minimum is 4 since SDP expects to run 4 ingest processes.
+        # processes to run. The minimum is 4 since SDP expects to run 4 ingest
+        # processes.
         n_substreams = 4
-        while n_substreams * max_engine_data_rate < first.adc_sample_rate * len(src_streams):
+        while (n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE
+               < first.adc_sample_rate * len(src_streams)):
             n_substreams *= 2
         if n_chans % n_substreams != 0:
             raise ValueError('Number of channels is too low')
