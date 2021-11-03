@@ -530,7 +530,7 @@ def _make_xbgpu(
     # * 2 is for real+complex
     batch_size = (
         len(acv.src_streams) * acv.n_spectra_per_heap
-        * stream.n_chans_per_endpoint * 4 * acv.bits_per_sample // 8
+        * stream.n_chans_per_endpoint * 2 * acv.bits_per_sample // 8
     )
     rx_reorder_tol = 536870912  # Default of --rx-reorder-tol option
     # Memory allocated for buffering and reordering incoming data
