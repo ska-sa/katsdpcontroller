@@ -651,8 +651,8 @@ class TestGpucbfBaselineCorrelationProductsStream:
         )
         # Note: the test values will probably need to be updated as the
         # implementation evolves.
-        assert_equal(bcp.n_chans_per_substream, 512)
-        assert_equal(bcp.n_substreams, 8)
+        assert_equal(bcp.n_chans_per_substream, 1024)
+        assert_equal(bcp.n_substreams, 4)
         assert_equal(bcp.int_time, 104448 * 4096 / 856e6)
         assert_equal(bcp.command_line_extra, [])
 

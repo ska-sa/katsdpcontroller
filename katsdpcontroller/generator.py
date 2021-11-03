@@ -527,14 +527,23 @@ def _make_xbgpu(
         g.graph["static_sensors"].add(ss)
 
     bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-    # * 4 is for 2 polarisations, each with real+complex
-    batch_size = len(acv.antennas) * stream.n_chans_per_endpoint * 4 * acv.bits_per_sample // 8
+    # * 2 is for real+complex
+    batch_size = (
+        len(acv.src_streams) * acv.n_spectra_per_heap
+        * stream.n_chans_per_endpoint * 2 * acv.bits_per_sample // 8
+    )
+    rx_reorder_tol = 536870912  # Default of --rx-reorder-tol option
+    # Memory allocated for buffering and reordering incoming data
+    # (no *2 for real+complex here: it cancels out).
+    recv_buffer = round(
+        rx_reorder_tol * len(acv.src_streams) * acv.bits_per_sample / 8 / stream.n_substreams
+    )
     for i in range(0, stream.n_substreams):
         xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
         xbgpu.image = 'katgpucbf'
-        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.0
-        xbgpu.mem = 800 + _mb(64 * batch_size)
-        xbgpu.cores = ['core']
+        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
+        xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
+        xbgpu.cores = ['src', 'dst']
         xbgpu.ports = ['port']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
@@ -551,9 +560,7 @@ def _make_xbgpu(
         }
         xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
-        # TODO: It's not necessary to set core affinity by command-line option
-        # because there is only one core reserved and the scheduler will bind
-        # it, but they're currently required arguments.
+        # TODO: ensure that the main thread runs on cores[dst]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = [
             'xbgpu',
@@ -566,8 +573,8 @@ def _make_xbgpu(
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface', '{interfaces[cbf].name}',
             '--dst-interface', '{interfaces[cbf].name}',
-            '--src-affinity', '{cores[core]}',
-            '--dst-affinity', '{cores[core]}',
+            '--src-affinity', '{cores[src]}',
+            '--dst-affinity', '{cores[dst]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
             '--katcp-port', '{ports[port]}'
         ]
@@ -577,7 +584,7 @@ def _make_xbgpu(
             # Use the core number as completion vector. This ensures that
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
-                '--src-comp-vector', '{cores[core]}'
+                '--src-comp-vector', '{cores[src]}'
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate

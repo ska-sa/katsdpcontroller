@@ -843,7 +843,7 @@ class TestSDPController(BaseTestSDPController):
 
         # Verify katcp sensors.
 
-        n_xengs = 8  # Update if sizing logic changes
+        n_xengs = 4  # Update if sizing logic changes
         # antenna-channelised-voltage sensors
         await assert_sensor_value(
             self.client,

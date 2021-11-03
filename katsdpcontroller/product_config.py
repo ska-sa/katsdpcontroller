@@ -530,11 +530,12 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                 raise ValueError(
                     'Inconsistent centre frequencies '
                     f'(both {first.centre_frequency} and {src.centre_frequency})')
-        # TODO: this may need refinement as katxgpu evolves. For now, assume
-        # the same relation as the MeerKAT correlator i.e. 4 X-engines per
-        # F-engine, rounded up to a power of two.
+        # Determine how fine to divide the stream, i.e., the number of xgpu
+        # processes to run. The minimum is 4 since SDP expects to run 4 ingest
+        # processes.
         n_substreams = 4
-        while n_substreams < 4 * (len(src_streams) // 2):
+        while (n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE
+               < first.adc_sample_rate * len(src_streams)):
             n_substreams *= 2
         if n_chans % n_substreams != 0:
             raise ValueError('Number of channels is too low')
