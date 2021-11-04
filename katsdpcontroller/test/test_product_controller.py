@@ -37,11 +37,11 @@ import katsdpmodels.rfi_mask
 import katsdpmodels.primary_beam
 import yarl
 
+from ..consul import CONSUL_URL
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
-    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url,
-    CONSUL_URL)
+    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url)
 from .. import scheduler
 from . import fake_katportalclient
 from .utils import (create_patch, assert_request_fails, assert_sensor_value,

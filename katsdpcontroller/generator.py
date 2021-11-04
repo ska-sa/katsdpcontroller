@@ -26,6 +26,7 @@ from katsdpmodels.rfi_mask import RFIMask
 from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
+from .defaults import LOCALHOST
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
     CaptureBlockState, KatcpTransition)
@@ -51,9 +52,6 @@ def escape_format(s: str) -> str:
     return s.replace('{', '{{').replace('}', '}}')
 
 
-# Docker doesn't support IPv6 out of the box, and on some systems 'localhost'
-# resolves to ::1, so force an IPv4 localhost.
-LOCALHOST = '127.0.0.1'
 CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)

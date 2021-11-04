@@ -7,7 +7,6 @@ import time
 import os
 import re
 import copy
-import uuid
 import functools
 import itertools
 from ipaddress import IPv4Address
@@ -16,7 +15,6 @@ from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, M
 import addict
 import jsonschema
 import networkx
-import aiohttp
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
@@ -27,8 +25,10 @@ import katsdpmodels.fetch.aiohttp
 
 import katsdpcontroller
 from . import scheduler, product_config, generator, tasks, sensor_proxy
+from .consul import ConsulService
 from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, device_status_to_sensor_status, ProductState)
+from .defaults import LOCALHOST
 from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
                     POSTPROCESSING_TIME_BUCKETS, POSTPROCESSING_REL_BUCKETS)
 from .product_config import Configuration
@@ -36,8 +36,6 @@ from .product_config import Configuration
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week
-LOCALHOST = '127.0.0.1'        # Unlike 'localhost', guaranteed to be IPv4
-CONSUL_URL = f'http://{LOCALHOST}:8500'
 _HINT_RE = re.compile(r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
                       r'(?: +labels: *(?P<labels>[a-z,]+))?',
                       re.IGNORECASE)
@@ -1385,19 +1383,14 @@ class DeviceServer(aiokatcp.DeviceServer):
             if isinstance(task_stats, TaskStats):
                 for sensor in task_stats.sensors.values():
                     self.sensors.add(sensor)
-        self._consul_service_id = None     # type: Optional[str]
+        self._consul_service = ConsulService()
 
     async def _consul_register(self) -> None:
         if self.sched is None:
             return
-        # We're talking to localhost, so use a low timeout. This will avoid
-        # stalling the startup if consul isn't running on the host.
-        timeout = aiohttp.ClientTimeout(total=5)
-        service_id = str(uuid.uuid4())
         port = self.sched.http_port
         service = {
             'Name': 'product-controller',
-            'ID': service_id,
             'Tags': ['prometheus-metrics'],
             'Meta': {
                 'subarray_product_id': self.subarray_product_id
@@ -1412,31 +1405,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 }
             ]
         }
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.put(f'{CONSUL_URL}/v1/agent/service/register',
-                                       params={'replace-existing-checks': '1'},
-                                       json=service) as resp:
-                    resp.raise_for_status()
-                    self._consul_service_id = service_id
-                    logging.info("Registered with consul as ID %s", service_id)
-        except aiohttp.ClientError as exc:
-            logger.warning('Could not register with consul: %s', exc)
-
-    async def _consul_deregister(self) -> None:
-        service_id = self._consul_service_id
-        if service_id is None:
-            return
-        timeout = aiohttp.ClientTimeout(total=5)
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.put(
-                        f'{CONSUL_URL}/v1/agent/service/deregister/{service_id}') as resp:
-                    resp.raise_for_status()
-                    self._consul_service_id = None
-                    logging.info('Deregistered from consul (ID %s)', service_id)
-        except aiohttp.ClientError as exc:
-            logger.warning('Could not deregister from consul: %s', exc)
+        self._consul_service = await ConsulService.register(service)
 
     async def start(self) -> None:
         await self.master_controller.wait_connected()
@@ -1444,7 +1413,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         await super().start()
 
     async def on_stop(self) -> None:
-        await self._consul_deregister()
+        await self._consul_service.deregister()
         self._prometheus_watcher.close()
         if self.product is not None and self.product.state != ProductState.DEAD:
             logger.warning('Product controller interrupted - deconfiguring running product')
