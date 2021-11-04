@@ -399,7 +399,7 @@ def _make_fgpu(
         fgpu.cpus = 3
         fgpu.mem = 3072  # Actual use is currently around 2.2 GB
         fgpu.cores = ['src0', 'src1', 'dst']
-        fgpu.ports = ['port']
+        fgpu.ports = ['port', 'prometheus']
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
         # up by network name.
@@ -424,7 +424,8 @@ def _make_fgpu(
             '--array-size', str(n_engines),
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
-            '--katcp-port', '{ports[port]}'
+            '--katcp-port', '{ports[port]}',
+            '--prometheus-port', '{ports[prometheus]}'
         ]
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
