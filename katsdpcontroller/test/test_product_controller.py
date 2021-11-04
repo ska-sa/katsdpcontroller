@@ -10,7 +10,6 @@ import io
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
-from urllib.parse import urljoin
 import typing
 from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any
 
@@ -37,7 +36,7 @@ import katsdpmodels.rfi_mask
 import katsdpmodels.primary_beam
 import yarl
 
-from ..consul import CONSUL_URL
+from ..consul import ConsulService
 from ..controller import device_server_sockname
 from ..product_controller import (
     DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
@@ -380,15 +379,6 @@ class BaseTestSDPController(asynctest.TestCase):
             prometheus_registry=self.prometheus_registry,
             shutdown_delay=0.0,
             **server_kwargs)
-        # server.start will try to register with consul. Mock that out, and make sure it
-        # fails (which will prevent it from trying to deregister on stop).
-        self.aioresponses = aioresponses()
-        self.aioresponses.start()
-        self.addCleanup(self.aioresponses.stop)
-        self.aioresponses.put(
-            urljoin(CONSUL_URL, '/v1/agent/service/register?replace-existing-checks=1'),
-            status=500
-        )
         self._setup_rfi_mask_model()
         self._setup_band_mask_model()
         self._setup_primary_beam_model()
@@ -419,6 +409,16 @@ class BaseTestSDPController(asynctest.TestCase):
                 'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
             })
         create_patch(self, 'katportalclient.KATPortalClient', return_value=dummy_client)
+        # server.start will try to register with consul. Mock that out.
+        create_patch(
+            self, 'katsdpcontroller.consul.ConsulService.register',
+            return_value=ConsulService(),
+            autospec=True
+        )
+        # Provide tests with aioresponses
+        self.aioresponses = aioresponses()
+        self.aioresponses.start()
+        self.addCleanup(self.aioresponses.stop)
 
 
 @timelimit

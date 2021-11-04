@@ -17,12 +17,12 @@ class ConsulService:
         self.service_id = service_id
 
     async def deregister(self) -> bool:
-        """Deregister the service from Consul.
+        """Deregister the service from Consul, if currently registered.
 
-        If it fails, no exception is thrown, but a warning message is logged.
-        Returns true if the service is not registered, whether because it was
-        never registered or was previously deregistered. If it returns false,
-        it is safe to try again.
+        If it fails, no exception is thrown, but a warning message is logged
+        (and it is safe to try again). Returns true if the service is no
+        longer registered, whether because it was already unregistered or
+        because it was successfully deregistered.
         """
         if self.service_id is None:
             return True
