@@ -49,8 +49,8 @@ class ConsulService:
         Parameters
         ----------
         service
-            A JSON dictionary to pass to Consul. It should exclude the
-            ``ID`` member, which will be generated automatically.
+            A JSON-serializable dictionary to pass to Consul. It should exclude
+            the ``ID`` member, which will be generated automatically.
         """
         service_id = str(uuid.uuid4())
         # We're talking to localhost, so use a low timeout. This will avoid
