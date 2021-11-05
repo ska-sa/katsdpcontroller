@@ -9,14 +9,16 @@ scrape_configs:
     static_configs:
       - targets:
         - "127.0.0.1:5004"
-  - job_name: 'product_controller'
+  - job_name: 'subarray-metrics'
     consul_sd_configs:
       - refresh_interval: 5s
     relabel_configs:
-      - source_labels: [__meta_consul_service]
-        regex: product-controller
+      - source_labels: [__meta_consul_tags, __meta_consul_service_metadata_subarray_product_id]
+        regex: .*,prometheus-metrics,.*;.+
         action: keep
       - source_labels: [__meta_consul_service_metadata_subarray_product_id]
         target_label: subarray_product_id
-      - source_labels: [__meta_consul_service_metadata_subarray_product_id]
+      - source_labels: [__meta_consul_service_metadata_task_type]
+        target_label: task_type
+      - source_labels: [__meta_consul_service]
         target_label: instance
