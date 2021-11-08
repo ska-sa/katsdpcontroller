@@ -1,5 +1,7 @@
 """Constants controlling tunable policies."""
 
+#: Unlike "localhost", guaranteed to be IPv4, which is more compatible with Docker
+LOCALHOST = '127.0.0.1'
 #: GPU to target when not running develop mode
 INGEST_GPU_NAME = 'GeForce GTX TITAN X'
 #: Maximum number of custom signals requested by (correlator) timeplot

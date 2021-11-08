@@ -13,6 +13,8 @@ from prometheus_client import Histogram
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from . import scheduler, sensor_proxy, product_config
+from .consul import ConsulService
+from .defaults import LOCALHOST
 
 
 logger = logging.getLogger(__name__)
@@ -283,6 +285,8 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         <name>.<sensor_name>
       For example:
         ingest.sdp_l0.1.input_rate
+    - Registers the service with consul for Prometheus metrics, if there is
+      a port called ``prometheus``.
     """
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         # Turn .status into a property that updates a sensor
@@ -324,6 +328,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             self.subarray_product.add_sensor(self._mesos_state_sensor)
 
         self.katcp_connection = None
+        self.consul_services = []
         self.capture_block_state_observer = None
         self.device_status_observer = None
 
@@ -390,9 +395,32 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             raise FailReply(msg) from error
 
     async def wait_ready(self):
-        success = await super().wait_ready()
+        if not await super().wait_ready():
+            return False
+        # register Prometheus metrics with consul if appropriate
+        if 'prometheus' in self.ports:
+            prometheus_port = self.ports['prometheus']
+            service = {
+                'Name': self.logical_node.name,
+                'Tags': ['prometheus-metrics'],
+                'Meta': {
+                    'subarray_product_id': self.subarray_product_id,
+                    'task_type': self.logical_node.task_type
+                },
+                'Port': prometheus_port,
+                'Checks': [
+                    {
+                        "Interval": "15s",
+                        "Timeout": "5s",
+                        # Using the metrics endpoint as a health check
+                        "HTTP": f"http://{LOCALHOST}:{prometheus_port}/metrics",
+                        "DeregisterCriticalServiceAfter": "90s"
+                    }
+                ]
+            }
+            self.consul_services.append(await ConsulService.register(service))
         # establish katcp connection to this node if appropriate
-        if success and 'port' in self.ports:
+        if 'port' in self.ports:
             while True:
                 self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
                                  self.host, self.ports['port'], self.name)
@@ -411,7 +439,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(
                             sensor, self)
-                    return success
+                    break
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
@@ -423,7 +451,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
-        return success
+        return True
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
@@ -464,6 +492,10 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
+        for service in self.consul_services:
+            # This might cause double-deregistration if this method is called
+            # twice, but at worst that should cause a warning.
+            asyncio.get_event_loop().create_task(service.deregister())
         if need_inform:
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 

@@ -240,7 +240,7 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
 
 
 def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:
-    """Wrap mock.patch such that it will be unpatched as part of test case cleanup"""
+    """Wrap asynctest.patch such that it will be unpatched as part of test case cleanup."""
     patcher = asynctest.patch(*args, **kwargs)
     mock_obj = patcher.start()
     test_case.addCleanup(patcher.stop)
