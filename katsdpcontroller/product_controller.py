@@ -19,7 +19,6 @@ import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import yarl
-import aioredis
 import katsdptelstate.aio.redis
 import katsdpmodels.fetch.aiohttp
 
@@ -1172,8 +1171,9 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         # connect to telstate store
         self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
                                                 self.telstate_node.ports['telstate'])
-        redis_client = await aioredis.create_redis_pool(f'redis://{self.telstate_endpoint}')
-        telstate_backend = katsdptelstate.aio.redis.RedisBackend(redis_client)
+        telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
+            f'redis://{self.telstate_endpoint}'
+        )
         telstate = katsdptelstate.aio.TelescopeState(telstate_backend)
         self.telstate = telstate
         self.resolver.telstate = telstate

@@ -4,7 +4,6 @@ addict==2.1.1
 aiohttp
 aiohttp-jinja2==1.4.2
 aiokatcp
-aioredis
 aiozk==0.14.0
 async-timeout
 click==7.0                 # via Flask

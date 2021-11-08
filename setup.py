@@ -27,7 +27,6 @@ setup(
         'aiohttp~=3.5',
         'aiohttp-jinja2',
         'aiokatcp>=0.6.1',
-        'aioredis',
         'aiozk',
         'async_timeout',
         'dash>=1.18.*',
