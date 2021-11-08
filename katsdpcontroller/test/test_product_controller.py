@@ -26,7 +26,6 @@ from prometheus_client import CollectorRegistry
 import pymesos
 import networkx
 import netifaces
-import aioredis
 import katsdptelstate.aio.memory
 from katsdptelstate.endpoint import Endpoint
 import katpoint
@@ -567,9 +566,9 @@ class TestSDPController(BaseTestSDPController):
 
         # Mock RedisBackend to create an in-memory telstate instead
         self.telstate = katsdptelstate.aio.TelescopeState()
-        create_patch(self, 'katsdptelstate.aio.redis.RedisBackend',
-                     return_value=self.telstate.backend)
-        create_patch(self, 'aioredis.create_redis_pool', autospec=True)
+        self.backend_from_url_mock = create_patch(
+            self, 'katsdptelstate.aio.redis.RedisBackend.from_url',
+            return_value=self.telstate.backend, autospec=True)
 
         self.sensor_proxy_client_class = create_patch(
             self, 'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
@@ -757,7 +756,9 @@ class TestSDPController(BaseTestSDPController):
         then indicate success.
         """
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
+        self.backend_from_url_mock.assert_called_once_with(
+            'redis://host.telstate:20000'
+        )
 
         # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
@@ -953,7 +954,7 @@ class TestSDPController(BaseTestSDPController):
     async def test_product_configure_telstate_fail(self) -> None:
         """If the telstate task fails, product-configure must fail"""
         self.fail_launches['telstate'] = 'TASK_FAILED'
-        aioredis.create_redis_pool.side_effect = ConnectionRefusedError
+        self.backend_from_url_mock.side_effect = ConnectionError
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
@@ -964,7 +965,9 @@ class TestSDPController(BaseTestSDPController):
         """If a task other than telstate fails, product-configure must fail"""
         self.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await assert_request_fails(self.client, *self._configure_args(SUBARRAY_PRODUCT))
-        aioredis.create_redis_pool.assert_called_once_with('redis://host.telstate:20000')
+        self.backend_from_url_mock.assert_called_once_with(
+            'redis://host.telstate:20000'
+        )
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
