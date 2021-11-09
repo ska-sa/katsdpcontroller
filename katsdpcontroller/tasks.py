@@ -401,11 +401,11 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         if 'prometheus' in self.ports:
             prometheus_port = self.ports['prometheus']
             service = {
-                'Name': self.logical_node.name,
+                'Name': self.logical_node.task_type,
                 'Tags': ['prometheus-metrics'],
                 'Meta': {
                     'subarray_product_id': self.subarray_product_id,
-                    'task_type': self.logical_node.task_type
+                    'task_name': self.logical_node.name
                 },
                 'Port': prometheus_port,
                 'Checks': [
