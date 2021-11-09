@@ -13,12 +13,12 @@ scrape_configs:
     consul_sd_configs:
       - refresh_interval: 5s
     relabel_configs:
-      - source_labels: [__meta_consul_tags, __meta_consul_service_metadata_subarray_product_id]
-        regex: .*,prometheus-metrics,.*;.+
+      - source_labels: [__meta_consul_tags, __meta_consul_service_metadata_subarray_product_id, __meta_consul_service_metadata_task_name]
+        regex: .*,prometheus-metrics,.*;.+;.+
         action: keep
       - source_labels: [__meta_consul_service_metadata_subarray_product_id]
         target_label: subarray_product_id
-      - source_labels: [__meta_consul_service_metadata_task_type]
-        target_label: task_type
-      - source_labels: [__meta_consul_service]
+      - source_labels: [__meta_consul_service_metadata_task_name]
         target_label: instance
+      - source_labels: [__meta_consul_service]
+        target_label: job
