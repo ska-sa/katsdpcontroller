@@ -543,7 +543,7 @@ def _make_xbgpu(
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
         xbgpu.cores = ['src', 'dst']
-        xbgpu.ports = ['port']
+        xbgpu.ports = ['port', 'prometheus']
         xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
@@ -575,7 +575,8 @@ def _make_xbgpu(
             '--src-affinity', '{cores[src]}',
             '--dst-affinity', '{cores[dst]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
-            '--katcp-port', '{ports[port]}'
+            '--katcp-port', '{ports[port]}',
+            '--prometheus-port', '{ports[prometheus]}'
         ]
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
