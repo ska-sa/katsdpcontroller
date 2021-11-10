@@ -5,15 +5,16 @@ import socket
 import ipaddress
 import os
 
-from addict import Dict
 import async_timeout
 import aiokatcp
+import yarl
+from addict import Dict
 from aiokatcp import FailReply, InvalidReply, Sensor
 from prometheus_client import Histogram
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from . import scheduler, sensor_proxy, product_config
-from .consul import ConsulService
+from .consul import ConsulService, CONSUL_PORT
 from .defaults import LOCALHOST
 
 
@@ -418,7 +419,15 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                     }
                 ]
             }
-            self.consul_services.append(await ConsulService.register(service))
+            # Connect to the Consul agent on the machine that will be running
+            # the task. Note that this requires it to be configured to listen
+            # on external interfaces - the default is to listen only on
+            # localhost.
+            # TODO: see if there is some way this requirement can be
+            # eliminated e.g. by running via a wrapper script / sidecar
+            # container that handles the registration and deregistration.
+            consul_url = yarl.URL.build(scheme='http', host=self.host, port=CONSUL_PORT)
+            self.consul_services.append(await ConsulService.register(service, consul_url))
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
