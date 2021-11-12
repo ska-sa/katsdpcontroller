@@ -67,11 +67,12 @@ STREAMS = '''{
 }'''
 
 EXPECTED_REQUEST_LIST = [
-    'product-configure',
-    'product-deconfigure',
+    'delays',
     'capture-done',
     'capture-init',
     'capture-status',
+    'product-configure',
+    'product-deconfigure',
     'telstate-endpoint',
     # Standard katcp commands
     'client-list', 'halt', 'help', 'log-level', 'sensor-list',
@@ -1300,6 +1301,47 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request('capture-init', CAPTURE_BLOCK)
         reply, _ = await self.client.request('capture-status')
         self.assertEqual(reply, [b'capturing'])
+
+    async def test_delays_bad_stream(self) -> None:
+        """Test delays with a stream that doesn't exist."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'delays', 'foo', 1234567890.0, '0,0:0,0')
+
+    async def test_delays_wrong_stream_type(self) -> None:
+        """Test delays with a stream that is of the wrong type."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'delays', 'i0_antenna_channelised_voltage', 1234567890.0, '0,0:0,0')
+
+    async def test_delays_wrong_length(self) -> None:
+        """Test delays with the wrong number of arguments."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0, '0,0:0,0')
+
+    async def test_delays_bad_format(self) -> None:
+        """Test delays with a badly-formatted coefficient set."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
+            '0,0:0,0:extra', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+        await assert_request_fails(
+            self.client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
+            '0,0:0,0,extra', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+        await assert_request_fails(
+            self.client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
+            'a,0:0,0', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+
+    async def test_delays_success(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
+            '0,0:0,0', '0,0:0,1', '0,1:0,0', '0,1:0,1')
+        katcp_client = self.sensor_proxy_client_class.return_value
+        # TODO: this doesn't check that the requests are going to the correct
+        # nodes.
+        katcp_client.request.assert_any_call('delays', 1234567890.0, '0,0:0,0', '0,0:0,1')
+        katcp_client.request.assert_any_call('delays', 1234567890.0, '0,1:0,0', '0,1:0,1')
 
     def _check_prom(self, name: str, service: str, type: str, value: float,
                     sample_name: str = None, extra_labels: Mapping[str, str] = None) -> None:

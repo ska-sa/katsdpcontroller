@@ -363,6 +363,10 @@ class SDPSubarrayProductBase:
     conditions, changes to :attr:`state` should generally only be made from
     inside the asynchronous tasks.
 
+    Some methods that are asynchronous but don't change state (such as
+    setting delays) may run concurrently. They are best-effort, and may fail if
+    the subarray product is deconfigured concurrently.
+
     There are some invariants that must hold at yield points:
     - There is at most one capture block in state CAPTURING.
     - :attr:`current_capture_block` is the capture block in state
@@ -377,6 +381,7 @@ class SDPSubarrayProductBase:
     asynchronous operations. They need to be cancellation-safe, to allow for
     forced deconfiguration to abort them.
     """
+
     def __init__(self, sched: Optional[scheduler.Scheduler],
                  configuration: Configuration,
                  config_dict: dict,
@@ -799,6 +804,52 @@ class SDPSubarrayProductBase:
                 g.write_svg(filename)
             except OSError as error:
                 logger.warning('Could not write %s: %s', filename, error)
+
+    async def set_delays(
+            self,
+            stream_name: str,
+            timestamp: aiokatcp.Timestamp,
+            coefficient_sets: Sequence[str]) -> None:
+        """Set F-engine delays."""
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set delays in state {self.state}")
+        # Find the stream with the given name
+        for stream in self.configuration.streams:
+            if stream.name == stream_name:
+                break
+        else:
+            raise FailReply(f"Unknown stream {stream_name!r}")
+
+        if not isinstance(stream, product_config.GpucbfAntennaChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        if len(coefficient_sets) != len(stream.src_streams):
+            raise FailReply(
+                f"Wrong number of coefficient sets ({len(coefficient_sets)}, "
+                f"expected {len(stream.src_streams)})"
+            )
+        for coefficient_set in coefficient_sets:
+            try:
+                parts = coefficient_set.split(":")
+                if len(parts) != 2:
+                    raise ValueError
+                for part in parts:
+                    terms = part.split(",")
+                    for term in terms:
+                        float(term)
+            except ValueError:
+                raise FailReply(f"Invalid coefficient-set {coefficient_set!r}")
+        await self.set_delays_impl(stream, timestamp, coefficient_sets)
+
+    async def set_delays_impl(
+            self,
+            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+            timestamp: aiokatcp.Timestamp,
+            coefficient_sets: Sequence[str]) -> None:
+        """Back-end implementation of :meth:`set_delays`.
+
+        This method can assume that the inputs and current state are valid.
+        """
+        pass
 
     def __repr__(self) -> str:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -1329,6 +1380,26 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             ready.set()
             await shutdown_task
 
+    async def set_delays_impl(
+            self,
+            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+            timestamp: aiokatcp.Timestamp,
+            coefficient_sets: Sequence[str]) -> None:
+        n_inputs = len(stream.src_streams)
+        conns = []
+        for i in range(n_inputs // 2):
+            node = self._nodes[f"f.{stream.name}.{i}"]
+            if node.katcp_connection is None:
+                raise FailReply(f"No katcp connection to {node.name}")
+            conns.append(node.katcp_connection)
+
+        reqs = []
+        for i, conn in enumerate(conns):
+            reqs.append(conn.request(
+                "delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]
+            ))
+        await asyncio.gather(*reqs)
+
 
 class DeviceServer(aiokatcp.DeviceServer):
     VERSION = 'product-controller-1.1'
@@ -1601,3 +1672,16 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
         cbid = await self._get_product().capture_done()
         return cbid
+
+    async def request_delays(
+            self, ctx, stream: str, time: aiokatcp.Timestamp, *coefficient_set: str) -> None:
+        """Set F-engine delays.
+
+        Parameters
+        ----------
+        time
+            Time at which delays will be applied
+        coefficient_set
+            Coefficients for each input, in the format ``delay,delay_rate:phase,phase_rate``
+        """
+        await self._get_product().set_delays(stream, time, coefficient_set)
