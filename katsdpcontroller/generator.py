@@ -584,7 +584,9 @@ def _make_xbgpu(
             # Use the core number as completion vector. This ensures that
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
+                '--src-ibv',
                 '--src-comp-vector', '{cores[src]}'
+                '--dst-ibv',
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
