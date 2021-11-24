@@ -587,6 +587,7 @@ def _make_xbgpu(
                 '--src-ibv',
                 '--src-comp-vector', '{cores[src]}'
                 '--dst-ibv',
+                '--dst-comp-vector', '{cores[dst]}'
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
