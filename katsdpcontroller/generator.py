@@ -292,26 +292,28 @@ def _make_dsim(
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
     dsim = SDPLogicalTask(name)
     dsim.image = 'katgpucbf'
-    if configuration.options.develop:
-        # In develop mode, scale down reservation for low bandwidths to allow
-        # testing low-bandwidth arrays on a single machine. Use a full core
-        # for the maximum sample rate (which is generous - it only needs
-        # about 50% for S-band, depending on the CPU).
-        total_adc_sample_rate = sum(stream.adc_sample_rate for stream in streams)
-        dsim.cpus = min(1.0, total_adc_sample_rate / (2 * _MAX_ADC_SAMPLE_RATE))
-    else:
-        dsim.cpus = 1
-        dsim.cores = [None]  # Pin to a single core for more reliable timing
-    dsim.mem = 64
+    dsim.mem = 4096
     dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         'dsim',
-        '--interface', '{interfaces[cbf].ipv4_address}',
+        '--interface', '{interfaces[cbf].name}',
         '--adc-sample-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4',
-        '--sync-time', str(sync_time)
+        '--sync-time', str(sync_time),
     ]
+    if configuration.options.develop:
+        # In develop mode, scale down reservation for low bandwidths to allow
+        # testing low-bandwidth arrays on a single machine. Use a full core
+        # for the maximum sample rate (which is generous - it only needs
+        # about 70% for S-band, depending on the CPU).
+        total_adc_sample_rate = sum(stream.adc_sample_rate for stream in streams)
+        dsim.cpus = min(1.0, total_adc_sample_rate / (2 * _MAX_ADC_SAMPLE_RATE))
+    else:
+        dsim.cpus = 2
+        dsim.cores = ['main', 'send']
+        dsim.command = ['taskset', '-c', '{cores[main]}'] + dsim.command + [
+            '--affinity', '{cores[send]}']
     if ibv:
         dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
         dsim.command += ['--ibv']
