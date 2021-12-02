@@ -293,6 +293,7 @@ def _make_dsim(
     dsim = SDPLogicalTask(name)
     dsim.image = 'katgpucbf'
     dsim.mem = 4096
+    dsim.ports = ['port', 'prometheus']
     dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
@@ -301,6 +302,8 @@ def _make_dsim(
         '--adc-sample-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4',
         '--sync-time', str(sync_time),
+        '--katcp-port', '{ports[port]}',
+        '--prometheus-port', '{ports[prometheus]}'
     ]
     if configuration.options.develop:
         # In develop mode, scale down reservation for low bandwidths to allow
