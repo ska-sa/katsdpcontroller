@@ -292,7 +292,7 @@ def _make_dsim(
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
     dsim = SDPLogicalTask(name)
     dsim.image = 'katgpucbf'
-    dsim.mem = 4096
+    dsim.mem = 2048
     dsim.ports = ['port', 'prometheus']
     dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
@@ -590,7 +590,7 @@ def _make_xbgpu(
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
                 '--src-ibv',
-                '--src-comp-vector', '{cores[src]}'
+                '--src-comp-vector', '{cores[src]}',
                 '--dst-ibv',
                 '--dst-comp-vector', '{cores[dst]}'
             ]
