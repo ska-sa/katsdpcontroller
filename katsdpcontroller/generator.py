@@ -590,7 +590,7 @@ def _make_xbgpu(
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
                 '--src-ibv',
-                '--src-comp-vector', '{cores[src]}'
+                '--src-comp-vector', '{cores[src]}',
                 '--dst-ibv',
                 '--dst-comp-vector', '{cores[dst]}'
             ]
