@@ -294,7 +294,9 @@ def _make_dsim(
     dsim.image = 'katgpucbf'
     dsim.mem = 2048
     dsim.ports = ['port', 'prometheus']
-    dsim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+    dsim.interfaces = [scheduler.InterfaceRequest(
+        'cbf', infiniband=ibv, multicast_out={stream.name for stream in streams}
+    )]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         'dsim',
@@ -408,7 +410,11 @@ def _make_fgpu(
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
         # up by network name.
-        fgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        fgpu.interfaces = [scheduler.InterfaceRequest(
+            'cbf', infiniband=ibv,
+            multicast_in={src.name for src in srcs},
+            multicast_out={stream.name}
+        )]
         fgpu.interfaces[0].bandwidth_in = sum(src.data_rate() for src in srcs)
         # stream.data_rate() is sum over all the engines
         fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
@@ -554,7 +560,15 @@ def _make_xbgpu(
         xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
         xbgpu.cores = ['src', 'dst']
         xbgpu.ports = ['port', 'prometheus']
-        xbgpu.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
+        # Note: we use just one name for the input stream, even though we only
+        # subscribe to a single multicast group of many. Every xbgpu receives
+        # data from every fgpu, so finer-grained tracking is not useful. For
+        # the destination it is more useful.
+        xbgpu.interfaces = [scheduler.InterfaceRequest(
+            'cbf', infiniband=ibv,
+            multicast_in={acv.name},
+            multicast_out={(stream, i)}
+        )]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
