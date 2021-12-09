@@ -461,6 +461,11 @@ def _make_fgpu(
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
 
+        # Rename sensors that are relevant to the stream rather than the process
+        for j, src in enumerate(srcs):
+            fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{src.name}-eq"
+            fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{src.name}-delay"
+
     return fgpu_group
 
 

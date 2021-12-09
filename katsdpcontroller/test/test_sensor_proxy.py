@@ -84,8 +84,9 @@ class TestSensorProxyClient(asynctest.TestCase):
         assert self.server.server is not None
         assert self.server.server.sockets is not None
         port = device_server_sockname(self.server)[1]
-        self.client = SensorProxyClient(self.mirror, 'prefix-',
-                                        host='127.0.0.1', port=port)
+        self.client = SensorProxyClient(
+            self.mirror, 'prefix-', renames={'bytes-sensor': 'custom-bytes-sensor'},
+            host='127.0.0.1', port=port)
         self.addCleanup(self.client.wait_closed)
         self.addCleanup(self.client.close)
         await self.client.wait_synced()
@@ -94,6 +95,8 @@ class TestSensorProxyClient(asynctest.TestCase):
         """Compare the upstream sensors against the mirror"""
         for sensor in self.server.sensors.values():
             qualname = 'prefix-' + sensor.name
+            if sensor.name == 'bytes-sensor':
+                qualname = 'custom-bytes-sensor'
             self.assertIn(qualname, self.mirror.sensors)
             sensor2 = self.mirror.sensors[qualname]
             self.assertEqual(sensor.description, sensor2.description)
@@ -107,9 +110,11 @@ class TestSensorProxyClient(asynctest.TestCase):
             self.assertEqual(sensor.status, sensor2.status)
         # Check that we don't have any we shouldn't
         for sensor2 in self.mirror.sensors.values():
-            self.assertTrue(sensor2.name.startswith('prefix-'))
+            self.assertTrue(sensor2.name.startswith('prefix-')
+                            or sensor2.name == 'custom-bytes-sensor')
             base_name = sensor2.name[7:]
             self.assertIn(base_name, self.server.sensors)
+        self.assertNotIn('prefix-bytes-sensor', self.mirror.sensors)
 
     async def test_init(self) -> None:
         self._check_sensors()

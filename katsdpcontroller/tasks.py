@@ -133,6 +133,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         # List of dictionaries for a .gui-urls sensor. The fields are expanded
         # using str.format(self).
         self.gui_urls = []
+        # Overrides for sensor name remapping
+        self.sensor_renames = {}
         # Whether we should abort the capture block if the task fails
         self.critical = True
         # Whether to set config keys in telstate (only useful for processes that use katsdpservices)
@@ -435,7 +437,9 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                                  self.host, self.ports['port'], self.name)
                 prefix = self.name + '.'
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
-                    self.sdp_controller, prefix, host=self.host, port=self.ports['port'])
+                    self.sdp_controller, prefix,
+                    renames=self.logical_node.sensor_renames,
+                    host=self.host, port=self.ports['port'])
                 try:
                     await self.katcp_connection.wait_synced()
                     self.logger.info("Connected to %s:%s for node %s",

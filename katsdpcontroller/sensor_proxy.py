@@ -43,9 +43,11 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def __init__(self, client: aiokatcp.Client, server: aiokatcp.DeviceServer,
                  prefix: str,
                  rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
-                 enum_types: Sequence[Type[enum.Enum]] = ()) -> None:
+                 enum_types: Sequence[Type[enum.Enum]] = (),
+                 renames: Optional[Mapping[str, str]] = None) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
+        self.renames = renames if renames is not None else {}
         self.server = server
         # We keep track of the sensors after name rewriting but prior to gui-url rewriting
         self.orig_sensors: aiokatcp.SensorSet
@@ -59,7 +61,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         self._interface_changed = False
 
     def rewrite_name(self, name: str) -> str:
-        return self.prefix + name
+        return self.renames.get(name, self.prefix + name)
 
     def sensor_added(self, name: str, description: str, units: str, type_name: str,
                      *args: bytes) -> None:
@@ -127,16 +129,20 @@ class SensorProxyClient(aiokatcp.Client):
         If given, a function that is given a ``.gui-urls`` sensor and returns a
         replacement value. Note that the function is responsible for decoding
         and encoding between JSON and :class:`bytes`.
-    args, kwargs
+    renames
+        Mapping from the remote server's sensor names to sensor names for
+        `server`. Sensors found in this mapping do not have `prefix` applied.
+    kwargs
         Passed to the base class
     """
 
     def __init__(self, server: aiokatcp.DeviceServer, prefix: str,
                  rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
                  enum_types: Sequence[Type[enum.Enum]] = (),
+                 renames: Optional[Mapping[str, str]] = None,
                  **kwargs) -> None:
         super().__init__(**kwargs)
-        watcher = SensorWatcher(self, server, prefix, rewrite_gui_urls)
+        watcher = SensorWatcher(self, server, prefix, rewrite_gui_urls, renames=renames)
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
 
