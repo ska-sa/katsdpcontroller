@@ -192,6 +192,18 @@ def attributes_resources(args):
         ibdevs = infiniband_devices(interface)
         if ibdevs:
             config['infiniband_devices'] = ibdevs
+            try:
+                with open(f'/sys/class/net/{interface}/settings/force_local_lb_disable') as f:
+                    line = f.read().strip()
+                    if line == 'Force local loopback disable is ON':
+                        config['infiniband_multicast_loopback'] = False
+                    elif line == 'Force local loopback disable is OFF':
+                        config['infiniband_multicast_loopback'] = True
+                    else:
+                        raise RuntimeError(
+                            f'Could not parse force_local_lb_disable for {interface}')
+            except OSError:
+                pass  # Ignore if the driver doesn't provide the setting
         try:
             config['ipv4_address'] = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
         except (KeyError, IndexError):
