@@ -774,20 +774,36 @@ class InterfaceRequest(ResourceRequestsContainer):
         Ingress bandwidth, in bps
     bandwidth_out : float or Decimal
         Egress bandwidth, in bps
+    multicast_in : a set of abstract names of multicast groups that will be
+        subscribed to on this interface. The names are arbitrary hashable
+        values.
+    multicast_out : like `multicast_in`, but groups to which data will be
+        sent.
     """
     RESOURCE_REQUESTS = INTERFACE_RESOURCES
 
-    def __init__(self, network, infiniband=False, affinity=False):
+    def __init__(self, network, infiniband=False, affinity=False,
+                 multicast_in=frozenset(), multicast_out=frozenset()):
         super().__init__()
         self.network = network
         self.infiniband = infiniband
         self.affinity = affinity
+        self.multicast_in = set(multicast_in)
+        self.multicast_out = set(multicast_out)
 
     def matches(self, interface, numa_node):
         if self.affinity and numa_node is not None and interface.numa_node != numa_node:
             return False
         if self.infiniband and not interface.infiniband_devices:
             return False
+        if not interface.infiniband_multicast_loopback:
+            new_out = interface.infiniband_multicast_out
+            if self.infiniband:
+                new_out = new_out | self.multicast_out
+            new_in = interface.multicast_in | self.multicast_in
+            if new_out & new_in:
+                # Transmitted data sent with ibverbs won't be received on the same interface
+                return False
         return self.network == interface.network
 
     def __repr__(self):
@@ -851,11 +867,15 @@ class InterfaceResources:
     ----------
     index : int
         Index into the agent's list of interfaces
+    infiniband_multicast_out, multicast_in
+        See :class:`AgentInterface`
     """
     def __init__(self, index):
         self.index = index
         prefix = 'katsdpcontroller.interface.{}.'.format(index)
         self.resources = {name: cls(prefix + name) for name, cls in INTERFACE_RESOURCES.items()}
+        self.infiniband_multicast_out = set()
+        self.multicast_in = set()
 
 
 class ResourceAllocation:
@@ -1525,6 +1545,12 @@ class AgentInterface(InterfaceResources):
         Index of the NUMA socket to which the NIC is connected
     infiniband_devices : list of str
         Device inodes that should be passed into Docker containers to use Infiniband libraries
+    infiniband_multicast_loopback : bool
+        If false, multicast data sent using ibverbs will not be received on the same interface
+    infiniband_multicast_out : set
+        Abstract names of multicast groups for which this interface sends data using ibverbs
+    multicast_in : set
+        Abstract names of multicast groups for which this interfaces receives data
     resources : list of :class:`Resource`
         Available resources
     """
@@ -1535,6 +1561,11 @@ class AgentInterface(InterfaceResources):
         self.ipv4_address = ipaddress.IPv4Address(spec['ipv4_address'])
         self.numa_node = spec.get('numa_node')
         self.infiniband_devices = spec.get('infiniband_devices', [])
+        # Default to True for backwards compatibility with nodes that don't
+        # advertise the setting (where the loopback has always been enabled).
+        self.infiniband_multicast_loopback = spec.get('infiniband_multicast_loopback', True)
+        self.infiniband_multicast_out = set()
+        self.multicast_in = set()
 
 
 def _decode_json_base64(value):
@@ -1744,6 +1775,11 @@ class Agent:
                 interface_alloc = InterfaceResources(i)
                 for name, req in request.requests.items():
                     interface_alloc.resources[name] = interface.resources[name].allocate(req.amount)
+                if request.infiniband:
+                    interface.infiniband_multicast_out |= request.multicast_out
+                    interface_alloc.infiniband_multicast_out |= request.multicast_out
+                interface.multicast_in |= request.multicast_in
+                interface_alloc.multicast_in |= request.multicast_in
                 alloc.interfaces[idx] = interface_alloc
         for request in logical_task.volumes:
             alloc.volumes.append(next(volume for volume in self.volumes
@@ -2946,6 +2982,24 @@ class Scheduler(pymesos.Scheduler):
             # Not a simple error e.g. due to packing problems
             raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
+    def _update_agents_multicast(self, agents):
+        """Update the multicast group information for a freshly minted set of :class:`Agent` s."""
+        # The agent objects in active tasks are not the same Python objects
+        # as in `agents`, so we have to map between them. We build a map from
+        # (agent_id, interface_name) to interface object
+        interface_map = {}
+        for agent in agents:
+            for interface in agent.interfaces:
+                interface_map[(agent.agent_id, interface.name)] = interface
+
+        for (task, _) in self._active.values():
+            for interface in task.allocation.interfaces:
+                key = (task.agent_id, task.agent.interfaces[interface.index])
+                new_interface = interface_map.get(key)
+                if new_interface is not None:
+                    new_interface.infiniband_multicast_out |= interface.infiniband_multicast_out
+                    new_interface.multicast_in |= interface.multicast_in
+
     async def _launch_once(self):
         """Run single iteration of :meth:`_launcher`"""
         candidates = [(queue, queue.front()) for queue in self._queues if queue]
@@ -2972,6 +3026,8 @@ class Scheduler(pymesos.Scheduler):
                 nodes = [node for node in nodes if node.state == TaskState.STARTING]
                 agents = [Agent(list(offers.values()))
                           for agent_id, offers in self._offers.get(role, {}).items()]
+                self._update_agents_multicast(agents)
+
                 # Back up the original agents so that if allocation fails we can
                 # diagnose it.
                 orig_agents = copy.deepcopy(agents)

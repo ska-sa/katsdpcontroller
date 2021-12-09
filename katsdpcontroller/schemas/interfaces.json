@@ -26,6 +26,10 @@
                     "type": "string",
                     "minLength": 1
                 }
+            },
+            "infiniband_multicast_loopback": {
+                "type": "boolean",
+                "default": true
             }
         },
         "required": ["name", "network", "ipv4_address"]
