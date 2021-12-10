@@ -125,6 +125,47 @@ from 0), there must be corresponding resources
 The node must also provide nvidia-container-runtime for access to the
 devices.
 
+Network interface support
+-------------------------
+There is support for requesting use of a network interface on a specific
+network (for example, providing high-speed access to a particular resource).
+Information about which interfaces on an agent are connected to which networks
+is encoded in the :code:`katsdpcontroller.interfaces` Mesos attribute, as a
+base64url-encoded JSON string conforming to
+:const:`katsdpcontroller.schemas.INTERFACES`. For the ith interface in this
+list (counting from 0) there must be corresponding resources
+:samp:`katsdpcontroller.interface.{i}.bandwidth_in` and
+:samp:`katsdpcontroller.interface.{i}.bandwidth_out` set to the interface speed
+in bits per second.
+
+There is also support for using the ibverbs library for raw Ethernet. An
+interface is assumed to support this if it has an `infiniband_devices` section
+in its attributes, listing related device files.  Tasks can request this
+support by specifying `infiniband=True` when constructing the
+:class:`InterfaceRequest`.  The scheduler will pass through the devices and
+allow an unlimited amount of locked memory, but if the container runs as a
+non-root user, it may need to take its own steps to obtain the necessary
+capabilities.
+
+In the Mellanox implementation there are some limitations on multicast:
+
+1. If the device is configured (via
+:samp:`/sys/class/net/{interface}/settings/force_local_lb_disable`) to disallow
+multicast loopback, then if one task sends multicast data via ibverbs, and
+another subscribes (whether or not via ibverbs), then they cannot use the same
+network interface. To ensure that this does not happen, you must
+
+  - Add ``infiniband_multicast_loopback: false`` to the Mesos attributes for
+    the interface (this is done automatically by the
+    :file:`scripts/agent_mkconfig.py` script defined below).
+  - Declare the multicast groups used by each task, using the `multicast_in`
+    and `multicast_out` attributes of :class:`InterfaceRequest`.
+
+2. If a subscriber uses ibverbs but the sender does not, then they cannot use
+   the same network interface, regardless of the loopback setting. Currently
+   katsdpcontroller has no logic to handle this, and any multicast group that
+   is consumed using ibverbs should also be produced using ibverbs.
+
 Agent prioritisation
 --------------------
 Each agent is assigned a 'priority', and tasks are assigned to the
