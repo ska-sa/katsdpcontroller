@@ -198,7 +198,10 @@ def attributes_resources(args):
                     if line == 'Force local loopback disable is ON':
                         config['infiniband_multicast_loopback'] = False
                     elif line == 'Force local loopback disable is OFF':
-                        config['infiniband_multicast_loopback'] = True
+                        # Don't set it to True, because that's the default, and
+                        # having it explicit would break older versions of
+                        # katsdpcontroller that don't expect it.
+                        pass
                     else:
                         raise RuntimeError(
                             f'Could not parse force_local_lb_disable for {interface}')
