@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-"""Sets up an agent with resources and attributes for the katsdpcontroller
-scheduler. See :mod:`katsdpcontroller.scheduler` for details.
+"""Sets up an agent with resources and attributes for the katsdpcontroller scheduler.
+
+See :mod:`katsdpcontroller.scheduler` for details.
 """
 
-from __future__ import print_function, division, absolute_import, unicode_literals
 import argparse
 import subprocess
 import contextlib
@@ -21,10 +21,7 @@ import xml.etree.ElementTree
 import netifaces
 import psutil
 try:
-    if sys.version_info >= (3,):
-        import py3nvml.py3nvml as pynvml
-    else:
-        import pynvml
+    import py3nvml.py3nvml as pynvml
     import pycuda.driver
     pycuda.driver.init()
 except ImportError:
@@ -46,7 +43,7 @@ def nvml_manager():
         pynvml.nvmlShutdown()
 
 
-class GPU(object):
+class GPU:
     def __init__(self, handle, cpu_to_node):
         node = None
         # TODO: use number of CPU cores to determine cpuset size
@@ -84,7 +81,7 @@ class GPU(object):
                 self.device_attributes[str(key)] = value
 
 
-class HWLocParser(object):
+class HWLocParser:
     def __init__(self):
         cmd = ['lstopo', '--output-format', 'xml']
         result = subprocess.check_output(cmd).decode('ascii')
@@ -140,23 +137,23 @@ def infiniband_devices(interface):
     plus inspection of /sys.
     """
     try:
-        with open('/sys/class/net/{}/device/resource'.format(interface)) as f:
+        with open(f'/sys/class/net/{interface}/device/resource') as f:
             resource = f.read()
         for ibdev in os.listdir('/sys/class/infiniband'):
-            with open('/sys/class/infiniband/{}/device/resource'.format(ibdev)) as f:
+            with open(f'/sys/class/infiniband/{ibdev}/device/resource') as f:
                 ib_resource = f.read()
             if ib_resource == resource:
                 # Found the matching device. Identify device inodes
                 devices = ['/dev/infiniband/rdma_cm']
                 for sub in ['infiniband_cm', 'infiniband_mad', 'infiniband_verbs']:
-                    path = '/sys/class/infiniband/{}/device/{}'.format(ibdev, sub)
+                    path = f'/sys/class/infiniband/{ibdev}/device/{sub}'
                     if os.path.exists(path):
                         for item in os.listdir(path):
                             device = '/dev/infiniband/' + item
                             if os.path.exists(device):
                                 devices.append(device)
                 return devices
-    except (IOError, OSError):
+    except OSError:
         pass
     return None
 
@@ -195,24 +192,39 @@ def attributes_resources(args):
         ibdevs = infiniband_devices(interface)
         if ibdevs:
             config['infiniband_devices'] = ibdevs
+            try:
+                with open(f'/sys/class/net/{interface}/settings/force_local_lb_disable') as f:
+                    line = f.read().strip()
+                    if line == 'Force local loopback disable is ON':
+                        config['infiniband_multicast_loopback'] = False
+                    elif line == 'Force local loopback disable is OFF':
+                        # Don't set it to True, because that's the default, and
+                        # having it explicit would break older versions of
+                        # katsdpcontroller that don't expect it.
+                        pass
+                    else:
+                        raise RuntimeError(
+                            f'Could not parse force_local_lb_disable for {interface}')
+            except OSError:
+                pass  # Ignore if the driver doesn't provide the setting
         try:
             config['ipv4_address'] = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
         except (KeyError, IndexError):
-            raise RuntimeError('Could not obtain IPv4 address for interface {}'.format(interface))
+            raise RuntimeError(f'Could not obtain IPv4 address for interface {interface}')
         try:
             config['numa_node'] = interface_nodes[interface]
         except KeyError:
             pass
         interfaces.append(config)
         try:
-            with open('/sys/class/net/{}/speed'.format(interface)) as f:
+            with open(f'/sys/class/net/{interface}/speed') as f:
                 speed = f.read().strip()
                 # This dummy value has been observed on a NIC which had been
                 # configured but had no cable attached.
                 if speed == '4294967295' or float(speed) < 0:
                     raise ValueError('cable unplugged?')
                 speed = float(speed) * 1e6  # /sys/class/net has speed in Mbps
-        except (IOError, OSError, ValueError) as error:
+        except (OSError, ValueError) as error:
             if interface == 'lo':
                 # Loopback interface speed is limited only by CPU power. Just
                 # pick a large number - this will only be used for testing
@@ -221,8 +233,8 @@ def attributes_resources(args):
             else:
                 raise RuntimeError('Could not determine speed of interface {}: {}'.format(
                     interface, error))
-        resources['katsdpcontroller.interface.{}.bandwidth_in'.format(i)] = speed
-        resources['katsdpcontroller.interface.{}.bandwidth_out'.format(i)] = speed
+        resources[f'katsdpcontroller.interface.{i}.bandwidth_in'] = speed
+        resources[f'katsdpcontroller.interface.{i}.bandwidth_out'] = speed
     attributes['katsdpcontroller.interfaces'] = interfaces
     attributes['katsdpcontroller.infiniband_devices'] = glob.glob('/dev/infiniband/*')
 
@@ -241,7 +253,7 @@ def attributes_resources(args):
                 'Error: --volume argument {} does not have the format NAME:PATH'
                 .format(volume_spec))
         if not os.path.exists(path):
-            raise RuntimeError('Path {} does not exist'.format(path))
+            raise RuntimeError(f'Path {path} does not exist')
         config = {'name': name, 'host_path': path}
         if numa_node is not None:
             config['numa_node'] = numa_node
@@ -259,9 +271,9 @@ def attributes_resources(args):
         if gpu.node is not None:
             config['numa_node'] = gpu.node
         gpus.append(config)
-        resources['katsdpcontroller.gpu.{}.compute'.format(i)] = 1.0
+        resources[f'katsdpcontroller.gpu.{i}.compute'] = 1.0
         # Convert memory to MiB, for consistency with Mesos' other resources
-        resources['katsdpcontroller.gpu.{}.mem'.format(i)] = float(gpu.mem) / 2**20
+        resources[f'katsdpcontroller.gpu.{i}.mem'] = float(gpu.mem) / 2**20
     attributes['katsdpcontroller.gpus'] = gpus
 
     if args.priority is not None:
@@ -271,10 +283,10 @@ def attributes_resources(args):
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     resources['cpus'] = float(len(hwloc.cpu_nodes())) - args.reserve_cpu
     if resources['cpus'] < 0.1:
-        raise RuntimeError('--reserve-cpu ({}) is too high'.format(args.reserve_cpu))
+        raise RuntimeError(f'--reserve-cpu ({args.reserve_cpu}) is too high')
     resources['mem'] = psutil.virtual_memory().total // 2**20 - args.reserve_mem
     if resources['mem'] < 1024.0:
-        raise RuntimeError('--reserve-mem ({}) is too high'.format(args.reserve_mem))
+        raise RuntimeError(f'--reserve-mem ({args.reserve_mem}) is too high')
     return attributes, resources
 
 
@@ -322,7 +334,7 @@ def write_dict(name, path, args, d, do_encode=False):
         else:
             converted = d
         for key, value in converted.items():
-            print('    {}:{}'.format(key, value))
+            print(f'    {key}:{value}')
     else:
         try:
             os.makedirs(path)
@@ -336,11 +348,11 @@ def write_dict(name, path, args, d, do_encode=False):
         for key, value in d.items():
             filename = os.path.join(path, key)
             content = encode(value) if do_encode else value
-            content = '{}\n'.format(content)
+            content = f'{content}\n'
             try:
-                with open(filename, 'r') as f:
+                with open(filename) as f:
                     orig_content = f.read()
-            except IOError:
+            except OSError:
                 orig_content = None
             if content != orig_content:
                 with open(os.path.join(path, key), 'w') as f:
