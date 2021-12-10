@@ -692,8 +692,24 @@ class TestAgent(unittest.TestCase):
         self.framework_id = 'framework'
         self.if_attr = _make_json_attr(
             'katsdpcontroller.interfaces',
-            [{'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.254.254',
-              'numa_node': 1, 'infiniband_devices': ['/dev/infiniband/foo']}])
+            [{
+                'name': 'eth0',
+                'network': 'net0',
+                'ipv4_address': '192.168.254.254',
+                'numa_node': 1,
+                'infiniband_devices': ['/dev/infiniband/foo'],
+                'infiniband_multicast_loopback': False
+            }])
+        # Same as if_attr but without infiniband_multicast_loopback
+        self.if_attr_loopback = _make_json_attr(
+            'katsdpcontroller.interfaces',
+            [{
+                'name': 'eth0',
+                'network': 'net0',
+                'ipv4_address': '192.168.254.254',
+                'numa_node': 1,
+                'infiniband_devices': ['/dev/infiniband/foo']
+            }])
         self.if_attr_bad_json = _make_text_attr(
             'katsdpcontroller.interfaces',
             base64.urlsafe_b64encode(b'{not valid json'))
@@ -761,6 +777,7 @@ class TestAgent(unittest.TestCase):
         assert_equal(11e8, agent.interfaces[0].resources['bandwidth_in'].available)
         assert_equal(12e8, agent.interfaces[0].resources['bandwidth_out'].available)
         assert_equal(['/dev/infiniband/foo'], agent.interfaces[0].infiniband_devices)
+        assert_equal(False, agent.interfaces[0].infiniband_multicast_loopback)
         assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
                       scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
                      agent.volumes)
@@ -868,6 +885,60 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
+
+    def test_allocate_conflicting_multicast_out(self):
+        """allocate raises if there is a multicast group conflict on the interface.
+
+        This tests the case where the task is sending using ibverbs.
+        """
+        task = scheduler.LogicalTask('task')
+        task.interfaces.append(scheduler.InterfaceRequest('net0', infiniband=True))
+        task.interfaces[-1].multicast_out |= {'mc'}
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
+        agent.interfaces[0].multicast_in |= {'mc'}
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
+    def test_allocate_conflicting_multicast_in(self):
+        """allocate raises if there is a multicast group conflict on the interface.
+
+        This tests the case where the task is receiving.
+        """
+        task = scheduler.LogicalTask('task')
+        task.interfaces.append(scheduler.InterfaceRequest('net0'))
+        task.interfaces[-1].multicast_in |= {'mc'}
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
+        agent.interfaces[0].infiniband_multicast_out |= {'mc'}
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
+    def test_allocate_safe_multicast_loopback(self):
+        """allocate does not raise on multicast conflict if loopback is available."""
+        task = scheduler.LogicalTask('task')
+        task.interfaces.append(scheduler.InterfaceRequest('net0', infiniband=True))
+        task.interfaces[-1].multicast_out |= {'mc'}
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr_loopback])])
+        agent.interfaces[0].multicast_in |= {'mc'}
+        agent.allocate(task)
+        assert_equal({'mc'}, agent.interfaces[0].infiniband_multicast_out)
+
+    def test_allocate_safe_no_infiniband(self):
+        """allocate does not raise on multicast conflict if infiniband is not used."""
+        task = scheduler.LogicalTask('task')
+        task.interfaces.append(scheduler.InterfaceRequest('net0'))
+        task.interfaces[-1].multicast_out |= {'mc'}
+        agent = scheduler.Agent([self._make_offer({
+            'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
+            'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
+        agent.interfaces[0].multicast_in |= {'mc'}
+        agent.allocate(task)
+        assert_equal(set(), agent.interfaces[0].infiniband_multicast_out)
 
     def test_allocate_no_numa_cores(self):
         """allocate raises if no NUMA node has enough cores on its own"""
@@ -1432,7 +1503,9 @@ class TestScheduler(asynctest.ClockedTestCase):
         node0.gpus.append(scheduler.GPURequest())
         node0.gpus[-1].compute = 0.5
         node0.gpus[-1].mem = 256.0
-        node0.interfaces = [scheduler.InterfaceRequest('net0', infiniband=True)]
+        node0.interfaces = [
+            scheduler.InterfaceRequest('net0', infiniband=True, multicast_out={'mc'})
+        ]
         node0.interfaces[-1].bandwidth_in = 500e6
         node0.interfaces[-1].bandwidth_out = 200e6
         node0.volumes = [scheduler.VolumeRequest('vol0', '/container-path', 'RW')]
@@ -1477,7 +1550,8 @@ class TestScheduler(asynctest.ClockedTestCase):
             ]),
             _make_json_attr('katsdpcontroller.interfaces', [
                 {'name': 'eth0', 'network': 'net0', 'ipv4_address': '192.168.1.1',
-                 'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0']}]),
+                 'infiniband_devices': ['/dev/infiniband/rdma_cm', '/dev/infiniband/uverbs0'],
+                 'infiniband_multicast_loopback': False}]),
             self.numa_attr
         ]
         self._make_physical()
@@ -1886,6 +1960,30 @@ class TestScheduler(asynctest.ClockedTestCase):
                 node.host = 'agenthost1'
         self._make_physical()
         launch, kill = await self._transition_node0(TaskState.STARTING, [self.nodes[0]])
+        offers = self._make_offers()
+        self.sched.resourceOffers(self.driver, offers)
+        await self.advance(30)
+        with assert_raises(scheduler.InsufficientResourcesError):
+            await launch
+
+    async def test_launch_multicast_conflict(self):
+        """Test launching when an interface can't be used due to multicast loopback limitations."""
+        node3 = scheduler.LogicalTask('node3')
+        node3.command = ['hello']
+        node3.image = 'image0'
+        # Add a GPU just to force it to run on agent0
+        node3.gpus.append(scheduler.GPURequest())
+        node3.gpus[-1].compute = 0.5
+        node3.gpus[-1].mem = 256.0
+        node3.interfaces = [
+            scheduler.InterfaceRequest('net0', multicast_in={'mc'})
+        ]
+        node3.interfaces[-1].bandwidth_in = 1e6
+        node3.interfaces[-1].bandwidth_out = 1e6
+        self.logical_graph.add_node(node3)
+
+        self._make_physical()
+        launch, kill = await self._transition_node0(TaskState.STARTING)
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, offers)
         await self.advance(30)
