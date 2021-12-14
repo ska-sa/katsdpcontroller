@@ -406,6 +406,8 @@ def _make_fgpu(
         fgpu.cpus = 3
         fgpu.mem = 3072  # Actual use is currently around 2.2 GB
         fgpu.cores = ['src0', 'src1', 'dst']
+        if not configuration.options.develop:
+            fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
         fgpu.ports = ['port', 'prometheus']
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
@@ -559,6 +561,8 @@ def _make_xbgpu(
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
         xbgpu.cores = ['src', 'dst']
+        if not configuration.options.develop:
+            xbgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
         xbgpu.ports = ['port', 'prometheus']
         # Note: we use just one name for the input stream, even though we only
         # subscribe to a single multicast group of many. Every xbgpu receives
