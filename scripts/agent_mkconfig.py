@@ -87,11 +87,18 @@ class HWLocParser:
         result = subprocess.check_output(cmd).decode('ascii')
         self._tree = xml.etree.ElementTree.fromstring(result)
         self._nodes = self._tree.findall(".//object[@type='NUMANode']")
-        # On single-socket machines, hwloc either doesn't create NUMANode
-        # (older versions), or it's a stub with just page_type entries
-        # (newer versions).
-        if not self._nodes or not self._nodes[0].findall(".//object[@type='PU']"):
+        # On single-socket machines, hwloc 1.x doesn't create NUMANode.
+        if not self._nodes:
             self._nodes = [self._tree]
+        self._nodes.sort(key=lambda node: int(node.get('os_index', 0)))
+        # In hwloc 2.x, NUMANode is a leaf that doesn't contain the associated
+        # cores and devices. We need to ascend the tree to find the container.
+        parent_map = {child: parent for parent in self._tree.iter() for child in parent}
+        for i in range(len(self._nodes)):
+            if int(self._nodes[i].get('os_index', 0)) != i:
+                raise RuntimeError('NUMA nodes are not numbered contiguously by the OS')
+            while not self._nodes[i].findall(".//object[@type='PU']"):
+                self._nodes[i] = parent_map[self._nodes[i]]
 
     def cpus_by_node(self):
         out = []
