@@ -1472,9 +1472,12 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         and no other tasks will be pinned to those cores. In addition, the
         cores will all be taken from the same NUMA socket, and network
         interfaces in :attr:`interfaces` will also come from the same socket.
-        The strings in the list become keys in :attr:`Task.cores`. You can use
-        ``None`` if you don't need to use the core numbers in the command to
-        pin individual threads.
+        The strings in the list become keys in :attr:`PhysicalTask.cores`. You
+        can use ``None`` if you don't need to use the core numbers in the
+        command to pin individual threads.
+    numa_nodes : float
+        Minimum fraction of a NUMA node's cores to allocate. This should only
+        be set if `cores` is, and must not be set higher than 1.0.
     ports : list of str
         Network service ports. Each element in the list is a logical name for
         the port.
@@ -1528,6 +1531,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.gpus = []
         self.interfaces = []
         self.volumes = []
+        self.numa_nodes = 0.0
         self.host = None
         self.capabilities = []
         self.image = None
@@ -1775,9 +1779,14 @@ class Agent:
         # Check that there are sufficient cores on this node
         if numa_node is not None:
             cores = self.numa_cores[numa_node]
+            total_cores = len(self.numa[numa_node])
         else:
             cores = RangeResource('cores')
-        need = logical_task.requests['cores'].amount
+            total_cores = 0
+        need = max(
+            logical_task.requests['cores'].amount,
+            math.ceil(logical_task.numa_nodes * total_cores)
+        )
         have = cores.available
         if need > have:
             raise InsufficientResourcesError('not enough cores on node {} ({} < {})'.format(
@@ -1801,7 +1810,7 @@ class Agent:
         alloc = ResourceAllocation(self)
         for name, request in logical_task.requests.items():
             if name == 'cores':
-                res = cores.allocate(request.amount)
+                res = cores.allocate(need)
             elif name == 'ports':
                 res = self.resources[name].allocate(request.amount, use_random=self._random)
             else:
