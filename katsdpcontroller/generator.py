@@ -595,6 +595,7 @@ def _make_xbgpu(
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
             '--channels', str(stream.n_chans),
             '--channels-per-substream', str(stream.n_chans_per_substream),
+            '--samples-between-spectra', str(acv.n_samples_between_spectra),
             '--spectra-per-heap', str(acv.n_spectra_per_heap),
             '--channel-offset-value', str(i * stream.n_chans_per_substream),
             '--sample-bits', str(acv.bits_per_sample),
