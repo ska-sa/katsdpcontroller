@@ -299,7 +299,7 @@ def _make_dsim(
     )]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
-        'dsim',
+        'schedrr', 'dsim',
         '--interface', '{interfaces[cbf].name}',
         '--adc-sample-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4',
@@ -426,7 +426,7 @@ def _make_fgpu(
         fgpu.gpus[0].compute = 0.5 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 3072     # Actual use is about 2.5GB, independent of channel count
         fgpu.command = [
-            'fgpu',
+            'schedrr', 'fgpu',
             '--src-interface', '{interfaces[cbf].name}',
             '--src-affinity', '{cores[src0]},{cores[src1]}',
             '--dst-interface', '{interfaces[cbf].name}',
@@ -590,7 +590,7 @@ def _make_xbgpu(
         # TODO: ensure that the main thread runs on cores[dst]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = [
-            'xbgpu',
+            'schedrr', 'xbgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
             '--channels', str(stream.n_chans),
