@@ -405,7 +405,7 @@ def _make_fgpu(
         fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
         fgpu.image = 'katgpucbf'
         fgpu.cpus = 3
-        fgpu.mem = 3072  # Actual use is currently around 2.2 GB
+        fgpu.mem = 768  # Actual use is currently around 550 MB
         fgpu.cores = ['src0', 'src1', 'dst']
         if not configuration.options.develop:
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
@@ -422,10 +422,10 @@ def _make_fgpu(
         # stream.data_rate() is sum over all the engines
         fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         fgpu.gpus = [scheduler.GPURequest()]
-        # Run at least 2 per GPU, scaling with bandwidth. This will
+        # Run at least 4 per GPU, scaling with bandwidth. This will
         # likely need to be revised based on the GPU model selected.
-        fgpu.gpus[0].compute = 0.5 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-        fgpu.gpus[0].mem = 3072     # Actual use is about 2.5GB, independent of channel count
+        fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+        fgpu.gpus[0].mem = 1024     # Actual use is about 800MB, independent of channel count
         fgpu.command = [
             'schedrr', 'fgpu',
             '--src-interface', '{interfaces[cbf].name}',
