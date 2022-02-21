@@ -307,6 +307,7 @@ def _make_dsim(
         '--katcp-port', '{ports[port]}',
         '--prometheus-port', '{ports[prometheus]}'
     ]
+    dsim.capabilities.append('SYS_NICE')  # For schedrr
     if configuration.options.develop:
         # In develop mode, scale down reservation for low bandwidths to allow
         # testing low-bandwidth arrays on a single machine. Use a full core
@@ -440,6 +441,7 @@ def _make_fgpu(
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}'
         ]
+        fgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             fgpu.capabilities.append('NET_RAW')
@@ -607,6 +609,7 @@ def _make_xbgpu(
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}'
         ]
+        xbgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             xbgpu.capabilities.append('NET_RAW')
