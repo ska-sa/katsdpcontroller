@@ -404,9 +404,9 @@ def _make_fgpu(
         srcs = stream.sources(i)
         fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
         fgpu.image = 'katgpucbf'
-        fgpu.cpus = 3
+        fgpu.cpus = 4
         fgpu.mem = 768  # Actual use is currently around 550 MB
-        fgpu.cores = ['src0', 'src1', 'dst']
+        fgpu.cores = ['src0', 'src1', 'dst', 'python']
         if not configuration.options.develop:
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
         fgpu.ports = ['port', 'prometheus']
@@ -427,7 +427,7 @@ def _make_fgpu(
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 1024     # Actual use is about 800MB, independent of channel count
         fgpu.command = [
-            'schedrr', 'fgpu',
+            'schedrr', 'taskset', '-c', '{cores[python]}', 'fgpu',
             '--src-interface', '{interfaces[cbf].name}',
             '--src-affinity', '{cores[src0]},{cores[src1]}',
             '--dst-interface', '{interfaces[cbf].name}',
