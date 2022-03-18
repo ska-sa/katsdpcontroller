@@ -89,6 +89,8 @@ DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
+#: Number of real components in a complex number
+COMPLEX = 2
 
 logger = logging.getLogger(__name__)
 
@@ -490,6 +492,7 @@ def _make_xbgpu(
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
+    n_inputs = len(acv.src_streams)
     xbgpu_group = LogicalGroup(f'xbgpu.{stream.name}')
     g.add_node(xbgpu_group)
 
@@ -550,22 +553,37 @@ def _make_xbgpu(
         g.graph["static_sensors"].add(ss)
 
     bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-    # * 2 is for real+complex
+
+    # Compute how much memory to provide for input
+
     batch_size = (
-        len(acv.src_streams) * acv.n_spectra_per_heap
-        * stream.n_chans_per_endpoint * 2 * acv.bits_per_sample // 8
+        n_inputs * acv.n_spectra_per_heap
+        * stream.n_chans_per_endpoint * COMPLEX * acv.bits_per_sample // 8
     )
-    rx_reorder_tol = 536870912  # Default of --rx-reorder-tol option
+    target_chunk_size = 16 * 1024**2
+    batches_per_chunk = math.ceil(target_chunk_size / batch_size)
+    chunk_size = batches_per_chunk * batch_size
+    rx_reorder_tol = 2**29  # Default of --rx-reorder-tol option
+    chunk_ticks = acv.n_samples_between_spectra * acv.n_spectra_per_heap * batches_per_chunk
+    max_active_chunks = math.ceil(rx_reorder_tol / chunk_ticks) + 1  # Based on calc in xbgpu
+    free_chunks = max_active_chunks + 8  # Magic number is from xbgpu
     # Memory allocated for buffering and reordering incoming data
-    # (no *2 for real+complex here: it cancels out).
-    recv_buffer = round(
-        rx_reorder_tol * len(acv.src_streams) * acv.bits_per_sample / 8 / stream.n_substreams
+    recv_buffer = free_chunks * chunk_size
+
+    # Compute how much memory to provide for output
+    vis_size = (
+        n_inputs * (n_inputs + 1) // 2 * stream.n_chans_per_substream
+        * stream.bits_per_sample // 8 * COMPLEX
     )
+    # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
+    mid_vis_size = batches_per_chunk * vis_size * 2
+    send_buffer = vis_size * 5  # Magic number is default in XSend class
+
     for i in range(0, stream.n_substreams):
         xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
-        xbgpu.mem = 800 + _mb(64 * batch_size + recv_buffer)
+        xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
         xbgpu.cores = ['src', 'dst']
         if not configuration.options.develop:
             xbgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
@@ -583,8 +601,8 @@ def _make_xbgpu(
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
-        xbgpu.gpus[0].compute = 0.08 * bw_scale
-        xbgpu.gpus[0].mem = 100 + _mb(32 * batch_size)
+        xbgpu.gpus[0].compute = 0.2 * bw_scale
+        xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size + 2 * vis_size + mid_vis_size)
         # Minimum capability as a function of bits-per-sample, based on
         # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
         min_compute_capability = {
@@ -604,6 +622,7 @@ def _make_xbgpu(
             '--channels-per-substream', str(stream.n_chans_per_substream),
             '--samples-between-spectra', str(acv.n_samples_between_spectra),
             '--spectra-per-heap', str(acv.n_spectra_per_heap),
+            '--heaps-per-fengine-per-chunk', str(batches_per_chunk),
             '--channel-offset-value', str(i * stream.n_chans_per_substream),
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface', '{interfaces[cbf].name}',
@@ -874,9 +893,9 @@ def _correlator_timeplot_frame_size(stream: product_config.VisStream,
     ans += defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
     # sd_blmxdata + sd_blmxflags
     ans += n_cont_chans * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
-    ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // 2)    # sd_timeseries + sd_timeseriesabs
+    ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // COMPLEX)    # sd_timeseries + sd_timeseriesabs
     # sd_percspectrum + sd_percspectrumflags
-    ans += n_spec_chans * n_perc_signals * (BYTES_PER_VIS // 2 + BYTES_PER_FLAG)
+    ans += n_spec_chans * n_perc_signals * (BYTES_PER_VIS // COMPLEX + BYTES_PER_FLAG)
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
     ans += n_bls * 10                               # bls_ordering
     ans += n_bls * 8 * 4                            # sd_flag_fraction
