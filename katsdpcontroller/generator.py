@@ -409,7 +409,8 @@ def _make_fgpu(
         fgpu.cores = ['src0', 'src1', 'dst', 'python']
         if not configuration.options.develop:
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
-        fgpu.ports = ['port', 'prometheus']
+        fgpu.ports = ['port', 'prometheus', 'aiomonitor', 'aioconsole']
+        fgpu.wait_ports = ['port', 'prometheus']
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
         # up by network name.
@@ -439,7 +440,10 @@ def _make_fgpu(
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
             '--katcp-port', '{ports[port]}',
-            '--prometheus-port', '{ports[prometheus]}'
+            '--prometheus-port', '{ports[prometheus]}',
+            '--aiomonitor',
+            '--aiomonitor-port', '{ports[aiomonitor]}',
+            '--aioconsole-port', '{ports[aioconsole]}'
         ]
         fgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
@@ -565,7 +569,8 @@ def _make_xbgpu(
         xbgpu.cores = ['src', 'dst']
         if not configuration.options.develop:
             xbgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
-        xbgpu.ports = ['port', 'prometheus']
+        xbgpu.ports = ['port', 'prometheus', 'aiomonitor', 'aioconsole']
+        xbgpu.wait_ports = ['port', 'prometheus']
         # Note: we use just one name for the input stream, even though we only
         # subscribe to a single multicast group of many. Every xbgpu receives
         # data from every fgpu, so finer-grained tracking is not useful. For
@@ -607,7 +612,10 @@ def _make_xbgpu(
             '--dst-affinity', '{cores[dst]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
             '--katcp-port', '{ports[port]}',
-            '--prometheus-port', '{ports[prometheus]}'
+            '--prometheus-port', '{ports[prometheus]}',
+            '--aiomonitor',
+            '--aiomonitor-port', '{ports[aiomonitor]}',
+            '--aioconsole-port', '{ports[aioconsole]}'
         ]
         xbgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
