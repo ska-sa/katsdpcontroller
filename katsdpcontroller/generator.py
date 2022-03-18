@@ -89,7 +89,7 @@ DATA_VOL = scheduler.VolumeRequest('data', '/var/kat/data', 'RW')
 OBJ_DATA_VOL = scheduler.VolumeRequest('obj_data', '/var/kat/data', 'RW')
 #: Volume for persisting user configuration
 CONFIG_VOL = scheduler.VolumeRequest('config', '/var/kat/config', 'RW')
-#: Number of real components in a complex number
+#: Number of components in a complex number
 COMPLEX = 2
 
 logger = logging.getLogger(__name__)
