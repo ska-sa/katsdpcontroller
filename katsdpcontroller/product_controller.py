@@ -805,6 +805,19 @@ class SDPSubarrayProductBase:
             except OSError as error:
                 logger.warning('Could not write %s: %s', filename, error)
 
+    def _find_stream(self, stream_name: str) -> product_config.Stream:
+        """Find the stream with a given name.
+
+        Raises
+        ------
+        FailReply
+            If no such stream exists
+        """
+        for stream in self.configuration.streams:
+            if stream.name == stream_name:
+                return stream
+        raise FailReply(f"Unknown stream {stream_name!r}")
+
     async def set_delays(
             self,
             stream_name: str,
@@ -813,13 +826,7 @@ class SDPSubarrayProductBase:
         """Set F-engine delays."""
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot set delays in state {self.state}")
-        # Find the stream with the given name
-        for stream in self.configuration.streams:
-            if stream.name == stream_name:
-                break
-        else:
-            raise FailReply(f"Unknown stream {stream_name!r}")
-
+        stream = self._find_stream(stream_name)
         if not isinstance(stream, product_config.GpucbfAntennaChannelisedVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
         if len(coefficient_sets) != len(stream.src_streams):
@@ -850,6 +857,37 @@ class SDPSubarrayProductBase:
         This method can assume that the inputs and current state are valid.
         """
         pass
+
+    async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
+        """Set F-engine gains."""
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set gains in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfAntennaChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        if len(values) not in {0, 1, stream.n_chans}:
+            raise FailReply(f"Expected 0, 1, or {stream.n_chans} values, received {len(values)}")
+        if input not in stream.input_labels:
+            raise FailReply(f"Unknown input {input!r}")
+        try:
+            for v in values:
+                complex(v)  # Evaluated just for the exception
+        except ValueError as exc:
+            raise FailReply(str(exc))
+        return await self.gain_impl(stream, input, values)
+
+    async def gain_impl(
+            self,
+            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+            input: str,
+            values: Sequence[str]) -> Sequence[str]:
+        """Back-end implementation of :meth:`gain`.
+
+        This method can assume that the inputs and current state are valid.
+        """
+        # TODO: this will not be the right thing if there are no values, as we
+        # should return the "previous" values.
+        return values
 
     def __repr__(self) -> str:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -1400,6 +1438,19 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             ))
         await asyncio.gather(*reqs)
 
+    async def gain_impl(
+            self,
+            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+            input: str,
+            values: Sequence[str]) -> Sequence[str]:
+        idx = stream.input_labels.index(input)
+        node_idx = idx // 2
+        node = self._nodes[f"f.{stream.name}.{node_idx}"]
+        if node.katcp_connection is None:
+            raise FailReply(f"No katcp connection to {node.name}")
+        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
+        return reply
+
 
 class DeviceServer(aiokatcp.DeviceServer):
     VERSION = 'product-controller-1.1'
@@ -1679,9 +1730,34 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         Parameters
         ----------
+        stream
+            Antenna-channelised-voltage stream on which to operate
         time
             Time at which delays will be applied
         coefficient_set
             Coefficients for each input, in the format ``delay,delay_rate:phase,phase_rate``
         """
         await self._get_product().set_delays(stream, time, coefficient_set)
+
+    async def request_gain(
+            self, ctx, stream: str, input: str, *values: str) -> Tuple[str, ...]:
+        """Set or query F-engine gains.
+
+        Parameters
+        ----------
+        stream
+            Antenna-channelised-voltage stream on which to operate
+        input
+            Single-pol input name on which to operate
+        values
+            A complex gain per channel, in the format <real>+<imag>j. It may
+            also be a single value to be applied across all channels, or
+            omitted to query the current gains.
+
+        Returns
+        -------
+        values
+            A complex gain per channel, or a single value that is used for all
+            channels.
+        """
+        return tuple(await self._get_product().gain(stream, input, values))
