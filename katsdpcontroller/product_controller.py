@@ -9,6 +9,7 @@ import re
 import copy
 import functools
 import itertools
+import numbers
 from ipaddress import IPv4Address
 from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, Mapping
 
@@ -19,6 +20,7 @@ import aiokatcp
 from aiokatcp import FailReply, Sensor, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import yarl
+import numpy as np
 import katsdptelstate.aio.redis
 import katsdpmodels.fetch.aiohttp
 
@@ -201,6 +203,14 @@ async def _resolve_model(fetcher: katsdpmodels.fetch.aiohttp.Fetcher,
     config = urls[-2] if len(urls) >= 2 else fixed
     return (str(_relative_url(base, yarl.URL(config))),
             str(_relative_url(base, yarl.URL(fixed))))
+
+
+def _format_complex(value: numbers.Complex) -> str:
+    """Format a complex number for a katcp request.
+
+    This is copied from katgpucbf.
+    """
+    return f"{value.real}{value.imag:+}j"
 
 
 class KatcpImageLookup(scheduler.ImageLookup):
@@ -885,9 +895,7 @@ class SDPSubarrayProductBase:
 
         This method can assume that the inputs and current state are valid.
         """
-        # TODO: this will not be the right thing if there are no values, as we
-        # should return the "previous" values.
-        return values
+        raise NotImplementedError()
 
     def __repr__(self) -> str:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
@@ -967,6 +975,14 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
         sensors = self._interface_mode_sensors.sensors
         self._capture_block_states = [
             sensor for sensor in sensors.values() if sensor.name.endswith('.capture-block-state')]
+        # F-engine gains, indexed by stream then input
+        self._gains: Dict[str, Dict[str, np.ndarray]] = {}
+        for stream in self.configuration.by_class(
+                product_config.GpucbfAntennaChannelisedVoltageStream):
+            self._gains[stream.name] = {}
+            for input in stream.input_labels:
+                # Arbitrary initial value
+                self._gains[stream.name][input] = np.full(stream.n_chans, 0.5, dtype=np.complex64)
 
     def _update_capture_block_state(self, capture_block_id: str,
                                     state: Optional[CaptureBlockState]) -> None:
@@ -1005,6 +1021,21 @@ class SDPSubarrayProductInterface(SDPSubarrayProductBase):
 
     async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
         self._interface_mode_sensors.remove_sensors(self.sdp_controller)
+
+    async def gain_impl(
+            self,
+            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+            input: str,
+            values: Sequence[str]) -> Sequence[str]:
+        cvalues = np.array([np.complex64(v) for v in values])
+        if len(cvalues) == 1:
+            cvalues = cvalues.repeat(stream.n_chans)
+        if len(cvalues) > 0:
+            self._gains[stream.name][input] = cvalues
+        out = self._gains[stream.name][input]
+        if np.all(out == out[0]):
+            out = out[:1]  # Same value for all channels
+        return [_format_complex(x) for x in out]
 
 
 class _IndexedKey(dict):
