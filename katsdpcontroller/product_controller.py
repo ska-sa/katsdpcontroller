@@ -1412,6 +1412,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     self.add_sensor(ss)
 
                 # launch the telescope state for this graph
+                telstate: Optional[katsdptelstate.aio.TelescopeState]
                 if self.telstate_node is not None:
                     telstate = await self._launch_telstate()
                 else:
