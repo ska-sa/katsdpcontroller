@@ -1671,9 +1671,6 @@ def build_logical_graph(configuration: Configuration,
         static_sensors=static_sensors
     )
 
-    # telstate node
-    telstate = _make_telstate(g, configuration)
-
     # Add SPEAD endpoints to the graph.
     input_multicast = []
     for stream in configuration.streams:
@@ -1692,9 +1689,6 @@ def build_logical_graph(configuration: Configuration,
         cam2telstate = _make_cam2telstate(g, configuration, cam_http[0])
         for node in input_multicast:
             g.add_edge(node, cam2telstate, depends_ready=True)
-
-    # meta_writer node
-    meta_writer = _make_meta_writer(g, configuration)
 
     # Simulators
     def dsim_key(stream: product_config.SimDigRawAntennaVoltageStream) -> Tuple[str, float]:
@@ -1793,6 +1787,20 @@ def build_logical_graph(configuration: Configuration,
             init_telstate[(stream.name, 'src_streams')] = [s.name for s in stream.src_streams]
             init_telstate[(stream.name, 'stream_type')] = stream.stream_type
 
+    # telstate node. If no other node takes a reference to telstate, then we
+    # don't create it.
+    need_telstate = False
+    for node in g:
+        if isinstance(node, SDPLogicalTask):
+            if node.pass_telstate or node.katsdpservices_config:
+                need_telstate = True
+    if need_telstate:
+        telstate: Optional[scheduler.LogicalNode] = _make_telstate(g, configuration)
+        meta_writer: Optional[scheduler.LogicalNode] = _make_meta_writer(g, configuration)
+    else:
+        telstate = None
+        meta_writer = None
+
     # Count large allocations in telstate, which affects memory usage of
     # telstate itself and any tasks that dump the contents of telstate.
     telstate_extra = 0
@@ -1805,7 +1813,7 @@ def build_logical_graph(configuration: Configuration,
             seen.add(node.name)
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
             # Connect every task to telstate
-            if node is not telstate:
+            if telstate is not None and node is not telstate:
                 if node.pass_telstate:
                     node.command.extend([
                         '--telstate', '{endpoints[telstate_telstate]}',
@@ -1814,7 +1822,7 @@ def build_logical_graph(configuration: Configuration,
                 g.add_edge(node, telstate, port='telstate',
                            depends_ready=True, depends_kill=True)
             # Make sure meta_writer is the last task to be handled in capture-done
-            if node is not meta_writer:
+            if meta_writer is not None and node is not meta_writer:
                 g.add_edge(meta_writer, node, depends_init=True)
             # Increase memory allocation where it depends on telstate content
             if node is telstate or node is meta_writer:
