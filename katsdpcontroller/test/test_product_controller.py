@@ -67,10 +67,11 @@ STREAMS = '''{
 }'''
 
 EXPECTED_REQUEST_LIST = [
-    'delays',
     'capture-done',
     'capture-init',
     'capture-status',
+    'delays',
+    'gain',
     'product-configure',
     'product-deconfigure',
     'telstate-endpoint',
@@ -614,6 +615,8 @@ class TestSDPController(BaseTestSDPController):
         self.fail_launches: typing.Dict[str, str] = {}
         # Set of katcp requests to return failures for
         self.fail_requests: Set[str] = set()
+        # Return values for katcp requests
+        self.katcp_replies: typing.Dict[str, Tuple[List[bytes], List[Message]]] = {}
 
         # Mock out use of katdal to get the targets
         create_patch(self, 'katdal.open',
@@ -714,7 +717,7 @@ class TestSDPController(BaseTestSDPController):
         if msg in self.fail_requests:
             raise FailReply('dummy failure')
         else:
-            return [], []
+            return self.katcp_replies.get(msg, ([], []))
 
     def _ifaddresses(self, interface: str) -> Mapping[int, Sequence[Mapping[str, str]]]:
         if interface == 'lo':
@@ -1301,6 +1304,40 @@ class TestSDPController(BaseTestSDPController):
         await self.client.request('capture-init', CAPTURE_BLOCK)
         reply, _ = await self.client.request('capture-status')
         self.assertEqual(reply, [b'capturing'])
+
+    async def test_gain_bad_stream(self) -> None:
+        """Test gain with a stream that doesn't exist."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'gain', 'foo', 'm000h', '1')
+
+    async def test_gain_wrong_stream_type(self) -> None:
+        """Test gain with a stream that is of the wrong type."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain', 'i0_antenna_channelised_voltage', 'm000h', '1')
+
+    async def test_gain_wrong_length(self) -> None:
+        """Test gain with the wrong number of channels."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h', '1', '0.5')
+
+    async def test_gain_bad_format(self) -> None:
+        """Test gain with badly-formatted gains."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h',
+            'not a complex number')
+
+    async def test_gain_success(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        self.katcp_replies['gain'] = ([b'1+2j'], [])
+        reply, _ = await self.client.request(
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1+2j')
+        # TODO: this doesn't check that it goes to the correct node
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain', 1, '1+2j')
+        self.assertEqual(reply, [b'1+2j'])
 
     async def test_delays_bad_stream(self) -> None:
         """Test delays with a stream that doesn't exist."""
