@@ -169,9 +169,10 @@ class SDPConfigMixin:
                                self.name)
             return
         if not resolver.telstate:
-            logger.warning(
-                "Graph node %s expected to be configured via telstate but there isn't one",
-                self.name)
+            if self._graph_config(resolver, graph):
+                logger.warning(
+                    "Graph node %s has explicit config but there is no telstate",
+                    self.name)
             return
 
         # Not every task will take a --external-hostname option, but the
