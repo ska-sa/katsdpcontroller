@@ -612,10 +612,9 @@ def _make_xbgpu(
         }
         xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
-        # TODO: ensure that the main thread runs on cores[dst]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = [
-            'schedrr', 'xbgpu',
+            'schedrr', 'taskset', '-c', '{cores[dst]}', 'xbgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
             '--channels', str(stream.n_chans),
