@@ -771,7 +771,7 @@ class TestAgent(unittest.TestCase):
         assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.resources['ports']))
         assert_equal(1, len(agent.interfaces))
         assert_equal('eth0', agent.interfaces[0].name)
-        assert_equal('net0', agent.interfaces[0].network)
+        assert_equal({'net0'}, agent.interfaces[0].networks)
         assert_equal(ipaddress.IPv4Address('192.168.254.254'), agent.interfaces[0].ipv4_address)
         assert_equal(1, agent.interfaces[0].numa_node)
         assert_equal(11e8, agent.interfaces[0].resources['bandwidth_in'].available)
