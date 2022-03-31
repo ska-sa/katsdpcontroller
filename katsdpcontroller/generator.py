@@ -408,9 +408,12 @@ def _make_fgpu(
         fgpu.image = 'katgpucbf'
         fgpu.cpus = 4
         fgpu.mem = 768  # Actual use is currently around 550 MB
-        fgpu.cores = ['src0', 'src1', 'dst', 'python']
         if not configuration.options.develop:
+            fgpu.cores = ['src0', 'src1', 'dst', 'python']
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
+            taskset = ['taskset', '-c', '{cores[python]}']
+        else:
+            taskset = []
         fgpu.ports = ['port', 'prometheus', 'aiomonitor', 'aioconsole']
         fgpu.wait_ports = ['port', 'prometheus']
         # TODO: could specify separate interface requests for input and
@@ -429,12 +432,10 @@ def _make_fgpu(
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 1024     # Actual use is about 800MB, independent of channel count
-        fgpu.command = [
-            'schedrr', 'taskset', '-c', '{cores[python]}', 'fgpu',
+        fgpu.command = ['schedrr'] + taskset + [
+            'fgpu',
             '--src-interface', '{interfaces[cbf].name}',
-            '--src-affinity', '{cores[src0]},{cores[src1]}',
             '--dst-interface', '{interfaces[cbf].name}',
-            '--dst-affinity', '{cores[dst]}',
             '--dst-packet-payload', '8192',
             '--adc-sample-rate', str(srcs[0].adc_sample_rate),
             '--feng-id', str(i),
@@ -447,6 +448,11 @@ def _make_fgpu(
             '--aiomonitor-port', '{ports[aiomonitor]}',
             '--aioconsole-port', '{ports[aioconsole]}'
         ]
+        if not configuration.options.develop:
+            fgpu.command += [
+                '--src-affinity', '{cores[src0]},{cores[src1]}',
+                '--dst-affinity', '{cores[dst]}',
+            ]
         fgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
@@ -584,9 +590,12 @@ def _make_xbgpu(
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
-        xbgpu.cores = ['src', 'dst']
         if not configuration.options.develop:
+            xbgpu.cores = ['src', 'dst']
             xbgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
+            taskset = ['taskset', '-c', '{cores[dst]}']
+        else:
+            taskset = []
         xbgpu.ports = ['port', 'prometheus', 'aiomonitor', 'aioconsole']
         xbgpu.wait_ports = ['port', 'prometheus']
         # Note: we use just one name for the input stream, even though we only
@@ -613,8 +622,8 @@ def _make_xbgpu(
         xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
-        xbgpu.command = [
-            'schedrr', 'taskset', '-c', '{cores[dst]}', 'xbgpu',
+        xbgpu.command = ['schedrr'] + taskset + [
+            'xbgpu',
             '--adc-sample-rate', str(first_dig.adc_sample_rate),
             '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
             '--channels', str(stream.n_chans),
@@ -626,8 +635,6 @@ def _make_xbgpu(
             '--sample-bits', str(acv.bits_per_sample),
             '--src-interface', '{interfaces[cbf].name}',
             '--dst-interface', '{interfaces[cbf].name}',
-            '--src-affinity', '{cores[src]}',
-            '--dst-affinity', '{cores[dst]}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}',
@@ -635,6 +642,11 @@ def _make_xbgpu(
             '--aiomonitor-port', '{ports[aiomonitor]}',
             '--aioconsole-port', '{ports[aioconsole]}'
         ]
+        if not configuration.options.develop:
+            xbgpu.command += [
+                '--src-affinity', '{cores[src]}',
+                '--dst-affinity', '{cores[dst]}'
+            ]
         xbgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
