@@ -289,6 +289,13 @@ def _make_dsim(
 
     n_endpoints = 8  # Matches MeerKAT digitisers
 
+    init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
+    telstate_data = {
+        'observer': streams[0].antenna.description
+    }
+    for key, value in telstate_data.items():
+        init_telstate[(streams[0].antenna.name, key)] = value
+
     # Generate a unique name. The caller groups streams by
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
@@ -355,6 +362,7 @@ def _make_fgpu(
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
+    # TODO: this list is not complete, and will need to be updated as the ICD evolves.
     static_sensors = [
         Sensor(float, f"{stream.name}-adc-sample-rate",
                "Sample rate of the ADC",
@@ -397,10 +405,33 @@ def _make_fgpu(
                default=stream.n_samples_between_spectra, initial_status=Sensor.Status.NOMINAL),
         Sensor(int, f"{stream.name}-spectra-per-heap",
                "Number of spectrum chunks per heap",
-               default=stream.n_spectra_per_heap, initial_status=Sensor.Status.NOMINAL)
+               default=stream.n_spectra_per_heap, initial_status=Sensor.Status.NOMINAL),
+        # Note: reports baseband centre frequency, not on-sky, and hence not
+        # stream.centre_frequency.
+        Sensor(float, f"{stream.name}-center-freq",
+               "The centre frequency of the digitised band",
+               default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL)
     ]
     for ss in static_sensors:
         g.graph["static_sensors"].add(ss)
+
+    init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
+    telstate_data = {
+        'instrument_dev_name': 'gpucbf',      # Made-up instrument name
+        # Normally obtained from the CBF proxy or subarray controller
+        'input_labels': stream.input_labels,
+        # Copies of our own sensors, with transformations normally applied by cam2telstate
+        'adc_sample_rate': stream.adc_sample_rate,
+        'n_inputs': len(stream.src_streams),
+        'scale_factor_timestamp': stream.adc_sample_rate,
+        'sync_time': float(sync_time),
+        'ticks_between_spectra': stream.n_samples_between_spectra,
+        'n_chans': stream.n_chans,
+        'bandwidth': stream.bandwidth,
+        'center_freq': stream.centre_frequency
+    }
+    for key, value in telstate_data.items():
+        init_telstate[(stream.name, key)] = value
 
     for i in range(0, n_engines):
         srcs = stream.sources(i)
@@ -524,14 +555,14 @@ def _make_xbgpu(
                 for p2 in range(2):
                     idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
+    n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
     static_sensors = [
         Sensor(int, f"{stream.name}-n-xengs",
                "The number of X-engines in the instrument",
                default=n_engines, initial_status=Sensor.Status.NOMINAL),
         Sensor(int, f"{stream.name}-n-accs",
                "The number of spectra that are accumulated per X-engine output",
-               default=round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra),
-               initial_status=Sensor.Status.NOMINAL),
+               default=n_accs, initial_status=Sensor.Status.NOMINAL),
         Sensor(float, f"{stream.name}-int-time",
                "The time, in seconds, for which the X-engines accumulate.",
                "s",
@@ -557,6 +588,19 @@ def _make_xbgpu(
     ]
     for ss in static_sensors:
         g.graph["static_sensors"].add(ss)
+
+    init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
+    telstate_data = {
+        'src_streams': [stream.antenna_channelised_voltage.name],
+        'instrument_dev_name': 'gpucbf',  # Made-up instrument name
+        'bandwidth': acv.bandwidth,
+        'bls_ordering': bls_ordering,
+        'int_time': stream.int_time,
+        'n_accs': n_accs,
+        'n_chans_per_substream': stream.n_chans_per_substream
+    }
+    for key, value in telstate_data.items():
+        init_telstate[(stream.name, key)] = value
 
     bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
 
