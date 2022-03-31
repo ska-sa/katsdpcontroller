@@ -8,6 +8,7 @@ See :mod:`katsdpcontroller.scheduler` for details.
 import argparse
 import subprocess
 import contextlib
+import math
 import os
 import os.path
 import sys
@@ -190,10 +191,17 @@ def attributes_resources(args):
     interfaces = []
     for i, network_spec in enumerate(args.networks):
         try:
-            interface, network = network_spec.split(':', 1)
+            parts = network_spec.split(':')
+            if not 2 <= len(parts) <= 3:
+                raise ValueError
+            interface, network = parts[:2]
+            if len(parts) >= 3:
+                max_speed = float(parts[2]) * 1e9
+            else:
+                max_speed = math.inf
         except ValueError:
             raise RuntimeError(
-                'Error: --network argument {} does not have the format INTERFACE:NETWORK'
+                'Error: --network argument {} does not have the format INTERFACE:NETWORK[:MAX-GBPS]'
                 .format(network_spec))
         config = {'name': interface, 'network': network}
         ibdevs = infiniband_devices(interface)
@@ -240,6 +248,7 @@ def attributes_resources(args):
             else:
                 raise RuntimeError('Could not determine speed of interface {}: {}'.format(
                     interface, error))
+        speed = min(speed, max_speed)
         resources[f'katsdpcontroller.interface.{i}.bandwidth_in'] = speed
         resources[f'katsdpcontroller.interface.{i}.bandwidth_out'] = speed
     attributes['katsdpcontroller.interfaces'] = interfaces
@@ -390,7 +399,7 @@ def main():
     parser.add_argument('--reserve-mem', type=float, default=1024.0,
                         help='MiB of memory resource to exclude from Mesos [%(default)s]')
     parser.add_argument('--network', dest='networks', action='append', default=[],
-                        metavar='INTERFACE:NETWORK',
+                        metavar='INTERFACE:NETWORK[:MAX-GBPS]',
                         help='Map network interface to a logical network')
     parser.add_argument('--volume', dest='volumes', action='append', default=[],
                         metavar='NAME:PATH[:NUMA]',
