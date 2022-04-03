@@ -211,6 +211,7 @@ from decimal import Decimal
 import time
 import io
 from abc import abstractmethod, ABC
+from contextlib import AsyncExitStack
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
@@ -1948,6 +1949,9 @@ class PhysicalNode:
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
     """
+
+    ports: typing.Dict[str, int]
+
     def __init__(self, logical_node):
         self.logical_node = logical_node
         self.name = logical_node.name
@@ -2165,7 +2169,6 @@ class PhysicalTask(PhysicalNode):
     """
 
     cores: typing.Dict[str, int]
-    ports: typing.Dict[str, int]
 
     def __init__(self, logical_task):
         super().__init__(logical_task)
@@ -2222,7 +2225,7 @@ class PhysicalTask(PhysicalNode):
                 setattr(self, resource.name, d)
 
     async def resolve(self, resolver, graph, image_path=None):
-        """Do final preparation before moving to :const:`TaskState.STAGING`.
+        """Do final preparation before moving to :const:`TaskState.STARTING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
         Parameters
@@ -2424,6 +2427,75 @@ class PhysicalTask(PhysicalNode):
         # hasattr is to protect against failure early in __init__
         if hasattr(self, '_queue'):
             self.queue = None
+
+
+class FakePhysicalTask(PhysicalNode):
+    """Drop-in replacement for PhysicalTask that does not actually launch anything.
+
+    It is intended for use with :option:`!--interface` and for unit testing. It
+    has the following behaviour:
+
+    - When set to :const:`TaskState.STARTED`, it immediately moves to
+      :const:`TaskState.RUNNING`.
+    - When killed, it immediately dies.
+    - If a max_run_time is set, it immediately dies.
+    - It allocates ports and listens on them. By default, incoming connections
+      are immediately closed.
+
+    .. todo::
+
+       It does not currently handle task_stats.
+    """
+
+    def __init__(self, logical_task):
+        super().__init__(logical_task)
+        self.start_time = None
+        self.end_time = None
+        self.queue = None
+        self.host = "127.0.0.1"
+        self._server_task: Optional[asyncio.Task] = None
+
+    def _start_serving(self):
+        self._server_task = asyncio.get_event_loop().create_task(self._serve())
+
+    def _stop_serving(self):
+        self._server_task.cancel()  # TODO: need to await the task somewhere
+        self._server_task = None
+
+    @staticmethod
+    async def _connected_cb(reader, writer):
+        writer.close()
+        await writer.wait_closed()
+
+    async def _create_server(self, port: str):
+        return await asyncio.start_server(self._connected_cb, host=self.host)
+
+    async def _serve(self):
+        async with AsyncExitStack() as stack:
+            for port in self.logical_task.ports:
+                stack.enter_async_context(await self._create_server(port))
+
+    def set_state(self, state):
+        if state >= TaskState.STARTED and state < TaskState.READY:
+            if self.logical_node.max_run_time is not None:
+                state = TaskState.DEAD
+            else:
+                state = TaskState.RUNNING
+        elif state == TaskState.KILLING:
+            state = TaskState.DEAD
+
+        now = time.time()
+        if state >= TaskState.RUNNING and self.start_time is None:
+            self.start_time = now
+            self.status = Dict(state='TASK_RUNNING', timestamp=now)
+        if state == TaskState.DEAD and self.end_time is None:
+            self.end_time = now
+            self.status = Dict(state='TASK_FINISHED', timestamp=now)
+        if state == TaskState.RUNNING and self._server_task is None:
+            self._start_serving()
+        elif state == TaskState.DEAD and self._server_task is not None:
+            self._stop_serving()
+        super().set_state(state)
 
 
 def instantiate(logical_graph):

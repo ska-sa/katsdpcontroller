@@ -60,7 +60,7 @@ setup(
         'agent': ['psutil', 'py3nvml', 'pycuda'],
         'test': tests_require
     },
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     use_katversion=True,
     license='MIT',
     zip_safe=False
