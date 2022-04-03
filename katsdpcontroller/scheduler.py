@@ -2633,19 +2633,21 @@ class TaskStats:
         pass
 
 
-class Scheduler(pymesos.Scheduler):
-    """Top-level scheduler implementing the Mesos Scheduler API.
+async def _cleanup_task(task):
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
-    Mesos calls the callbacks provided in this class from another thread. To
-    ensure thread safety, they are all posted to the event loop via a
-    decorator.
 
-    The following invariants are maintained at each yield point:
-    - each dictionary within :attr:`_offers` is non-empty
-    - every role in :attr:`_roles_needed` is non-suppressed (there may be
-      additional non-suppressed roles, but they will be suppressed when an
-      offer arrives)
-    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
+class SchedulerBase:
+    """Top-level scheduler.
+
+    This base class does not actually connect to Mesos, so can only be used
+    to launch nodes that are not derived from :class:`PhysicalTask`. This is
+    useful for simulation or testing. For interacting with Mesos, use
+    :class:`Scheduler`.
 
     Parameters
     ----------
@@ -2707,7 +2709,6 @@ class Scheduler(pymesos.Scheduler):
         self.http_url = http_url
         self.task_stats = task_stats if task_stats is not None else TaskStats()
         self._launcher_task = self._loop.create_task(self._launcher())
-        self._reconciliation_task = self._loop.create_task(self._reconciliation())
 
         # Configure the web app
         app = aiohttp.web.Application()
@@ -2779,21 +2780,7 @@ class Scheduler(pymesos.Scheduler):
         return (False, 0, 0, 0, 0, node.name)
 
     def _update_roles(self, new_roles):
-        revive_roles = new_roles - self._roles_needed
-        suppress_roles = self._roles_needed - new_roles
-        self._roles_needed = new_roles
-        if revive_roles:
-            self._driver.reviveOffers(revive_roles)
-        if suppress_roles:
-            self._driver.suppressOffers(suppress_roles)
-            # Decline all held offers that aren't needed any more
-            to_decline = []
-            for role in suppress_roles:
-                role_offers = self._offers.pop(role, {})
-                for agent_offers in role_offers.values():
-                    to_decline.extend([offer.id for offer in agent_offers.values()])
-            if to_decline:
-                self._driver.declineOffer(to_decline)
+        pass  # Real implementation in Scheduler
 
     def _remove_offer(self, role, agent_id, offer_id):
         try:
@@ -2808,108 +2795,6 @@ class Scheduler(pymesos.Scheduler):
             # same time it is rescinded - the task will be lost but we won't
             # crash).
             pass
-
-    def set_driver(self, driver):
-        self._driver = driver
-
-    def registered(self, driver, framework_id, master_info):
-        pass
-
-    @run_in_event_loop
-    def resourceOffers(self, driver, offers):
-        def format_time(t):
-            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
-
-        to_decline = []
-        to_suppress = set()
-        for offer in offers:
-            if offer.unavailability:
-                start_time_ns = offer.unavailability.start.nanoseconds
-                start_time = start_time_ns / 1e9
-                if not offer.unavailability.duration:
-                    logger.debug('Declining offer %s from %s: unavailable from %s forever',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time))
-                    to_decline.append(offer.id)
-                    continue
-                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
-                end_time = end_time_ns / 1e9
-                if end_time >= time.time():
-                    logger.debug('Declining offer %s from %s: unavailable from %s to %s',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time), format_time(end_time))
-                    to_decline.append(offer.id)
-                    continue
-                else:
-                    logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time), format_time(end_time))
-            role = offer.allocation_info.role
-            if role in self._roles_needed:
-                logger.debug('Adding offer %s on %s with role %s to pool',
-                             offer.id.value, offer.agent_id.value, role)
-                role_offers = self._offers.setdefault(role, {})
-                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
-                agent_offers[offer.id.value] = offer
-            else:
-                # This can happen either due to a race or at startup, when
-                # we haven't yet suppressed roles.
-                logger.debug('Declining offer %s on %s with role %s',
-                             offer.id.value, offer.agent_id.value, role)
-                to_decline.append(offer.id)
-                to_suppress.add(role)
-
-        if to_decline:
-            self._driver.declineOffer(to_decline)
-        if to_suppress:
-            self._driver.suppressOffers(to_suppress)
-        self._wakeup_launcher.set()
-
-    @run_in_event_loop
-    def inverseOffers(self, driver, offers):
-        for offer in offers:
-            logger.debug('Declining inverse offer %s', offer.id.value)
-            self._driver.declineInverseOffer(offer.id)
-
-    @run_in_event_loop
-    def offerRescinded(self, driver, offer_id):
-        # TODO: this is not very efficient. A secondary lookup from offer id to
-        # the relevant offer info would speed it up.
-        for role, role_offers in self._offers.items():
-            for agent_id, agent_offers in role_offers.items():
-                if offer_id.value in agent_offers:
-                    self._remove_offer(role, agent_id, offer_id.value)
-                    return
-
-    @run_in_event_loop
-    def statusUpdate(self, driver, status):
-        logger.debug(
-            'Update: task %s in state %s (%s)',
-            status.task_id.value, status.state, status.message)
-        task = self.get_task(status.task_id.value)
-        if task is not None:
-            if status.state in TERMINAL_STATUSES:
-                task.set_state(TaskState.DEAD)
-                del self._active[status.task_id.value]
-            elif status.state == 'TASK_RUNNING':
-                if task.state < TaskState.RUNNING:
-                    task.set_state(TaskState.RUNNING)
-                    # The task itself is responsible for advancing to
-                    # READY
-            task.set_status(status)
-            if (task.kill_sent_time is not None
-                    and status.state != 'TASK_KILLING'
-                    and status.state not in TERMINAL_STATUSES
-                    and self._loop.time() > task.kill_sent_time + self.kill_timeout):
-                logger.warning('Retrying kill on %s (task ID %s)',
-                               task.name, status.task_id.value)
-                self._driver.killTask(status.task_id)
-        else:
-            if status.state not in TERMINAL_STATUSES:
-                logger.warning('Received status update for unknown task %s, killing it',
-                               status.task_id.value)
-                self._driver.killTask(status.task_id)
-        self._driver.acknowledgeStatusUpdate(status)
 
     @classmethod
     def _diagnose_insufficient(cls, agents, nodes):
@@ -3156,6 +3041,7 @@ class Scheduler(pymesos.Scheduler):
                         # TODO: if there are more pending in the queue then we
                         # should use a filter to be re-offered remaining
                         # resources of this agent more quickly.
+                        assert self._driver is not None
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
                             self._remove_offer(role, agent.agent_id, offer_id.value)
@@ -3191,6 +3077,7 @@ class Scheduler(pymesos.Scheduler):
                         to_decline.extend([offer.id for offer in agent_offers.values()])
                         del role_offers[agent_id]
             if to_decline:
+                assert self._driver is not None
                 self._driver.declineOffer(to_decline)
 
     async def _launcher(self):
@@ -3306,6 +3193,10 @@ class Scheduler(pymesos.Scheduler):
             raise ValueError('queue has not been added to the scheduler')
         if resources_timeout is None:
             resources_timeout = self.resources_timeout
+        if self._driver is None:
+            for node in nodes:
+                if isinstance(node, PhysicalTask):
+                    raise TypeError(f'{node.name} is a PhysicalTask but there is no Mesos driver')
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
@@ -3607,6 +3498,186 @@ class Scheduler(pymesos.Scheduler):
             futures.append(asyncio.ensure_future(kill_one(node, kill_graph)))
         await asyncio.gather(*futures)
 
+    async def close(self):
+        """Shut down the scheduler. This is a coroutine that kills any graphs
+        with running tasks or pending launches, and joins the driver thread. It
+        is an error to make any further calls to the scheduler after calling
+        this function.
+
+        .. note::
+
+            A graph with no running tasks but other types of nodes still
+            running will not be shut down. This is subject to change in the
+            future.
+        """
+        # TODO: do we need to explicitly decline outstanding offers?
+        self._closing = True    # Prevents concurrent launches
+        await self.http_runner.cleanup()
+        # Find the graphs that are still running
+        graphs = set()
+        for (_task, graph) in self._active.values():
+            graphs.add(graph)
+        for queue in self._queues:
+            for group in queue:
+                graphs.add(group.graph)
+        for graph in graphs:
+            await self.kill(graph)
+        for queue in self._queues:
+            while queue:
+                queue.front().future.cancel()
+        await _cleanup_task(self._launcher_task)
+        self._launcher_task = None
+
+    def get_task(self, task_id, return_graph=False):
+        try:
+            if return_graph:
+                return self._active[task_id]
+            return self._active[task_id][0]
+        except KeyError:
+            return None
+
+
+class Scheduler(SchedulerBase, pymesos.Scheduler):
+    """Top-level scheduler implementing the Mesos Scheduler API.
+
+    Mesos calls the callbacks provided in this class from another thread. To
+    ensure thread safety, they are all posted to the event loop via a
+    decorator.
+
+    The following invariants are maintained at each yield point:
+    - each dictionary within :attr:`_offers` is non-empty
+    - every role in :attr:`_roles_needed` is non-suppressed (there may be
+      additional non-suppressed roles, but they will be suppressed when an
+      offer arrives)
+    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
+
+    Refer to :class:`SchedulerBase` for descriptions of parameters, attributes
+    etc.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        SchedulerBase.__init__(self, *args, **kwargs)
+        self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconciliation())
+
+    def _update_roles(self, new_roles):
+        revive_roles = new_roles - self._roles_needed
+        suppress_roles = self._roles_needed - new_roles
+        self._roles_needed = new_roles
+        if revive_roles:
+            self._driver.reviveOffers(revive_roles)
+        if suppress_roles:
+            self._driver.suppressOffers(suppress_roles)
+            # Decline all held offers that aren't needed any more
+            to_decline = []
+            for role in suppress_roles:
+                role_offers = self._offers.pop(role, {})
+                for agent_offers in role_offers.values():
+                    to_decline.extend([offer.id for offer in agent_offers.values()])
+            if to_decline:
+                self._driver.declineOffer(to_decline)
+
+    def set_driver(self, driver):
+        self._driver = driver
+
+    def registered(self, driver, framework_id, master_info):
+        pass
+
+    @run_in_event_loop
+    def resourceOffers(self, driver, offers):
+        def format_time(t):
+            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+
+        to_decline = []
+        to_suppress = set()
+        for offer in offers:
+            if offer.unavailability:
+                start_time_ns = offer.unavailability.start.nanoseconds
+                start_time = start_time_ns / 1e9
+                if not offer.unavailability.duration:
+                    logger.debug('Declining offer %s from %s: unavailable from %s forever',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time))
+                    to_decline.append(offer.id)
+                    continue
+                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
+                end_time = end_time_ns / 1e9
+                if end_time >= time.time():
+                    logger.debug('Declining offer %s from %s: unavailable from %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
+                    to_decline.append(offer.id)
+                    continue
+                else:
+                    logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
+            role = offer.allocation_info.role
+            if role in self._roles_needed:
+                logger.debug('Adding offer %s on %s with role %s to pool',
+                             offer.id.value, offer.agent_id.value, role)
+                role_offers = self._offers.setdefault(role, {})
+                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+                agent_offers[offer.id.value] = offer
+            else:
+                # This can happen either due to a race or at startup, when
+                # we haven't yet suppressed roles.
+                logger.debug('Declining offer %s on %s with role %s',
+                             offer.id.value, offer.agent_id.value, role)
+                to_decline.append(offer.id)
+                to_suppress.add(role)
+
+        if to_decline:
+            self._driver.declineOffer(to_decline)
+        if to_suppress:
+            self._driver.suppressOffers(to_suppress)
+        self._wakeup_launcher.set()
+
+    @run_in_event_loop
+    def inverseOffers(self, driver, offers):
+        for offer in offers:
+            logger.debug('Declining inverse offer %s', offer.id.value)
+            self._driver.declineInverseOffer(offer.id)
+
+    @run_in_event_loop
+    def offerRescinded(self, driver, offer_id):
+        # TODO: this is not very efficient. A secondary lookup from offer id to
+        # the relevant offer info would speed it up.
+        for role, role_offers in self._offers.items():
+            for agent_id, agent_offers in role_offers.items():
+                if offer_id.value in agent_offers:
+                    self._remove_offer(role, agent_id, offer_id.value)
+                    return
+
+    @run_in_event_loop
+    def statusUpdate(self, driver, status):
+        logger.debug(
+            'Update: task %s in state %s (%s)',
+            status.task_id.value, status.state, status.message)
+        task = self.get_task(status.task_id.value)
+        if task is not None:
+            if status.state in TERMINAL_STATUSES:
+                task.set_state(TaskState.DEAD)
+                del self._active[status.task_id.value]
+            elif status.state == 'TASK_RUNNING':
+                if task.state < TaskState.RUNNING:
+                    task.set_state(TaskState.RUNNING)
+                    # The task itself is responsible for advancing to
+                    # READY
+            task.set_status(status)
+            if (task.kill_sent_time is not None
+                    and status.state != 'TASK_KILLING'
+                    and status.state not in TERMINAL_STATUSES
+                    and self._loop.time() > task.kill_sent_time + self.kill_timeout):
+                logger.warning('Retrying kill on %s (task ID %s)',
+                               task.name, status.task_id.value)
+                self._driver.killTask(status.task_id)
+        else:
+            if status.state not in TERMINAL_STATUSES:
+                logger.warning('Received status update for unknown task %s, killing it',
+                               status.task_id.value)
+                self._driver.killTask(status.task_id)
+        self._driver.acknowledgeStatusUpdate(status)
+
     async def _reconciliation(self) -> None:
         """Background task that periodically requests reconciliation.
 
@@ -3638,42 +3709,8 @@ class Scheduler(pymesos.Scheduler):
             explicit = not explicit
 
     async def close(self):
-        """Shut down the scheduler. This is a coroutine that kills any graphs
-        with running tasks or pending launches, and joins the driver thread. It
-        is an error to make any further calls to the scheduler after calling
-        this function.
-
-        .. note::
-
-            A graph with no running tasks but other types of nodes still
-            running will not be shut down. This is subject to change in the
-            future.
-        """
-        async def cleanup_task(task):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        # TODO: do we need to explicitly decline outstanding offers?
-        self._closing = True    # Prevents concurrent launches
-        await self.http_runner.cleanup()
-        # Find the graphs that are still running
-        graphs = set()
-        for (_task, graph) in self._active.values():
-            graphs.add(graph)
-        for queue in self._queues:
-            for group in queue:
-                graphs.add(group.graph)
-        for graph in graphs:
-            await self.kill(graph)
-        for queue in self._queues:
-            while queue:
-                queue.front().future.cancel()
-        await cleanup_task(self._launcher_task)
-        self._launcher_task = None
-        await cleanup_task(self._reconciliation_task)
+        await super().close()
+        await _cleanup_task(self._reconciliation_task)
         self._reconciliation_task = None
         self._driver.stop()
         # If self._driver is a mock, then asyncio incorrectly complains about passing
@@ -3681,14 +3718,6 @@ class Scheduler(pymesos.Scheduler):
         # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
-
-    def get_task(self, task_id, return_graph=False):
-        try:
-            if return_graph:
-                return self._active[task_id]
-            return self._active[task_id][0]
-        except KeyError:
-            return None
 
 
 __all__ = [
@@ -3715,4 +3744,4 @@ __all__ = [
     'ImageLookup', 'SimpleImageLookup', 'HTTPImageLookup',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Agent', 'AgentGPU', 'AgentInterface',
-    'Scheduler', 'instantiate']
+    'SchedulerBase', 'Scheduler', 'instantiate']
