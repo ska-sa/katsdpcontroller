@@ -4,6 +4,8 @@ import asyncio
 import socket
 import ipaddress
 import os
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager, Tuple, Type
 
 import async_timeout
 import aiokatcp
@@ -681,6 +683,32 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
                 batch_runtime.observe(elapsed)
                 batch_runtime_rel.observe(elapsed / self.logical_node.batch_data_time)
                 logger.info('Task %s ran for %s s', self.name, elapsed)
+
+
+class FakeDeviceServer(aiokatcp.DeviceServer):
+    pass
+
+
+@asynccontextmanager
+async def wrap_katcp_server(server: aiokatcp.DeviceServer) -> aiokatcp.DeviceServer:
+    await server.start()
+    yield server
+    await server.stop()
+
+
+class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
+    katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
+
+    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+        scheduler.FakePhysicalTask.__init__(self, logical_task)
+        SDPPhysicalTaskMixin.__init__(
+            self, logical_task, sdp_controller, subarray_product, capture_block_id)
+
+    async def _create_server(self, port: str) -> Tuple[AsyncContextManager, int]:
+        if port != 'port':  # conventional name for katcp port
+            return await super()._create_server(port)
+        katcp_server = FakeDeviceServer(self.host, 0)
+        return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[0]
 
 
 class LogicalGroup(scheduler.LogicalExternal):
