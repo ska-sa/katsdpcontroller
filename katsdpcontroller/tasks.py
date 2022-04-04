@@ -696,6 +696,11 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
     VERSION = "fake-1.0"
     BUILD_STATE = "fake-1.0"
 
+    async def unhandled_request(self, ctx, req: aiokatcp.core.Message) -> None:
+        """Respond to any unknown requests with an empty reply."""
+        ctx.reply(aiokatcp.core.Message.OK)
+        await ctx.drain()
+
 
 @asynccontextmanager
 async def wrap_katcp_server(

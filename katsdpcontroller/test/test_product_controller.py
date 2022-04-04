@@ -375,8 +375,11 @@ class BaseTestSDPController(asynctest.TestCase):
         self.addCleanup(mc_client.close)
         self.prometheus_registry = CollectorRegistry()
 
+        if 'sched' not in server_kwargs:
+            server_kwargs['sched'] = scheduler.SchedulerBase('realtime', '127.0.0.1', 0)
         self.server = DeviceServer(
-            master_controller=mc_client, subarray_product_id=SUBARRAY_PRODUCT,
+            master_controller=mc_client,
+            subarray_product_id=SUBARRAY_PRODUCT,
             prometheus_registry=self.prometheus_registry,
             shutdown_delay=0.0,
             **server_kwargs)
@@ -429,7 +432,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
     async def setUp(self) -> None:
         await super().setUp()
         image_resolver_factory = scheduler.ImageResolverFactory(scheduler.SimpleImageLookup('sdp'))
-        await self.setup_server(host='127.0.0.1', port=0, sched=None,
+        await self.setup_server(host='127.0.0.1', port=0,
                                 batch_role='batch',
                                 interface_mode=True,
                                 localhost=True,

@@ -2177,7 +2177,7 @@ class PhysicalTask(PhysicalNode):
         self.interfaces: typing.Dict[str, AgentInterface] = {}
         self.endpoints: typing.Dict[str, Endpoint] = {}
         self.taskinfo = None
-        self.allocation = None
+        self.allocation: Optional[Dict] = None
         self.status = None
         self.start_time = None         # time.time()
         self.end_time = None           # time.time()
