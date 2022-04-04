@@ -11,7 +11,7 @@ import functools
 import itertools
 import numbers
 from ipaddress import IPv4Address
-from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, Mapping
+from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Mapping
 
 import addict
 import jsonschema
@@ -393,7 +393,7 @@ class SDPSubarrayProductBase:
     forced deconfiguration to abort them.
     """
 
-    def __init__(self, sched: Optional[scheduler.Scheduler],
+    def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver,
@@ -812,7 +812,8 @@ class SDPSubarrayProductBase:
             if name != 'resources':
                 g = scheduler.subgraph(self.logical_graph, 'depends_' + name)
             else:
-                g = scheduler.subgraph(self.logical_graph, scheduler.Scheduler.depends_resources)
+                g = scheduler.subgraph(self.logical_graph,
+                                       scheduler.SchedulerBase.depends_resources)
             g = networkx.relabel_nodes(g, {node: node.name for node in g})
             g = networkx.drawing.nx_pydot.to_pydot(g)
             filename = os.path.join(output_dir,
@@ -1061,8 +1062,6 @@ class _IndexedKey(dict):
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
 
-    sched: scheduler.Scheduler     # Override Optional[] from base class
-
     def _instantiate(self, logical_node: scheduler.LogicalNode,
                      capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
         if getattr(logical_node, 'sdp_physical_factory', False):
@@ -1076,7 +1075,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                    for logical in logical_graph}
         return networkx.relabel_nodes(logical_graph, mapping)
 
-    def __init__(self, sched: scheduler.Scheduler,
+    def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver, subarray_product_id: str,
@@ -1220,7 +1219,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             await self.sched.launch(physical_graph, self.resolver, [telstate_node],
                                     queue=self.batch_queue,
                                     resources_timeout=BATCH_RESOURCES_TIMEOUT)
-            nodelist = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
+            nodelist = [
+                node for node in physical_graph
+                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            ]
             await self.sched.batch_run(physical_graph, self.resolver, nodelist,
                                        queue=self.batch_queue,
                                        resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
@@ -1346,12 +1348,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 result = False
         return result, died
 
-    def unexpected_death(self, task: scheduler.PhysicalTask) -> None:
+    def unexpected_death(self, task: tasks.SDPAnyPhysicalTask) -> None:
         logger.warning('Task %s died unexpectedly', task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
-    def bad_device_status(self, task: scheduler.PhysicalTask) -> None:
+    def bad_device_status(self, task: tasks.SDPAnyPhysicalTask) -> None:
         logger.warning('Task %s has failed (device-status)', task.name)
         if task.logical_node.critical:
             self._go_to_error()
@@ -1508,7 +1510,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,
                  subarray_product_id: str,
-                 sched: Optional[scheduler.Scheduler],
+                 sched: scheduler.SchedulerBase,
                  batch_role: str,
                  interface_mode: bool,
                  localhost: bool,
@@ -1550,11 +1552,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._prometheus_watcher = sensor_proxy.PrometheusWatcher(
             self.sensors, {'subarray_product_id': subarray_product_id},
             functools.partial(_prometheus_factory, prometheus_registry))
-        if sched is not None:
-            task_stats = sched.task_stats
-            if isinstance(task_stats, TaskStats):
-                for sensor in task_stats.sensors.values():
-                    self.sensors.add(sensor)
+        task_stats = sched.task_stats
+        if isinstance(task_stats, TaskStats):
+            for sensor in task_stats.sensors.values():
+                self.sensors.add(sensor)
         self._consul_service = ConsulService()
 
     async def _consul_register(self) -> None:
@@ -1649,12 +1650,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.localhost)
 
         # create graph object and build physical graph from specified resources
-        product_cls: Type[SDPSubarrayProductBase]
-        if self.interface_mode:
-            product_cls = SDPSubarrayProductInterface
-        else:
-            product_cls = SDPSubarrayProduct
-        product = product_cls(self.sched, configuration, config_dict, resolver, name, self)
+        product = SDPSubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure

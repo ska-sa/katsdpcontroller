@@ -155,5 +155,7 @@ def device_status_to_sensor_status(status: DeviceStatus) -> aiokatcp.Sensor.Stat
 
 
 def device_server_sockname(server: aiokatcp.DeviceServer) -> Tuple[str, int]:
-    assert server.server and server.server.sockets, "Server is not yet started"
+    assert server.server
+    assert isinstance(server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
+    assert server.server.sockets, "Server is not yet started"
     return server.server.sockets[0].getsockname()[:2]

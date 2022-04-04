@@ -4,8 +4,9 @@ import asyncio
 import socket
 import ipaddress
 import os
+import typing
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, Tuple, Type
+from typing import AsyncContextManager, AsyncGenerator, List, Set, Tuple, Type, Union
 
 import async_timeout
 import aiokatcp
@@ -282,7 +283,7 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
-class SDPPhysicalTaskMixin:
+class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
     """Augments task classes with SDP-specific functionality.
 
     This class is used in a mixin with either :class:`scheduler.PhysicalTask`
@@ -300,7 +301,8 @@ class SDPPhysicalTaskMixin:
         ingest.sdp_l0.1.input_rate
     """
 
-    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+    def __init__(self, logical_task: SDPLogicalTask, sdp_controller,
+                 subarray_product, capture_block_id: str) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
         self.sdp_controller = sdp_controller
@@ -312,14 +314,14 @@ class SDPPhysicalTaskMixin:
             self.name = logical_task.name
         else:
             self.name = '.'.join([capture_block_id, logical_task.name])
-        self.gui_urls = []
+        self.gui_urls: List[dict] = []
         # dict of exposed KATCP sensors. This excludes the state sensors, which
         # are present even when the process is not running.
-        self.sensors = {}
+        self.sensors: typing.Dict[str, aiokatcp.Sensor] = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
-        self._capture_blocks = set()
+        self._capture_blocks: Set[str] = set()
         # Event set to true whenever _capture_blocks is empty
         self._capture_blocks_empty = asyncio.Event()
         self._capture_blocks_empty.set()
@@ -330,7 +332,7 @@ class SDPPhysicalTaskMixin:
                                     initial_status=Sensor.Status.NOMINAL)
         self._mesos_state_sensor = Sensor(
             str, self.name + '.mesos-state', 'Mesos-reported task state', '')
-        if self.logical_node.metadata_katcp_sensors:
+        if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
             # themselves are created unconditionally because it avoids having to
@@ -345,16 +347,6 @@ class SDPPhysicalTaskMixin:
     @property
     def subarray_product_id(self):
         return self.subarray_product.subarray_product_id
-
-    @property
-    def status(self):
-        return self._status
-
-    @status.setter
-    def status(self, value):
-        self._status = value
-        if value is not None:
-            self._mesos_state_sensor.value = value.state
 
     def get_transition(self, state):
         """Get state transition actions"""
@@ -556,6 +548,8 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
       a port called ``prometheus``.
     """
 
+    logical_node: SDPLogicalTask
+
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.PhysicalTask.__init__(self, logical_task)
         SDPPhysicalTaskMixin.__init__(
@@ -584,6 +578,16 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
             for name, endpoint in self.endpoints.items()
         }
         return args
+
+    @property   # type: ignore
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+        if value is not None:
+            self._mesos_state_sensor.value = value.state
 
     async def wait_ready(self):
         if not await super().wait_ready():
@@ -690,13 +694,15 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
 
 
 @asynccontextmanager
-async def wrap_katcp_server(server: aiokatcp.DeviceServer) -> aiokatcp.DeviceServer:
+async def wrap_katcp_server(
+        server: aiokatcp.DeviceServer) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
     await server.start()
     yield server
     await server.stop()
 
 
 class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
+    logical_node: SDPLogicalTask
     katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
@@ -705,10 +711,16 @@ class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePh
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
     async def _create_server(self, port: str) -> Tuple[AsyncContextManager, int]:
+        assert self.host is not None
         if port != 'port':  # conventional name for katcp port
             return await super()._create_server(port)
         katcp_server = FakeDeviceServer(self.host, 0)
+        assert isinstance(katcp_server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
+        assert katcp_server.server.sockets
         return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[0]
+
+
+SDPAnyPhysicalTask = Union[SDPPhysicalTask, SDPFakePhysicalTask]
 
 
 class LogicalGroup(scheduler.LogicalExternal):

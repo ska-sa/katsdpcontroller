@@ -34,6 +34,7 @@ import katsdpservices
 
 import katsdpcontroller
 from . import singularity, product_config, product_controller, scheduler, sensor_proxy
+from .defaults import LOCALHOST
 from .schemas import ZK_STATE       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
                          add_shared_options, extract_shared_options, make_image_resolver_factory,
@@ -463,6 +464,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
 
     This is intended **only** for integration testing.
     """
+
     async def start(self) -> None:
         await super().start()
 
@@ -474,8 +476,9 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
 
     async def create_product(self, name: str, config: dict) -> InternalProduct:
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
+        sched = scheduler.SchedulerBase(self._args.realtime_role, LOCALHOST, 0)
         server = product_controller.DeviceServer(
-            '127.0.0.1', 0, mc_client, name, None, self._args.batch_role,
+            '127.0.0.1', 0, mc_client, name, sched, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory,
             s3_config={}, shutdown_delay=0)
         product = InternalProduct(name, config, asyncio.Task.current_task(), server)

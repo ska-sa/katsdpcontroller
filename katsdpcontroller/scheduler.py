@@ -215,7 +215,8 @@ from contextlib import AsyncExitStack
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type
+from typing import (
+    AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type)
 
 import pkg_resources
 import docker
@@ -230,6 +231,7 @@ import aiohttp.web
 from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
+from .defaults import LOCALHOST
 
 
 #: Mesos task states that indicate that the task is dead
@@ -2170,17 +2172,17 @@ class PhysicalTask(PhysicalNode):
 
     cores: typing.Dict[str, int]
 
-    def __init__(self, logical_task):
+    def __init__(self, logical_task: LogicalTask) -> None:
         super().__init__(logical_task)
-        self.interfaces = {}
-        self.endpoints = {}
+        self.interfaces: typing.Dict[str, AgentInterface] = {}
+        self.endpoints: typing.Dict[str, Endpoint] = {}
         self.taskinfo = None
         self.allocation = None
         self.status = None
         self.start_time = None         # time.time()
         self.end_time = None           # time.time()
         self.kill_sent_time = None     # loop.time() when killTask called
-        self._queue = None
+        self._queue: Optional["LaunchQueue"] = None
         self.task_stats = None
         for name, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
@@ -2371,7 +2373,7 @@ class PhysicalTask(PhysicalNode):
         args['generation'] = self.generation
         return args
 
-    def set_state(self, state):
+    def set_state(self, state: TaskState) -> None:
         old_state = self.state
         try:
             super().set_state(state)
@@ -2404,11 +2406,11 @@ class PhysicalTask(PhysicalNode):
         self.kill_sent_time = asyncio.get_event_loop().time()
 
     @property
-    def queue(self):
+    def queue(self) -> Optional["LaunchQueue"]:
         return self._queue
 
     @queue.setter
-    def queue(self, queue):
+    def queue(self, queue: Optional["LaunchQueue"]) -> None:
         old_queue = self._queue
         self._queue = queue
         # Once a task has reached STARTED, the queue only changes due to __del__,
@@ -2448,10 +2450,12 @@ class FakePhysicalTask(PhysicalNode):
        It does not currently handle task_stats, start_time, stop_time or status.
     """
 
-    def __init__(self, logical_task):
+    logical_node: LogicalTask
+
+    def __init__(self, logical_task: LogicalTask) -> None:
         super().__init__(logical_task)
         self.queue = None
-        self.host = "127.0.0.1"
+        self.host = LOCALHOST
         self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
         self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
 
@@ -2510,6 +2514,9 @@ class FakePhysicalTask(PhysicalNode):
     def dependency_abort(self):
         self._kill_event.set()
         super().dependency_abort()
+
+
+AnyPhysicalTask = Union[PhysicalTask, FakePhysicalTask]
 
 
 def instantiate(logical_graph):
@@ -3809,7 +3816,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
 __all__ = [
     'LogicalNode', 'PhysicalNode',
     'LogicalExternal', 'PhysicalExternal',
-    'LogicalTask', 'PhysicalTask', 'TaskState',
+    'LogicalTask', 'PhysicalTask', 'FakePhysicalTask', 'AnyPhysicalTask', 'TaskState',
     'Volume',
     'ResourceRequest', 'ScalarResourceRequest', 'RangeResourceRequest',
     'Resource', 'ScalarResource', 'RangeResource',
