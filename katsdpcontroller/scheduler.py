@@ -215,7 +215,7 @@ from contextlib import AsyncExitStack
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import List, Tuple, Optional, Mapping, Union, ClassVar, Type
+from typing import AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type
 
 import pkg_resources
 import docker
@@ -2435,67 +2435,81 @@ class FakePhysicalTask(PhysicalNode):
     It is intended for use with :option:`!--interface` and for unit testing. It
     has the following behaviour:
 
-    - When set to :const:`TaskState.STARTED`, it immediately moves to
-      :const:`TaskState.RUNNING`.
-    - When killed, it immediately dies.
-    - If a max_run_time is set, it immediately dies.
+    - When set to :const:`TaskState.STARTED`, it moves itself to
+      :const:`TaskState.RUNNING` (although not instantly).
+    - When killed, it takes care of going to state DEAD.
+    - If a `max_run_time` is set, it exits immediately; otherwise it waits
+      until it is killed.
     - It allocates ports and listens on them. By default, incoming connections
       are immediately closed.
 
     .. todo::
 
-       It does not currently handle task_stats.
+       It does not currently handle task_stats, start_time, stop_time or status.
     """
 
     def __init__(self, logical_task):
         super().__init__(logical_task)
-        self.start_time = None
-        self.end_time = None
         self.queue = None
         self.host = "127.0.0.1"
-        self._server_task: Optional[asyncio.Task] = None
-
-    def _start_serving(self):
-        self._server_task = asyncio.get_event_loop().create_task(self._serve())
-
-    def _stop_serving(self):
-        self._server_task.cancel()  # TODO: need to await the task somewhere
-        self._server_task = None
+        self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
+        self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
 
     @staticmethod
     async def _connected_cb(reader, writer):
         writer.close()
         await writer.wait_closed()
 
-    async def _create_server(self, port: str):
-        return await asyncio.start_server(self._connected_cb, host=self.host)
+    async def _create_server(self, port: str) -> Tuple[AsyncContextManager, int]:
+        """Create a server to service a named port.
 
-    async def _serve(self):
+        The default implementation will accept connections and immediately
+        close them. Subclasses may override this method to provide more
+        useful functionality.
+
+        Returns
+        -------
+        server
+            Any asynchronous context manager
+        port
+            The port number at which the server can be reached
+        """
+        server = await asyncio.start_server(self._connected_cb, host=self.host)
+        assert server.sockets is not None
+        return server, server.sockets[0].getsockname()[1]
+
+    async def _run(self):
         async with AsyncExitStack() as stack:
             for port in self.logical_task.ports:
                 stack.enter_async_context(await self._create_server(port))
+            self.set_state(TaskState.RUNNING)
+            # If we have a max_run_time, assume it is a batch task and emulate
+            # it terminating immediately. Otherwise emulate a service and wait
+            # to be shut down.
+            if self.max_run_time is not None:
+                await self._kill_event()
+
+    def _dead_callback(self, task: asyncio.Task) -> None:
+        try:
+            task.result()  # Evaluate for exceptions
+        except Exception:
+            logger.exception("Fake task %s died unexpectedly", task.get_name())
+        self._task = None
+        self.set_state(TaskState.DEAD)
 
     def set_state(self, state):
-        if state >= TaskState.STARTED and state < TaskState.READY:
-            if self.logical_node.max_run_time is not None:
-                state = TaskState.DEAD
-            else:
-                state = TaskState.RUNNING
-        elif state == TaskState.KILLING:
-            state = TaskState.DEAD
-
-        now = time.time()
-        if state >= TaskState.RUNNING and self.start_time is None:
-            self.start_time = now
-            self.status = Dict(state='TASK_RUNNING', timestamp=now)
-        if state == TaskState.DEAD and self.end_time is None:
-            self.end_time = now
-            self.status = Dict(state='TASK_FINISHED', timestamp=now)
-        if state == TaskState.RUNNING and self._server_task is None:
-            self._start_serving()
-        elif state == TaskState.DEAD and self._server_task is not None:
-            self._stop_serving()
         super().set_state(state)
+        if self.state >= TaskState.STARTED and self.state <= TaskState.READY and self._task is None:
+            self._task = asyncio.get_event_loop().create_task(self._run(), name=self.name)
+            self._task.add_done_callback(self._dead_callback)
+
+    def kill(self, driver, **kwargs):
+        self._kill_event.set()
+        super().kill()
+
+    def dependency_abort(self):
+        self._kill_event.set()
+        super().dependency_abort()
 
 
 def instantiate(logical_graph):
