@@ -194,16 +194,22 @@ def attributes_resources(args):
             parts = network_spec.split(':')
             if not 2 <= len(parts) <= 3:
                 raise ValueError
-            interface, network = parts[:2]
+            interface, networks = parts[:2]
+            networks = networks.split(',')
             if len(parts) >= 3:
                 max_speed = float(parts[2]) * 1e9
             else:
                 max_speed = math.inf
         except ValueError:
             raise RuntimeError(
-                'Error: --network argument {} does not have the format INTERFACE:NETWORK[:MAX-GBPS]'
-                .format(network_spec))
-        config = {'name': interface, 'network': network}
+                f'Error: --network argument {network_spec} does not have the format '
+                'INTERFACE:NETWORK[,NETWORK...][:MAX-GBPS]')
+        if len(networks) == 1:
+            # Older versions of katsdpcontroller only supported a single
+            # string. Use that format where possible for maximum
+            # compatibility.
+            networks = networks[0]
+        config = {'name': interface, 'network': networks}
         ibdevs = infiniband_devices(interface)
         if ibdevs:
             config['infiniband_devices'] = ibdevs
@@ -399,7 +405,7 @@ def main():
     parser.add_argument('--reserve-mem', type=float, default=1024.0,
                         help='MiB of memory resource to exclude from Mesos [%(default)s]')
     parser.add_argument('--network', dest='networks', action='append', default=[],
-                        metavar='INTERFACE:NETWORK[:MAX-GBPS]',
+                        metavar='INTERFACE:NETWORK[,NETWORK...][:MAX-GBPS]',
                         help='Map network interface to a logical network')
     parser.add_argument('--volume', dest='volumes', action='append', default=[],
                         metavar='NAME:PATH[:NUMA]',

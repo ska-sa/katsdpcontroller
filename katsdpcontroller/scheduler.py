@@ -797,9 +797,7 @@ class GPURequest(ResourceRequestsContainer):
 
 
 class InterfaceRequest(ResourceRequestsContainer):
-    """Request for resources on a network interface. At the moment only
-    a logical network name can be specified, but this may be augmented in
-    future to allocate bandwidth.
+    """Request for resources on a network interface.
 
     Attributes
     ----------
@@ -845,7 +843,7 @@ class InterfaceRequest(ResourceRequestsContainer):
             if new_out & new_in:
                 # Transmitted data sent with ibverbs won't be received on the same interface
                 return False
-        return self.network == interface.network
+        return self.network in interface.networks
 
     def __repr__(self):
         return '<{} {}{}{}{}>'.format(
@@ -1582,8 +1580,8 @@ class AgentInterface(InterfaceResources):
     ----------
     name : str
         Kernel interface name
-    network : str
-        Logical name for the network to which the interface is attached
+    networks : Set[str]
+        Logical names for the networks to which the interface is attached
     ipv4_address : :class:`ipaddress.IPv4Address`
         IPv4 local address of the interface
     numa_node : int, optional
@@ -1602,7 +1600,9 @@ class AgentInterface(InterfaceResources):
     def __init__(self, spec, index):
         super().__init__(index)
         self.name = spec['name']
-        self.network = spec['network']
+        # For compatibility, spec['network'] is either a string or a list of strings
+        networks = spec['network']
+        self.networks = {networks} if isinstance(networks, str) else set(networks)
         self.ipv4_address = ipaddress.IPv4Address(spec['ipv4_address'])
         self.numa_node = spec.get('numa_node')
         self.infiniband_devices = spec.get('infiniband_devices', [])
@@ -2956,7 +2956,8 @@ class Scheduler(pymesos.Scheduler):
             networks = {}
             for agent in agents:
                 for interface in agent.interfaces:
-                    networks.setdefault(interface.network, []).append(interface)
+                    for network in interface.networks:
+                        networks.setdefault(network, []).append(interface)
             for network, interfaces in networks.items():
                 max_interface_resources[network] = {}
                 total_interface_resources[network] = {}
