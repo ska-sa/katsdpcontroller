@@ -28,8 +28,8 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
 from .tasks import (
-    SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
-    CaptureBlockState, KatcpTransition)
+    SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
+    LogicalGroup, CaptureBlockState, KatcpTransition)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
@@ -1903,6 +1903,17 @@ def build_logical_graph(configuration: Configuration,
                 pass
             if force_host is not None:
                 node.host = force_host
+    # For any tasks that don't pick a more specific fake implementation, use
+    # either SDPFakePhysicalTask or FakePhysicalTask depending on the original.
+    if configuration.options.interface_mode:
+        for node in g:
+            if node.physical_factory == scheduler.PhysicalTask:
+                node.physical_factory = scheduler.FakePhysicalTask
+            elif node.physical_factory == SDPPhysicalTask:
+                node.physical_factory = SDPFakePhysicalTask
+            elif issubclass(node.physical_factory, scheduler.PhysicalTask):
+                raise TypeError(f'{node.name} needs to specify a fake physical factory')
+
     return g
 
 

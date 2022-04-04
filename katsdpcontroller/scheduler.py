@@ -2482,16 +2482,19 @@ class FakePhysicalTask(PhysicalNode):
         assert server.sockets is not None
         return server, server.sockets[0].getsockname()[1]
 
-    async def _run(self):
+    async def _run(self) -> None:
         async with AsyncExitStack() as stack:
-            for port in self.logical_task.ports:
-                stack.enter_async_context(await self._create_server(port))
+            for port_name in self.logical_node.ports:
+                if port_name is not None:
+                    server, port = await self._create_server(port_name)
+                    self.ports[port_name] = port
+                    await stack.enter_async_context(server)
             self.set_state(TaskState.RUNNING)
             # If we have a max_run_time, assume it is a batch task and emulate
             # it terminating immediately. Otherwise emulate a service and wait
             # to be shut down.
-            if self.max_run_time is not None:
-                await self._kill_event()
+            if self.logical_node.max_run_time is None:
+                await self._kill_event.wait()
 
     def _dead_callback(self, task: asyncio.Task) -> None:
         try:

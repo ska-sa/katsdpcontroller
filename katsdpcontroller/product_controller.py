@@ -1679,6 +1679,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             config_dict = load_json_dict(config)
             configuration = await Configuration.from_config(config_dict)
+            configuration.options.interface_mode = self.interface_mode
         except product_config.SensorFailure as exc:
             retmsg = f"Error retrieving sensor data from CAM: {exc}"
             logger.error(retmsg)

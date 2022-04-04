@@ -451,10 +451,6 @@ class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
-        for service in self.consul_services:
-            # This might cause double-deregistration if this method is called
-            # twice, but at worst that should cause a warning.
-            asyncio.get_event_loop().create_task(service.deregister())
         if need_inform:
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
@@ -624,6 +620,13 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
             self.consul_services.append(await ConsulService.register(service, consul_url))
         return True
 
+    def _disconnect(self):
+        for service in self.consul_services:
+            # This might cause double-deregistration if this method is called
+            # twice, but at worst that should cause a warning.
+            asyncio.get_event_loop().create_task(service.deregister())
+        super().disconnect()
+
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
 
@@ -690,13 +693,13 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
 
 
 class FakeDeviceServer(aiokatcp.DeviceServer):
-    pass
+    VERSION = "fake-1.0"
+    BUILD_STATE = "fake-1.0"
 
 
 @asynccontextmanager
 async def wrap_katcp_server(
         server: aiokatcp.DeviceServer) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
-    await server.start()
     yield server
     await server.stop()
 
@@ -715,6 +718,7 @@ class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePh
         if port != 'port':  # conventional name for katcp port
             return await super()._create_server(port)
         katcp_server = FakeDeviceServer(self.host, 0)
+        await katcp_server.start()
         assert isinstance(katcp_server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
         assert katcp_server.server.sockets
         return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[0]
