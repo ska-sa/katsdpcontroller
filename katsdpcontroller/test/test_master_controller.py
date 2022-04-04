@@ -23,7 +23,7 @@ from .. import master_controller, scheduler
 from ..controller import (DeviceStatus, ProductState, device_server_sockname,
                           make_image_resolver_factory, device_status_to_sensor_status)
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
-                                 SingularityProductManager, NoAddressesError,
+                                 ProductManagerBase, SingularityProductManager, NoAddressesError,
                                  DeviceServer, parse_args)
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
@@ -871,7 +871,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await assert_request_fails(self.client, 'product-list', 'product')
 
     async def test_get_multicast_groups(self) -> None:
-        await self.client.request('product-configure', 'product', CONFIG)
+        # Prevent product-configure from actually allocating multicast groups,
+        # since that would throw off the expected values.
+        with mock.patch.object(ProductManagerBase, 'get_multicast_groups', return_value='0.0.0.0'):
+            await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
         self.assertEqual(reply, [b'239.192.0.1+9'])
         reply, informs = await self.client.request('get-multicast-groups', 'product', 1)
