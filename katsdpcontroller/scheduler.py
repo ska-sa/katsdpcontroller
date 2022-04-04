@@ -2512,7 +2512,7 @@ class FakePhysicalTask(PhysicalNode):
 
     def kill(self, driver, **kwargs):
         self._kill_event.set()
-        super().kill()
+        super().kill(driver, **kwargs)
 
     def dependency_abort(self):
         self._kill_event.set()

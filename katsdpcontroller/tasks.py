@@ -721,7 +721,7 @@ class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePh
         await katcp_server.start()
         assert isinstance(katcp_server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
         assert katcp_server.server.sockets
-        return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[0]
+        return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[1]
 
 
 SDPAnyPhysicalTask = Union[SDPPhysicalTask, SDPFakePhysicalTask]
