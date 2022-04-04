@@ -6,7 +6,7 @@ import ipaddress
 import os
 import typing
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, AsyncGenerator, List, Set, Tuple, Type, Union
+from typing import AsyncContextManager, AsyncGenerator, List, Set, Type, Union
 
 import async_timeout
 import aiokatcp
@@ -625,7 +625,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
             # This might cause double-deregistration if this method is called
             # twice, but at worst that should cause a warning.
             asyncio.get_event_loop().create_task(service.deregister())
-        super().disconnect()
+        super()._disconnect()
 
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
@@ -704,7 +704,10 @@ async def wrap_katcp_server(
     await server.stop()
 
 
-class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
+# TODO: see if SDPConfigMixin can be re-enabled here. It will need
+# FakePhysicalTask to behave much more like PhysicalTask for generator.py to
+# extract config.
+class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
     logical_node: SDPLogicalTask
     katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
 
@@ -713,15 +716,15 @@ class SDPFakePhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.FakePh
         SDPPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
-    async def _create_server(self, port: str) -> Tuple[AsyncContextManager, int]:
+    async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         assert self.host is not None
         if port != 'port':  # conventional name for katcp port
-            return await super()._create_server(port)
-        katcp_server = FakeDeviceServer(self.host, 0)
+            return await super()._create_server(port, sock)
+        host, port_no = sock.getsockname()[:2]
+        sock.close()  # TODO: allow aiokatcp to take an existing socket
+        katcp_server = FakeDeviceServer(host, port_no)
         await katcp_server.start()
-        assert isinstance(katcp_server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
-        assert katcp_server.server.sockets
-        return wrap_katcp_server(katcp_server), katcp_server.server.sockets[0].getsockname()[1]
+        return wrap_katcp_server(katcp_server)
 
 
 SDPAnyPhysicalTask = Union[SDPPhysicalTask, SDPFakePhysicalTask]

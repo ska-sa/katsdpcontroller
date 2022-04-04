@@ -1268,48 +1268,55 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     ]
 
         # Load canonical model URLs
-        model_base_url = self.resolver.s3_config['models']['read']['url']
-        if not model_base_url.endswith('/'):
-            model_base_url += '/'      # Ensure it is a directory
-        init_telstate['sdp_model_base_url'] = model_base_url
-        async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
-            rfi_mask_model_urls = await _resolve_model(
-                fetcher, model_base_url, 'rfi_mask/current.alias')
-            init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
-            init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
-            for stream in itertools.chain(
-                    self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
-                    self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream)):
-                ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
-                band_mask_model_urls = await _resolve_model(
-                    fetcher, model_base_url,
-                    f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
-                )
-                prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
-                init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
-                init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
-                for group in ['individual', 'cohort']:
-                    config_value = _IndexedKey()
-                    fixed_value = _IndexedKey()
-                    for ant in stream.antennas:
-                        pb_model_urls = await _resolve_model(
-                            fetcher, model_base_url,
-                            f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
-                        )
-                        config_value[ant] = pb_model_urls[0]
-                        fixed_value[ant] = pb_model_urls[1]
-                    prefix = (stream.name, 'model', 'primary_beam', group)
-                    init_telstate[prefix + ('config',)] = config_value
-                    init_telstate[prefix + ('fixed',)] = fixed_value
+        if not self.configuration.options.interface_mode:
+            model_base_url = self.resolver.s3_config['models']['read']['url']
+            if not model_base_url.endswith('/'):
+                model_base_url += '/'      # Ensure it is a directory
+            init_telstate['sdp_model_base_url'] = model_base_url
+            async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
+                rfi_mask_model_urls = await _resolve_model(
+                    fetcher, model_base_url, 'rfi_mask/current.alias')
+                init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
+                init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+                for stream in itertools.chain(
+                        self.configuration.by_class(
+                            product_config.AntennaChannelisedVoltageStream),
+                        self.configuration.by_class(
+                            product_config.SimAntennaChannelisedVoltageStream)):
+                    ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
+                    band_mask_model_urls = await _resolve_model(
+                        fetcher, model_base_url,
+                        f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
+                    )
+                    prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
+                    init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
+                    init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
+                    for group in ['individual', 'cohort']:
+                        config_value = _IndexedKey()
+                        fixed_value = _IndexedKey()
+                        for ant in stream.antennas:
+                            pb_model_urls = await _resolve_model(
+                                fetcher, model_base_url,
+                                f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
+                            )
+                            config_value[ant] = pb_model_urls[0]
+                            fixed_value[ant] = pb_model_urls[1]
+                        prefix = (stream.name, 'model', 'primary_beam', group)
+                        init_telstate[prefix + ('config',)] = config_value
+                        init_telstate[prefix + ('fixed',)] = fixed_value
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
-        self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
-                                                self.telstate_node.ports['telstate'])
-        telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
-            f'redis://{self.telstate_endpoint}'
-        )
+        telstate_backend: katsdptelstate.aio.backend.Backend
+        if self.configuration.options.interface_mode:
+            telstate_backend = katsdptelstate.aio.memory.MemoryBackend()
+        else:
+            self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
+                                                    self.telstate_node.ports['telstate'])
+            telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
+                f'redis://{self.telstate_endpoint}'
+            )
         telstate = katsdptelstate.aio.TelescopeState(telstate_backend)
         self.telstate = telstate
         self.resolver.telstate = telstate

@@ -2458,36 +2458,53 @@ class FakePhysicalTask(PhysicalNode):
         self.host = LOCALHOST
         self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
         self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
+        self._sockets: Dict[str, socket.socket] = {}  # Pre-created sockets
+
+        # Sockets have to be created now rather than in _run because we
+        # need to populate ports. For PhysicalTask this is done during
+        # `allocate` but we don't have that method.
+        for port_name in self.logical_node.ports:
+            if port_name is not None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+                sock.bind((self.host, 0))
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+                self._sockets[port_name] = sock
+                self.ports[port_name] = sock.getsockname()[1]
 
     @staticmethod
     async def _connected_cb(reader, writer):
         writer.close()
         await writer.wait_closed()
 
-    async def _create_server(self, port: str) -> Tuple[AsyncContextManager, int]:
+    async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         """Create a server to service a named port.
 
         The default implementation will accept connections and immediately
         close them. Subclasses may override this method to provide more
         useful functionality.
 
+        Parameters
+        ----------
+        port
+            Name assigned to the port in the logical task
+        sock
+            Socket on which the server should listen. If it is not possible to
+            start the server on an existing socket, it may instead close the
+            socket then listen on the same address.
+
         Returns
         -------
         server
             Any asynchronous context manager
-        port
-            The port number at which the server can be reached
         """
-        server = await asyncio.start_server(self._connected_cb, host=self.host)
-        assert server.sockets is not None
-        return server, server.sockets[0].getsockname()[1]
+        return await asyncio.start_server(self._connected_cb, sock=sock)
 
     async def _run(self) -> None:
         async with AsyncExitStack() as stack:
-            for port_name in self.logical_node.ports:
-                if port_name is not None:
-                    server, port = await self._create_server(port_name)
-                    self.ports[port_name] = port
+            for port in self.logical_node.ports:
+                if port is not None:
+                    server = await self._create_server(port, self._sockets[port])
+                    del self._sockets[port]  # The server should now close the socket
                     await stack.enter_async_context(server)
             self.set_state(TaskState.RUNNING)
             # If we have a max_run_time, assume it is a batch task and emulate
@@ -2505,10 +2522,17 @@ class FakePhysicalTask(PhysicalNode):
         self.set_state(TaskState.DEAD)
 
     def set_state(self, state):
+        if state == TaskState.KILLING and self._task is None:
+            state = TaskState.DEAD  # Nothing to kill, so immediately become dead
         super().set_state(state)
         if self.state >= TaskState.STARTED and self.state <= TaskState.READY and self._task is None:
             self._task = asyncio.get_event_loop().create_task(self._run(), name=self.name)
             self._task.add_done_callback(self._dead_callback)
+        if self.state == TaskState.DEAD:
+            # Clean up any sockets that weren't absorbed into servers
+            for sock in self._sockets.values():
+                sock.close()
+            self._sockets.clear()
 
     def kill(self, driver, **kwargs):
         self._kill_event.set()

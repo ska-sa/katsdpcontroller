@@ -204,7 +204,10 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.taskinfo.container.docker.setdefault('parameters', []).append(
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
-    telstate.physical_factory = TelstateTask
+    if configuration.options.interface_mode:
+        telstate.physical_factory = SDPFakePhysicalTask
+    else:
+        telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
     telstate.pass_telstate = False  # Don't pass --telstate to telstate itself
@@ -1102,7 +1105,10 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
 
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
-        ingest.physical_factory = IngestTask
+        if configuration.options.interface_mode:
+            ingest.physical_factory = SDPFakePhysicalTask
+        else:
+            ingest.physical_factory = IngestTask
         ingest.image = 'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
