@@ -639,7 +639,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request('product-configure', 'product', CONFIG)
         await asynctest.exhaust_callbacks(self.loop)
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         # Prepend the subarray product ID to the names
         expected_product_sensors = [
             (b'product.' + s[0],) + s[1:]

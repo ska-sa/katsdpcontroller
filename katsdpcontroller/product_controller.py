@@ -733,6 +733,10 @@ class SDPSubarrayProductBase:
         finally:
             self._clear_async_task(task)
         logger.info('Subarray product %s successfully configured', self.subarray_product_id)
+        # A number of sensors are added without individually triggering interface-changed
+        # notifications, so that subscribers don't try to repeatly refresh
+        # their sensor lists.
+        self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def deconfigure(self, force: bool = False) -> None:
         """Start deconfiguration of the subarray, but does not wait for it to complete."""

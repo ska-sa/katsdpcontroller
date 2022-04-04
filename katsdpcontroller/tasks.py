@@ -721,6 +721,14 @@ class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
         SDPPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
+        if self.logical_node.metadata_katcp_sensors:
+            # Notify about the sensors added by the mixin constructor. This is
+            # done here rather than in the constructor because SDPPhysicalTask
+            # adds further sensors as part of resolve.
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         assert self.host is not None
         if port != 'port':  # conventional name for katcp port
