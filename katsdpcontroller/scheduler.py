@@ -2434,7 +2434,7 @@ class PhysicalTask(PhysicalNode):
 class FakePhysicalTask(PhysicalNode):
     """Drop-in replacement for PhysicalTask that does not actually launch anything.
 
-    It is intended for use with :option:`!--interface` and for unit testing. It
+    It is intended for use with :option:`!--interface-mode` and for unit testing. It
     has the following behaviour:
 
     - When set to :const:`TaskState.STARTED`, it moves itself to
