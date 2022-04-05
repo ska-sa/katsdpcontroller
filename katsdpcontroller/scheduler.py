@@ -2490,8 +2490,8 @@ class FakePhysicalTask(PhysicalNode):
             Name assigned to the port in the logical task
         sock
             Socket on which the server should listen. If it is not possible to
-            start the server on an existing socket, it may instead close the
-            socket then listen on the same address.
+            start the server on an existing socket, a subclass implementation
+            may instead close the socket then listen on the same address.
 
         Returns
         -------
