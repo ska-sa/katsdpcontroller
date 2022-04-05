@@ -1598,6 +1598,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         # Re-validate, since the override may have broken it
         try:
             configuration = await Configuration.from_config(config_dict)
+            configuration.options.interface_mode = self.interface_mode
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = f"Overrides make the config invalid: {error}"
             logger.error(retmsg)

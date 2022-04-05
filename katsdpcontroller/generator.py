@@ -2315,6 +2315,11 @@ async def build_postprocess_logical_graph(
     g = networkx.MultiDiGraph()
     telstate_node = scheduler.LogicalExternal('telstate')
     g.add_node(telstate_node)
+    # The postprocessing steps don't work well with interface mode because
+    # they depend on examining state written by the containers, and this is
+    # not currently simulated to the necessary level.
+    if configuration.options.interface_mode:
+        return g
 
     target_mapper = TargetMapper()
 
