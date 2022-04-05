@@ -454,15 +454,16 @@ class TestSDPControllerInterface(BaseTestSDPController):
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(
             self.client,
-            EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
+            EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST,
+            subset=True)
 
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
         await self.client.request("product-deconfigure")
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         await self.client.wait_disconnected()
         self.client.remove_inform_callback('interface-changed', interface_changed_callback)
 

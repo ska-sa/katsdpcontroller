@@ -241,7 +241,6 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'gpucbf_m900h-destination', b'', b'string'),
     (b'gui-urls', b'', b'string'),
     (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
-    (b'katcp-address', b'', b'address'),
     (b'state', b'', b'discrete',
      b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error', b'postprocessing'),
     (b'telstate.telstate', b'', b'address'),
