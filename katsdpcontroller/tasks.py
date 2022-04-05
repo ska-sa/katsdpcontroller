@@ -706,6 +706,7 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
 @asynccontextmanager
 async def wrap_katcp_server(
         server: aiokatcp.DeviceServer) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
+    await server.start()
     yield server
     await server.stop()
 
@@ -736,7 +737,6 @@ class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
         host, port_no = sock.getsockname()[:2]
         sock.close()  # TODO: allow aiokatcp to take an existing socket
         katcp_server = self.logical_node.fake_katcp_server_cls(host, port_no)
-        await katcp_server.start()
         return wrap_katcp_server(katcp_server)
 
 
