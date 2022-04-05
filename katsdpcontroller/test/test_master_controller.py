@@ -646,7 +646,8 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             for s in (EXPECTED_INTERFACE_SENSOR_LIST
                       + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
                       + EXPECTED_PRODUCT_SENSOR_LIST)]
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors)
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors,
+                             subset=True)
         await assert_sensor_value(self.client, 'products', '["product"]')
         product = self.server._manager.products['product']
         await assert_sensor_value(
