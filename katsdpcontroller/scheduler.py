@@ -2472,7 +2472,8 @@ class FakePhysicalTask(PhysicalNode):
                 self.ports[port_name] = sock.getsockname()[1]
 
     @staticmethod
-    async def _connected_cb(reader, writer):
+    async def _connected_cb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Handle a new connection to a port by immediately closing it."""
         writer.close()
         await writer.wait_closed()
 
