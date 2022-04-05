@@ -1427,7 +1427,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._consul_service = ConsulService()
 
     async def _consul_register(self) -> None:
-        if self.sched is None:
+        if not isinstance(self.sched, scheduler.Scheduler):
+            # This indicates we're running in interface mode, so avoid
+            # advertising ourselves to consul and causing confusion.
             return
         port = self.sched.http_port
         service = {
