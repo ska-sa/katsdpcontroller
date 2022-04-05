@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import copy
+import json
 import urllib.parse
 import os.path
 from typing import (
@@ -15,7 +16,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import FailReply, Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -178,6 +179,42 @@ class FakeIngestDeviceServer(FakeDeviceServer):
     async def request_capture_done(self, ctx) -> None:
         """Dummy implementation of capture-done."""
         self.sensors['capture-active'].value = False
+
+
+class FakeCalDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._capture_blocks: Dict[str, str] = {}
+        self._current_capture_block: Optional[str] = None
+        self.sensors.add(
+            Sensor(str, 'capture-block-state',
+                   'JSON dict with the state of each capture block',
+                   default='{}', initial_status=Sensor.Status.NOMINAL))
+
+    def _update_capture_block_state(self) -> None:
+        """Update the sensor from the internal state."""
+        self.sensors['capture-block-state'].value = json.dumps(self._capture_blocks)
+
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
+        """Add capture block ID to capture-block-state sensor."""
+        if self._current_capture_block is not None:
+            raise FailReply('A capture block is already active')
+        self._current_capture_block = capture_block_id
+        self._capture_blocks[capture_block_id] = 'CAPTURING'
+        self._update_capture_block_state()
+
+    async def request_capture_done(self, ctx) -> None:
+        """Simulate the capture block going through all the states."""
+        if self._current_capture_block is None:
+            raise FailReply('Not currently capturing')
+        cbid = self._current_capture_block
+        self._current_capture_block = None
+        self._capture_blocks[cbid] = 'PROCESSING'
+        self._update_capture_block_state()
+        self._capture_blocks[cbid] = 'REPORTING'
+        self._update_capture_block_state()
+        del self._capture_blocks[cbid]
+        self._update_capture_block_state()
 
 
 def _mb(value):
@@ -1294,6 +1331,7 @@ def _make_cal(g: networkx.MultiDiGraph,
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(stream.name, i))
+        cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
         cal.cpus = cpus
