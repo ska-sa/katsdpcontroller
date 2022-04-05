@@ -29,7 +29,8 @@ from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
-    LogicalGroup, CaptureBlockState, KatcpTransition)
+    LogicalGroup, CaptureBlockState, KatcpTransition,
+    FakeDeviceServer)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
@@ -160,6 +161,23 @@ class IngestTask(SDPPhysicalTask):
             if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
+
+
+class FakeIngestDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sensors.add(
+            Sensor(bool, 'capture-active',
+                   'Is there a currently active capture session (prometheus: gauge)',
+                   default=False, initial_status=Sensor.Status.NOMINAL))
+
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
+        """Dummy implementation of capture-init."""
+        self.sensors['capture-active'].value = True
+
+    async def request_capture_done(self, ctx) -> None:
+        """Dummy implementation of capture-done."""
+        self.sensors['capture-active'].value = False
 
 
 def _mb(value):
@@ -1109,6 +1127,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
             ingest.physical_factory = SDPFakePhysicalTask
         else:
             ingest.physical_factory = IngestTask
+        ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = 'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']

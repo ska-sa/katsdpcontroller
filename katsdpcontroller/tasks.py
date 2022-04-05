@@ -130,6 +130,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
         self.physical_factory = SDPPhysicalTask
+        self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
         self.final_state = CaptureBlockState.BURNDOWN
@@ -714,7 +715,6 @@ async def wrap_katcp_server(
 # extract config.
 class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
     logical_node: SDPLogicalTask
-    katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.FakePhysicalTask.__init__(self, logical_task)
@@ -735,7 +735,7 @@ class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
             return await super()._create_server(port, sock)
         host, port_no = sock.getsockname()[:2]
         sock.close()  # TODO: allow aiokatcp to take an existing socket
-        katcp_server = FakeDeviceServer(host, port_no)
+        katcp_server = self.logical_node.fake_katcp_server_cls(host, port_no)
         await katcp_server.start()
         return wrap_katcp_server(katcp_server)
 
