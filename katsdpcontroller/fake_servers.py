@@ -31,7 +31,19 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "For this input, the complex, unitless, per-channel digital scaling factors "
                     "implemented prior to requantisation",
                     default="[1.0+0.0j]",
-                    initial_status=Sensor.Status.NOMINAL,
+                    initial_status=Sensor.Status.NOMINAL
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"input{pol}-delay",
+                    "The delay settings for this input: (loadmcnt <ADC sample "
+                    "count when model was loaded>, delay <in seconds>, "
+                    "delay-rate <unit-less or, seconds-per-second>, "
+                    "phase <radians>, phase-rate <radians per second>).",
+                    default="(-1, 0.0, 0.0, 0.0, 0.0)",
+                    initial_status=Sensor.Status.NOMINAL
                 )
             )
 
