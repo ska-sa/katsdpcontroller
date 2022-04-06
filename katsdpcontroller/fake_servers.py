@@ -1,10 +1,37 @@
 """Katcp device servers that emulate various container images."""
 
 import json
-from typing import Dict, Optional
+import numbers
+from typing import Dict, Optional, Tuple
 
+import numpy as np
 from aiokatcp import Sensor, FailReply
 from .tasks import FakeDeviceServer
+
+
+def _format_complex(value: numbers.Complex) -> str:
+    """Format a complex number for a katcp request.
+
+    This is copied from katgpucbf.
+    """
+    return f"{value.real}{value.imag:+}j"
+
+
+class FakeFgpuDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._gains = [np.ones((1,), np.complex64) for _ in range(2)]
+
+    async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
+        """Set or query the eq gains."""
+        # Validation is handled by the subarray product, so we just trust here.
+        if values:
+            self._gains[input] = np.array([np.complex64(v) for v in values])
+        out = self._gains[input]
+        if np.all(out == out[0]):
+            # Same value for all channels
+            out = out[:1]
+        return tuple(_format_complex(v) for v in out)
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):

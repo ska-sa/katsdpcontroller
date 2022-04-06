@@ -9,7 +9,6 @@ import re
 import copy
 import functools
 import itertools
-import numbers
 from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Mapping
 
 import addict
@@ -202,14 +201,6 @@ async def _resolve_model(fetcher: katsdpmodels.fetch.aiohttp.Fetcher,
     config = urls[-2] if len(urls) >= 2 else fixed
     return (str(_relative_url(base, yarl.URL(config))),
             str(_relative_url(base, yarl.URL(fixed))))
-
-
-def _format_complex(value: numbers.Complex) -> str:
-    """Format a complex number for a katcp request.
-
-    This is copied from katgpucbf.
-    """
-    return f"{value.real}{value.imag:+}j"
 
 
 class KatcpImageLookup(scheduler.ImageLookup):

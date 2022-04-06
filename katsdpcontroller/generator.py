@@ -27,7 +27,7 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
-from .fake_servers import FakeIngestDeviceServer, FakeCalDeviceServer
+from .fake_servers import FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
     LogicalGroup, CaptureBlockState, KatcpTransition)
@@ -441,6 +441,7 @@ def _make_fgpu(
         srcs = stream.sources(i)
         fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
         fgpu.image = 'katgpucbf'
+        fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
         fgpu.mem = 768  # Actual use is currently around 550 MB
         if not configuration.options.develop:
