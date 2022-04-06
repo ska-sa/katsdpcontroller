@@ -4,7 +4,6 @@ import logging
 import re
 import time
 import copy
-import json
 import urllib.parse
 import os.path
 from typing import (
@@ -16,7 +15,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp import FailReply, Sensor, SensorSet
+from aiokatcp import Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -28,10 +27,10 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
+from .fake_servers import FakeIngestDeviceServer, FakeCalDeviceServer
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
-    LogicalGroup, CaptureBlockState, KatcpTransition,
-    FakeDeviceServer)
+    LogicalGroup, CaptureBlockState, KatcpTransition)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
@@ -162,59 +161,6 @@ class IngestTask(SDPPhysicalTask):
             if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
-
-
-class FakeIngestDeviceServer(FakeDeviceServer):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.sensors.add(
-            Sensor(bool, 'capture-active',
-                   'Is there a currently active capture session (prometheus: gauge)',
-                   default=False, initial_status=Sensor.Status.NOMINAL))
-
-    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
-        """Dummy implementation of capture-init."""
-        self.sensors['capture-active'].value = True
-
-    async def request_capture_done(self, ctx) -> None:
-        """Dummy implementation of capture-done."""
-        self.sensors['capture-active'].value = False
-
-
-class FakeCalDeviceServer(FakeDeviceServer):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._capture_blocks: Dict[str, str] = {}
-        self._current_capture_block: Optional[str] = None
-        self.sensors.add(
-            Sensor(str, 'capture-block-state',
-                   'JSON dict with the state of each capture block',
-                   default='{}', initial_status=Sensor.Status.NOMINAL))
-
-    def _update_capture_block_state(self) -> None:
-        """Update the sensor from the internal state."""
-        self.sensors['capture-block-state'].value = json.dumps(self._capture_blocks)
-
-    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
-        """Add capture block ID to capture-block-state sensor."""
-        if self._current_capture_block is not None:
-            raise FailReply('A capture block is already active')
-        self._current_capture_block = capture_block_id
-        self._capture_blocks[capture_block_id] = 'CAPTURING'
-        self._update_capture_block_state()
-
-    async def request_capture_done(self, ctx) -> None:
-        """Simulate the capture block going through all the states."""
-        if self._current_capture_block is None:
-            raise FailReply('Not currently capturing')
-        cbid = self._current_capture_block
-        self._current_capture_block = None
-        self._capture_blocks[cbid] = 'PROCESSING'
-        self._update_capture_block_state()
-        self._capture_blocks[cbid] = 'REPORTING'
-        self._update_capture_block_state()
-        del self._capture_blocks[cbid]
-        self._update_capture_block_state()
 
 
 def _mb(value):
