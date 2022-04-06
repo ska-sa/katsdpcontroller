@@ -898,6 +898,29 @@ class SDPSubarrayProductBase:
         """
         raise NotImplementedError()
 
+    async def capture_start_stop(self, stream_name: str, start: bool) -> None:
+        """Either start or stop transmission on a stream."""
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot start or stop streams in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+
+        conns = []
+        for i in range(stream.n_substreams):
+            # TODO: the type: ignore can probably be removed once
+            # SDPSubarrayProduct and SDPSubarrayProductBase are merged back
+            # together.
+            node = self._nodes[f"xb.{stream.name}.{i}"]  # type: ignore
+            if node.katcp_connection is None:
+                raise FailReply(f"No katcp connection to {node.name}")
+            conns.append(node.katcp_connection)
+        reqs = []
+        command = "capture-start" if start else "capture-stop"
+        for conn in conns:
+            reqs.append(conn.request(command))
+        await asyncio.gather(*reqs)
+
     def __repr__(self) -> str:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
@@ -1670,3 +1693,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             channels.
         """
         return tuple(await self._get_product().gain(stream, input, values))
+
+    async def request_capture_start(self, ctx, stream: str) -> None:
+        """Enable data transmission for the named data stream."""
+        await self._get_product().capture_start_stop(stream, True)
+
+    async def request_capture_stop(self, ctx, stream: str) -> None:
+        """Halt data transmission for the named data stream."""
+        await self._get_product().capture_start_stop(stream, False)

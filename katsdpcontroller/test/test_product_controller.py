@@ -69,7 +69,9 @@ STREAMS = '''{
 EXPECTED_REQUEST_LIST = [
     'capture-done',
     'capture-init',
+    'capture-start',
     'capture-status',
+    'capture-stop',
     'delays',
     'gain',
     'product-configure',
@@ -1383,6 +1385,36 @@ class TestSDPController(BaseTestSDPController):
         # nodes.
         katcp_client.request.assert_any_call('delays', 1234567890.0, '0,0:0,0', '0,0:0,1')
         katcp_client.request.assert_any_call('delays', 1234567890.0, '0,1:0,0', '0,1:0,1')
+
+    async def test_capture_start(self) -> None:
+        """Test capture-start in the success case."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'capture-start', 'gpucbf_baseline_correlation_products')
+        katcp_client = self.sensor_proxy_client_class.return_value
+        # TODO: this doesn't check that the requests are going to the correct
+        # nodes.
+        katcp_client.request.assert_any_call('capture-start')
+
+    async def test_capture_start_bad_stream(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'capture-start', 'foo')
+
+    async def test_capture_start_wrong_stream_type(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'capture-start', 'gpucbf_antenna_channelised_voltage')
+
+    async def test_capture_stop(self) -> None:
+        # Note: most of the code for capture-stop is shared with capture-start,
+        # so the testing does not need to be as thorough.
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'capture-start', 'gpucbf_baseline_correlation_products')
+        katcp_client = self.sensor_proxy_client_class.return_value
+        # TODO: this doesn't check that the requests are going to the correct
+        # nodes.
+        katcp_client.request.assert_any_call('capture-start')
 
     def _check_prom(self, name: str, service: str, type: str, value: float,
                     sample_name: str = None, extra_labels: Mapping[str, str] = None) -> None:
