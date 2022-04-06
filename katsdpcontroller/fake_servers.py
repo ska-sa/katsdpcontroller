@@ -18,20 +18,36 @@ def _format_complex(value: numbers.Complex) -> str:
 
 
 class FakeFgpuDeviceServer(FakeDeviceServer):
+    N_POLS = 2
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._gains = [np.ones((1,), np.complex64) for _ in range(2)]
+        self._gains = [np.ones((1,), np.complex64) for _ in range(self.N_POLS)]
+        for pol in range(self.N_POLS):
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"input{pol}-eq",
+                    "For this input, the complex, unitless, per-channel digital scaling factors "
+                    "implemented prior to requantisation",
+                    default="[1.0+0.0j]",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
 
     async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
         """Set or query the eq gains."""
         # Validation is handled by the subarray product, so we just trust here.
         if values:
-            self._gains[input] = np.array([np.complex64(v) for v in values])
-        out = self._gains[input]
-        if np.all(out == out[0]):
-            # Same value for all channels
-            out = out[:1]
-        return tuple(_format_complex(v) for v in out)
+            cvalues = np.array([np.complex64(v) for v in values])
+            if np.all(cvalues == cvalues[0]):
+                # Same value for all channels
+                cvalues = cvalues[:1]
+            self._gains[input] = cvalues
+            self.sensors[f"input{input}-eq"].value = (
+                "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
+            )
+        return tuple(_format_complex(v) for v in self._gains[input])
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
