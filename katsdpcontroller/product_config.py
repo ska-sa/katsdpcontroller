@@ -556,6 +556,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         )
         self.n_substreams = n_substreams
         self.bits_per_sample = 8
+        self.pfb_taps = defaults.PFB_TAPS
         self.command_line_extra = list(command_line_extra)
 
     @property
