@@ -19,10 +19,11 @@ def _format_complex(value: numbers.Complex) -> str:
 
 class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
+    DEFAULT_GAIN = 1.0
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._gains = [np.ones((1,), np.complex64) for _ in range(self.N_POLS)]
+        self._gains = [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
         for pol in range(self.N_POLS):
             self.sensors.add(
                 Sensor(
@@ -60,6 +61,14 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
             )
         return tuple(_format_complex(v) for v in self._gains[input])
+
+    async def request_gain_all(self, ctx, *values: str) -> None:
+        """Set the eq gains for all inputs."""
+        for pol in range(self.N_POLS):
+            if values == ("default",):
+                self._gains[pol] = np.full((1,), self.DEFAULT_GAIN, np.complex64)
+            else:
+                await self.request_gain(ctx, pol, *values)
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):

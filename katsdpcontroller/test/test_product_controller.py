@@ -74,6 +74,7 @@ EXPECTED_REQUEST_LIST = [
     'capture-stop',
     'delays',
     'gain',
+    'gain-all',
     'product-configure',
     'product-deconfigure',
     'telstate-endpoint',
