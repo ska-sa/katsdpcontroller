@@ -1336,7 +1336,8 @@ class TestSDPController(BaseTestSDPController):
             self.client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h',
             'not a complex number')
 
-    async def test_gain_success(self) -> None:
+    async def test_gain_single(self) -> None:
+        """Test gain with a single gain to apply to all channels."""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         self.katcp_replies['gain'] = ([b'1+2j'], [])
         reply, _ = await self.client.request(
@@ -1345,6 +1346,71 @@ class TestSDPController(BaseTestSDPController):
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('gain', 1, '1+2j')
         self.assertEqual(reply, [b'1+2j'])
+
+    async def test_gain_multi(self) -> None:
+        """Test gain with a different gain for each channel."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        gains = [b'%d+2j' % i for i in range(4096)]
+        self.katcp_replies['gain'] = (gains, [])
+        reply, _ = await self.client.request(
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains)
+        # TODO: this doesn't check that it goes to the correct node
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain', 1, *[g.decode() for g in gains])
+        self.assertEqual(reply, gains)
+
+    async def test_gain_all_bad_stream(self) -> None:
+        """Test gain-all with a stream that doesn't exist."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'gain-all', 'foo', '1')
+
+    async def test_gain_all_wrong_stream_type(self) -> None:
+        """Test gain-all with a stream that is of the wrong type."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'i0_antenna_channelised_voltage', '1')
+
+    async def test_gain_all_wrong_length(self) -> None:
+        """Test gain-all with the wrong number of channels."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'gpucbf_antenna_channelised_voltage', '1', '0.5')
+
+    async def test_gain_all_bad_format(self) -> None:
+        """Test gain-all with badly-formatted gains."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'gpucbf_antenna_channelised_voltage',
+            'not a complex number')
+
+    async def test_gain_all_single(self) -> None:
+        """Test gain-all with a single gain to apply to all channels."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', '1+2j')
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain-all', '1+2j')
+
+    async def test_gain_all_multi(self) -> None:
+        """Test gain-all with a different gain for each channel."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        gains = [b'%d+2j' % i for i in range(4096)]
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        print(katcp_client.request.mock_calls)
+        katcp_client.request.assert_any_call('gain-all', *[g.decode() for g in gains])
+
+    async def test_gain_all_default(self) -> None:
+        """Test setting gains to default with gain-all."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain-all', 'default')
 
     async def test_delays_bad_stream(self) -> None:
         """Test delays with a stream that doesn't exist."""
