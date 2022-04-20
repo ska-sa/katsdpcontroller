@@ -227,15 +227,25 @@ EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'gui-urls', b'', b'string')
 ]
 
+# This is just a subset meant to check common classes of sensors.
+# There are too many for it to be practical to maintain a canonical list.
 EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'bf_ingest.beamformer.1.port', b'', b'address'),
-    (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
-    (b'timeplot.sdp_l0.1.gui-urls', b'', b'string'),
-    (b'timeplot.sdp_l0.1.html_port', b'', b'address'),
+    (b'bf_ingest.sdp_beamformer_engineering_ram.1.port', b'', b'address'),
+    (b'bf_ingest.sdp_beamformer_engineering_ram.1.mesos-state', b'', b'string'),
+    (b'bf_ingest.sdp_beamformer_engineering_ram.2.state', b'', b'discrete',
+     b'not-ready', b'starting', b'started', b'running', b'ready', b'killing', b'dead'),
     (b'cal.1.capture-block-state', b'', b'string'),
+    (b'cal.1.gui-urls', b'', b'string'),
+    (b'capture-block-state', b'', b'string'),
+    (b'gpucbf_antenna_channelised_voltage-bandwidth', b'Hz', b'float'),
+    (b'gpucbf_m900h-destination', b'', b'string'),
+    (b'gui-urls', b'', b'string'),
+    (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
     (b'state', b'', b'discrete',
      b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error', b'postprocessing'),
-    (b'capture-block-state', b'', b'string')
+    (b'telstate.telstate', b'', b'address'),
+    (b'timeplot.sdp_l0.gui-urls', b'', b'string'),
+    (b'timeplot.sdp_l0.html_port', b'', b'address')
 ]
 
 
@@ -262,13 +272,22 @@ async def assert_sensor_value(
 
 
 async def assert_sensors(client: aiokatcp.Client,
-                         expected_list: Iterable[Tuple[bytes, ...]]) -> None:
+                         expected_list: Iterable[Tuple[bytes, ...]],
+                         subset: bool = False) -> None:
+    """Check that the expected sensors are all present.
+
+    The values are not checked. Each sensor is described by the raw data
+    returned from the ``?sensor-list`` request, excluding the description.
+    If `subset` is true, then it is acceptable for there to be additional
+    sensors.
+    """
     expected = {item[0]: item[1:] for item in expected_list}
     reply, informs = await client.request("sensor-list")
     actual = {}
     for inform in informs:
-        # Skip the description
-        actual[inform.arguments[0]] = tuple(inform.arguments[2:])
+        if not subset or inform.arguments[0] in expected:
+            # Skip the description
+            actual[inform.arguments[0]] = tuple(inform.arguments[2:])
     assert_equal(expected, actual)
 
 

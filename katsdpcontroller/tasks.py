@@ -4,6 +4,9 @@ import asyncio
 import socket
 import ipaddress
 import os
+import typing
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager, AsyncGenerator, List, Set, Type, Union
 
 import async_timeout
 import aiokatcp
@@ -127,6 +130,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
         self.physical_factory = SDPPhysicalTask
+        self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
         self.final_state = CaptureBlockState.BURNDOWN
@@ -280,12 +284,14 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
-class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
-    """Augments the parent class with SDP-specific functionality.
+class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
+    """Augments task classes with SDP-specific functionality.
+
+    This class is used in a mixin with either :class:`scheduler.PhysicalTask`
+    or :class:`scheduler.FakePhysicalTask`.
 
     It
     - Tracks the owning controller, subarray product and capture block ID
-    - Provides Docker labels to report the above
     - Provides a number of internal katcp sensors
     - Tracks live capture block IDs for this task
     - Connects to the service's katcp port and mirrors katcp sensors. Such
@@ -294,13 +300,12 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         <name>.<sensor_name>
       For example:
         ingest.sdp_l0.1.input_rate
-    - Registers the service with consul for Prometheus metrics, if there is
-      a port called ``prometheus``.
     """
-    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+
+    def __init__(self, logical_task: SDPLogicalTask, sdp_controller,
+                 subarray_product, capture_block_id: str) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
-        super().__init__(logical_task)
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
         self.capture_block_id = capture_block_id   # Only useful for batch tasks
@@ -310,14 +315,14 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             self.name = logical_task.name
         else:
             self.name = '.'.join([capture_block_id, logical_task.name])
-        self.gui_urls = []
+        self.gui_urls: List[dict] = []
         # dict of exposed KATCP sensors. This excludes the state sensors, which
         # are present even when the process is not running.
-        self.sensors = {}
+        self.sensors: typing.Dict[str, aiokatcp.Sensor] = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
-        self._capture_blocks = set()
+        self._capture_blocks: Set[str] = set()
         # Event set to true whenever _capture_blocks is empty
         self._capture_blocks_empty = asyncio.Event()
         self._capture_blocks_empty.set()
@@ -328,7 +333,7 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                                     initial_status=Sensor.Status.NOMINAL)
         self._mesos_state_sensor = Sensor(
             str, self.name + '.mesos-state', 'Mesos-reported task state', '')
-        if self.logical_node.metadata_katcp_sensors:
+        if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
             # themselves are created unconditionally because it avoids having to
@@ -337,46 +342,12 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
             self.subarray_product.add_sensor(self._mesos_state_sensor)
 
         self.katcp_connection = None
-        self.consul_services = []
         self.capture_block_state_observer = None
         self.device_status_observer = None
-
-    def subst_args(self, resolver):
-        """Add extra values for substitution into command lines.
-
-        The extra keys are:
-
-        capture_block_id
-            If this task is specific to a single capture block, contains the
-            capture block ID. Otherwise it is absent.
-        endpoints_vector
-            A dictionary with the same keys as ``endpoints``, but where each
-            value is an array of endpoints. Typically this will just be a
-            singleton array, but where the endpoint address has the form
-            x.x.x.x+n, it will be expanded to n+1 sequential IP addresses.
-        """
-        args = super().subst_args(resolver)
-        if self.capture_block_id is not None:
-            args['capture_block_id'] = self.capture_block_id
-        args['endpoints_vector'] = {
-            name: endpoint_list_parser(endpoint.port)(endpoint.host)
-            for name, endpoint in self.endpoints.items()
-        }
-        return args
 
     @property
     def subarray_product_id(self):
         return self.subarray_product.subarray_product_id
-
-    @property
-    def status(self):
-        return self._status
-
-    @status.setter
-    def status(self, value):
-        self._status = value
-        if value is not None:
-            self._mesos_state_sensor.value = value.state
 
     def get_transition(self, state):
         """Get state transition actions"""
@@ -406,36 +377,6 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
     async def wait_ready(self):
         if not await super().wait_ready():
             return False
-        # register Prometheus metrics with consul if appropriate
-        if 'prometheus' in self.ports:
-            prometheus_port = self.ports['prometheus']
-            service = {
-                'Name': self.logical_node.task_type,
-                'Tags': ['prometheus-metrics'],
-                'Meta': {
-                    'subarray_product_id': self.subarray_product_id,
-                    'task_name': self.logical_node.name
-                },
-                'Port': prometheus_port,
-                'Checks': [
-                    {
-                        "Interval": "15s",
-                        "Timeout": "5s",
-                        # Using the metrics endpoint as a health check
-                        "HTTP": f"http://{LOCALHOST}:{prometheus_port}/metrics",
-                        "DeregisterCriticalServiceAfter": "90s"
-                    }
-                ]
-            }
-            # Connect to the Consul agent on the machine that will be running
-            # the task. Note that this requires it to be configured to listen
-            # on external interfaces - the default is to listen only on
-            # localhost.
-            # TODO: see if there is some way this requirement can be
-            # eliminated e.g. by running via a wrapper script / sidecar
-            # container that handles the registration and deregistration.
-            consul_url = yarl.URL.build(scheme='http', host=self.host, port=CONSUL_PORT)
-            self.consul_services.append(await ConsulService.register(service, consul_url))
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
@@ -511,10 +452,6 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
-        for service in self.consul_services:
-            # This might cause double-deregistration if this method is called
-            # twice, but at worst that should cause a warning.
-            asyncio.get_event_loop().create_task(service.deregister())
         if need_inform:
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
@@ -555,6 +492,145 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
                                           status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
+
+    def set_state(self, state):
+        super().set_state(state)
+        self._state_sensor.value = state
+        if self.state == scheduler.TaskState.DEAD:
+            self._disconnect()
+            self._capture_blocks.clear()
+            self._capture_blocks_empty.set()
+            if not self.death_expected:
+                self.subarray_product.unexpected_death(self)
+
+    def clone(self):
+        clone = self.logical_node.physical_factory(
+            self.logical_node, self.sdp_controller, self.subarray_product,
+            self.capture_block_id)
+        clone.generation = self.generation + 1
+        return clone
+
+    def add_capture_block(self, capture_block):
+        self._capture_blocks.add(capture_block.name)
+        self._capture_blocks_empty.clear()
+
+    def remove_capture_block(self, capture_block):
+        self._capture_blocks.discard(capture_block.name)
+        if not self._capture_blocks:
+            self._capture_blocks_empty.set()
+
+    async def graceful_kill(self, driver, **kwargs):
+        try:
+            if self.logical_node.final_state == CaptureBlockState.DEAD:
+                capture_blocks = kwargs.get('capture_blocks', {})
+                # Explicitly copy the values because it will mutate
+                for capture_block in list(capture_blocks.values()):
+                    await capture_block.dead_event.wait()
+        except Exception:
+            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
+
+        self.logger.info('Waiting for capture blocks on %s', self.name)
+        await self._capture_blocks_empty.wait()
+        self.logger.info('All capture blocks for %s completed', self.name)
+        self._disconnect()
+        super().kill(driver, **kwargs)
+
+
+class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTask):
+    """Augments the parent class with SDP-specific functionality.
+
+    In addition to the augmentations from the mixin classes, this class:
+    - Provides Docker labels.
+    - Registers the service with consul for Prometheus metrics, if there is
+      a port called ``prometheus``.
+    """
+
+    logical_node: SDPLogicalTask
+
+    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+        scheduler.PhysicalTask.__init__(self, logical_task)
+        SDPPhysicalTaskMixin.__init__(
+            self, logical_task, sdp_controller, subarray_product, capture_block_id)
+        self.consul_services = []
+
+    def subst_args(self, resolver):
+        """Add extra values for substitution into command lines.
+
+        The extra keys are:
+
+        capture_block_id
+            If this task is specific to a single capture block, contains the
+            capture block ID. Otherwise it is absent.
+        endpoints_vector
+            A dictionary with the same keys as ``endpoints``, but where each
+            value is an array of endpoints. Typically this will just be a
+            singleton array, but where the endpoint address has the form
+            x.x.x.x+n, it will be expanded to n+1 sequential IP addresses.
+        """
+        args = super().subst_args(resolver)
+        if self.capture_block_id is not None:
+            args['capture_block_id'] = self.capture_block_id
+        args['endpoints_vector'] = {
+            name: endpoint_list_parser(endpoint.port)(endpoint.host)
+            for name, endpoint in self.endpoints.items()
+        }
+        return args
+
+    @property   # type: ignore
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+        if value is not None:
+            self._mesos_state_sensor.value = value.state
+
+    async def wait_ready(self):
+        if not await super().wait_ready():
+            return False
+        # register Prometheus metrics with consul if appropriate
+        if 'prometheus' in self.ports:
+            prometheus_port = self.ports['prometheus']
+            service = {
+                'Name': self.logical_node.task_type,
+                'Tags': ['prometheus-metrics'],
+                'Meta': {
+                    'subarray_product_id': self.subarray_product_id,
+                    'task_name': self.logical_node.name
+                },
+                'Port': prometheus_port,
+                'Checks': [
+                    {
+                        "Interval": "15s",
+                        "Timeout": "5s",
+                        # Using the metrics endpoint as a health check
+                        "HTTP": f"http://{LOCALHOST}:{prometheus_port}/metrics",
+                        "DeregisterCriticalServiceAfter": "90s"
+                    }
+                ]
+            }
+            # Connect to the Consul agent on the machine that will be running
+            # the task. Note that this requires it to be configured to listen
+            # on external interfaces - the default is to listen only on
+            # localhost.
+            # TODO: see if there is some way this requirement can be
+            # eliminated e.g. by running via a wrapper script / sidecar
+            # container that handles the registration and deregistration.
+            consul_url = yarl.URL.build(scheme='http', host=self.host, port=CONSUL_PORT)
+            self.consul_services.append(await ConsulService.register(service, consul_url))
+        return True
+
+    def _disconnect(self):
+        for service in self.consul_services:
+            # This might cause double-deregistration if this method is called
+            # twice, but at worst that should cause a warning.
+            asyncio.get_event_loop().create_task(service.deregister())
+        super()._disconnect()
+
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
+
         # Provide info about which container this is for logspout to collect.
         labels = {
             'task': self.logical_node.name,
@@ -600,16 +676,6 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                        initial_status=Sensor.Status.NOMINAL))
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
-    def set_state(self, state):
-        super().set_state(state)
-        self._state_sensor.value = state
-        if self.state == scheduler.TaskState.DEAD:
-            self._disconnect()
-            self._capture_blocks.clear()
-            self._capture_blocks_empty.set()
-            if not self.death_expected:
-                self.subarray_product.unexpected_death(self)
-
     def set_status(self, status):
         # Ensure we only count once, even in corner cases like a lost task
         # being rediscovered
@@ -626,37 +692,55 @@ class SDPPhysicalTask(SDPConfigMixin, scheduler.PhysicalTask):
                 batch_runtime_rel.observe(elapsed / self.logical_node.batch_data_time)
                 logger.info('Task %s ran for %s s', self.name, elapsed)
 
-    def clone(self):
-        clone = self.logical_node.physical_factory(
-            self.logical_node, self.sdp_controller, self.subarray_product,
-            self.capture_block_id)
-        clone.generation = self.generation + 1
-        return clone
 
-    def add_capture_block(self, capture_block):
-        self._capture_blocks.add(capture_block.name)
-        self._capture_blocks_empty.clear()
+class FakeDeviceServer(aiokatcp.DeviceServer):
+    VERSION = "fake-1.0"
+    BUILD_STATE = "fake-1.0"
 
-    def remove_capture_block(self, capture_block):
-        self._capture_blocks.discard(capture_block.name)
-        if not self._capture_blocks:
-            self._capture_blocks_empty.set()
+    async def unhandled_request(self, ctx, req: aiokatcp.core.Message) -> None:
+        """Respond to any unknown requests with an empty reply."""
+        ctx.reply(aiokatcp.core.Message.OK)
+        await ctx.drain()
 
-    async def graceful_kill(self, driver, **kwargs):
-        try:
-            if self.logical_node.final_state == CaptureBlockState.DEAD:
-                capture_blocks = kwargs.get('capture_blocks', {})
-                # Explicitly copy the values because it will mutate
-                for capture_block in list(capture_blocks.values()):
-                    await capture_block.dead_event.wait()
-        except Exception:
-            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
 
-        self.logger.info('Waiting for capture blocks on %s', self.name)
-        await self._capture_blocks_empty.wait()
-        self.logger.info('All capture blocks for %s completed', self.name)
-        self._disconnect()
-        super().kill(driver, **kwargs)
+@asynccontextmanager
+async def wrap_katcp_server(
+        server: aiokatcp.DeviceServer) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
+    await server.start()
+    yield server
+    await server.stop()
+
+
+# TODO: see if SDPConfigMixin can be re-enabled here. It will need
+# FakePhysicalTask to behave much more like PhysicalTask for generator.py to
+# extract config.
+class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
+    logical_node: SDPLogicalTask
+
+    def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
+        scheduler.FakePhysicalTask.__init__(self, logical_task)
+        SDPPhysicalTaskMixin.__init__(
+            self, logical_task, sdp_controller, subarray_product, capture_block_id)
+
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
+        if self.logical_node.metadata_katcp_sensors:
+            # Notify about the sensors added by the mixin constructor. This is
+            # done here rather than in the constructor because SDPPhysicalTask
+            # adds further sensors as part of resolve.
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+
+    async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
+        assert self.host is not None
+        if port != 'port':  # conventional name for katcp port
+            return await super()._create_server(port, sock)
+        host, port_no = sock.getsockname()[:2]
+        sock.close()  # TODO: allow aiokatcp to take an existing socket
+        katcp_server = self.logical_node.fake_katcp_server_cls(host, port_no)
+        return wrap_katcp_server(katcp_server)
+
+
+SDPAnyPhysicalTask = Union[SDPPhysicalTask, SDPFakePhysicalTask]
 
 
 class LogicalGroup(scheduler.LogicalExternal):

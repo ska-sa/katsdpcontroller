@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import copy
+import json
 import urllib.parse
 import os.path
 from typing import (
@@ -15,7 +16,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import FailReply, Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -28,8 +29,9 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
 from .tasks import (
-    SDPLogicalTask, SDPPhysicalTask, LogicalGroup,
-    CaptureBlockState, KatcpTransition)
+    SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
+    LogicalGroup, CaptureBlockState, KatcpTransition,
+    FakeDeviceServer)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
@@ -162,6 +164,59 @@ class IngestTask(SDPPhysicalTask):
         await super().resolve(resolver, graph, image_path)
 
 
+class FakeIngestDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sensors.add(
+            Sensor(bool, 'capture-active',
+                   'Is there a currently active capture session (prometheus: gauge)',
+                   default=False, initial_status=Sensor.Status.NOMINAL))
+
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
+        """Dummy implementation of capture-init."""
+        self.sensors['capture-active'].value = True
+
+    async def request_capture_done(self, ctx) -> None:
+        """Dummy implementation of capture-done."""
+        self.sensors['capture-active'].value = False
+
+
+class FakeCalDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._capture_blocks: Dict[str, str] = {}
+        self._current_capture_block: Optional[str] = None
+        self.sensors.add(
+            Sensor(str, 'capture-block-state',
+                   'JSON dict with the state of each capture block',
+                   default='{}', initial_status=Sensor.Status.NOMINAL))
+
+    def _update_capture_block_state(self) -> None:
+        """Update the sensor from the internal state."""
+        self.sensors['capture-block-state'].value = json.dumps(self._capture_blocks)
+
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
+        """Add capture block ID to capture-block-state sensor."""
+        if self._current_capture_block is not None:
+            raise FailReply('A capture block is already active')
+        self._current_capture_block = capture_block_id
+        self._capture_blocks[capture_block_id] = 'CAPTURING'
+        self._update_capture_block_state()
+
+    async def request_capture_done(self, ctx) -> None:
+        """Simulate the capture block going through all the states."""
+        if self._current_capture_block is None:
+            raise FailReply('Not currently capturing')
+        cbid = self._current_capture_block
+        self._current_capture_block = None
+        self._capture_blocks[cbid] = 'PROCESSING'
+        self._update_capture_block_state()
+        self._capture_blocks[cbid] = 'REPORTING'
+        self._update_capture_block_state()
+        del self._capture_blocks[cbid]
+        self._update_capture_block_state()
+
+
 def _mb(value):
     """Convert bytes to mebibytes"""
     return value / 1024**2
@@ -204,7 +259,10 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.taskinfo.container.docker.setdefault('parameters', []).append(
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
-    telstate.physical_factory = TelstateTask
+    if configuration.options.interface_mode:
+        telstate.physical_factory = SDPFakePhysicalTask
+    else:
+        telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
     telstate.katsdpservices_config = False
     telstate.pass_telstate = False  # Don't pass --telstate to telstate itself
@@ -1102,7 +1160,11 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
 
     for i in range(1, n_ingest + 1):
         ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
-        ingest.physical_factory = IngestTask
+        if configuration.options.interface_mode:
+            ingest.physical_factory = SDPFakePhysicalTask
+        else:
+            ingest.physical_factory = IngestTask
+        ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = 'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         ingest.command = ['ingest.py']
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
@@ -1269,6 +1331,7 @@ def _make_cal(g: networkx.MultiDiGraph,
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
         cal = SDPLogicalTask('{}.{}'.format(stream.name, i))
+        cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
         cal.cpus = cpus
@@ -1903,6 +1966,17 @@ def build_logical_graph(configuration: Configuration,
                 pass
             if force_host is not None:
                 node.host = force_host
+    # For any tasks that don't pick a more specific fake implementation, use
+    # either SDPFakePhysicalTask or FakePhysicalTask depending on the original.
+    if configuration.options.interface_mode:
+        for node in g:
+            if node.physical_factory == scheduler.PhysicalTask:
+                node.physical_factory = scheduler.FakePhysicalTask
+            elif node.physical_factory == SDPPhysicalTask:
+                node.physical_factory = SDPFakePhysicalTask
+            elif issubclass(node.physical_factory, scheduler.PhysicalTask):
+                raise TypeError(f'{node.name} needs to specify a fake physical factory')
+
     return g
 
 
@@ -2241,6 +2315,11 @@ async def build_postprocess_logical_graph(
     g = networkx.MultiDiGraph()
     telstate_node = scheduler.LogicalExternal('telstate')
     g.add_node(telstate_node)
+    # The postprocessing steps don't work well with interface mode because
+    # they depend on examining state written by the containers, and this is
+    # not currently simulated to the necessary level.
+    if configuration.options.interface_mode:
+        return g
 
     target_mapper = TargetMapper()
 

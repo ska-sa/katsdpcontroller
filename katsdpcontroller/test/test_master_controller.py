@@ -23,7 +23,7 @@ from .. import master_controller, scheduler
 from ..controller import (DeviceStatus, ProductState, device_server_sockname,
                           make_image_resolver_factory, device_status_to_sensor_status)
 from ..master_controller import (ProductFailed, Product, SingularityProduct,
-                                 SingularityProductManager, NoAddressesError,
+                                 ProductManagerBase, SingularityProductManager, NoAddressesError,
                                  DeviceServer, parse_args)
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
@@ -639,14 +639,15 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request('product-configure', 'product', CONFIG)
         await asynctest.exhaust_callbacks(self.loop)
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         # Prepend the subarray product ID to the names
         expected_product_sensors = [
             (b'product.' + s[0],) + s[1:]
             for s in (EXPECTED_INTERFACE_SENSOR_LIST
                       + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
                       + EXPECTED_PRODUCT_SENSOR_LIST)]
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors)
+        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors,
+                             subset=True)
         await assert_sensor_value(self.client, 'products', '["product"]')
         product = self.server._manager.products['product']
         await assert_sensor_value(
@@ -871,7 +872,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         await assert_request_fails(self.client, 'product-list', 'product')
 
     async def test_get_multicast_groups(self) -> None:
-        await self.client.request('product-configure', 'product', CONFIG)
+        # Prevent product-configure from actually allocating multicast groups,
+        # since that would throw off the expected values.
+        with mock.patch.object(ProductManagerBase, 'get_multicast_groups', return_value='0.0.0.0'):
+            await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
         self.assertEqual(reply, [b'239.192.0.1+9'])
         reply, informs = await self.client.request('get-multicast-groups', 'product', 1)

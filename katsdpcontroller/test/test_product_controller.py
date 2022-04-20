@@ -375,8 +375,11 @@ class BaseTestSDPController(asynctest.TestCase):
         self.addCleanup(mc_client.close)
         self.prometheus_registry = CollectorRegistry()
 
+        if 'sched' not in server_kwargs:
+            server_kwargs['sched'] = scheduler.SchedulerBase('realtime', '127.0.0.1', 0)
         self.server = DeviceServer(
-            master_controller=mc_client, subarray_product_id=SUBARRAY_PRODUCT,
+            master_controller=mc_client,
+            subarray_product_id=SUBARRAY_PRODUCT,
             prometheus_registry=self.prometheus_registry,
             shutdown_delay=0.0,
             **server_kwargs)
@@ -429,7 +432,7 @@ class TestSDPControllerInterface(BaseTestSDPController):
     async def setUp(self) -> None:
         await super().setUp()
         image_resolver_factory = scheduler.ImageResolverFactory(scheduler.SimpleImageLookup('sdp'))
-        await self.setup_server(host='127.0.0.1', port=0, sched=None,
+        await self.setup_server(host='127.0.0.1', port=0,
                                 batch_role='batch',
                                 interface_mode=True,
                                 localhost=True,
@@ -451,15 +454,16 @@ class TestSDPControllerInterface(BaseTestSDPController):
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(
             self.client,
-            EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST)
+            EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST,
+            subset=True)
 
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
         await self.client.request("product-deconfigure")
-        interface_changed_callback.assert_called_once_with(b'sensor-list')
+        interface_changed_callback.assert_called_with(b'sensor-list')
         await self.client.wait_disconnected()
         self.client.remove_inform_callback('interface-changed', interface_changed_callback)
 

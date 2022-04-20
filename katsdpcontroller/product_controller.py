@@ -10,17 +10,15 @@ import copy
 import functools
 import itertools
 import numbers
-from ipaddress import IPv4Address
-from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Type, Mapping
+from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Mapping
 
 import addict
 import jsonschema
 import networkx
 import aiokatcp
-from aiokatcp import FailReply, Sensor, Address
+from aiokatcp import FailReply, Sensor
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
 import yarl
-import numpy as np
 import katsdptelstate.aio.memory
 import katsdptelstate.aio.redis
 import katsdpmodels.fetch.aiohttp
@@ -393,7 +391,7 @@ class SDPSubarrayProductBase:
     forced deconfiguration to abort them.
     """
 
-    def __init__(self, sched: Optional[scheduler.Scheduler],
+    def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver,
@@ -735,6 +733,10 @@ class SDPSubarrayProductBase:
         finally:
             self._clear_async_task(task)
         logger.info('Subarray product %s successfully configured', self.subarray_product_id)
+        # A number of sensors are added without individually triggering interface-changed
+        # notifications, so that subscribers don't try to repeatly refresh
+        # their sensor lists.
+        self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def deconfigure(self, force: bool = False) -> None:
         """Start deconfiguration of the subarray, but does not wait for it to complete."""
@@ -812,7 +814,8 @@ class SDPSubarrayProductBase:
             if name != 'resources':
                 g = scheduler.subgraph(self.logical_graph, 'depends_' + name)
             else:
-                g = scheduler.subgraph(self.logical_graph, scheduler.Scheduler.depends_resources)
+                g = scheduler.subgraph(self.logical_graph,
+                                       scheduler.SchedulerBase.depends_resources)
             g = networkx.relabel_nodes(g, {node: node.name for node in g})
             g = networkx.drawing.nx_pydot.to_pydot(g)
             filename = os.path.join(output_dir,
@@ -908,147 +911,6 @@ class SDPSubarrayProductBase:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
 
-class InterfaceModeSensors:
-    def __init__(self, subarray_product_id: str) -> None:
-        """Manage dummy subarray product sensors on a DeviceServer instance
-
-        Parameters
-        ----------
-        subarray_product_id
-            Subarray product id, e.g. `array_1_c856M4k`
-        """
-        self.subarray_product_id = subarray_product_id
-        self.sensors: Dict[str, Sensor] = {}
-
-    def add_sensors(self, server: aiokatcp.DeviceServer) -> None:
-        """Add dummy subarray product sensors and issue #interface-changed"""
-
-        interface_sensors: List[Sensor] = [
-            Sensor(Address, 'bf_ingest.beamformer.1.port', 'IP endpoint for port',
-                   default=Address(IPv4Address("1.2.3.4"), 31048),
-                   initial_status=Sensor.Status.NOMINAL),
-            Sensor(bool, 'ingest.sdp_l0.1.capture-active',
-                   'Is there a currently active capture session.',
-                   default=False, initial_status=Sensor.Status.NOMINAL),
-            Sensor(str, 'timeplot.sdp_l0.1.gui-urls', 'URLs for GUIs',
-                   default='[{"category": "Plot", '
-                   '"href": "http://ing1.sdp.mkat.fake.kat.ac.za:31054/", '
-                   '"description": "Signal displays for array_1_bc856M4k", '
-                   '"title": "Signal Display"}]',
-                   initial_status=Sensor.Status.NOMINAL),
-            Sensor(Address, 'timeplot.sdp_l0.1.html_port', 'IP endpoint for html_port',
-                   default=Address(IPv4Address("1.2.3.5"), 31054),
-                   initial_status=Sensor.Status.NOMINAL),
-            Sensor(str, 'cal.1.capture-block-state',
-                   'JSON dict with the state of each capture block',
-                   default='{}',
-                   initial_status=Sensor.Status.NOMINAL)
-        ]
-
-        sensors_added = False
-        try:
-            for sensor in interface_sensors:
-                if sensor.name in self.sensors:
-                    logger.info('Simulated sensor %r already exists, skipping',
-                                sensor.name)
-                    continue
-                self.sensors[sensor.name] = sensor
-                server.sensors.add(sensor)
-                sensors_added = True
-        finally:
-            if sensors_added:
-                server.mass_inform('interface-changed', 'sensor-list')
-
-    def remove_sensors(self, server: aiokatcp.DeviceServer) -> None:
-        """Remove dummy subarray product sensors and issue #interface-changed"""
-        sensors_removed = False
-        try:
-            for sensor_name, sensor in list(self.sensors.items()):
-                server.sensors.discard(sensor)
-                del self.sensors[sensor_name]
-                sensors_removed = True
-        finally:
-            if sensors_removed:
-                server.mass_inform('interface-changed', 'sensor-list')
-
-
-class SDPSubarrayProductInterface(SDPSubarrayProductBase):
-    """Dummy implementation of SDPSubarrayProductBase interface that does not
-    actually run anything.
-    """
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._interface_mode_sensors = InterfaceModeSensors(self.subarray_product_id)
-        sensors = self._interface_mode_sensors.sensors
-        self._capture_block_states = [
-            sensor for sensor in sensors.values() if sensor.name.endswith('.capture-block-state')]
-        # F-engine gains, indexed by stream then input
-        self._gains: Dict[str, Dict[str, np.ndarray]] = {}
-        for stream in self.configuration.by_class(
-                product_config.GpucbfAntennaChannelisedVoltageStream):
-            self._gains[stream.name] = {}
-            for input in stream.input_labels:
-                # Arbitrary initial value
-                self._gains[stream.name][input] = np.full(stream.n_chans, 0.5, dtype=np.complex64)
-
-    def _update_capture_block_state(self, capture_block_id: str,
-                                    state: Optional[CaptureBlockState]) -> None:
-        """Update the simulated *.capture-block-state sensors.
-
-        The dictionary that is JSON-encoded in the sensor value is updated to
-        set the value associated with the key `capture_block_id`. If `state` is
-        `None`, the key is removed instead.
-        """
-        for name, sensor in self._interface_mode_sensors.sensors.items():
-            if name.endswith('.capture-block-state'):
-                states = json.loads(sensor.value)
-                if state is None:
-                    states.pop(capture_block_id, None)
-                else:
-                    states[capture_block_id] = state.name.lower()
-                sensor.set_value(json.dumps(states))
-
-    async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
-        self._update_capture_block_state(capture_block.name, CaptureBlockState.CAPTURING)
-
-    async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
-        self._update_capture_block_state(capture_block.name, CaptureBlockState.BURNDOWN)
-
-    async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
-        await asyncio.sleep(0.1)
-        self._update_capture_block_state(capture_block.name, CaptureBlockState.POSTPROCESSING)
-        capture_block.state = CaptureBlockState.POSTPROCESSING
-        await asyncio.sleep(0.1)
-        self._update_capture_block_state(capture_block.name, None)
-
-    async def configure_impl(self) -> None:
-        logger.warning("No components will be started - running in interface mode")
-        # Add dummy sensors for this product
-        self._interface_mode_sensors.add_sensors(self.sdp_controller)
-        # Add a dummy telstate. It's not used for anything, but satisfies some
-        # checks that a telstate exists.
-        backend = katsdptelstate.aio.memory.MemoryBackend()
-        self.telstate = katsdptelstate.aio.TelescopeState(backend)
-
-    async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
-        self._interface_mode_sensors.remove_sensors(self.sdp_controller)
-
-    async def gain_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            input: str,
-            values: Sequence[str]) -> Sequence[str]:
-        cvalues = np.array([np.complex64(v) for v in values])
-        if len(cvalues) == 1:
-            cvalues = cvalues.repeat(stream.n_chans)
-        if len(cvalues) > 0:
-            self._gains[stream.name][input] = cvalues
-        out = self._gains[stream.name][input]
-        if np.all(out == out[0]):
-            out = out[:1]  # Same value for all channels
-        return [_format_complex(x) for x in out]
-
-
 class _IndexedKey(dict):
     """Wrapper class indicating that the contents form a telstate indexed key.
 
@@ -1060,8 +922,6 @@ class _IndexedKey(dict):
 
 class SDPSubarrayProduct(SDPSubarrayProductBase):
     """Subarray product that actually launches nodes."""
-
-    sched: scheduler.Scheduler     # Override Optional[] from base class
 
     def _instantiate(self, logical_node: scheduler.LogicalNode,
                      capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
@@ -1076,7 +936,7 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                    for logical in logical_graph}
         return networkx.relabel_nodes(logical_graph, mapping)
 
-    def __init__(self, sched: scheduler.Scheduler,
+    def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
                  resolver: Resolver, subarray_product_id: str,
@@ -1220,7 +1080,10 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             await self.sched.launch(physical_graph, self.resolver, [telstate_node],
                                     queue=self.batch_queue,
                                     resources_timeout=BATCH_RESOURCES_TIMEOUT)
-            nodelist = [node for node in physical_graph if isinstance(node, scheduler.PhysicalTask)]
+            nodelist = [
+                node for node in physical_graph
+                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            ]
             await self.sched.batch_run(physical_graph, self.resolver, nodelist,
                                        queue=self.batch_queue,
                                        resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
@@ -1266,48 +1129,55 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                     ]
 
         # Load canonical model URLs
-        model_base_url = self.resolver.s3_config['models']['read']['url']
-        if not model_base_url.endswith('/'):
-            model_base_url += '/'      # Ensure it is a directory
-        init_telstate['sdp_model_base_url'] = model_base_url
-        async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
-            rfi_mask_model_urls = await _resolve_model(
-                fetcher, model_base_url, 'rfi_mask/current.alias')
-            init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
-            init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
-            for stream in itertools.chain(
-                    self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
-                    self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream)):
-                ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
-                band_mask_model_urls = await _resolve_model(
-                    fetcher, model_base_url,
-                    f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
-                )
-                prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
-                init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
-                init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
-                for group in ['individual', 'cohort']:
-                    config_value = _IndexedKey()
-                    fixed_value = _IndexedKey()
-                    for ant in stream.antennas:
-                        pb_model_urls = await _resolve_model(
-                            fetcher, model_base_url,
-                            f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
-                        )
-                        config_value[ant] = pb_model_urls[0]
-                        fixed_value[ant] = pb_model_urls[1]
-                    prefix = (stream.name, 'model', 'primary_beam', group)
-                    init_telstate[prefix + ('config',)] = config_value
-                    init_telstate[prefix + ('fixed',)] = fixed_value
+        if not self.configuration.options.interface_mode:
+            model_base_url = self.resolver.s3_config['models']['read']['url']
+            if not model_base_url.endswith('/'):
+                model_base_url += '/'      # Ensure it is a directory
+            init_telstate['sdp_model_base_url'] = model_base_url
+            async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
+                rfi_mask_model_urls = await _resolve_model(
+                    fetcher, model_base_url, 'rfi_mask/current.alias')
+                init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
+                init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+                for stream in itertools.chain(
+                        self.configuration.by_class(
+                            product_config.AntennaChannelisedVoltageStream),
+                        self.configuration.by_class(
+                            product_config.SimAntennaChannelisedVoltageStream)):
+                    ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
+                    band_mask_model_urls = await _resolve_model(
+                        fetcher, model_base_url,
+                        f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias'
+                    )
+                    prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
+                    init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
+                    init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
+                    for group in ['individual', 'cohort']:
+                        config_value = _IndexedKey()
+                        fixed_value = _IndexedKey()
+                        for ant in stream.antennas:
+                            pb_model_urls = await _resolve_model(
+                                fetcher, model_base_url,
+                                f'primary_beam/current/{group}/{ant}/{stream.band}.alias'
+                            )
+                            config_value[ant] = pb_model_urls[0]
+                            fixed_value[ant] = pb_model_urls[1]
+                        prefix = (stream.name, 'model', 'primary_beam', group)
+                        init_telstate[prefix + ('config',)] = config_value
+                        init_telstate[prefix + ('fixed',)] = fixed_value
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
         # connect to telstate store
-        self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
-                                                self.telstate_node.ports['telstate'])
-        telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
-            f'redis://{self.telstate_endpoint}'
-        )
+        telstate_backend: katsdptelstate.aio.backend.Backend
+        if self.configuration.options.interface_mode:
+            telstate_backend = katsdptelstate.aio.memory.MemoryBackend()
+        else:
+            self.telstate_endpoint = '{}:{}'.format(self.telstate_node.host,
+                                                    self.telstate_node.ports['telstate'])
+            telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
+                f'redis://{self.telstate_endpoint}'
+            )
         telstate = katsdptelstate.aio.TelescopeState(telstate_backend)
         self.telstate = telstate
         self.resolver.telstate = telstate
@@ -1346,12 +1216,12 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 result = False
         return result, died
 
-    def unexpected_death(self, task: scheduler.PhysicalTask) -> None:
+    def unexpected_death(self, task: tasks.SDPAnyPhysicalTask) -> None:
         logger.warning('Task %s died unexpectedly', task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
-    def bad_device_status(self, task: scheduler.PhysicalTask) -> None:
+    def bad_device_status(self, task: tasks.SDPAnyPhysicalTask) -> None:
         logger.warning('Task %s has failed (device-status)', task.name)
         if task.logical_node.critical:
             self._go_to_error()
@@ -1508,7 +1378,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     def __init__(self, host: str, port: int, master_controller: aiokatcp.Client,
                  subarray_product_id: str,
-                 sched: Optional[scheduler.Scheduler],
+                 sched: scheduler.SchedulerBase,
                  batch_role: str,
                  interface_mode: bool,
                  localhost: bool,
@@ -1550,15 +1420,16 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._prometheus_watcher = sensor_proxy.PrometheusWatcher(
             self.sensors, {'subarray_product_id': subarray_product_id},
             functools.partial(_prometheus_factory, prometheus_registry))
-        if sched is not None:
-            task_stats = sched.task_stats
-            if isinstance(task_stats, TaskStats):
-                for sensor in task_stats.sensors.values():
-                    self.sensors.add(sensor)
+        task_stats = sched.task_stats
+        if isinstance(task_stats, TaskStats):
+            for sensor in task_stats.sensors.values():
+                self.sensors.add(sensor)
         self._consul_service = ConsulService()
 
     async def _consul_register(self) -> None:
-        if self.sched is None:
+        if not isinstance(self.sched, scheduler.Scheduler):
+            # This indicates we're running in interface mode, so avoid
+            # advertising ourselves to consul and causing confusion.
             return
         port = self.sched.http_port
         service = {
@@ -1649,12 +1520,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.localhost)
 
         # create graph object and build physical graph from specified resources
-        product_cls: Type[SDPSubarrayProductBase]
-        if self.interface_mode:
-            product_cls = SDPSubarrayProductInterface
-        else:
-            product_cls = SDPSubarrayProduct
-        product = product_cls(self.sched, configuration, config_dict, resolver, name, self)
+        product = SDPSubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
@@ -1683,6 +1549,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             config_dict = load_json_dict(config)
             configuration = await Configuration.from_config(config_dict)
+            configuration.options.interface_mode = self.interface_mode
         except product_config.SensorFailure as exc:
             retmsg = f"Error retrieving sensor data from CAM: {exc}"
             logger.error(retmsg)
@@ -1731,6 +1598,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         # Re-validate, since the override may have broken it
         try:
             configuration = await Configuration.from_config(config_dict)
+            configuration.options.interface_mode = self.interface_mode
         except (ValueError, jsonschema.ValidationError) as error:
             retmsg = f"Overrides make the config invalid: {error}"
             logger.error(retmsg)

@@ -209,12 +209,16 @@ class Options:
                  wrapper: Optional[str] = None,
                  image_tag: Optional[str] = None,
                  image_overrides: Mapping[str, str] = {},
-                 service_overrides: Mapping[str, ServiceOverride] = {}) -> None:
+                 service_overrides: Mapping[str, ServiceOverride] = {},
+                 interface_mode: bool = False) -> None:
         self.develop = develop
         self.wrapper = wrapper
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
         self.service_overrides = dict(service_overrides)
+        # Command line --interface mode - not set via config dict, but
+        # convenient to pass together with other options.
+        self.interface_mode = interface_mode
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> 'Options':

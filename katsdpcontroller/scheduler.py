@@ -211,10 +211,12 @@ from decimal import Decimal
 import time
 import io
 from abc import abstractmethod, ABC
+from contextlib import AsyncExitStack
 import random
 import typing
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import List, Tuple, Optional, Mapping, Union, ClassVar, Type
+from typing import (
+    AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type)
 
 import pkg_resources
 import docker
@@ -229,6 +231,7 @@ import aiohttp.web
 from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
+from .defaults import LOCALHOST
 
 
 #: Mesos task states that indicate that the task is dead
@@ -1948,6 +1951,9 @@ class PhysicalNode:
         Task which asynchronously waits for the to be ready (e.g. for ports to
         be open). It is started on reaching :class:`~TaskState.RUNNING`.
     """
+
+    ports: typing.Dict[str, int]
+
     def __init__(self, logical_node):
         self.logical_node = logical_node
         self.name = logical_node.name
@@ -2165,19 +2171,18 @@ class PhysicalTask(PhysicalNode):
     """
 
     cores: typing.Dict[str, int]
-    ports: typing.Dict[str, int]
 
-    def __init__(self, logical_task):
+    def __init__(self, logical_task: LogicalTask) -> None:
         super().__init__(logical_task)
-        self.interfaces = {}
-        self.endpoints = {}
+        self.interfaces: typing.Dict[str, AgentInterface] = {}
+        self.endpoints: typing.Dict[str, Endpoint] = {}
         self.taskinfo = None
-        self.allocation = None
+        self.allocation: Optional[Dict] = None
         self.status = None
         self.start_time = None         # time.time()
         self.end_time = None           # time.time()
         self.kill_sent_time = None     # loop.time() when killTask called
-        self._queue = None
+        self._queue: Optional["LaunchQueue"] = None
         self.task_stats = None
         for name, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
@@ -2222,7 +2227,7 @@ class PhysicalTask(PhysicalNode):
                 setattr(self, resource.name, d)
 
     async def resolve(self, resolver, graph, image_path=None):
-        """Do final preparation before moving to :const:`TaskState.STAGING`.
+        """Do final preparation before moving to :const:`TaskState.STARTING`.
         At this point all dependencies are guaranteed to have resources allocated.
 
         Parameters
@@ -2368,7 +2373,7 @@ class PhysicalTask(PhysicalNode):
         args['generation'] = self.generation
         return args
 
-    def set_state(self, state):
+    def set_state(self, state: TaskState) -> None:
         old_state = self.state
         try:
             super().set_state(state)
@@ -2401,11 +2406,11 @@ class PhysicalTask(PhysicalNode):
         self.kill_sent_time = asyncio.get_event_loop().time()
 
     @property
-    def queue(self):
+    def queue(self) -> Optional["LaunchQueue"]:
         return self._queue
 
     @queue.setter
-    def queue(self, queue):
+    def queue(self, queue: Optional["LaunchQueue"]) -> None:
         old_queue = self._queue
         self._queue = queue
         # Once a task has reached STARTED, the queue only changes due to __del__,
@@ -2424,6 +2429,122 @@ class PhysicalTask(PhysicalNode):
         # hasattr is to protect against failure early in __init__
         if hasattr(self, '_queue'):
             self.queue = None
+
+
+class FakePhysicalTask(PhysicalNode):
+    """Drop-in replacement for PhysicalTask that does not actually launch anything.
+
+    It is intended for use with :option:`!--interface-mode` and for unit testing. It
+    has the following behaviour:
+
+    - When set to :const:`TaskState.STARTED`, it moves itself to
+      :const:`TaskState.RUNNING` (although not instantly).
+    - When killed, it takes care of going to state DEAD.
+    - If a `max_run_time` is set, it exits immediately; otherwise it waits
+      until it is killed.
+    - It allocates ports and listens on them. By default, incoming connections
+      are immediately closed.
+
+    .. todo::
+
+       It does not currently handle task_stats, start_time, stop_time or status.
+    """
+
+    logical_node: LogicalTask
+
+    def __init__(self, logical_task: LogicalTask) -> None:
+        super().__init__(logical_task)
+        self.queue = None
+        self.host = LOCALHOST
+        self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
+        self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
+        self._sockets: Dict[str, socket.socket] = {}  # Pre-created sockets
+
+        # Sockets have to be created now rather than in _run because we
+        # need to populate ports. For PhysicalTask this is done during
+        # `allocate` but we don't have that method.
+        for port_name in self.logical_node.ports:
+            if port_name is not None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+                sock.bind((self.host, 0))
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+                self._sockets[port_name] = sock
+                self.ports[port_name] = sock.getsockname()[1]
+
+    @staticmethod
+    async def _connected_cb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Handle a new connection to a port by immediately closing it."""
+        writer.close()
+        await writer.wait_closed()
+
+    async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
+        """Create a server to service a named port.
+
+        The default implementation will accept connections and immediately
+        close them. Subclasses may override this method to provide more
+        useful functionality.
+
+        Parameters
+        ----------
+        port
+            Name assigned to the port in the logical task
+        sock
+            Socket on which the server should listen. If it is not possible to
+            start the server on an existing socket, a subclass implementation
+            may instead close the socket then listen on the same address.
+
+        Returns
+        -------
+        server
+            Any asynchronous context manager
+        """
+        return await asyncio.start_server(self._connected_cb, sock=sock)
+
+    async def _run(self) -> None:
+        async with AsyncExitStack() as stack:
+            for port in self.logical_node.ports:
+                if port is not None:
+                    server = await self._create_server(port, self._sockets[port])
+                    del self._sockets[port]  # The server should now close the socket
+                    await stack.enter_async_context(server)
+            self.set_state(TaskState.RUNNING)
+            # If we have a max_run_time, assume it is a batch task and emulate
+            # it terminating immediately. Otherwise emulate a service and wait
+            # to be shut down.
+            if self.logical_node.max_run_time is None:
+                await self._kill_event.wait()
+
+    def _dead_callback(self, task: asyncio.Task) -> None:
+        try:
+            task.result()  # Evaluate for exceptions
+        except Exception:
+            logger.exception("Fake task %s died unexpectedly", task.get_name())
+        self._task = None
+        self.set_state(TaskState.DEAD)
+
+    def set_state(self, state):
+        if state == TaskState.KILLING and self._task is None:
+            state = TaskState.DEAD  # Nothing to kill, so immediately become dead
+        super().set_state(state)
+        if self.state >= TaskState.STARTED and self.state <= TaskState.READY and self._task is None:
+            self._task = asyncio.get_event_loop().create_task(self._run(), name=self.name)
+            self._task.add_done_callback(self._dead_callback)
+        if self.state == TaskState.DEAD:
+            # Clean up any sockets that weren't absorbed into servers
+            for sock in self._sockets.values():
+                sock.close()
+            self._sockets.clear()
+
+    def kill(self, driver, **kwargs):
+        self._kill_event.set()
+        super().kill(driver, **kwargs)
+
+    def dependency_abort(self):
+        self._kill_event.set()
+        super().dependency_abort()
+
+
+AnyPhysicalTask = Union[PhysicalTask, FakePhysicalTask]
 
 
 def instantiate(logical_graph):
@@ -2633,19 +2754,21 @@ class TaskStats:
         pass
 
 
-class Scheduler(pymesos.Scheduler):
-    """Top-level scheduler implementing the Mesos Scheduler API.
+async def _cleanup_task(task):
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
-    Mesos calls the callbacks provided in this class from another thread. To
-    ensure thread safety, they are all posted to the event loop via a
-    decorator.
 
-    The following invariants are maintained at each yield point:
-    - each dictionary within :attr:`_offers` is non-empty
-    - every role in :attr:`_roles_needed` is non-suppressed (there may be
-      additional non-suppressed roles, but they will be suppressed when an
-      offer arrives)
-    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
+class SchedulerBase:
+    """Top-level scheduler.
+
+    This base class does not actually connect to Mesos, so can only be used
+    to launch nodes that are not derived from :class:`PhysicalTask`. This is
+    useful for simulation or testing. For interacting with Mesos, use
+    :class:`Scheduler`.
 
     Parameters
     ----------
@@ -2707,7 +2830,6 @@ class Scheduler(pymesos.Scheduler):
         self.http_url = http_url
         self.task_stats = task_stats if task_stats is not None else TaskStats()
         self._launcher_task = self._loop.create_task(self._launcher())
-        self._reconciliation_task = self._loop.create_task(self._reconciliation())
 
         # Configure the web app
         app = aiohttp.web.Application()
@@ -2779,21 +2901,7 @@ class Scheduler(pymesos.Scheduler):
         return (False, 0, 0, 0, 0, node.name)
 
     def _update_roles(self, new_roles):
-        revive_roles = new_roles - self._roles_needed
-        suppress_roles = self._roles_needed - new_roles
-        self._roles_needed = new_roles
-        if revive_roles:
-            self._driver.reviveOffers(revive_roles)
-        if suppress_roles:
-            self._driver.suppressOffers(suppress_roles)
-            # Decline all held offers that aren't needed any more
-            to_decline = []
-            for role in suppress_roles:
-                role_offers = self._offers.pop(role, {})
-                for agent_offers in role_offers.values():
-                    to_decline.extend([offer.id for offer in agent_offers.values()])
-            if to_decline:
-                self._driver.declineOffer(to_decline)
+        pass  # Real implementation in Scheduler
 
     def _remove_offer(self, role, agent_id, offer_id):
         try:
@@ -2808,108 +2916,6 @@ class Scheduler(pymesos.Scheduler):
             # same time it is rescinded - the task will be lost but we won't
             # crash).
             pass
-
-    def set_driver(self, driver):
-        self._driver = driver
-
-    def registered(self, driver, framework_id, master_info):
-        pass
-
-    @run_in_event_loop
-    def resourceOffers(self, driver, offers):
-        def format_time(t):
-            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
-
-        to_decline = []
-        to_suppress = set()
-        for offer in offers:
-            if offer.unavailability:
-                start_time_ns = offer.unavailability.start.nanoseconds
-                start_time = start_time_ns / 1e9
-                if not offer.unavailability.duration:
-                    logger.debug('Declining offer %s from %s: unavailable from %s forever',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time))
-                    to_decline.append(offer.id)
-                    continue
-                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
-                end_time = end_time_ns / 1e9
-                if end_time >= time.time():
-                    logger.debug('Declining offer %s from %s: unavailable from %s to %s',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time), format_time(end_time))
-                    to_decline.append(offer.id)
-                    continue
-                else:
-                    logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
-                                 offer.id.value, offer.hostname,
-                                 format_time(start_time), format_time(end_time))
-            role = offer.allocation_info.role
-            if role in self._roles_needed:
-                logger.debug('Adding offer %s on %s with role %s to pool',
-                             offer.id.value, offer.agent_id.value, role)
-                role_offers = self._offers.setdefault(role, {})
-                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
-                agent_offers[offer.id.value] = offer
-            else:
-                # This can happen either due to a race or at startup, when
-                # we haven't yet suppressed roles.
-                logger.debug('Declining offer %s on %s with role %s',
-                             offer.id.value, offer.agent_id.value, role)
-                to_decline.append(offer.id)
-                to_suppress.add(role)
-
-        if to_decline:
-            self._driver.declineOffer(to_decline)
-        if to_suppress:
-            self._driver.suppressOffers(to_suppress)
-        self._wakeup_launcher.set()
-
-    @run_in_event_loop
-    def inverseOffers(self, driver, offers):
-        for offer in offers:
-            logger.debug('Declining inverse offer %s', offer.id.value)
-            self._driver.declineInverseOffer(offer.id)
-
-    @run_in_event_loop
-    def offerRescinded(self, driver, offer_id):
-        # TODO: this is not very efficient. A secondary lookup from offer id to
-        # the relevant offer info would speed it up.
-        for role, role_offers in self._offers.items():
-            for agent_id, agent_offers in role_offers.items():
-                if offer_id.value in agent_offers:
-                    self._remove_offer(role, agent_id, offer_id.value)
-                    return
-
-    @run_in_event_loop
-    def statusUpdate(self, driver, status):
-        logger.debug(
-            'Update: task %s in state %s (%s)',
-            status.task_id.value, status.state, status.message)
-        task = self.get_task(status.task_id.value)
-        if task is not None:
-            if status.state in TERMINAL_STATUSES:
-                task.set_state(TaskState.DEAD)
-                del self._active[status.task_id.value]
-            elif status.state == 'TASK_RUNNING':
-                if task.state < TaskState.RUNNING:
-                    task.set_state(TaskState.RUNNING)
-                    # The task itself is responsible for advancing to
-                    # READY
-            task.set_status(status)
-            if (task.kill_sent_time is not None
-                    and status.state != 'TASK_KILLING'
-                    and status.state not in TERMINAL_STATUSES
-                    and self._loop.time() > task.kill_sent_time + self.kill_timeout):
-                logger.warning('Retrying kill on %s (task ID %s)',
-                               task.name, status.task_id.value)
-                self._driver.killTask(status.task_id)
-        else:
-            if status.state not in TERMINAL_STATUSES:
-                logger.warning('Received status update for unknown task %s, killing it',
-                               status.task_id.value)
-                self._driver.killTask(status.task_id)
-        self._driver.acknowledgeStatusUpdate(status)
 
     @classmethod
     def _diagnose_insufficient(cls, agents, nodes):
@@ -3157,6 +3163,7 @@ class Scheduler(pymesos.Scheduler):
                         # TODO: if there are more pending in the queue then we
                         # should use a filter to be re-offered remaining
                         # resources of this agent more quickly.
+                        assert self._driver is not None
                         self._driver.launchTasks(offer_ids, taskinfos[agent])
                         for offer_id in offer_ids:
                             self._remove_offer(role, agent.agent_id, offer_id.value)
@@ -3192,6 +3199,7 @@ class Scheduler(pymesos.Scheduler):
                         to_decline.extend([offer.id for offer in agent_offers.values()])
                         del role_offers[agent_id]
             if to_decline:
+                assert self._driver is not None
                 self._driver.declineOffer(to_decline)
 
     async def _launcher(self):
@@ -3307,6 +3315,10 @@ class Scheduler(pymesos.Scheduler):
             raise ValueError('queue has not been added to the scheduler')
         if resources_timeout is None:
             resources_timeout = self.resources_timeout
+        if self._driver is None:
+            for node in nodes:
+                if isinstance(node, PhysicalTask):
+                    raise TypeError(f'{node.name} is a PhysicalTask but there is no Mesos driver')
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
@@ -3608,6 +3620,186 @@ class Scheduler(pymesos.Scheduler):
             futures.append(asyncio.ensure_future(kill_one(node, kill_graph)))
         await asyncio.gather(*futures)
 
+    async def close(self):
+        """Shut down the scheduler. This is a coroutine that kills any graphs
+        with running tasks or pending launches, and joins the driver thread. It
+        is an error to make any further calls to the scheduler after calling
+        this function.
+
+        .. note::
+
+            A graph with no running tasks but other types of nodes still
+            running will not be shut down. This is subject to change in the
+            future.
+        """
+        # TODO: do we need to explicitly decline outstanding offers?
+        self._closing = True    # Prevents concurrent launches
+        await self.http_runner.cleanup()
+        # Find the graphs that are still running
+        graphs = set()
+        for (_task, graph) in self._active.values():
+            graphs.add(graph)
+        for queue in self._queues:
+            for group in queue:
+                graphs.add(group.graph)
+        for graph in graphs:
+            await self.kill(graph)
+        for queue in self._queues:
+            while queue:
+                queue.front().future.cancel()
+        await _cleanup_task(self._launcher_task)
+        self._launcher_task = None
+
+    def get_task(self, task_id, return_graph=False):
+        try:
+            if return_graph:
+                return self._active[task_id]
+            return self._active[task_id][0]
+        except KeyError:
+            return None
+
+
+class Scheduler(SchedulerBase, pymesos.Scheduler):
+    """Top-level scheduler implementing the Mesos Scheduler API.
+
+    Mesos calls the callbacks provided in this class from another thread. To
+    ensure thread safety, they are all posted to the event loop via a
+    decorator.
+
+    The following invariants are maintained at each yield point:
+    - each dictionary within :attr:`_offers` is non-empty
+    - every role in :attr:`_roles_needed` is non-suppressed (there may be
+      additional non-suppressed roles, but they will be suppressed when an
+      offer arrives)
+    - every role in :attr:`_offers` also appears in :attr:`_roles_needed`
+
+    Refer to :class:`SchedulerBase` for descriptions of parameters, attributes
+    etc.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        SchedulerBase.__init__(self, *args, **kwargs)
+        self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconciliation())
+
+    def _update_roles(self, new_roles):
+        revive_roles = new_roles - self._roles_needed
+        suppress_roles = self._roles_needed - new_roles
+        self._roles_needed = new_roles
+        if revive_roles:
+            self._driver.reviveOffers(revive_roles)
+        if suppress_roles:
+            self._driver.suppressOffers(suppress_roles)
+            # Decline all held offers that aren't needed any more
+            to_decline = []
+            for role in suppress_roles:
+                role_offers = self._offers.pop(role, {})
+                for agent_offers in role_offers.values():
+                    to_decline.extend([offer.id for offer in agent_offers.values()])
+            if to_decline:
+                self._driver.declineOffer(to_decline)
+
+    def set_driver(self, driver):
+        self._driver = driver
+
+    def registered(self, driver, framework_id, master_info):
+        pass
+
+    @run_in_event_loop
+    def resourceOffers(self, driver, offers):
+        def format_time(t):
+            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+
+        to_decline = []
+        to_suppress = set()
+        for offer in offers:
+            if offer.unavailability:
+                start_time_ns = offer.unavailability.start.nanoseconds
+                start_time = start_time_ns / 1e9
+                if not offer.unavailability.duration:
+                    logger.debug('Declining offer %s from %s: unavailable from %s forever',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time))
+                    to_decline.append(offer.id)
+                    continue
+                end_time_ns = start_time_ns + offer.unavailability.duration.nanoseconds
+                end_time = end_time_ns / 1e9
+                if end_time >= time.time():
+                    logger.debug('Declining offer %s from %s: unavailable from %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
+                    to_decline.append(offer.id)
+                    continue
+                else:
+                    logger.debug('Offer %s on %s has unavailability in the past: %s to %s',
+                                 offer.id.value, offer.hostname,
+                                 format_time(start_time), format_time(end_time))
+            role = offer.allocation_info.role
+            if role in self._roles_needed:
+                logger.debug('Adding offer %s on %s with role %s to pool',
+                             offer.id.value, offer.agent_id.value, role)
+                role_offers = self._offers.setdefault(role, {})
+                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+                agent_offers[offer.id.value] = offer
+            else:
+                # This can happen either due to a race or at startup, when
+                # we haven't yet suppressed roles.
+                logger.debug('Declining offer %s on %s with role %s',
+                             offer.id.value, offer.agent_id.value, role)
+                to_decline.append(offer.id)
+                to_suppress.add(role)
+
+        if to_decline:
+            self._driver.declineOffer(to_decline)
+        if to_suppress:
+            self._driver.suppressOffers(to_suppress)
+        self._wakeup_launcher.set()
+
+    @run_in_event_loop
+    def inverseOffers(self, driver, offers):
+        for offer in offers:
+            logger.debug('Declining inverse offer %s', offer.id.value)
+            self._driver.declineInverseOffer(offer.id)
+
+    @run_in_event_loop
+    def offerRescinded(self, driver, offer_id):
+        # TODO: this is not very efficient. A secondary lookup from offer id to
+        # the relevant offer info would speed it up.
+        for role, role_offers in self._offers.items():
+            for agent_id, agent_offers in role_offers.items():
+                if offer_id.value in agent_offers:
+                    self._remove_offer(role, agent_id, offer_id.value)
+                    return
+
+    @run_in_event_loop
+    def statusUpdate(self, driver, status):
+        logger.debug(
+            'Update: task %s in state %s (%s)',
+            status.task_id.value, status.state, status.message)
+        task = self.get_task(status.task_id.value)
+        if task is not None:
+            if status.state in TERMINAL_STATUSES:
+                task.set_state(TaskState.DEAD)
+                del self._active[status.task_id.value]
+            elif status.state == 'TASK_RUNNING':
+                if task.state < TaskState.RUNNING:
+                    task.set_state(TaskState.RUNNING)
+                    # The task itself is responsible for advancing to
+                    # READY
+            task.set_status(status)
+            if (task.kill_sent_time is not None
+                    and status.state != 'TASK_KILLING'
+                    and status.state not in TERMINAL_STATUSES
+                    and self._loop.time() > task.kill_sent_time + self.kill_timeout):
+                logger.warning('Retrying kill on %s (task ID %s)',
+                               task.name, status.task_id.value)
+                self._driver.killTask(status.task_id)
+        else:
+            if status.state not in TERMINAL_STATUSES:
+                logger.warning('Received status update for unknown task %s, killing it',
+                               status.task_id.value)
+                self._driver.killTask(status.task_id)
+        self._driver.acknowledgeStatusUpdate(status)
+
     async def _reconciliation(self) -> None:
         """Background task that periodically requests reconciliation.
 
@@ -3639,42 +3831,8 @@ class Scheduler(pymesos.Scheduler):
             explicit = not explicit
 
     async def close(self):
-        """Shut down the scheduler. This is a coroutine that kills any graphs
-        with running tasks or pending launches, and joins the driver thread. It
-        is an error to make any further calls to the scheduler after calling
-        this function.
-
-        .. note::
-
-            A graph with no running tasks but other types of nodes still
-            running will not be shut down. This is subject to change in the
-            future.
-        """
-        async def cleanup_task(task):
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        # TODO: do we need to explicitly decline outstanding offers?
-        self._closing = True    # Prevents concurrent launches
-        await self.http_runner.cleanup()
-        # Find the graphs that are still running
-        graphs = set()
-        for (_task, graph) in self._active.values():
-            graphs.add(graph)
-        for queue in self._queues:
-            for group in queue:
-                graphs.add(group.graph)
-        for graph in graphs:
-            await self.kill(graph)
-        for queue in self._queues:
-            while queue:
-                queue.front().future.cancel()
-        await cleanup_task(self._launcher_task)
-        self._launcher_task = None
-        await cleanup_task(self._reconciliation_task)
+        await super().close()
+        await _cleanup_task(self._reconciliation_task)
         self._reconciliation_task = None
         self._driver.stop()
         # If self._driver is a mock, then asyncio incorrectly complains about passing
@@ -3683,19 +3841,11 @@ class Scheduler(pymesos.Scheduler):
         status = await self._loop.run_in_executor(None, lambda: self._driver.join())
         return status
 
-    def get_task(self, task_id, return_graph=False):
-        try:
-            if return_graph:
-                return self._active[task_id]
-            return self._active[task_id][0]
-        except KeyError:
-            return None
-
 
 __all__ = [
     'LogicalNode', 'PhysicalNode',
     'LogicalExternal', 'PhysicalExternal',
-    'LogicalTask', 'PhysicalTask', 'TaskState',
+    'LogicalTask', 'PhysicalTask', 'FakePhysicalTask', 'AnyPhysicalTask', 'TaskState',
     'Volume',
     'ResourceRequest', 'ScalarResourceRequest', 'RangeResourceRequest',
     'Resource', 'ScalarResource', 'RangeResource',
@@ -3716,4 +3866,4 @@ __all__ = [
     'ImageLookup', 'SimpleImageLookup', 'HTTPImageLookup',
     'ImageResolver', 'TaskIDAllocator', 'Resolver',
     'Agent', 'AgentGPU', 'AgentInterface',
-    'Scheduler', 'instantiate']
+    'SchedulerBase', 'Scheduler', 'instantiate']
