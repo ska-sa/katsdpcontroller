@@ -735,6 +735,11 @@ def _make_xbgpu(
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(xbgpu_group, xbgpu, depends_ready=True, depends_init=True)
 
+        xbgpu.static_gauges['xbgpu_expected_input_heaps_per_second'] = (
+            acv.adc_sample_rate / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
+            * len(acv.src_streams) / 2   # / 2 because each heap contains two pols
+        )
+
     return xbgpu_group
 
 

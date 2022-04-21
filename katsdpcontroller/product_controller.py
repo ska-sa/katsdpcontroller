@@ -51,6 +51,9 @@ POSTPROCESSING_TIME_REL = Histogram(
 STATIC_GAUGES = [
     Gauge(
         'fgpu_expected_input_heaps_per_second',
+        'Number of heaps that should be received per second'),
+    Gauge(
+        'xbgpu_expected_input_heaps_per_second',
         'Number of heaps that should be received per second')
 ]
 logger = logging.getLogger(__name__)
