@@ -527,6 +527,10 @@ def _make_fgpu(
         for j, src in enumerate(srcs):
             fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{src.name}-eq"
             fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{src.name}-delay"
+        # Prepare expected data rate
+        fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
+            src.adc_sample_rate / src.samples_per_heap for src in srcs
+        )
 
     return fgpu_group
 
