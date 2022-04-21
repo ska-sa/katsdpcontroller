@@ -4,7 +4,6 @@ import logging
 import re
 import time
 import copy
-import json
 import urllib.parse
 import os.path
 from typing import (
@@ -16,7 +15,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp import FailReply, Sensor, SensorSet
+from aiokatcp import Sensor, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -28,10 +27,10 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
+from .fake_servers import FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer
 from .tasks import (
     SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
-    LogicalGroup, CaptureBlockState, KatcpTransition,
-    FakeDeviceServer)
+    LogicalGroup, CaptureBlockState, KatcpTransition)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
     Configuration)
@@ -162,59 +161,6 @@ class IngestTask(SDPPhysicalTask):
             if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
-
-
-class FakeIngestDeviceServer(FakeDeviceServer):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.sensors.add(
-            Sensor(bool, 'capture-active',
-                   'Is there a currently active capture session (prometheus: gauge)',
-                   default=False, initial_status=Sensor.Status.NOMINAL))
-
-    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
-        """Dummy implementation of capture-init."""
-        self.sensors['capture-active'].value = True
-
-    async def request_capture_done(self, ctx) -> None:
-        """Dummy implementation of capture-done."""
-        self.sensors['capture-active'].value = False
-
-
-class FakeCalDeviceServer(FakeDeviceServer):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._capture_blocks: Dict[str, str] = {}
-        self._current_capture_block: Optional[str] = None
-        self.sensors.add(
-            Sensor(str, 'capture-block-state',
-                   'JSON dict with the state of each capture block',
-                   default='{}', initial_status=Sensor.Status.NOMINAL))
-
-    def _update_capture_block_state(self) -> None:
-        """Update the sensor from the internal state."""
-        self.sensors['capture-block-state'].value = json.dumps(self._capture_blocks)
-
-    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
-        """Add capture block ID to capture-block-state sensor."""
-        if self._current_capture_block is not None:
-            raise FailReply('A capture block is already active')
-        self._current_capture_block = capture_block_id
-        self._capture_blocks[capture_block_id] = 'CAPTURING'
-        self._update_capture_block_state()
-
-    async def request_capture_done(self, ctx) -> None:
-        """Simulate the capture block going through all the states."""
-        if self._current_capture_block is None:
-            raise FailReply('Not currently capturing')
-        cbid = self._current_capture_block
-        self._current_capture_block = None
-        self._capture_blocks[cbid] = 'PROCESSING'
-        self._update_capture_block_state()
-        self._capture_blocks[cbid] = 'REPORTING'
-        self._update_capture_block_state()
-        del self._capture_blocks[cbid]
-        self._update_capture_block_state()
 
 
 def _mb(value):
@@ -357,7 +303,7 @@ def _make_dsim(
     # Generate a unique name. The caller groups streams by
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
-    dsim = SDPLogicalTask(name)
+    dsim = SDPLogicalTask(name, streams=streams)
     dsim.image = 'katgpucbf'
     dsim.mem = 2048
     dsim.ports = ['port', 'prometheus']
@@ -461,6 +407,9 @@ def _make_fgpu(
         Sensor(int, f"{stream.name}-n-samples-between-spectra",
                "Number of samples between spectra",
                default=stream.n_samples_between_spectra, initial_status=Sensor.Status.NOMINAL),
+        Sensor(int, f"{stream.name}-pfb-group-delay",
+               "PFB group delay, specified in number of samples",
+               default=-stream.n_chans * stream.pfb_taps, initial_status=Sensor.Status.NOMINAL),
         Sensor(int, f"{stream.name}-spectra-per-heap",
                "Number of spectrum chunks per heap",
                default=stream.n_spectra_per_heap, initial_status=Sensor.Status.NOMINAL),
@@ -493,8 +442,9 @@ def _make_fgpu(
 
     for i in range(0, n_engines):
         srcs = stream.sources(i)
-        fgpu = SDPLogicalTask(f'f.{stream.name}.{i}')
+        fgpu = SDPLogicalTask(f'f.{stream.name}.{i}', streams=[stream])
         fgpu.image = 'katgpucbf'
+        fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
         fgpu.mem = 768  # Actual use is currently around 550 MB
         if not configuration.options.develop:
@@ -531,6 +481,7 @@ def _make_fgpu(
             '--array-size', str(n_engines),
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
+            '--taps', str(stream.pfb_taps),
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}',
             '--aiomonitor',
@@ -688,7 +639,7 @@ def _make_xbgpu(
     send_buffer = vis_size * 5  # Magic number is default in XSend class
 
     for i in range(0, stream.n_substreams):
-        xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}')
+        xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
@@ -839,7 +790,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     init_telstate[('sub', 'band')] = stream.antenna_channelised_voltage.band
 
     for i in range(n_sim):
-        sim = SDPLogicalTask('sim.{}.{}'.format(stream.name, i + 1))
+        sim = SDPLogicalTask('sim.{}.{}'.format(stream.name, i + 1), streams=[stream])
         sim.image = 'katcbfsim'
         # create-*-stream is passed on the command-line instead of telstate
         # for now due to SR-462.
@@ -1101,6 +1052,11 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         raise ValueError('At least one of spectral or continuum must be given')
     name = primary.name
     src = primary.baseline_correlation_products
+    streams = []
+    if spectral is not None:
+        streams.append(spectral)
+    if continuum is not None:
+        streams.append(continuum)
     # Number of ingest nodes.
     n_ingest = primary.n_servers
 
@@ -1159,7 +1115,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
 
     for i in range(1, n_ingest + 1):
-        ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i))
+        ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i), streams=streams)
         if configuration.options.interface_mode:
             ingest.physical_factory = SDPFakePhysicalTask
         else:
@@ -1330,7 +1286,8 @@ def _make_cal(g: networkx.MultiDiGraph,
 
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
-        cal = SDPLogicalTask('{}.{}'.format(stream.name, i))
+        cal = SDPLogicalTask('{}.{}'.format(stream.name, i),
+                             streams=(stream,) + tuple(flags_streams))
         cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
@@ -1457,7 +1414,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
                      max_channels: Optional[int] = None):
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
-    vis_writer = SDPLogicalTask('vis_writer.' + output_name)
+    vis_writer = SDPLogicalTask('vis_writer.' + output_name, streams=[stream])
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
@@ -1534,7 +1491,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
                       max_channels: Optional[int] = None) -> scheduler.LogicalNode:
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
-    flag_writer = SDPLogicalTask('flag_writer.' + output_name)
+    flag_writer = SDPLogicalTask('flag_writer.' + output_name, streams=[stream])
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
@@ -1662,7 +1619,7 @@ def _make_beamformer_engineering_pol(
     src_multicast = find_node(g, 'multicast.' + src_stream.name)
     assert isinstance(src_multicast, LogicalMulticast)
 
-    bf_ingest = SDPLogicalTask(node_name)
+    bf_ingest = SDPLogicalTask(node_name, streams=[stream] if stream is not None else [])
     bf_ingest.image = 'katsdpbfingest'
     bf_ingest.command = ['schedrr', 'bf_ingest.py']
     bf_ingest.cpus = 2
@@ -2108,7 +2065,7 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
 
     for target, obs_time in targets:
         target_name = target_mapper(target)
-        imager = SDPLogicalTask(f'continuum_image.{stream.name}.{target_name}')
+        imager = SDPLogicalTask(f'continuum_image.{stream.name}.{target_name}', streams=[stream])
         imager.cpus = cpus
         # These resources are very rough estimates
         imager.mem = 50000 if not configuration.options.develop else 8000
@@ -2209,7 +2166,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
                     continue
 
             imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
-                stream.name, first_channel, last_channel, target_name))
+                stream.name, first_channel, last_channel, target_name), streams=[stream])
             imager.cpus = _spectral_imager_cpus(configuration)
             # TODO: these resources are very rough estimates. The disk
             # estimate is conservative since it assumes no compression.
@@ -2286,7 +2243,7 @@ def _make_spectral_imager_report(
         stream: product_config.SpectralImageStream,
         data_url: str,
         spectral_nodes: Sequence[scheduler.LogicalNode]) -> scheduler.LogicalNode:
-    report = SDPLogicalTask(f'spectral_image_report.{stream.name}')
+    report = SDPLogicalTask(f'spectral_image_report.{stream.name}', streams=[stream])
     report.cpus = 1.0
     # Memory is a guess - but since we don't open the chunk store it should be lightweight
     report.mem = 4 * 1024

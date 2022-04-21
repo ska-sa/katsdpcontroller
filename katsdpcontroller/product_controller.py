@@ -9,8 +9,8 @@ import re
 import copy
 import functools
 import itertools
-import numbers
-from typing import Dict, Set, List, Tuple, Callable, Sequence, Optional, Mapping
+from typing import (
+    Dict, Generator, Set, List, Tuple, Callable, Sequence, Iterable, Optional, Mapping)
 
 import addict
 import jsonschema
@@ -202,14 +202,6 @@ async def _resolve_model(fetcher: katsdpmodels.fetch.aiohttp.Fetcher,
     config = urls[-2] if len(urls) >= 2 else fixed
     return (str(_relative_url(base, yarl.URL(config))),
             str(_relative_url(base, yarl.URL(fixed))))
-
-
-def _format_complex(value: numbers.Complex) -> str:
-    """Format a complex number for a katcp request.
-
-    This is copied from katgpucbf.
-    """
-    return f"{value.real}{value.imag:+}j"
 
 
 class KatcpImageLookup(scheduler.ImageLookup):
@@ -907,6 +899,43 @@ class SDPSubarrayProductBase:
         """
         raise NotImplementedError()
 
+    async def gain_all(self, stream_name: str, values: Sequence[str]) -> None:
+        """Set F-engine gains for all inputs."""
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set gains in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfAntennaChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        if len(values) not in {1, stream.n_chans}:
+            raise FailReply(f"Expected 1, or {stream.n_chans} values, received {len(values)}")
+        values = tuple(values)
+        if values != ("default",):
+            try:
+                for v in values:
+                    complex(v)  # Evaluated just for the exception
+            except ValueError as exc:
+                raise FailReply(str(exc))
+        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
+        await self._multi_request(  # type: ignore
+            self.find_nodes(task_type="f", streams=[stream]),  # type: ignore
+            itertools.repeat(("gain-all",) + values)
+        )
+
+    async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
+        """Either start or stop transmission on a stream."""
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot start or stop streams in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+
+        command = "capture-start" if start else "capture-stop"
+        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
+        await self._multi_request(  # type: ignore
+            self.find_nodes(task_type="xb", streams=[stream]),  # type: ignore
+            itertools.repeat((command,))
+        )
+
     def __repr__(self) -> str:
         return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
@@ -958,6 +987,36 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
     def __del__(self) -> None:
         if hasattr(self, 'batch_queue'):
             self.sched.remove_queue(self.batch_queue)
+
+    def find_nodes(
+        self, *,
+        task_type: Optional[str] = None,
+        streams: Optional[Iterable[product_config.Stream]] = None
+    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
+        """Find physical nodes matching given criteria.
+
+        Parameters
+        ----------
+        task_type
+            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
+            node. If ``None``, any node can match.
+        streams
+            Streams to match against the :attr:`.SDPLogicalTask.streams`
+            attribute of the logical node. To match, there must be at least
+            one stream name in the intersection (only the names are matched,
+            not the identity). If ``None``, any node can match.
+        """
+        stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
+        for node in self.physical_graph:
+            logical_node = node.logical_node
+            if not isinstance(logical_node, tasks.SDPLogicalTask):
+                continue
+            if task_type is not None and task_type != logical_node.task_type:
+                continue
+            if (stream_names is not None
+                    and not stream_names.intersection(logical_node.stream_names)):
+                continue
+            yield node
 
     async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
                                     reqs: Sequence[KatcpTransition],
@@ -1338,25 +1397,52 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             ready.set()
             await shutdown_task
 
+    async def _multi_request(
+            self,
+            nodes: Iterable[tasks.SDPAnyPhysicalTask],
+            messages: Iterable[Iterable]) -> None:
+        """Send katcp requests for multiple nodes in parallel.
+
+        If any of the nodes has no current katcp connection, abort before
+        sending any of the messages. Otherwise, send the messages and wait
+        for all of them to complete (even if some of them fail). If any fail,
+        raise the first failure.
+
+        Each message is given as an iterable of arguments (starting with the
+        request name). It is acceptable for the messages iterator to be
+        longer than the node list. In particular, :meth:`itertools.repeat`
+        can be used to replicate a single message to every node.
+        """
+        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
+        messages_iter = iter(messages)
+        for node in nodes:
+            if node.katcp_connection is None:
+                raise FailReply(f"No katcp connection to {node.name}")
+            reqs.append((node.katcp_connection, next(messages_iter)))
+        # Now that we've validated things, send the messages
+        futures = []
+        for conn, msg in reqs:
+            futures.append(conn.request(*msg))
+        if futures:  # gather doesn't like having zero futures
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+
     async def set_delays_impl(
             self,
             stream: product_config.GpucbfAntennaChannelisedVoltageStream,
             timestamp: aiokatcp.Timestamp,
             coefficient_sets: Sequence[str]) -> None:
         n_inputs = len(stream.src_streams)
-        conns = []
+        # Can't use find_nodes because we need to ensure we match the right nodes
+        # to the right coefficients.
+        nodes = []
+        msgs = []
         for i in range(n_inputs // 2):
-            node = self._nodes[f"f.{stream.name}.{i}"]
-            if node.katcp_connection is None:
-                raise FailReply(f"No katcp connection to {node.name}")
-            conns.append(node.katcp_connection)
-
-        reqs = []
-        for i, conn in enumerate(conns):
-            reqs.append(conn.request(
-                "delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]
-            ))
-        await asyncio.gather(*reqs)
+            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
+            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
+        await self._multi_request(nodes, msgs)
 
     async def gain_impl(
             self,
@@ -1679,3 +1765,26 @@ class DeviceServer(aiokatcp.DeviceServer):
             channels.
         """
         return tuple(await self._get_product().gain(stream, input, values))
+
+    async def request_gain_all(
+            self, ctx, stream: str, *values: str) -> None:
+        """Set F-engine gains for all inputs.
+
+        Parameters
+        ----------
+        stream
+            Antenna-channelised-voltage stream on which to operate
+        values
+            A complex gain per channel, in the format <real>+<imag>j. It may
+            also be a single value to be applied across all channels, or
+            "default" to restore the gains used at startup.
+        """
+        await self._get_product().gain_all(stream, values)
+
+    async def request_capture_start(self, ctx, stream: str) -> None:
+        """Enable data transmission for the named data stream."""
+        await self._get_product().capture_start_stop(stream, start=True)
+
+    async def request_capture_stop(self, ctx, stream: str) -> None:
+        """Halt data transmission for the named data stream."""
+        await self._get_product().capture_start_stop(stream, start=False)

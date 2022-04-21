@@ -126,9 +126,10 @@ class KatcpTransition(object):
 
 
 class SDPLogicalTask(scheduler.LogicalTask):
-    def __init__(self, name):
+    def __init__(self, name, streams=()):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
+        self.stream_names = frozenset(stream.name for stream in streams)
         self.physical_factory = SDPPhysicalTask
         self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
         self.transitions = {}

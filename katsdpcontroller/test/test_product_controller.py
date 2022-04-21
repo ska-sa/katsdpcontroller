@@ -69,9 +69,12 @@ STREAMS = '''{
 EXPECTED_REQUEST_LIST = [
     'capture-done',
     'capture-init',
+    'capture-start',
     'capture-status',
+    'capture-stop',
     'delays',
     'gain',
+    'gain-all',
     'product-configure',
     'product-deconfigure',
     'telstate-endpoint',
@@ -1333,7 +1336,8 @@ class TestSDPController(BaseTestSDPController):
             self.client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h',
             'not a complex number')
 
-    async def test_gain_success(self) -> None:
+    async def test_gain_single(self) -> None:
+        """Test gain with a single gain to apply to all channels."""
         await self._configure_subarray(SUBARRAY_PRODUCT)
         self.katcp_replies['gain'] = ([b'1+2j'], [])
         reply, _ = await self.client.request(
@@ -1342,6 +1346,71 @@ class TestSDPController(BaseTestSDPController):
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('gain', 1, '1+2j')
         self.assertEqual(reply, [b'1+2j'])
+
+    async def test_gain_multi(self) -> None:
+        """Test gain with a different gain for each channel."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        gains = [b'%d+2j' % i for i in range(4096)]
+        self.katcp_replies['gain'] = (gains, [])
+        reply, _ = await self.client.request(
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains)
+        # TODO: this doesn't check that it goes to the correct node
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain', 1, *[g.decode() for g in gains])
+        self.assertEqual(reply, gains)
+
+    async def test_gain_all_bad_stream(self) -> None:
+        """Test gain-all with a stream that doesn't exist."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'gain-all', 'foo', '1')
+
+    async def test_gain_all_wrong_stream_type(self) -> None:
+        """Test gain-all with a stream that is of the wrong type."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'i0_antenna_channelised_voltage', '1')
+
+    async def test_gain_all_wrong_length(self) -> None:
+        """Test gain-all with the wrong number of channels."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'gpucbf_antenna_channelised_voltage', '1', '0.5')
+
+    async def test_gain_all_bad_format(self) -> None:
+        """Test gain-all with badly-formatted gains."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'gain-all', 'gpucbf_antenna_channelised_voltage',
+            'not a complex number')
+
+    async def test_gain_all_single(self) -> None:
+        """Test gain-all with a single gain to apply to all channels."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', '1+2j')
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain-all', '1+2j')
+
+    async def test_gain_all_multi(self) -> None:
+        """Test gain-all with a different gain for each channel."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        gains = [b'%d+2j' % i for i in range(4096)]
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        print(katcp_client.request.mock_calls)
+        katcp_client.request.assert_any_call('gain-all', *[g.decode() for g in gains])
+
+    async def test_gain_all_default(self) -> None:
+        """Test setting gains to default with gain-all."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
+        # TODO: this doesn't check that it goes to the correct nodes
+        katcp_client = self.sensor_proxy_client_class.return_value
+        katcp_client.request.assert_any_call('gain-all', 'default')
 
     async def test_delays_bad_stream(self) -> None:
         """Test delays with a stream that doesn't exist."""
@@ -1383,6 +1452,36 @@ class TestSDPController(BaseTestSDPController):
         # nodes.
         katcp_client.request.assert_any_call('delays', 1234567890.0, '0,0:0,0', '0,0:0,1')
         katcp_client.request.assert_any_call('delays', 1234567890.0, '0,1:0,0', '0,1:0,1')
+
+    async def test_capture_start(self) -> None:
+        """Test capture-start in the success case."""
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'capture-start', 'gpucbf_baseline_correlation_products')
+        katcp_client = self.sensor_proxy_client_class.return_value
+        # TODO: this doesn't check that the requests are going to the correct
+        # nodes.
+        katcp_client.request.assert_any_call('capture-start')
+
+    async def test_capture_start_bad_stream(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(self.client, 'capture-start', 'foo')
+
+    async def test_capture_start_wrong_stream_type(self) -> None:
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await assert_request_fails(
+            self.client, 'capture-start', 'gpucbf_antenna_channelised_voltage')
+
+    async def test_capture_stop(self) -> None:
+        # Note: most of the code for capture-stop is shared with capture-start,
+        # so the testing does not need to be as thorough.
+        await self._configure_subarray(SUBARRAY_PRODUCT)
+        await self.client.request(
+            'capture-start', 'gpucbf_baseline_correlation_products')
+        katcp_client = self.sensor_proxy_client_class.return_value
+        # TODO: this doesn't check that the requests are going to the correct
+        # nodes.
+        katcp_client.request.assert_any_call('capture-start')
 
     def _check_prom(self, name: str, service: str, type: str, value: float,
                     sample_name: str = None, extra_labels: Mapping[str, str] = None) -> None:
