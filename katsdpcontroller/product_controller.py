@@ -921,7 +921,7 @@ class SDPSubarrayProductBase:
             itertools.repeat(("gain-all",) + values)
         )
 
-    async def capture_start_stop(self, stream_name: str, start: bool) -> None:
+    async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
         """Either start or stop transmission on a stream."""
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot start or stop streams in state {self.state}")
@@ -1783,8 +1783,8 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     async def request_capture_start(self, ctx, stream: str) -> None:
         """Enable data transmission for the named data stream."""
-        await self._get_product().capture_start_stop(stream, True)
+        await self._get_product().capture_start_stop(stream, start=True)
 
     async def request_capture_stop(self, ctx, stream: str) -> None:
         """Halt data transmission for the named data stream."""
-        await self._get_product().capture_start_stop(stream, False)
+        await self._get_product().capture_start_stop(stream, start=False)
