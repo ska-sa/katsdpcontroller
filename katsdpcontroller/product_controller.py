@@ -907,7 +907,7 @@ class SDPSubarrayProductBase:
         if not isinstance(stream, product_config.GpucbfAntennaChannelisedVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
         if len(values) not in {1, stream.n_chans}:
-            raise FailReply(f"Expected 0, 1, or {stream.n_chans} values, received {len(values)}")
+            raise FailReply(f"Expected 1, or {stream.n_chans} values, received {len(values)}")
         values = tuple(values)
         if values != ("default",):
             try:
