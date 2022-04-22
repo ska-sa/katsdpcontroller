@@ -7,7 +7,7 @@ import copy
 import urllib.parse
 import os.path
 from typing import (
-    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING
+    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING, cast
 )
 
 import addict
@@ -615,7 +615,11 @@ def _make_xbgpu(
     for key, value in telstate_data.items():
         init_telstate[(stream.name, key)] = value
 
-    bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+    input_rate = sum(
+        cast(product_config.DigRawAntennaVoltageStreamBase, dig).adc_sample_rate
+        for dig in acv.src_streams
+    ) * acv.bits_per_sample // 8
+    bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
 
     # Compute how much memory to provide for input
 
