@@ -28,7 +28,7 @@ KATCBFSIM_SPECTRA_PER_HEAP = 256
 #: Alignment constraint for `int_time` in katxgpu
 GPUCBF_SPECTRA_PER_HEAP = 256
 #: Maximum input data rate for an xbgpu instance (bytes per second).
-#: This is sufficient for S-band with 80 antennas to be handled by 64 engines.
-XBGPU_MAX_SRC_DATA_RATE = 4.375e9
+#: This is sufficient for UHF with 80 antennas to be handled by 32 engines.
+XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16

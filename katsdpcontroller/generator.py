@@ -7,7 +7,7 @@ import copy
 import urllib.parse
 import os.path
 from typing import (
-    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING
+    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING, cast
 )
 
 import addict
@@ -615,7 +615,11 @@ def _make_xbgpu(
     for key, value in telstate_data.items():
         init_telstate[(stream.name, key)] = value
 
-    bw_scale = stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+    input_rate = sum(
+        cast(product_config.DigRawAntennaVoltageStreamBase, dig).adc_sample_rate
+        for dig in acv.src_streams
+    ) * acv.bits_per_sample // 8
+    bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
 
     # Compute how much memory to provide for input
 
@@ -649,7 +653,7 @@ def _make_xbgpu(
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
         if not configuration.options.develop:
             xbgpu.cores = ['src', 'dst']
-            xbgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
+            xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
             taskset = ['taskset', '-c', '{cores[dst]}']
         else:
             taskset = []
@@ -667,7 +671,7 @@ def _make_xbgpu(
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
-        xbgpu.gpus[0].compute = 0.2 * bw_scale
+        xbgpu.gpus[0].compute = 0.15 * bw_scale
         xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size + 2 * vis_size + mid_vis_size)
         # Minimum capability as a function of bits-per-sample, based on
         # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
