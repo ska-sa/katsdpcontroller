@@ -527,85 +527,6 @@ class SDPSubarrayProduct:
         if self.telstate is None:
             raise FailReply(f'Subarray product {self.subarray_product_id} has no SDP components.')
 
-    async def configure_impl(self) -> None:
-        """Extension point to configure the subarray."""
-        try:
-            try:
-                resolver = self.resolver
-                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
-
-                # Register static KATCP sensors.
-                for ss in self.physical_graph.graph["static_sensors"].values():
-                    self.add_sensor(ss)
-
-                # launch the telescope state for this graph
-                telstate: Optional[katsdptelstate.aio.TelescopeState]
-                if self.telstate_node is not None:
-                    telstate = await self._launch_telstate()
-                else:
-                    telstate = None
-                # launch containers for those nodes that require them
-                await self.sched.launch(self.physical_graph, self.resolver)
-                alive, died = self.check_nodes()
-                # is everything we asked for alive
-                if not alive:
-                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
-                    ret_msg = (f"{fail_list} failed to start. "
-                               "Check the error log for specific details.")
-                    logger.error(ret_msg)
-                    raise FailReply(ret_msg)
-                # Record the TaskInfo for each task in telstate, as well as details
-                # about the image resolver.
-                details = {}
-                for task in self.physical_graph:
-                    if isinstance(task, scheduler.PhysicalTask):
-                        details[task.logical_node.name] = {
-                            'host': task.host,
-                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
-                        }
-                if telstate is not None:
-                    await telstate.add('sdp_task_details', details, immutable=True)
-                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                       immutable=True)
-            except BaseException as exc:
-                # If there was a problem the graph might be semi-running. Shut it all down.
-                await self._shutdown(force=True)
-                raise exc
-        except scheduler.InsufficientResourcesError as error:
-            raise FailReply('Insufficient resources to launch {}: {}'.format(
-                self.subarray_product_id, error)) from error
-        except scheduler.ImageError as error:
-            raise FailReply(str(error)) from error
-
-    async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
-        """Extension point to deconfigure the subarray.
-
-        Parameters
-        ----------
-        force
-            Whether to do an abrupt deconfiguration without waiting for
-            postprocessing.
-        ready
-            If the ?product-deconfigure command should return before
-            deconfiguration is complete, this event can be set at that point.
-        """
-        if force:
-            await self._shutdown(force=force)
-            ready.set()
-        else:
-            def must_wait(node):
-                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
-                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
-            # Start the shutdown in a separate task, so that we can monitor
-            # for task shutdown.
-            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
-            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
-            await asyncio.gather(*wait_tasks)
-            self.state = ProductState.POSTPROCESSING
-            ready.set()
-            await shutdown_task
-
     async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
         """Extension point to start a capture block.
 
@@ -708,7 +629,54 @@ class SDPSubarrayProduct:
 
     async def _configure(self) -> None:
         """Asynchronous task that does the configuration."""
-        await self.configure_impl()
+        try:
+            try:
+                resolver = self.resolver
+                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+
+                # Register static KATCP sensors.
+                for ss in self.physical_graph.graph["static_sensors"].values():
+                    self.add_sensor(ss)
+
+                # launch the telescope state for this graph
+                telstate: Optional[katsdptelstate.aio.TelescopeState]
+                if self.telstate_node is not None:
+                    telstate = await self._launch_telstate()
+                else:
+                    telstate = None
+                # launch containers for those nodes that require them
+                await self.sched.launch(self.physical_graph, self.resolver)
+                alive, died = self.check_nodes()
+                # is everything we asked for alive
+                if not alive:
+                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
+                    ret_msg = (f"{fail_list} failed to start. "
+                               "Check the error log for specific details.")
+                    logger.error(ret_msg)
+                    raise FailReply(ret_msg)
+                # Record the TaskInfo for each task in telstate, as well as details
+                # about the image resolver.
+                details = {}
+                for task in self.physical_graph:
+                    if isinstance(task, scheduler.PhysicalTask):
+                        details[task.logical_node.name] = {
+                            'host': task.host,
+                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
+                        }
+                if telstate is not None:
+                    await telstate.add('sdp_task_details', details, immutable=True)
+                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                                       immutable=True)
+            except BaseException as exc:
+                # If there was a problem the graph might be semi-running. Shut it all down.
+                await self._shutdown(force=True)
+                raise exc
+        except scheduler.InsufficientResourcesError as error:
+            raise FailReply('Insufficient resources to launch {}: {}'.format(
+                self.subarray_product_id, error)) from error
+        except scheduler.ImageError as error:
+            raise FailReply(str(error)) from error
         self.state = ProductState.IDLE
 
     async def _deconfigure(self, force: bool, ready: asyncio.Event) -> None:
@@ -739,8 +707,20 @@ class SDPSubarrayProduct:
                     capture_block.postprocess_task.cancel()
                 else:
                     self._capture_block_dead(capture_block)
-
-        await self.deconfigure_impl(force, ready)
+            await self._shutdown(force=force)
+            ready.set()
+        else:
+            def must_wait(node):
+                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
+                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
+            # Start the shutdown in a separate task, so that we can monitor
+            # for task shutdown.
+            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
+            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
+            await asyncio.gather(*wait_tasks)
+            self.state = ProductState.POSTPROCESSING
+            ready.set()
+            await shutdown_task
 
         # Allow all the postprocessing tasks to finish up
         # Note: this needs to be done carefully, because self.capture_blocks
@@ -755,7 +735,6 @@ class SDPSubarrayProduct:
             self.telstate.backend.close()
 
         self.state = ProductState.DEAD
-        ready.set()     # In case deconfigure_impl didn't already do this
         # Setting dead_event is done by the first callback
         for callback in self.dead_callbacks:
             callback(self)
