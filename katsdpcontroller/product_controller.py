@@ -527,21 +527,8 @@ class SDPSubarrayProduct:
         if self.telstate is None:
             raise FailReply(f'Subarray product {self.subarray_product_id} has no SDP components.')
 
-    async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
-        """Extension point to start a capture block.
-
-        If it raises an exception, the capture block is assumed to not have
-        been started, and the subarray product goes into state ERROR.
-        """
-        assert self.telstate is not None
-        await self.telstate.add('sdp_capture_block_id', capture_block.name)
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.add_capture_block(capture_block)
-        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
-
-    async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
-        """Extension point to stop a capture block.
+    async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
+        """Stop a capture block.
 
         This should only do the work needed for the ``capture-done`` master
         controller request to return. The caller takes care of calling
@@ -620,7 +607,7 @@ class SDPSubarrayProduct:
 
         This should only be overridden to clean up the state machine, not to
         do processing. It is called both for the normal lifecycle, but also
-        when there is a failure e.g. if capture_init_impl or capture_done_impl
+        when there is a failure e.g. if _capture_init or _capture_done_impl
         raised an exception.
         """
         for node in self.physical_graph:
@@ -692,7 +679,7 @@ class SDPSubarrayProduct:
                 capture_block = self.current_capture_block
                 # To prevent trying again if we get a second forced-deconfigure.
                 self.current_capture_block = None
-                await self.capture_done_impl(capture_block)
+                await self._capture_done_impl(capture_block)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -761,7 +748,12 @@ class SDPSubarrayProduct:
         # Update the sensor with the INITIALISING state
         self._update_capture_block_sensor()
         try:
-            await self.capture_init_impl(capture_block)
+            assert self.telstate is not None
+            await self.telstate.add('sdp_capture_block_id', capture_block.name)
+            for node in self.physical_graph:
+                if isinstance(node, tasks.SDPPhysicalTask):
+                    node.add_capture_block(capture_block)
+            await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
             if self.state == ProductState.ERROR:
                 raise FailReply('Subarray product went into ERROR while starting capture')
         except asyncio.CancelledError:
@@ -778,10 +770,10 @@ class SDPSubarrayProduct:
 
     async def _capture_done(self, error_expected: bool = False) -> CaptureBlock:
         """The asynchronous task that handles ?capture-done. See
-        :meth:`capture_done_impl` for additional details.
+        :meth:`_capture_done_impl` for additional details.
 
         This is only called for a "normal" capture-done. Forced deconfigures
-        call :meth:`capture_done_impl` directly.
+        call :meth:`_capture_done_impl` directly.
 
         Returns
         -------
@@ -791,7 +783,7 @@ class SDPSubarrayProduct:
         done_exc: Optional[Exception] = None
         assert capture_block is not None
         try:
-            await self.capture_done_impl(capture_block)
+            await self._capture_done_impl(capture_block)
             if self.state == ProductState.ERROR and not error_expected:
                 raise FailReply('Subarray product went into ERROR while stopping capture')
         except asyncio.CancelledError:
@@ -978,6 +970,7 @@ class SDPSubarrayProduct:
             timestamp: aiokatcp.Timestamp,
             coefficient_sets: Sequence[str]) -> None:
         """Set F-engine delays."""
+        # Validation
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot set delays in state {self.state}")
         stream = self._find_stream(stream_name)
@@ -999,17 +992,8 @@ class SDPSubarrayProduct:
                         float(term)
             except ValueError:
                 raise FailReply(f"Invalid coefficient-set {coefficient_set!r}")
-        await self.set_delays_impl(stream, timestamp, coefficient_sets)
 
-    async def set_delays_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            timestamp: aiokatcp.Timestamp,
-            coefficient_sets: Sequence[str]) -> None:
-        """Back-end implementation of :meth:`set_delays`.
-
-        This method can assume that the inputs and current state are valid.
-        """
+        # Looks valid, now make the requests
         n_inputs = len(stream.src_streams)
         # Can't use find_nodes because we need to ensure we match the right nodes
         # to the right coefficients.
@@ -1036,17 +1020,8 @@ class SDPSubarrayProduct:
                 complex(v)  # Evaluated just for the exception
         except ValueError as exc:
             raise FailReply(str(exc))
-        return await self.gain_impl(stream, input, values)
 
-    async def gain_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            input: str,
-            values: Sequence[str]) -> Sequence[str]:
-        """Back-end implementation of :meth:`gain`.
-
-        This method can assume that the inputs and current state are valid.
-        """
+        # Looks valid, now make the request
         idx = stream.input_labels.index(input)
         node_idx = idx // 2
         node = self._nodes[f"f.{stream.name}.{node_idx}"]
