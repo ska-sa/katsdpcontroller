@@ -527,6 +527,167 @@ class SDPSubarrayProduct:
         if self.telstate is None:
             raise FailReply(f'Subarray product {self.subarray_product_id} has no SDP components.')
 
+    def _find_stream(self, stream_name: str) -> product_config.Stream:
+        """Find the stream with a given name.
+
+        Raises
+        ------
+        FailReply
+            If no such stream exists
+        """
+        for stream in self.configuration.streams:
+            if stream.name == stream_name:
+                return stream
+        raise FailReply(f"Unknown stream {stream_name!r}")
+
+    def find_nodes(
+        self, *,
+        task_type: Optional[str] = None,
+        streams: Optional[Iterable[product_config.Stream]] = None
+    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
+        """Find physical nodes matching given criteria.
+
+        Parameters
+        ----------
+        task_type
+            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
+            node. If ``None``, any node can match.
+        streams
+            Streams to match against the :attr:`.SDPLogicalTask.streams`
+            attribute of the logical node. To match, there must be at least
+            one stream name in the intersection (only the names are matched,
+            not the identity). If ``None``, any node can match.
+        """
+        stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
+        for node in self.physical_graph:
+            logical_node = node.logical_node
+            if not isinstance(logical_node, tasks.SDPLogicalTask):
+                continue
+            if task_type is not None and task_type != logical_node.task_type:
+                continue
+            if (stream_names is not None
+                    and not stream_names.intersection(logical_node.stream_names)):
+                continue
+            yield node
+
+    async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
+                                    reqs: Sequence[KatcpTransition],
+                                    deps: Sequence[asyncio.Future],
+                                    state: CaptureBlockState,
+                                    capture_block: CaptureBlock) -> None:
+        try:
+            if deps:
+                # If we're starting a capture and a dependency fails, there is
+                # no point trying to continue. On the shutdown path, we should
+                # continue anyway to try to close everything off as neatly as
+                # possible.
+                await asyncio.gather(*deps,
+                                     return_exceptions=(state != CaptureBlockState.CAPTURING))
+            if reqs:
+                if node.katcp_connection is None:
+                    logger.warning(
+                        'Cannot issue %s to %s because there is no katcp connection',
+                        reqs[0], node.name)
+                else:
+                    for req in reqs:
+                        await node.issue_req(req.name, req.args, timeout=req.timeout)
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+                observer = node.capture_block_state_observer
+                if observer is not None:
+                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
+                    await observer.wait_capture_block_done(capture_block.name)
+                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
+                else:
+                    logger.debug('Task %s has no capture-block-state observer', node.name)
+        finally:
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+                node.remove_capture_block(capture_block)
+
+    async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
+                               capture_block: CaptureBlock) -> None:
+        """Issue requests to nodes on state transitions.
+
+        The requests are made in parallel, but respects `depends_init`
+        dependencies in the graph.
+
+        Parameters
+        ----------
+        state
+            New state
+        reverse
+            If there is a `depends_init` edge from A to B in the graph, A's
+            request will be made first if `reverse` is false, otherwise B's
+            request will be made first.
+        capture_block
+            The capture block is that being transitioned
+        """
+        # Create a copy of the graph containing only dependency edges.
+        deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
+        # Reverse it
+        if not reverse:
+            deps_graph = deps_graph.reverse(copy=False)
+
+        futures: Dict[object, asyncio.Future] = {}     # Keyed by node
+        # Lexicographical tie-breaking isn't strictly required, but it makes
+        # behaviour predictable.
+        now = time.time()   # Outside loop to be consistent across all nodes
+        for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
+            reqs: List[KatcpTransition] = []
+            try:
+                reqs = node.get_transition(state)
+            except AttributeError:
+                # Not all nodes are SDPPhysicalTask
+                pass
+            if reqs:
+                # Apply {} substitutions to request data
+                subst = dict(capture_block_id=capture_block.name,
+                             time=now)
+                reqs = [req.format(**subst) for req in reqs]
+            deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
+            task = asyncio.get_event_loop().create_task(
+                self._exec_node_transition(node, reqs, deps, state, capture_block))
+            futures[node] = task
+        if futures:
+            # We want to wait for all the futures to complete, even if one of
+            # them fails early (to give the others time to do cleanup). But
+            # then we want to raise the first exception.
+            results = await asyncio.gather(*futures.values(), return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+
+    async def _multi_request(
+            self,
+            nodes: Iterable[tasks.SDPAnyPhysicalTask],
+            messages: Iterable[Iterable]) -> None:
+        """Send katcp requests for multiple nodes in parallel.
+
+        If any of the nodes has no current katcp connection, abort before
+        sending any of the messages. Otherwise, send the messages and wait
+        for all of them to complete (even if some of them fail). If any fail,
+        raise the first failure.
+
+        Each message is given as an iterable of arguments (starting with the
+        request name). It is acceptable for the messages iterator to be
+        longer than the node list. In particular, :meth:`itertools.repeat`
+        can be used to replicate a single message to every node.
+        """
+        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
+        messages_iter = iter(messages)
+        for node in nodes:
+            if node.katcp_connection is None:
+                raise FailReply(f"No katcp connection to {node.name}")
+            reqs.append((node.katcp_connection, next(messages_iter)))
+        # Now that we've validated things, send the messages
+        futures = []
+        for conn, msg in reqs:
+            futures.append(conn.request(*msg))
+        if futures:  # gather doesn't like having zero futures
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.
 
@@ -938,19 +1099,6 @@ class SDPSubarrayProduct:
             except OSError as error:
                 logger.warning('Could not write %s: %s', filename, error)
 
-    def _find_stream(self, stream_name: str) -> product_config.Stream:
-        """Find the stream with a given name.
-
-        Raises
-        ------
-        FailReply
-            If no such stream exists
-        """
-        for stream in self.configuration.streams:
-            if stream.name == stream_name:
-                return stream
-        raise FailReply(f"Unknown stream {stream_name!r}")
-
     async def set_delays(
             self,
             stream_name: str,
@@ -1051,122 +1199,6 @@ class SDPSubarrayProduct:
             self.find_nodes(task_type="xb", streams=[stream]),
             itertools.repeat((command,))
         )
-
-    def find_nodes(
-        self, *,
-        task_type: Optional[str] = None,
-        streams: Optional[Iterable[product_config.Stream]] = None
-    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
-        """Find physical nodes matching given criteria.
-
-        Parameters
-        ----------
-        task_type
-            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
-            node. If ``None``, any node can match.
-        streams
-            Streams to match against the :attr:`.SDPLogicalTask.streams`
-            attribute of the logical node. To match, there must be at least
-            one stream name in the intersection (only the names are matched,
-            not the identity). If ``None``, any node can match.
-        """
-        stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
-        for node in self.physical_graph:
-            logical_node = node.logical_node
-            if not isinstance(logical_node, tasks.SDPLogicalTask):
-                continue
-            if task_type is not None and task_type != logical_node.task_type:
-                continue
-            if (stream_names is not None
-                    and not stream_names.intersection(logical_node.stream_names)):
-                continue
-            yield node
-
-    async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
-                                    reqs: Sequence[KatcpTransition],
-                                    deps: Sequence[asyncio.Future],
-                                    state: CaptureBlockState,
-                                    capture_block: CaptureBlock) -> None:
-        try:
-            if deps:
-                # If we're starting a capture and a dependency fails, there is
-                # no point trying to continue. On the shutdown path, we should
-                # continue anyway to try to close everything off as neatly as
-                # possible.
-                await asyncio.gather(*deps,
-                                     return_exceptions=(state != CaptureBlockState.CAPTURING))
-            if reqs:
-                if node.katcp_connection is None:
-                    logger.warning(
-                        'Cannot issue %s to %s because there is no katcp connection',
-                        reqs[0], node.name)
-                else:
-                    for req in reqs:
-                        await node.issue_req(req.name, req.args, timeout=req.timeout)
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
-                observer = node.capture_block_state_observer
-                if observer is not None:
-                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
-                    await observer.wait_capture_block_done(capture_block.name)
-                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
-                else:
-                    logger.debug('Task %s has no capture-block-state observer', node.name)
-        finally:
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
-                node.remove_capture_block(capture_block)
-
-    async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
-                               capture_block: CaptureBlock) -> None:
-        """Issue requests to nodes on state transitions.
-
-        The requests are made in parallel, but respects `depends_init`
-        dependencies in the graph.
-
-        Parameters
-        ----------
-        state
-            New state
-        reverse
-            If there is a `depends_init` edge from A to B in the graph, A's
-            request will be made first if `reverse` is false, otherwise B's
-            request will be made first.
-        capture_block
-            The capture block is that being transitioned
-        """
-        # Create a copy of the graph containing only dependency edges.
-        deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
-        # Reverse it
-        if not reverse:
-            deps_graph = deps_graph.reverse(copy=False)
-
-        futures: Dict[object, asyncio.Future] = {}     # Keyed by node
-        # Lexicographical tie-breaking isn't strictly required, but it makes
-        # behaviour predictable.
-        now = time.time()   # Outside loop to be consistent across all nodes
-        for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
-            reqs: List[KatcpTransition] = []
-            try:
-                reqs = node.get_transition(state)
-            except AttributeError:
-                # Not all nodes are SDPPhysicalTask
-                pass
-            if reqs:
-                # Apply {} substitutions to request data
-                subst = dict(capture_block_id=capture_block.name,
-                             time=now)
-                reqs = [req.format(**subst) for req in reqs]
-            deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
-            task = asyncio.get_event_loop().create_task(
-                self._exec_node_transition(node, reqs, deps, state, capture_block))
-            futures[node] = task
-        if futures:
-            # We want to wait for all the futures to complete, even if one of
-            # them fails early (to give the others time to do cleanup). But
-            # then we want to raise the first exception.
-            results = await asyncio.gather(*futures.values(), return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
 
     async def _launch_telstate(self) -> katsdptelstate.aio.TelescopeState:
         """Make sure the telstate node is launched"""
@@ -1330,38 +1362,6 @@ class SDPSubarrayProduct:
         # TODO: issue progress reports as tasks stop
         await self.sched.kill(self.physical_graph, force=force,
                               capture_blocks=self.capture_blocks)
-
-    async def _multi_request(
-            self,
-            nodes: Iterable[tasks.SDPAnyPhysicalTask],
-            messages: Iterable[Iterable]) -> None:
-        """Send katcp requests for multiple nodes in parallel.
-
-        If any of the nodes has no current katcp connection, abort before
-        sending any of the messages. Otherwise, send the messages and wait
-        for all of them to complete (even if some of them fail). If any fail,
-        raise the first failure.
-
-        Each message is given as an iterable of arguments (starting with the
-        request name). It is acceptable for the messages iterator to be
-        longer than the node list. In particular, :meth:`itertools.repeat`
-        can be used to replicate a single message to every node.
-        """
-        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
-        messages_iter = iter(messages)
-        for node in nodes:
-            if node.katcp_connection is None:
-                raise FailReply(f"No katcp connection to {node.name}")
-            reqs.append((node.katcp_connection, next(messages_iter)))
-        # Now that we've validated things, send the messages
-        futures = []
-        for conn, msg in reqs:
-            futures.append(conn.request(*msg))
-        if futures:  # gather doesn't like having zero futures
-            results = await asyncio.gather(*futures, return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
 
 
 class DeviceServer(aiokatcp.DeviceServer):
