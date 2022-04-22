@@ -527,6 +527,10 @@ def _make_fgpu(
         for j, src in enumerate(srcs):
             fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{src.name}-eq"
             fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{src.name}-delay"
+        # Prepare expected data rate
+        fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
+            src.adc_sample_rate / src.samples_per_heap for src in srcs
+        )
 
     return fgpu_group
 
@@ -730,6 +734,11 @@ def _make_xbgpu(
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(xbgpu_group, xbgpu, depends_ready=True, depends_init=True)
+
+        xbgpu.static_gauges['xbgpu_expected_input_heaps_per_second'] = (
+            acv.adc_sample_rate / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
+            * len(acv.src_streams) / 2   # / 2 because each heap contains two pols
+        )
 
     return xbgpu_group
 

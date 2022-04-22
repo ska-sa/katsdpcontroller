@@ -329,12 +329,12 @@ class DigRawAntennaVoltageStreamBase(Stream):
         self.band = band
         self.antenna_name = antenna_name
         self.bits_per_sample = 10
+        self.samples_per_heap = 4096
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
         """Network bandwidth in bits per second."""
-        samples_per_heap = 4096
-        heap_size = samples_per_heap * self.bits_per_sample // 8
-        heap_time = samples_per_heap / self.adc_sample_rate
+        heap_size = self.samples_per_heap * self.bits_per_sample // 8
+        heap_time = self.samples_per_heap / self.adc_sample_rate
         return data_rate(heap_size, heap_time, ratio, overhead)
 
 

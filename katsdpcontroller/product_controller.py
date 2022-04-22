@@ -48,6 +48,14 @@ POSTPROCESSING_TIME_REL = Histogram(
     'Wall-clock time for postprocessing each capture block (including burndown phase)'
     ', relative to observation time',
     buckets=POSTPROCESSING_REL_BUCKETS)
+STATIC_GAUGES = [
+    Gauge(
+        'fgpu_expected_input_heaps_per_second',
+        'Number of heaps that should be received per second'),
+    Gauge(
+        'xbgpu_expected_input_heaps_per_second',
+        'Number of heaps that should be received per second')
+]
 logger = logging.getLogger(__name__)
 
 
@@ -421,6 +429,15 @@ class SDPSubarrayProductBase:
             "State of the subarray product state machine (prometheus: gauge)",
             status_func=_error_on_error)
         self._device_status_sensor = sdp_controller.sensors['device-status']
+
+        # Set gauges for expected data rates
+        for gauge in STATIC_GAUGES:
+            value = 0.0
+            gauge_name = gauge.collect()[0].name
+            for node in self.logical_graph:
+                if isinstance(node, tasks.SDPLogicalTask):
+                    value += node.static_gauges.get(gauge_name, 0.0)
+            gauge.set(value)
 
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.add_sensor(self._capture_block_sensor)

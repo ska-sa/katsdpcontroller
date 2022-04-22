@@ -5,8 +5,9 @@ import socket
 import ipaddress
 import os
 import typing
+from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, AsyncGenerator, List, Set, Type, Union
+from typing import AsyncContextManager, AsyncGenerator, List, MutableMapping, Set, Type, Union
 
 import async_timeout
 import aiokatcp
@@ -140,6 +141,8 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.gui_urls = []
         # Overrides for sensor name remapping
         self.sensor_renames = {}
+        # Passes values to SDPSubarrayProduct to set as gauges
+        self.static_gauges: MutableMapping[str, float] = defaultdict(float)
         # Whether we should abort the capture block if the task fails
         self.critical = True
         # Whether to set config keys in telstate (only useful for processes that use katsdpservices)
