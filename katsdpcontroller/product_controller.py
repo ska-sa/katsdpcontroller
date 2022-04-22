@@ -356,11 +356,20 @@ def _error_on_error(state: ProductState) -> Sensor.Status:
     return Sensor.Status.ERROR if state == ProductState.ERROR else Sensor.Status.NOMINAL
 
 
-class SDPSubarrayProductBase:
-    """SDP Subarray Product Base
+class _IndexedKey(dict):
+    """Wrapper class indicating that the contents form a telstate indexed key.
 
-    Represents an instance of an SDP subarray product. This includes ingest, an
-    appropriate telescope model, and any required post-processing.
+    This is used in dictionaries containing initial values to be placed into
+    telstate.
+    """
+    pass
+
+
+class SDPSubarrayProduct:
+    """Represents an instance of an SDP subarray product.
+
+    This includes ingest, an appropriate telescope model, and any required
+    post-processing.
 
     In general each telescope subarray product is handled in a completely
     parallel fashion by the SDP. This class encapsulates these instances,
@@ -383,20 +392,27 @@ class SDPSubarrayProductBase:
     - :attr:`current_capture_block` is set if and only if the subarray state
       is CAPTURING.
     - Elements of :attr:`capture_blocks` are not in state DEAD.
-
-    This is a base class that is intended to be subclassed. The methods whose
-    names end in ``_impl`` are extension points that should be implemented in
-    subclasses to do the real work. These methods are run as part of the
-    asynchronous operations. They need to be cancellation-safe, to allow for
-    forced deconfiguration to abort them.
     """
+
+    def _instantiate(self, logical_node: scheduler.LogicalNode,
+                     capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
+        if getattr(logical_node, 'sdp_physical_factory', False):
+            return logical_node.physical_factory(
+                logical_node, self.sdp_controller, self, capture_block_id)
+        return logical_node.physical_factory(logical_node)
+
+    def _instantiate_physical_graph(self, logical_graph: networkx.MultiDiGraph,
+                                    capture_block_id: str = None) -> networkx.MultiDiGraph:
+        mapping = {logical: self._instantiate(logical, capture_block_id)
+                   for logical in logical_graph}
+        return networkx.relabel_nodes(logical_graph, mapping)
 
     def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
-                 resolver: Resolver,
-                 subarray_product_id: str,
-                 sdp_controller: 'DeviceServer') -> None:
+                 resolver: Resolver, subarray_product_id: str,
+                 sdp_controller: 'DeviceServer',
+                 telstate_name: str = 'telstate') -> None:
         #: Current background task (can only be one)
         self._async_task: Optional[asyncio.Task] = None
         self.sched = sched
@@ -442,9 +458,27 @@ class SDPSubarrayProductBase:
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.add_sensor(self._capture_block_sensor)
         self.add_sensor(self._state_sensor)
+        # Priority is lower (higher number) than the default queue
+        self.batch_queue = scheduler.LaunchQueue(
+            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
+        sched.add_queue(self.batch_queue)
+        # generate physical nodes
+        self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
+        # Nodes indexed by logical name
+        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
+        self.telstate_node = self._nodes.get(telstate_name)
+        self.master_controller = sdp_controller.master_controller
+
         logger.info("Created: %r", self)
         logger.info('Logical graph nodes:\n'
                     + '\n'.join(repr(node) for node in self.logical_graph))
+
+    def __del__(self) -> None:
+        if hasattr(self, 'batch_queue'):
+            self.sched.remove_queue(self.batch_queue)
+
+    def __repr__(self) -> str:
+        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
     @property
     def state(self) -> ProductState:
@@ -495,7 +529,54 @@ class SDPSubarrayProductBase:
 
     async def configure_impl(self) -> None:
         """Extension point to configure the subarray."""
-        pass
+        try:
+            try:
+                resolver = self.resolver
+                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+
+                # Register static KATCP sensors.
+                for ss in self.physical_graph.graph["static_sensors"].values():
+                    self.add_sensor(ss)
+
+                # launch the telescope state for this graph
+                telstate: Optional[katsdptelstate.aio.TelescopeState]
+                if self.telstate_node is not None:
+                    telstate = await self._launch_telstate()
+                else:
+                    telstate = None
+                # launch containers for those nodes that require them
+                await self.sched.launch(self.physical_graph, self.resolver)
+                alive, died = self.check_nodes()
+                # is everything we asked for alive
+                if not alive:
+                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
+                    ret_msg = (f"{fail_list} failed to start. "
+                               "Check the error log for specific details.")
+                    logger.error(ret_msg)
+                    raise FailReply(ret_msg)
+                # Record the TaskInfo for each task in telstate, as well as details
+                # about the image resolver.
+                details = {}
+                for task in self.physical_graph:
+                    if isinstance(task, scheduler.PhysicalTask):
+                        details[task.logical_node.name] = {
+                            'host': task.host,
+                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
+                        }
+                if telstate is not None:
+                    await telstate.add('sdp_task_details', details, immutable=True)
+                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                                       immutable=True)
+            except BaseException as exc:
+                # If there was a problem the graph might be semi-running. Shut it all down.
+                await self._shutdown(force=True)
+                raise exc
+        except scheduler.InsufficientResourcesError as error:
+            raise FailReply('Insufficient resources to launch {}: {}'.format(
+                self.subarray_product_id, error)) from error
+        except scheduler.ImageError as error:
+            raise FailReply(str(error)) from error
 
     async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
         """Extension point to deconfigure the subarray.
@@ -509,7 +590,21 @@ class SDPSubarrayProductBase:
             If the ?product-deconfigure command should return before
             deconfiguration is complete, this event can be set at that point.
         """
-        pass
+        if force:
+            await self._shutdown(force=force)
+            ready.set()
+        else:
+            def must_wait(node):
+                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
+                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
+            # Start the shutdown in a separate task, so that we can monitor
+            # for task shutdown.
+            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
+            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
+            await asyncio.gather(*wait_tasks)
+            self.state = ProductState.POSTPROCESSING
+            ready.set()
+            await shutdown_task
 
     async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
         """Extension point to start a capture block.
@@ -517,7 +612,12 @@ class SDPSubarrayProductBase:
         If it raises an exception, the capture block is assumed to not have
         been started, and the subarray product goes into state ERROR.
         """
-        pass
+        assert self.telstate is not None
+        await self.telstate.add('sdp_capture_block_id', capture_block.name)
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTask):
+                node.add_capture_block(capture_block)
+        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
 
     async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Extension point to stop a capture block.
@@ -533,7 +633,7 @@ class SDPSubarrayProductBase:
         and the subarray product goes into state ERROR unless this occurred as
         part of deconfiguring.
         """
-        pass
+        await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
     async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
         """Complete the post-processing for a capture block.
@@ -548,7 +648,51 @@ class SDPSubarrayProductBase:
         This function should move the capture block to POSTPROCESSING after
         burndown of the real-time processing, but should not set it to DEAD.
         """
-        pass
+        assert self.telstate is not None
+        assert self.telstate_node is not None
+        try:
+            await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
+            capture_block.state = CaptureBlockState.POSTPROCESSING
+            logical_graph = await generator.build_postprocess_logical_graph(
+                capture_block.configuration, capture_block.name,
+                self.telstate, self.telstate_endpoint)
+            physical_graph = self._instantiate_physical_graph(
+                logical_graph, capture_block.name)
+            capture_block.postprocess_physical_graph = physical_graph
+            nodes = {node.logical_node.name: node for node in physical_graph}
+            telstate_node = nodes['telstate']
+            telstate_node.host = self.telstate_node.host
+            telstate_node.ports = dict(self.telstate_node.ports)
+            # This doesn't actually run anything, just marks the fake telstate node
+            # as READY. It could block for a while behind real tasks in the batch
+            # queue, but that doesn't matter because our real tasks will block too.
+            # However, because of this blocking it needs a large resources_timeout,
+            # even though it uses no resources.
+            await self.sched.launch(physical_graph, self.resolver, [telstate_node],
+                                    queue=self.batch_queue,
+                                    resources_timeout=BATCH_RESOURCES_TIMEOUT)
+            nodelist = [
+                node for node in physical_graph
+                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            ]
+            await self.sched.batch_run(physical_graph, self.resolver, nodelist,
+                                       queue=self.batch_queue,
+                                       resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
+        finally:
+            init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
+            done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
+            observation_time = done_time - init_time
+            postprocessing_time = time.time() - done_time
+            POSTPROCESSING_TIME.observe(postprocessing_time)
+            logger.info('Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
+                        capture_block.name, postprocessing_time, observation_time,
+                        extra=dict(capture_block_id=capture_block.name,
+                                   observation_time=observation_time,
+                                   postprocessing_time=postprocessing_time))
+            # In unit tests the obs time might be zero, which leads to errors here
+            if observation_time > 0:
+                POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
+            await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
     def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
         """Clean up after a capture block is no longer active.
@@ -558,7 +702,9 @@ class SDPSubarrayProductBase:
         when there is a failure e.g. if capture_init_impl or capture_done_impl
         raised an exception.
         """
-        pass
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTask):
+                node.remove_capture_block(capture_block)
 
     async def _configure(self) -> None:
         """Asynchronous task that does the configuration."""
@@ -885,7 +1031,15 @@ class SDPSubarrayProductBase:
 
         This method can assume that the inputs and current state are valid.
         """
-        pass
+        n_inputs = len(stream.src_streams)
+        # Can't use find_nodes because we need to ensure we match the right nodes
+        # to the right coefficients.
+        nodes = []
+        msgs = []
+        for i in range(n_inputs // 2):
+            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
+            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
+        await self._multi_request(nodes, msgs)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
         """Set F-engine gains."""
@@ -914,7 +1068,13 @@ class SDPSubarrayProductBase:
 
         This method can assume that the inputs and current state are valid.
         """
-        raise NotImplementedError()
+        idx = stream.input_labels.index(input)
+        node_idx = idx // 2
+        node = self._nodes[f"f.{stream.name}.{node_idx}"]
+        if node.katcp_connection is None:
+            raise FailReply(f"No katcp connection to {node.name}")
+        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
+        return reply
 
     async def gain_all(self, stream_name: str, values: Sequence[str]) -> None:
         """Set F-engine gains for all inputs."""
@@ -932,9 +1092,8 @@ class SDPSubarrayProductBase:
                     complex(v)  # Evaluated just for the exception
             except ValueError as exc:
                 raise FailReply(str(exc))
-        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
-        await self._multi_request(  # type: ignore
-            self.find_nodes(task_type="f", streams=[stream]),  # type: ignore
+        await self._multi_request(
+            self.find_nodes(task_type="f", streams=[stream]),
             itertools.repeat(("gain-all",) + values)
         )
 
@@ -947,63 +1106,10 @@ class SDPSubarrayProductBase:
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
         command = "capture-start" if start else "capture-stop"
-        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
-        await self._multi_request(  # type: ignore
-            self.find_nodes(task_type="xb", streams=[stream]),  # type: ignore
+        await self._multi_request(
+            self.find_nodes(task_type="xb", streams=[stream]),
             itertools.repeat((command,))
         )
-
-    def __repr__(self) -> str:
-        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
-
-
-class _IndexedKey(dict):
-    """Wrapper class indicating that the contents form a telstate indexed key.
-
-    This is used in dictionaries containing initial values to be placed into
-    telstate.
-    """
-    pass
-
-
-class SDPSubarrayProduct(SDPSubarrayProductBase):
-    """Subarray product that actually launches nodes."""
-
-    def _instantiate(self, logical_node: scheduler.LogicalNode,
-                     capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
-        if getattr(logical_node, 'sdp_physical_factory', False):
-            return logical_node.physical_factory(
-                logical_node, self.sdp_controller, self, capture_block_id)
-        return logical_node.physical_factory(logical_node)
-
-    def _instantiate_physical_graph(self, logical_graph: networkx.MultiDiGraph,
-                                    capture_block_id: str = None) -> networkx.MultiDiGraph:
-        mapping = {logical: self._instantiate(logical, capture_block_id)
-                   for logical in logical_graph}
-        return networkx.relabel_nodes(logical_graph, mapping)
-
-    def __init__(self, sched: scheduler.SchedulerBase,
-                 configuration: Configuration,
-                 config_dict: dict,
-                 resolver: Resolver, subarray_product_id: str,
-                 sdp_controller: 'DeviceServer',
-                 telstate_name: str = 'telstate') -> None:
-        super().__init__(sched, configuration, config_dict, resolver,
-                         subarray_product_id, sdp_controller)
-        # Priority is lower (higher number) than the default queue
-        self.batch_queue = scheduler.LaunchQueue(
-            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
-        sched.add_queue(self.batch_queue)
-        # generate physical nodes
-        self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
-        # Nodes indexed by logical name
-        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
-        self.telstate_node = self._nodes.get(telstate_name)
-        self.master_controller = sdp_controller.master_controller
-
-    def __del__(self) -> None:
-        if hasattr(self, 'batch_queue'):
-            self.sched.remove_queue(self.batch_queue)
 
     def find_nodes(
         self, *,
@@ -1120,69 +1226,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
             for result in results:
                 if isinstance(result, Exception):
                     raise result
-
-    async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
-        assert self.telstate is not None
-        await self.telstate.add('sdp_capture_block_id', capture_block.name)
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.add_capture_block(capture_block)
-        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
-
-    async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
-        await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
-
-    async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
-        assert self.telstate is not None
-        assert self.telstate_node is not None
-        try:
-            await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
-            capture_block.state = CaptureBlockState.POSTPROCESSING
-            logical_graph = await generator.build_postprocess_logical_graph(
-                capture_block.configuration, capture_block.name,
-                self.telstate, self.telstate_endpoint)
-            physical_graph = self._instantiate_physical_graph(
-                logical_graph, capture_block.name)
-            capture_block.postprocess_physical_graph = physical_graph
-            nodes = {node.logical_node.name: node for node in physical_graph}
-            telstate_node = nodes['telstate']
-            telstate_node.host = self.telstate_node.host
-            telstate_node.ports = dict(self.telstate_node.ports)
-            # This doesn't actually run anything, just marks the fake telstate node
-            # as READY. It could block for a while behind real tasks in the batch
-            # queue, but that doesn't matter because our real tasks will block too.
-            # However, because of this blocking it needs a large resources_timeout,
-            # even though it uses no resources.
-            await self.sched.launch(physical_graph, self.resolver, [telstate_node],
-                                    queue=self.batch_queue,
-                                    resources_timeout=BATCH_RESOURCES_TIMEOUT)
-            nodelist = [
-                node for node in physical_graph
-                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
-            ]
-            await self.sched.batch_run(physical_graph, self.resolver, nodelist,
-                                       queue=self.batch_queue,
-                                       resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
-        finally:
-            init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
-            done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
-            observation_time = done_time - init_time
-            postprocessing_time = time.time() - done_time
-            POSTPROCESSING_TIME.observe(postprocessing_time)
-            logger.info('Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
-                        capture_block.name, postprocessing_time, observation_time,
-                        extra=dict(capture_block_id=capture_block.name,
-                                   observation_time=observation_time,
-                                   postprocessing_time=postprocessing_time))
-            # In unit tests the obs time might be zero, which leads to errors here
-            if observation_time > 0:
-                POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
-            await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
-
-    def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.remove_capture_block(capture_block)
 
     async def _launch_telstate(self) -> katsdptelstate.aio.TelescopeState:
         """Make sure the telstate node is launched"""
@@ -1347,73 +1390,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         await self.sched.kill(self.physical_graph, force=force,
                               capture_blocks=self.capture_blocks)
 
-    async def configure_impl(self) -> None:
-        try:
-            try:
-                resolver = self.resolver
-                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
-
-                # Register static KATCP sensors.
-                for ss in self.physical_graph.graph["static_sensors"].values():
-                    self.add_sensor(ss)
-
-                # launch the telescope state for this graph
-                telstate: Optional[katsdptelstate.aio.TelescopeState]
-                if self.telstate_node is not None:
-                    telstate = await self._launch_telstate()
-                else:
-                    telstate = None
-                # launch containers for those nodes that require them
-                await self.sched.launch(self.physical_graph, self.resolver)
-                alive, died = self.check_nodes()
-                # is everything we asked for alive
-                if not alive:
-                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
-                    ret_msg = (f"{fail_list} failed to start. "
-                               "Check the error log for specific details.")
-                    logger.error(ret_msg)
-                    raise FailReply(ret_msg)
-                # Record the TaskInfo for each task in telstate, as well as details
-                # about the image resolver.
-                details = {}
-                for task in self.physical_graph:
-                    if isinstance(task, scheduler.PhysicalTask):
-                        details[task.logical_node.name] = {
-                            'host': task.host,
-                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
-                        }
-                if telstate is not None:
-                    await telstate.add('sdp_task_details', details, immutable=True)
-                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                       immutable=True)
-            except BaseException as exc:
-                # If there was a problem the graph might be semi-running. Shut it all down.
-                await self._shutdown(force=True)
-                raise exc
-        except scheduler.InsufficientResourcesError as error:
-            raise FailReply('Insufficient resources to launch {}: {}'.format(
-                self.subarray_product_id, error)) from error
-        except scheduler.ImageError as error:
-            raise FailReply(str(error)) from error
-
-    async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
-        if force:
-            await self._shutdown(force=force)
-            ready.set()
-        else:
-            def must_wait(node):
-                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
-                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
-            # Start the shutdown in a separate task, so that we can monitor
-            # for task shutdown.
-            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
-            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
-            await asyncio.gather(*wait_tasks)
-            self.state = ProductState.POSTPROCESSING
-            ready.set()
-            await shutdown_task
-
     async def _multi_request(
             self,
             nodes: Iterable[tasks.SDPAnyPhysicalTask],
@@ -1446,34 +1422,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
                 if isinstance(result, Exception):
                     raise result
 
-    async def set_delays_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            timestamp: aiokatcp.Timestamp,
-            coefficient_sets: Sequence[str]) -> None:
-        n_inputs = len(stream.src_streams)
-        # Can't use find_nodes because we need to ensure we match the right nodes
-        # to the right coefficients.
-        nodes = []
-        msgs = []
-        for i in range(n_inputs // 2):
-            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
-            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
-        await self._multi_request(nodes, msgs)
-
-    async def gain_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            input: str,
-            values: Sequence[str]) -> Sequence[str]:
-        idx = stream.input_labels.index(input)
-        node_idx = idx // 2
-        node = self._nodes[f"f.{stream.name}.{node_idx}"]
-        if node.katcp_connection is None:
-            raise FailReply(f"No katcp connection to {node.name}")
-        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
-        return reply
-
 
 class DeviceServer(aiokatcp.DeviceServer):
     VERSION = 'product-controller-1.1'
@@ -1500,7 +1448,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.s3_config = _normalise_s3_config(s3_config)
         self.graph_dir = graph_dir
         self.master_controller = master_controller
-        self.product: Optional[SDPSubarrayProductBase] = None
+        self.product: Optional[SDPSubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
         super().__init__(host, port)
@@ -1664,7 +1612,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, configuration, config_dict)
 
-    def _get_product(self) -> SDPSubarrayProductBase:
+    def _get_product(self) -> SDPSubarrayProduct:
         """Check that self.product exists (i.e. ?product-configure has been called).
 
         If it has not, raises a :exc:`FailReply`.
