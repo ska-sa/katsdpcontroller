@@ -532,7 +532,7 @@ class SDPSubarrayProduct:
 
         This should only do the work needed for the ``capture-done`` master
         controller request to return. The caller takes care of calling
-        :meth:`postprocess_impl`.
+        :meth:`_postprocess`.
 
         It needs to be safe to run from DECONFIGURING and ERROR states, because
         it may be run as part of forced deconfigure.
@@ -543,11 +543,8 @@ class SDPSubarrayProduct:
         """
         await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
-    async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
+    async def _postprocess(self, capture_block: CaptureBlock) -> None:
         """Complete the post-processing for a capture block.
-
-        Subclasses should override this if a capture block is not finished when
-        :meth:`_capture_done` returns.
 
         Note that a failure here does **not** put the subarray product into
         ERROR state, as it is assumed that this does not interfere with
@@ -601,18 +598,6 @@ class SDPSubarrayProduct:
             if observation_time > 0:
                 POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
             await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
-
-    def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
-        """Clean up after a capture block is no longer active.
-
-        This should only be overridden to clean up the state machine, not to
-        do processing. It is called both for the normal lifecycle, but also
-        when there is a failure e.g. if _capture_init or _capture_done_impl
-        raised an exception.
-        """
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.remove_capture_block(capture_block)
 
     async def _configure(self) -> None:
         """Asynchronous task that does the configuration."""
@@ -735,7 +720,9 @@ class SDPSubarrayProduct:
         # Setting the state will trigger _update_capture_block_sensor, which
         # will update the sensor with the value removed
         capture_block.state = CaptureBlockState.DEAD
-        self.capture_block_dead_impl(capture_block)
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTask):
+                node.remove_capture_block(capture_block)
 
     def _update_capture_block_sensor(self) -> None:
         value = {name: capture_block.state.name.lower()
@@ -799,7 +786,7 @@ class SDPSubarrayProduct:
         self.current_capture_block = None
         capture_block.state = CaptureBlockState.BURNDOWN
         capture_block.postprocess_task = asyncio.get_event_loop().create_task(
-            self.postprocess_impl(capture_block))
+            self._postprocess(capture_block))
         log_task_exceptions(
             capture_block.postprocess_task, logger,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
