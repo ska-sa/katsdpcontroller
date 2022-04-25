@@ -38,7 +38,7 @@ import yarl
 from ..consul import ConsulService
 from ..controller import device_server_sockname
 from ..product_controller import (
-    DeviceServer, SDPSubarrayProductBase, SDPSubarrayProduct, SDPResources,
+    DeviceServer, SDPSubarrayProduct, SDPResources,
     ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url)
 from .. import scheduler
 from . import fake_katportalclient
@@ -1140,12 +1140,8 @@ class TestSDPController(BaseTestSDPController):
         """Capture-init fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-init", CAPTURE_BLOCK)
 
-    def _ingest_died(self, subarray_product: SDPSubarrayProductBase) -> None:
+    def _ingest_died(self, subarray_product: SDPSubarrayProduct) -> None:
         """Mark an ingest process as having died"""
-        # The type signature uses SDPSubarrayProductBase so that the callers don't
-        # all have to explicitly check that self.server.product is an
-        # instance of SDPSubarrayProduct.
-        assert isinstance(subarray_product, SDPSubarrayProduct)
         for node in subarray_product.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
                 node.set_state(scheduler.TaskState.DEAD)
@@ -1154,7 +1150,7 @@ class TestSDPController(BaseTestSDPController):
         else:
             raise ValueError('Could not find ingest node')
 
-    def _ingest_bad_device_status(self, subarray_product: SDPSubarrayProductBase) -> None:
+    def _ingest_bad_device_status(self, subarray_product: SDPSubarrayProduct) -> None:
         """Mark an ingest process as having bad status"""
         sensor = self.server.sensors['ingest.sdp_l0.1.device-status']
         sensor.set_value(DeviceStatus.FAIL, Sensor.Status.ERROR)
@@ -1226,7 +1222,7 @@ class TestSDPController(BaseTestSDPController):
         await self._test_busy("capture-done")
 
     async def _test_failure_while_capturing(
-            self, failfunc: Callable[[SDPSubarrayProductBase], None]) -> None:
+            self, failfunc: Callable[[SDPSubarrayProduct], None]) -> None:
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product

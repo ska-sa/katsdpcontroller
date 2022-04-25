@@ -356,11 +356,20 @@ def _error_on_error(state: ProductState) -> Sensor.Status:
     return Sensor.Status.ERROR if state == ProductState.ERROR else Sensor.Status.NOMINAL
 
 
-class SDPSubarrayProductBase:
-    """SDP Subarray Product Base
+class _IndexedKey(dict):
+    """Wrapper class indicating that the contents form a telstate indexed key.
 
-    Represents an instance of an SDP subarray product. This includes ingest, an
-    appropriate telescope model, and any required post-processing.
+    This is used in dictionaries containing initial values to be placed into
+    telstate.
+    """
+    pass
+
+
+class SDPSubarrayProduct:
+    """Represents an instance of an SDP subarray product.
+
+    This includes ingest, an appropriate telescope model, and any required
+    post-processing.
 
     In general each telescope subarray product is handled in a completely
     parallel fashion by the SDP. This class encapsulates these instances,
@@ -383,20 +392,27 @@ class SDPSubarrayProductBase:
     - :attr:`current_capture_block` is set if and only if the subarray state
       is CAPTURING.
     - Elements of :attr:`capture_blocks` are not in state DEAD.
-
-    This is a base class that is intended to be subclassed. The methods whose
-    names end in ``_impl`` are extension points that should be implemented in
-    subclasses to do the real work. These methods are run as part of the
-    asynchronous operations. They need to be cancellation-safe, to allow for
-    forced deconfiguration to abort them.
     """
+
+    def _instantiate(self, logical_node: scheduler.LogicalNode,
+                     capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
+        if getattr(logical_node, 'sdp_physical_factory', False):
+            return logical_node.physical_factory(
+                logical_node, self.sdp_controller, self, capture_block_id)
+        return logical_node.physical_factory(logical_node)
+
+    def _instantiate_physical_graph(self, logical_graph: networkx.MultiDiGraph,
+                                    capture_block_id: str = None) -> networkx.MultiDiGraph:
+        mapping = {logical: self._instantiate(logical, capture_block_id)
+                   for logical in logical_graph}
+        return networkx.relabel_nodes(logical_graph, mapping)
 
     def __init__(self, sched: scheduler.SchedulerBase,
                  configuration: Configuration,
                  config_dict: dict,
-                 resolver: Resolver,
-                 subarray_product_id: str,
-                 sdp_controller: 'DeviceServer') -> None:
+                 resolver: Resolver, subarray_product_id: str,
+                 sdp_controller: 'DeviceServer',
+                 telstate_name: str = 'telstate') -> None:
         #: Current background task (can only be one)
         self._async_task: Optional[asyncio.Task] = None
         self.sched = sched
@@ -442,9 +458,27 @@ class SDPSubarrayProductBase:
         self.state = ProductState.CONFIGURING   # This sets the sensor
         self.add_sensor(self._capture_block_sensor)
         self.add_sensor(self._state_sensor)
+        # Priority is lower (higher number) than the default queue
+        self.batch_queue = scheduler.LaunchQueue(
+            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
+        sched.add_queue(self.batch_queue)
+        # generate physical nodes
+        self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
+        # Nodes indexed by logical name
+        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
+        self.telstate_node = self._nodes.get(telstate_name)
+        self.master_controller = sdp_controller.master_controller
+
         logger.info("Created: %r", self)
         logger.info('Logical graph nodes:\n'
                     + '\n'.join(repr(node) for node in self.logical_graph))
+
+    def __del__(self) -> None:
+        if hasattr(self, 'batch_queue'):
+            self.sched.remove_queue(self.batch_queue)
+
+    def __repr__(self) -> str:
+        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
 
     @property
     def state(self) -> ProductState:
@@ -493,38 +527,173 @@ class SDPSubarrayProductBase:
         if self.telstate is None:
             raise FailReply(f'Subarray product {self.subarray_product_id} has no SDP components.')
 
-    async def configure_impl(self) -> None:
-        """Extension point to configure the subarray."""
-        pass
+    def _find_stream(self, stream_name: str) -> product_config.Stream:
+        """Find the stream with a given name.
 
-    async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
-        """Extension point to deconfigure the subarray.
+        Raises
+        ------
+        FailReply
+            If no such stream exists
+        """
+        for stream in self.configuration.streams:
+            if stream.name == stream_name:
+                return stream
+        raise FailReply(f"Unknown stream {stream_name!r}")
+
+    def find_nodes(
+        self, *,
+        task_type: Optional[str] = None,
+        streams: Optional[Iterable[product_config.Stream]] = None
+    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
+        """Find physical nodes matching given criteria.
 
         Parameters
         ----------
-        force
-            Whether to do an abrupt deconfiguration without waiting for
-            postprocessing.
-        ready
-            If the ?product-deconfigure command should return before
-            deconfiguration is complete, this event can be set at that point.
+        task_type
+            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
+            node. If ``None``, any node can match.
+        streams
+            Streams to match against the :attr:`.SDPLogicalTask.streams`
+            attribute of the logical node. To match, there must be at least
+            one stream name in the intersection (only the names are matched,
+            not the identity). If ``None``, any node can match.
         """
-        pass
+        stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
+        for node in self.physical_graph:
+            logical_node = node.logical_node
+            if not isinstance(logical_node, tasks.SDPLogicalTask):
+                continue
+            if task_type is not None and task_type != logical_node.task_type:
+                continue
+            if (stream_names is not None
+                    and not stream_names.intersection(logical_node.stream_names)):
+                continue
+            yield node
 
-    async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
-        """Extension point to start a capture block.
+    async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
+                                    reqs: Sequence[KatcpTransition],
+                                    deps: Sequence[asyncio.Future],
+                                    state: CaptureBlockState,
+                                    capture_block: CaptureBlock) -> None:
+        try:
+            if deps:
+                # If we're starting a capture and a dependency fails, there is
+                # no point trying to continue. On the shutdown path, we should
+                # continue anyway to try to close everything off as neatly as
+                # possible.
+                await asyncio.gather(*deps,
+                                     return_exceptions=(state != CaptureBlockState.CAPTURING))
+            if reqs:
+                if node.katcp_connection is None:
+                    logger.warning(
+                        'Cannot issue %s to %s because there is no katcp connection',
+                        reqs[0], node.name)
+                else:
+                    for req in reqs:
+                        await node.issue_req(req.name, req.args, timeout=req.timeout)
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+                observer = node.capture_block_state_observer
+                if observer is not None:
+                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
+                    await observer.wait_capture_block_done(capture_block.name)
+                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
+                else:
+                    logger.debug('Task %s has no capture-block-state observer', node.name)
+        finally:
+            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+                node.remove_capture_block(capture_block)
 
-        If it raises an exception, the capture block is assumed to not have
-        been started, and the subarray product goes into state ERROR.
+    async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
+                               capture_block: CaptureBlock) -> None:
+        """Issue requests to nodes on state transitions.
+
+        The requests are made in parallel, but respects `depends_init`
+        dependencies in the graph.
+
+        Parameters
+        ----------
+        state
+            New state
+        reverse
+            If there is a `depends_init` edge from A to B in the graph, A's
+            request will be made first if `reverse` is false, otherwise B's
+            request will be made first.
+        capture_block
+            The capture block is that being transitioned
         """
-        pass
+        # Create a copy of the graph containing only dependency edges.
+        deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
+        # Reverse it
+        if not reverse:
+            deps_graph = deps_graph.reverse(copy=False)
 
-    async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
-        """Extension point to stop a capture block.
+        futures: Dict[object, asyncio.Future] = {}     # Keyed by node
+        # Lexicographical tie-breaking isn't strictly required, but it makes
+        # behaviour predictable.
+        now = time.time()   # Outside loop to be consistent across all nodes
+        for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
+            reqs: List[KatcpTransition] = []
+            try:
+                reqs = node.get_transition(state)
+            except AttributeError:
+                # Not all nodes are SDPPhysicalTask
+                pass
+            if reqs:
+                # Apply {} substitutions to request data
+                subst = dict(capture_block_id=capture_block.name,
+                             time=now)
+                reqs = [req.format(**subst) for req in reqs]
+            deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
+            task = asyncio.get_event_loop().create_task(
+                self._exec_node_transition(node, reqs, deps, state, capture_block))
+            futures[node] = task
+        if futures:
+            # We want to wait for all the futures to complete, even if one of
+            # them fails early (to give the others time to do cleanup). But
+            # then we want to raise the first exception.
+            results = await asyncio.gather(*futures.values(), return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+
+    async def _multi_request(
+            self,
+            nodes: Iterable[tasks.SDPAnyPhysicalTask],
+            messages: Iterable[Iterable]) -> None:
+        """Send katcp requests for multiple nodes in parallel.
+
+        If any of the nodes has no current katcp connection, abort before
+        sending any of the messages. Otherwise, send the messages and wait
+        for all of them to complete (even if some of them fail). If any fail,
+        raise the first failure.
+
+        Each message is given as an iterable of arguments (starting with the
+        request name). It is acceptable for the messages iterator to be
+        longer than the node list. In particular, :meth:`itertools.repeat`
+        can be used to replicate a single message to every node.
+        """
+        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
+        messages_iter = iter(messages)
+        for node in nodes:
+            if node.katcp_connection is None:
+                raise FailReply(f"No katcp connection to {node.name}")
+            reqs.append((node.katcp_connection, next(messages_iter)))
+        # Now that we've validated things, send the messages
+        futures = []
+        for conn, msg in reqs:
+            futures.append(conn.request(*msg))
+        if futures:  # gather doesn't like having zero futures
+            results = await asyncio.gather(*futures, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+
+    async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
+        """Stop a capture block.
 
         This should only do the work needed for the ``capture-done`` master
         controller request to return. The caller takes care of calling
-        :meth:`postprocess_impl`.
+        :meth:`_postprocess`.
 
         It needs to be safe to run from DECONFIGURING and ERROR states, because
         it may be run as part of forced deconfigure.
@@ -533,13 +702,10 @@ class SDPSubarrayProductBase:
         and the subarray product goes into state ERROR unless this occurred as
         part of deconfiguring.
         """
-        pass
+        await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
 
-    async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
+    async def _postprocess(self, capture_block: CaptureBlock) -> None:
         """Complete the post-processing for a capture block.
-
-        Subclasses should override this if a capture block is not finished when
-        :meth:`_capture_done` returns.
 
         Note that a failure here does **not** put the subarray product into
         ERROR state, as it is assumed that this does not interfere with
@@ -548,21 +714,102 @@ class SDPSubarrayProductBase:
         This function should move the capture block to POSTPROCESSING after
         burndown of the real-time processing, but should not set it to DEAD.
         """
-        pass
-
-    def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
-        """Clean up after a capture block is no longer active.
-
-        This should only be overridden to clean up the state machine, not to
-        do processing. It is called both for the normal lifecycle, but also
-        when there is a failure e.g. if capture_init_impl or capture_done_impl
-        raised an exception.
-        """
-        pass
+        assert self.telstate is not None
+        assert self.telstate_node is not None
+        try:
+            await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
+            capture_block.state = CaptureBlockState.POSTPROCESSING
+            logical_graph = await generator.build_postprocess_logical_graph(
+                capture_block.configuration, capture_block.name,
+                self.telstate, self.telstate_endpoint)
+            physical_graph = self._instantiate_physical_graph(
+                logical_graph, capture_block.name)
+            capture_block.postprocess_physical_graph = physical_graph
+            nodes = {node.logical_node.name: node for node in physical_graph}
+            telstate_node = nodes['telstate']
+            telstate_node.host = self.telstate_node.host
+            telstate_node.ports = dict(self.telstate_node.ports)
+            # This doesn't actually run anything, just marks the fake telstate node
+            # as READY. It could block for a while behind real tasks in the batch
+            # queue, but that doesn't matter because our real tasks will block too.
+            # However, because of this blocking it needs a large resources_timeout,
+            # even though it uses no resources.
+            await self.sched.launch(physical_graph, self.resolver, [telstate_node],
+                                    queue=self.batch_queue,
+                                    resources_timeout=BATCH_RESOURCES_TIMEOUT)
+            nodelist = [
+                node for node in physical_graph
+                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            ]
+            await self.sched.batch_run(physical_graph, self.resolver, nodelist,
+                                       queue=self.batch_queue,
+                                       resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
+        finally:
+            init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
+            done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
+            observation_time = done_time - init_time
+            postprocessing_time = time.time() - done_time
+            POSTPROCESSING_TIME.observe(postprocessing_time)
+            logger.info('Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
+                        capture_block.name, postprocessing_time, observation_time,
+                        extra=dict(capture_block_id=capture_block.name,
+                                   observation_time=observation_time,
+                                   postprocessing_time=postprocessing_time))
+            # In unit tests the obs time might be zero, which leads to errors here
+            if observation_time > 0:
+                POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
+            await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
 
     async def _configure(self) -> None:
         """Asynchronous task that does the configuration."""
-        await self.configure_impl()
+        try:
+            try:
+                resolver = self.resolver
+                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+
+                # Register static KATCP sensors.
+                for ss in self.physical_graph.graph["static_sensors"].values():
+                    self.add_sensor(ss)
+
+                # launch the telescope state for this graph
+                telstate: Optional[katsdptelstate.aio.TelescopeState]
+                if self.telstate_node is not None:
+                    telstate = await self._launch_telstate()
+                else:
+                    telstate = None
+                # launch containers for those nodes that require them
+                await self.sched.launch(self.physical_graph, self.resolver)
+                alive, died = self.check_nodes()
+                # is everything we asked for alive
+                if not alive:
+                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
+                    ret_msg = (f"{fail_list} failed to start. "
+                               "Check the error log for specific details.")
+                    logger.error(ret_msg)
+                    raise FailReply(ret_msg)
+                # Record the TaskInfo for each task in telstate, as well as details
+                # about the image resolver.
+                details = {}
+                for task in self.physical_graph:
+                    if isinstance(task, scheduler.PhysicalTask):
+                        details[task.logical_node.name] = {
+                            'host': task.host,
+                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
+                        }
+                if telstate is not None:
+                    await telstate.add('sdp_task_details', details, immutable=True)
+                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
+                                       immutable=True)
+            except BaseException as exc:
+                # If there was a problem the graph might be semi-running. Shut it all down.
+                await self._shutdown(force=True)
+                raise exc
+        except scheduler.InsufficientResourcesError as error:
+            raise FailReply('Insufficient resources to launch {}: {}'.format(
+                self.subarray_product_id, error)) from error
+        except scheduler.ImageError as error:
+            raise FailReply(str(error)) from error
         self.state = ProductState.IDLE
 
     async def _deconfigure(self, force: bool, ready: asyncio.Event) -> None:
@@ -578,7 +825,7 @@ class SDPSubarrayProductBase:
                 capture_block = self.current_capture_block
                 # To prevent trying again if we get a second forced-deconfigure.
                 self.current_capture_block = None
-                await self.capture_done_impl(capture_block)
+                await self._capture_done_impl(capture_block)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -593,8 +840,20 @@ class SDPSubarrayProductBase:
                     capture_block.postprocess_task.cancel()
                 else:
                     self._capture_block_dead(capture_block)
-
-        await self.deconfigure_impl(force, ready)
+            await self._shutdown(force=force)
+            ready.set()
+        else:
+            def must_wait(node):
+                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
+                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
+            # Start the shutdown in a separate task, so that we can monitor
+            # for task shutdown.
+            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
+            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
+            await asyncio.gather(*wait_tasks)
+            self.state = ProductState.POSTPROCESSING
+            ready.set()
+            await shutdown_task
 
         # Allow all the postprocessing tasks to finish up
         # Note: this needs to be done carefully, because self.capture_blocks
@@ -609,7 +868,6 @@ class SDPSubarrayProductBase:
             self.telstate.backend.close()
 
         self.state = ProductState.DEAD
-        ready.set()     # In case deconfigure_impl didn't already do this
         # Setting dead_event is done by the first callback
         for callback in self.dead_callbacks:
             callback(self)
@@ -623,7 +881,9 @@ class SDPSubarrayProductBase:
         # Setting the state will trigger _update_capture_block_sensor, which
         # will update the sensor with the value removed
         capture_block.state = CaptureBlockState.DEAD
-        self.capture_block_dead_impl(capture_block)
+        for node in self.physical_graph:
+            if isinstance(node, tasks.SDPPhysicalTask):
+                node.remove_capture_block(capture_block)
 
     def _update_capture_block_sensor(self) -> None:
         value = {name: capture_block.state.name.lower()
@@ -636,7 +896,12 @@ class SDPSubarrayProductBase:
         # Update the sensor with the INITIALISING state
         self._update_capture_block_sensor()
         try:
-            await self.capture_init_impl(capture_block)
+            assert self.telstate is not None
+            await self.telstate.add('sdp_capture_block_id', capture_block.name)
+            for node in self.physical_graph:
+                if isinstance(node, tasks.SDPPhysicalTask):
+                    node.add_capture_block(capture_block)
+            await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
             if self.state == ProductState.ERROR:
                 raise FailReply('Subarray product went into ERROR while starting capture')
         except asyncio.CancelledError:
@@ -653,10 +918,10 @@ class SDPSubarrayProductBase:
 
     async def _capture_done(self, error_expected: bool = False) -> CaptureBlock:
         """The asynchronous task that handles ?capture-done. See
-        :meth:`capture_done_impl` for additional details.
+        :meth:`_capture_done_impl` for additional details.
 
         This is only called for a "normal" capture-done. Forced deconfigures
-        call :meth:`capture_done_impl` directly.
+        call :meth:`_capture_done_impl` directly.
 
         Returns
         -------
@@ -666,7 +931,7 @@ class SDPSubarrayProductBase:
         done_exc: Optional[Exception] = None
         assert capture_block is not None
         try:
-            await self.capture_done_impl(capture_block)
+            await self._capture_done_impl(capture_block)
             if self.state == ProductState.ERROR and not error_expected:
                 raise FailReply('Subarray product went into ERROR while stopping capture')
         except asyncio.CancelledError:
@@ -682,7 +947,7 @@ class SDPSubarrayProductBase:
         self.current_capture_block = None
         capture_block.state = CaptureBlockState.BURNDOWN
         capture_block.postprocess_task = asyncio.get_event_loop().create_task(
-            self.postprocess_impl(capture_block))
+            self._postprocess(capture_block))
         log_task_exceptions(
             capture_block.postprocess_task, logger,
             "Exception in postprocessing for {}/{}".format(self.subarray_product_id,
@@ -834,25 +1099,13 @@ class SDPSubarrayProductBase:
             except OSError as error:
                 logger.warning('Could not write %s: %s', filename, error)
 
-    def _find_stream(self, stream_name: str) -> product_config.Stream:
-        """Find the stream with a given name.
-
-        Raises
-        ------
-        FailReply
-            If no such stream exists
-        """
-        for stream in self.configuration.streams:
-            if stream.name == stream_name:
-                return stream
-        raise FailReply(f"Unknown stream {stream_name!r}")
-
     async def set_delays(
             self,
             stream_name: str,
             timestamp: aiokatcp.Timestamp,
             coefficient_sets: Sequence[str]) -> None:
         """Set F-engine delays."""
+        # Validation
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot set delays in state {self.state}")
         stream = self._find_stream(stream_name)
@@ -874,18 +1127,17 @@ class SDPSubarrayProductBase:
                         float(term)
             except ValueError:
                 raise FailReply(f"Invalid coefficient-set {coefficient_set!r}")
-        await self.set_delays_impl(stream, timestamp, coefficient_sets)
 
-    async def set_delays_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            timestamp: aiokatcp.Timestamp,
-            coefficient_sets: Sequence[str]) -> None:
-        """Back-end implementation of :meth:`set_delays`.
-
-        This method can assume that the inputs and current state are valid.
-        """
-        pass
+        # Looks valid, now make the requests
+        n_inputs = len(stream.src_streams)
+        # Can't use find_nodes because we need to ensure we match the right nodes
+        # to the right coefficients.
+        nodes = []
+        msgs = []
+        for i in range(n_inputs // 2):
+            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
+            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
+        await self._multi_request(nodes, msgs)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
         """Set F-engine gains."""
@@ -903,18 +1155,15 @@ class SDPSubarrayProductBase:
                 complex(v)  # Evaluated just for the exception
         except ValueError as exc:
             raise FailReply(str(exc))
-        return await self.gain_impl(stream, input, values)
 
-    async def gain_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            input: str,
-            values: Sequence[str]) -> Sequence[str]:
-        """Back-end implementation of :meth:`gain`.
-
-        This method can assume that the inputs and current state are valid.
-        """
-        raise NotImplementedError()
+        # Looks valid, now make the request
+        idx = stream.input_labels.index(input)
+        node_idx = idx // 2
+        node = self._nodes[f"f.{stream.name}.{node_idx}"]
+        if node.katcp_connection is None:
+            raise FailReply(f"No katcp connection to {node.name}")
+        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
+        return reply
 
     async def gain_all(self, stream_name: str, values: Sequence[str]) -> None:
         """Set F-engine gains for all inputs."""
@@ -932,9 +1181,8 @@ class SDPSubarrayProductBase:
                     complex(v)  # Evaluated just for the exception
             except ValueError as exc:
                 raise FailReply(str(exc))
-        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
-        await self._multi_request(  # type: ignore
-            self.find_nodes(task_type="f", streams=[stream]),  # type: ignore
+        await self._multi_request(
+            self.find_nodes(task_type="f", streams=[stream]),
             itertools.repeat(("gain-all",) + values)
         )
 
@@ -947,242 +1195,10 @@ class SDPSubarrayProductBase:
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
         command = "capture-start" if start else "capture-stop"
-        # TODO: remove the type: ignores once SDPSubarrayProduct and SDPSubarrayProductBase merged
-        await self._multi_request(  # type: ignore
-            self.find_nodes(task_type="xb", streams=[stream]),  # type: ignore
+        await self._multi_request(
+            self.find_nodes(task_type="xb", streams=[stream]),
             itertools.repeat((command,))
         )
-
-    def __repr__(self) -> str:
-        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
-
-
-class _IndexedKey(dict):
-    """Wrapper class indicating that the contents form a telstate indexed key.
-
-    This is used in dictionaries containing initial values to be placed into
-    telstate.
-    """
-    pass
-
-
-class SDPSubarrayProduct(SDPSubarrayProductBase):
-    """Subarray product that actually launches nodes."""
-
-    def _instantiate(self, logical_node: scheduler.LogicalNode,
-                     capture_block_id: Optional[str]) -> scheduler.PhysicalNode:
-        if getattr(logical_node, 'sdp_physical_factory', False):
-            return logical_node.physical_factory(
-                logical_node, self.sdp_controller, self, capture_block_id)
-        return logical_node.physical_factory(logical_node)
-
-    def _instantiate_physical_graph(self, logical_graph: networkx.MultiDiGraph,
-                                    capture_block_id: str = None) -> networkx.MultiDiGraph:
-        mapping = {logical: self._instantiate(logical, capture_block_id)
-                   for logical in logical_graph}
-        return networkx.relabel_nodes(logical_graph, mapping)
-
-    def __init__(self, sched: scheduler.SchedulerBase,
-                 configuration: Configuration,
-                 config_dict: dict,
-                 resolver: Resolver, subarray_product_id: str,
-                 sdp_controller: 'DeviceServer',
-                 telstate_name: str = 'telstate') -> None:
-        super().__init__(sched, configuration, config_dict, resolver,
-                         subarray_product_id, sdp_controller)
-        # Priority is lower (higher number) than the default queue
-        self.batch_queue = scheduler.LaunchQueue(
-            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY)
-        sched.add_queue(self.batch_queue)
-        # generate physical nodes
-        self.physical_graph = self._instantiate_physical_graph(self.logical_graph)
-        # Nodes indexed by logical name
-        self._nodes = {node.logical_node.name: node for node in self.physical_graph}
-        self.telstate_node = self._nodes.get(telstate_name)
-        self.master_controller = sdp_controller.master_controller
-
-    def __del__(self) -> None:
-        if hasattr(self, 'batch_queue'):
-            self.sched.remove_queue(self.batch_queue)
-
-    def find_nodes(
-        self, *,
-        task_type: Optional[str] = None,
-        streams: Optional[Iterable[product_config.Stream]] = None
-    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
-        """Find physical nodes matching given criteria.
-
-        Parameters
-        ----------
-        task_type
-            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
-            node. If ``None``, any node can match.
-        streams
-            Streams to match against the :attr:`.SDPLogicalTask.streams`
-            attribute of the logical node. To match, there must be at least
-            one stream name in the intersection (only the names are matched,
-            not the identity). If ``None``, any node can match.
-        """
-        stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
-        for node in self.physical_graph:
-            logical_node = node.logical_node
-            if not isinstance(logical_node, tasks.SDPLogicalTask):
-                continue
-            if task_type is not None and task_type != logical_node.task_type:
-                continue
-            if (stream_names is not None
-                    and not stream_names.intersection(logical_node.stream_names)):
-                continue
-            yield node
-
-    async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
-                                    reqs: Sequence[KatcpTransition],
-                                    deps: Sequence[asyncio.Future],
-                                    state: CaptureBlockState,
-                                    capture_block: CaptureBlock) -> None:
-        try:
-            if deps:
-                # If we're starting a capture and a dependency fails, there is
-                # no point trying to continue. On the shutdown path, we should
-                # continue anyway to try to close everything off as neatly as
-                # possible.
-                await asyncio.gather(*deps,
-                                     return_exceptions=(state != CaptureBlockState.CAPTURING))
-            if reqs:
-                if node.katcp_connection is None:
-                    logger.warning(
-                        'Cannot issue %s to %s because there is no katcp connection',
-                        reqs[0], node.name)
-                else:
-                    for req in reqs:
-                        await node.issue_req(req.name, req.args, timeout=req.timeout)
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
-                observer = node.capture_block_state_observer
-                if observer is not None:
-                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
-                    await observer.wait_capture_block_done(capture_block.name)
-                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
-                else:
-                    logger.debug('Task %s has no capture-block-state observer', node.name)
-        finally:
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
-                node.remove_capture_block(capture_block)
-
-    async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
-                               capture_block: CaptureBlock) -> None:
-        """Issue requests to nodes on state transitions.
-
-        The requests are made in parallel, but respects `depends_init`
-        dependencies in the graph.
-
-        Parameters
-        ----------
-        state
-            New state
-        reverse
-            If there is a `depends_init` edge from A to B in the graph, A's
-            request will be made first if `reverse` is false, otherwise B's
-            request will be made first.
-        capture_block
-            The capture block is that being transitioned
-        """
-        # Create a copy of the graph containing only dependency edges.
-        deps_graph = scheduler.subgraph(self.physical_graph, DEPENDS_INIT)
-        # Reverse it
-        if not reverse:
-            deps_graph = deps_graph.reverse(copy=False)
-
-        futures: Dict[object, asyncio.Future] = {}     # Keyed by node
-        # Lexicographical tie-breaking isn't strictly required, but it makes
-        # behaviour predictable.
-        now = time.time()   # Outside loop to be consistent across all nodes
-        for node in networkx.lexicographical_topological_sort(deps_graph, key=lambda x: x.name):
-            reqs: List[KatcpTransition] = []
-            try:
-                reqs = node.get_transition(state)
-            except AttributeError:
-                # Not all nodes are SDPPhysicalTask
-                pass
-            if reqs:
-                # Apply {} substitutions to request data
-                subst = dict(capture_block_id=capture_block.name,
-                             time=now)
-                reqs = [req.format(**subst) for req in reqs]
-            deps = [futures[trg] for trg in deps_graph.predecessors(node) if trg in futures]
-            task = asyncio.get_event_loop().create_task(
-                self._exec_node_transition(node, reqs, deps, state, capture_block))
-            futures[node] = task
-        if futures:
-            # We want to wait for all the futures to complete, even if one of
-            # them fails early (to give the others time to do cleanup). But
-            # then we want to raise the first exception.
-            results = await asyncio.gather(*futures.values(), return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
-
-    async def capture_init_impl(self, capture_block: CaptureBlock) -> None:
-        assert self.telstate is not None
-        await self.telstate.add('sdp_capture_block_id', capture_block.name)
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.add_capture_block(capture_block)
-        await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
-
-    async def capture_done_impl(self, capture_block: CaptureBlock) -> None:
-        await self.exec_transitions(CaptureBlockState.BURNDOWN, False, capture_block)
-
-    async def postprocess_impl(self, capture_block: CaptureBlock) -> None:
-        assert self.telstate is not None
-        assert self.telstate_node is not None
-        try:
-            await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
-            capture_block.state = CaptureBlockState.POSTPROCESSING
-            logical_graph = await generator.build_postprocess_logical_graph(
-                capture_block.configuration, capture_block.name,
-                self.telstate, self.telstate_endpoint)
-            physical_graph = self._instantiate_physical_graph(
-                logical_graph, capture_block.name)
-            capture_block.postprocess_physical_graph = physical_graph
-            nodes = {node.logical_node.name: node for node in physical_graph}
-            telstate_node = nodes['telstate']
-            telstate_node.host = self.telstate_node.host
-            telstate_node.ports = dict(self.telstate_node.ports)
-            # This doesn't actually run anything, just marks the fake telstate node
-            # as READY. It could block for a while behind real tasks in the batch
-            # queue, but that doesn't matter because our real tasks will block too.
-            # However, because of this blocking it needs a large resources_timeout,
-            # even though it uses no resources.
-            await self.sched.launch(physical_graph, self.resolver, [telstate_node],
-                                    queue=self.batch_queue,
-                                    resources_timeout=BATCH_RESOURCES_TIMEOUT)
-            nodelist = [
-                node for node in physical_graph
-                if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
-            ]
-            await self.sched.batch_run(physical_graph, self.resolver, nodelist,
-                                       queue=self.batch_queue,
-                                       resources_timeout=BATCH_RESOURCES_TIMEOUT, attempts=3)
-        finally:
-            init_time = capture_block.state_time[CaptureBlockState.CAPTURING]
-            done_time = capture_block.state_time[CaptureBlockState.BURNDOWN]
-            observation_time = done_time - init_time
-            postprocessing_time = time.time() - done_time
-            POSTPROCESSING_TIME.observe(postprocessing_time)
-            logger.info('Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
-                        capture_block.name, postprocessing_time, observation_time,
-                        extra=dict(capture_block_id=capture_block.name,
-                                   observation_time=observation_time,
-                                   postprocessing_time=postprocessing_time))
-            # In unit tests the obs time might be zero, which leads to errors here
-            if observation_time > 0:
-                POSTPROCESSING_TIME_REL.observe(postprocessing_time / observation_time)
-            await self.exec_transitions(CaptureBlockState.DEAD, False, capture_block)
-
-    def capture_block_dead_impl(self, capture_block: CaptureBlock) -> None:
-        for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
-                node.remove_capture_block(capture_block)
 
     async def _launch_telstate(self) -> katsdptelstate.aio.TelescopeState:
         """Make sure the telstate node is launched"""
@@ -1347,133 +1363,6 @@ class SDPSubarrayProduct(SDPSubarrayProductBase):
         await self.sched.kill(self.physical_graph, force=force,
                               capture_blocks=self.capture_blocks)
 
-    async def configure_impl(self) -> None:
-        try:
-            try:
-                resolver = self.resolver
-                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
-
-                # Register static KATCP sensors.
-                for ss in self.physical_graph.graph["static_sensors"].values():
-                    self.add_sensor(ss)
-
-                # launch the telescope state for this graph
-                telstate: Optional[katsdptelstate.aio.TelescopeState]
-                if self.telstate_node is not None:
-                    telstate = await self._launch_telstate()
-                else:
-                    telstate = None
-                # launch containers for those nodes that require them
-                await self.sched.launch(self.physical_graph, self.resolver)
-                alive, died = self.check_nodes()
-                # is everything we asked for alive
-                if not alive:
-                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
-                    ret_msg = (f"{fail_list} failed to start. "
-                               "Check the error log for specific details.")
-                    logger.error(ret_msg)
-                    raise FailReply(ret_msg)
-                # Record the TaskInfo for each task in telstate, as well as details
-                # about the image resolver.
-                details = {}
-                for task in self.physical_graph:
-                    if isinstance(task, scheduler.PhysicalTask):
-                        details[task.logical_node.name] = {
-                            'host': task.host,
-                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict()
-                        }
-                if telstate is not None:
-                    await telstate.add('sdp_task_details', details, immutable=True)
-                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
-                    await telstate.add('sdp_image_overrides', resolver.image_resolver.overrides,
-                                       immutable=True)
-            except BaseException as exc:
-                # If there was a problem the graph might be semi-running. Shut it all down.
-                await self._shutdown(force=True)
-                raise exc
-        except scheduler.InsufficientResourcesError as error:
-            raise FailReply('Insufficient resources to launch {}: {}'.format(
-                self.subarray_product_id, error)) from error
-        except scheduler.ImageError as error:
-            raise FailReply(str(error)) from error
-
-    async def deconfigure_impl(self, force: bool, ready: asyncio.Event) -> None:
-        if force:
-            await self._shutdown(force=force)
-            ready.set()
-        else:
-            def must_wait(node):
-                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
-                        and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
-            # Start the shutdown in a separate task, so that we can monitor
-            # for task shutdown.
-            wait_tasks = [node.dead_event.wait() for node in self.physical_graph if must_wait(node)]
-            shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
-            await asyncio.gather(*wait_tasks)
-            self.state = ProductState.POSTPROCESSING
-            ready.set()
-            await shutdown_task
-
-    async def _multi_request(
-            self,
-            nodes: Iterable[tasks.SDPAnyPhysicalTask],
-            messages: Iterable[Iterable]) -> None:
-        """Send katcp requests for multiple nodes in parallel.
-
-        If any of the nodes has no current katcp connection, abort before
-        sending any of the messages. Otherwise, send the messages and wait
-        for all of them to complete (even if some of them fail). If any fail,
-        raise the first failure.
-
-        Each message is given as an iterable of arguments (starting with the
-        request name). It is acceptable for the messages iterator to be
-        longer than the node list. In particular, :meth:`itertools.repeat`
-        can be used to replicate a single message to every node.
-        """
-        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
-        messages_iter = iter(messages)
-        for node in nodes:
-            if node.katcp_connection is None:
-                raise FailReply(f"No katcp connection to {node.name}")
-            reqs.append((node.katcp_connection, next(messages_iter)))
-        # Now that we've validated things, send the messages
-        futures = []
-        for conn, msg in reqs:
-            futures.append(conn.request(*msg))
-        if futures:  # gather doesn't like having zero futures
-            results = await asyncio.gather(*futures, return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
-
-    async def set_delays_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            timestamp: aiokatcp.Timestamp,
-            coefficient_sets: Sequence[str]) -> None:
-        n_inputs = len(stream.src_streams)
-        # Can't use find_nodes because we need to ensure we match the right nodes
-        # to the right coefficients.
-        nodes = []
-        msgs = []
-        for i in range(n_inputs // 2):
-            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
-            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
-        await self._multi_request(nodes, msgs)
-
-    async def gain_impl(
-            self,
-            stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-            input: str,
-            values: Sequence[str]) -> Sequence[str]:
-        idx = stream.input_labels.index(input)
-        node_idx = idx // 2
-        node = self._nodes[f"f.{stream.name}.{node_idx}"]
-        if node.katcp_connection is None:
-            raise FailReply(f"No katcp connection to {node.name}")
-        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
-        return reply
-
 
 class DeviceServer(aiokatcp.DeviceServer):
     VERSION = 'product-controller-1.1'
@@ -1500,7 +1389,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.s3_config = _normalise_s3_config(s3_config)
         self.graph_dir = graph_dir
         self.master_controller = master_controller
-        self.product: Optional[SDPSubarrayProductBase] = None
+        self.product: Optional[SDPSubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
         super().__init__(host, port)
@@ -1664,7 +1553,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, configuration, config_dict)
 
-    def _get_product(self) -> SDPSubarrayProductBase:
+    def _get_product(self) -> SDPSubarrayProduct:
         """Check that self.product exists (i.e. ?product-configure has been called).
 
         If it has not, raises a :exc:`FailReply`.
