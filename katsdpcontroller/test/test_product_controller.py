@@ -294,7 +294,7 @@ class TestRelativeUrl(unittest.TestCase):
             _relative_url(yarl.URL('relative/url'), self.base)
 
 
-class BaseTestSDPController(asynctest.TestCase):
+class BaseTestController(asynctest.TestCase):
     """Utilities for test classes"""
 
     def _setup_model(self, model: katsdpmodels.models.Model,
@@ -429,8 +429,8 @@ class BaseTestSDPController(asynctest.TestCase):
 
 
 @timelimit
-class TestSDPControllerInterface(BaseTestSDPController):
-    """Testing of the SDP controller in interface mode."""
+class TestControllerInterface(BaseTestController):
+    """Testing of the controller in interface mode."""
 
     async def setUp(self) -> None:
         await super().setUp()
@@ -505,8 +505,8 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
 
 @timelimit
-class TestSDPController(BaseTestSDPController):
-    """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
+class TestController(BaseTestController):
+    """Test :class:`katsdpcontroller.product_controller.DeviceServer` using
     mocking of the scheduler.
     """
     def _request_slow(self, name: str, *args: Any, cancelled: bool = False) -> DelayedManager:
