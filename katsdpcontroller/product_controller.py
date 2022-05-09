@@ -239,11 +239,11 @@ class Resolver(scheduler.Resolver):
         self.service_overrides = service_overrides
         self.s3_config = s3_config
         self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
-        self.resources: Optional[SDPResources] = None
+        self.resources: Optional[Resources] = None
         self.localhost = localhost
 
 
-class SDPResources:
+class Resources:
     """Helper class to allocate resources for a single subarray-product."""
     def __init__(self, master_controller: aiokatcp.Client, subarray_product_id: str) -> None:
         self.master_controller = master_controller
@@ -365,15 +365,15 @@ class _IndexedKey(dict):
     pass
 
 
-class SDPSubarrayProduct:
-    """Represents an instance of an SDP subarray product.
+class SubarrayProduct:
+    """Represents an instance of a subarray product.
 
     This includes ingest, an appropriate telescope model, and any required
     post-processing.
 
     In general each telescope subarray product is handled in a completely
-    parallel fashion by the SDP. This class encapsulates these instances,
-    handling control input and sensor feedback to CAM.
+    parallel fashion. This class encapsulates these instances, handling control
+    input and sensor feedback to CAM.
 
     State changes are asynchronous operations. There can only be one
     asynchronous operation at a time. Attempting a second one will either
@@ -765,7 +765,7 @@ class SDPSubarrayProduct:
         try:
             try:
                 resolver = self.resolver
-                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+                resolver.resources = Resources(self.master_controller, self.subarray_product_id)
 
                 # Register static KATCP sensors.
                 for ss in self.physical_graph.graph["static_sensors"].values():
@@ -1389,7 +1389,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.s3_config = _normalise_s3_config(s3_config)
         self.graph_dir = graph_dir
         self.master_controller = master_controller
-        self.product: Optional[SDPSubarrayProduct] = None
+        self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
         super().__init__(host, port)
@@ -1512,7 +1512,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.localhost)
 
         # create graph object and build physical graph from specified resources
-        product = SDPSubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
+        product = SubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
@@ -1553,7 +1553,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, configuration, config_dict)
 
-    def _get_product(self) -> SDPSubarrayProduct:
+    def _get_product(self) -> SubarrayProduct:
         """Check that self.product exists (i.e. ?product-configure has been called).
 
         If it has not, raises a :exc:`FailReply`.

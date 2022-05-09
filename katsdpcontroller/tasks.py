@@ -103,7 +103,7 @@ class KatcpTransition(object):
     *args : str
         Request arguments. String arguments are passed through
         :meth:`str.format`: see
-        :meth:`.SDPSubarrayProduct.exec_transitions` for the keys that can
+        :meth:`.SubarrayProduct.exec_transitions` for the keys that can
         be substituted.
     timeout : float
         Maximum time to wait for the query to succeed.
@@ -141,7 +141,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.gui_urls = []
         # Overrides for sensor name remapping
         self.sensor_renames = {}
-        # Passes values to SDPSubarrayProduct to set as gauges
+        # Passes values to SubarrayProduct to set as gauges
         self.static_gauges: MutableMapping[str, float] = defaultdict(float)
         # Whether we should abort the capture block if the task fails
         self.critical = True
