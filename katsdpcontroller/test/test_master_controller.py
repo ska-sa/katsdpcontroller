@@ -28,7 +28,7 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
                     DelayedManager, Background, run_clocked,
-                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
+                    CONFIG, CONFIG_CBF_ONLY, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
 
@@ -781,6 +781,11 @@ class TestDeviceServer(asynctest.ClockedTestCase):
                 await self.client.request('product-reconfigure', 'product')
         # Check that the subarray was deconfigured cleanly
         self.assertEqual({}, self.server._manager.products)
+
+    async def test_product_configure_reuse_name(self) -> None:
+        await self.client.request('product-configure', 'product', CONFIG_CBF_ONLY)
+        await self.client.request('product-deconfigure', 'product')
+        await self.client.request('product-configure', 'product', CONFIG)
 
     async def test_help(self) -> None:
         reply, informs = await self.client.request('help')

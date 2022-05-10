@@ -1226,8 +1226,11 @@ class DeviceServer(aiokatcp.DeviceServer):
                     raise FailReply(f"Product {product.name} is not yet configured")
                 if not product.katcp_conn or not product.katcp_conn.is_connected:
                     raise FailReply('Not connected to product controller (try with force=True)')
-                await product.katcp_conn.request('product-deconfigure', force)
-                if force:
+                reply = (await product.katcp_conn.request('product-deconfigure', force))[0]
+                # reply will be empty if this is an older product controller.
+                # Otherwise a return of False (encoded as b'0') tells us that
+                # the product controller will die promptly.
+                if force or (reply and reply[0] == b'0'):
                     # Make sure it actually dies; if not we'll force it when we
                     # time out.
                     await product.dead_event.wait()
