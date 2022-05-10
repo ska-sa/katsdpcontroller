@@ -487,7 +487,8 @@ class TestControllerInterface(BaseTestController):
         # should not be able to deconfigure when not in idle state
         await assert_request_fails(self.client, "product-deconfigure")
         await self.client.request("capture-done")
-        await self.client.request("product-deconfigure")
+        reply, _informs = await self.client.request("product-deconfigure")
+        assert reply == [b'1']
         # server should now shut itself down
         await self.client.wait_disconnected()
 
