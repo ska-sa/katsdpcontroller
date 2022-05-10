@@ -451,7 +451,7 @@ class SubarrayProduct:
             value = 0.0
             gauge_name = gauge.collect()[0].name
             for node in self.logical_graph:
-                if isinstance(node, tasks.LogicalTask):
+                if isinstance(node, tasks.ProductLogicalTask):
                     value += node.static_gauges.get(gauge_name, 0.0)
             gauge.set(value)
 
@@ -544,16 +544,16 @@ class SubarrayProduct:
         self, *,
         task_type: Optional[str] = None,
         streams: Optional[Iterable[product_config.Stream]] = None
-    ) -> Generator[tasks.AnyPhysicalTask, None, None]:
+    ) -> Generator[tasks.ProductAnyPhysicalTask, None, None]:
         """Find physical nodes matching given criteria.
 
         Parameters
         ----------
         task_type
-            The :attr:`.tasks.LogicalTask.task_type` attribute of the logical
+            The :attr:`.ProductLogicalTask.task_type` attribute of the logical
             node. If ``None``, any node can match.
         streams
-            Streams to match against the :attr:`.tasks.LogicalTask.streams`
+            Streams to match against the :attr:`.ProductLogicalTask.streams`
             attribute of the logical node. To match, there must be at least
             one stream name in the intersection (only the names are matched,
             not the identity). If ``None``, any node can match.
@@ -561,7 +561,7 @@ class SubarrayProduct:
         stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
         for node in self.physical_graph:
             logical_node = node.logical_node
-            if not isinstance(logical_node, tasks.LogicalTask):
+            if not isinstance(logical_node, tasks.ProductLogicalTask):
                 continue
             if task_type is not None and task_type != logical_node.task_type:
                 continue
@@ -570,7 +570,7 @@ class SubarrayProduct:
                 continue
             yield node
 
-    async def _exec_node_transition(self, node: tasks.PhysicalTask,
+    async def _exec_node_transition(self, node: tasks.ProductPhysicalTask,
                                     reqs: Sequence[KatcpTransition],
                                     deps: Sequence[asyncio.Future],
                                     state: CaptureBlockState,
@@ -591,7 +591,8 @@ class SubarrayProduct:
                 else:
                     for req in reqs:
                         await node.issue_req(req.name, req.args, timeout=req.timeout)
-            if isinstance(node, tasks.PhysicalTask) and state == node.logical_node.final_state:
+            if (isinstance(node, tasks.ProductPhysicalTask)
+                    and state == node.logical_node.final_state):
                 observer = node.capture_block_state_observer
                 if observer is not None:
                     logger.info('Waiting for %s on %s', capture_block.name, node.name)
@@ -600,7 +601,8 @@ class SubarrayProduct:
                 else:
                     logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:
-            if isinstance(node, tasks.PhysicalTask) and state == node.logical_node.final_state:
+            if (isinstance(node, tasks.ProductPhysicalTask)
+                    and state == node.logical_node.final_state):
                 node.remove_capture_block(capture_block)
 
     async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
@@ -636,7 +638,7 @@ class SubarrayProduct:
             try:
                 reqs = node.get_transition(state)
             except AttributeError:
-                # Not all nodes are tasks.PhysicalTask
+                # Not all nodes are ProductPhysicalTask
                 pass
             if reqs:
                 # Apply {} substitutions to request data
@@ -658,7 +660,7 @@ class SubarrayProduct:
 
     async def _multi_request(
             self,
-            nodes: Iterable[tasks.AnyPhysicalTask],
+            nodes: Iterable[tasks.ProductAnyPhysicalTask],
             messages: Iterable[Iterable]) -> None:
         """Send katcp requests for multiple nodes in parallel.
 
@@ -844,7 +846,7 @@ class SubarrayProduct:
             ready.set()
         else:
             def must_wait(node):
-                return (isinstance(node.logical_node, tasks.LogicalTask)
+                return (isinstance(node.logical_node, tasks.ProductLogicalTask)
                         and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
             # Start the shutdown in a separate task, so that we can monitor
             # for task shutdown.
@@ -882,7 +884,7 @@ class SubarrayProduct:
         # will update the sensor with the value removed
         capture_block.state = CaptureBlockState.DEAD
         for node in self.physical_graph:
-            if isinstance(node, tasks.PhysicalTask):
+            if isinstance(node, tasks.ProductPhysicalTask):
                 node.remove_capture_block(capture_block)
 
     def _update_capture_block_sensor(self) -> None:
@@ -899,7 +901,7 @@ class SubarrayProduct:
             assert self.telstate is not None
             await self.telstate.add('sdp_capture_block_id', capture_block.name)
             for node in self.physical_graph:
-                if isinstance(node, tasks.PhysicalTask):
+                if isinstance(node, tasks.ProductPhysicalTask):
                     node.add_capture_block(capture_block)
             await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
             if self.state == ProductState.ERROR:
@@ -1308,12 +1310,12 @@ class SubarrayProduct:
                 result = False
         return result, died
 
-    def unexpected_death(self, task: tasks.AnyPhysicalTask) -> None:
+    def unexpected_death(self, task: tasks.ProductAnyPhysicalTask) -> None:
         logger.warning('Task %s died unexpectedly', task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
-    def bad_device_status(self, task: tasks.AnyPhysicalTask) -> None:
+    def bad_device_status(self, task: tasks.ProductAnyPhysicalTask) -> None:
         logger.warning('Task %s has failed (device-status)', task.name)
         if task.logical_node.critical:
             self._go_to_error()

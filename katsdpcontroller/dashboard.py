@@ -19,7 +19,7 @@ import dash_table
 from dash_dangerously_set_inner_html import DangerouslySetInnerHTML
 
 from . import scheduler
-from .tasks import PhysicalTask
+from .tasks import ProductPhysicalTask
 
 
 def timestamp_utc(timestamp):
@@ -45,7 +45,7 @@ def _get_tasks(product):
     order_graph = scheduler.subgraph(product.physical_graph, scheduler.DEPENDS_READY)
     tasks = networkx.lexicographical_topological_sort(
             order_graph.reverse(), key=lambda node: node.name)
-    tasks = [task for task in tasks if isinstance(task, PhysicalTask)]
+    tasks = [task for task in tasks if isinstance(task, ProductPhysicalTask)]
     return tasks
 
 
@@ -55,7 +55,7 @@ def _get_batch_tasks(product):
         graph = capture_block.postprocess_physical_graph
         if graph is not None:
             for task in graph.nodes:
-                if isinstance(task, PhysicalTask):
+                if isinstance(task, ProductPhysicalTask):
                     tasks.append((name, task))
     return tasks
 

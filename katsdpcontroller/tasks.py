@@ -126,12 +126,12 @@ class KatcpTransition(object):
         return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
 
 
-class LogicalTask(scheduler.LogicalTask):
+class ProductLogicalTask(scheduler.LogicalTask):
     def __init__(self, name, streams=()):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
         self.stream_names = frozenset(stream.name for stream in streams)
-        self.physical_factory = PhysicalTask
+        self.physical_factory = ProductPhysicalTask
         self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
@@ -288,8 +288,8 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
-class PhysicalTaskMixin(scheduler.PhysicalNode):
-    """Augments task classes with MeerKAT-specific functionality.
+class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
+    """Augments task classes with functionality specific to subarray products.
 
     This class is used in a mixin with either :class:`scheduler.PhysicalTask`
     or :class:`scheduler.FakePhysicalTask`.
@@ -306,7 +306,7 @@ class PhysicalTaskMixin(scheduler.PhysicalNode):
         ingest.sdp_l0.1.input_rate
     """
 
-    def __init__(self, logical_task: LogicalTask, sdp_controller,
+    def __init__(self, logical_task: ProductLogicalTask, sdp_controller,
                  subarray_product, capture_block_id: str) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
@@ -540,8 +540,8 @@ class PhysicalTaskMixin(scheduler.PhysicalNode):
         super().kill(driver, **kwargs)
 
 
-class PhysicalTask(ConfigMixin, PhysicalTaskMixin, scheduler.PhysicalTask):
-    """Augments the parent class with MeerKAT-specific functionality.
+class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.PhysicalTask):
+    """Augments the parent class with functionality specific to subarray products.
 
     In addition to the augmentations from the mixin classes, this class:
     - Provides Docker labels.
@@ -549,11 +549,11 @@ class PhysicalTask(ConfigMixin, PhysicalTaskMixin, scheduler.PhysicalTask):
       a port called ``prometheus``.
     """
 
-    logical_node: LogicalTask
+    logical_node: ProductLogicalTask
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.PhysicalTask.__init__(self, logical_task)
-        PhysicalTaskMixin.__init__(
+        ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
         self.consul_services = []
 
@@ -718,20 +718,20 @@ async def wrap_katcp_server(
 # TODO: see if ConfigMixin can be re-enabled here. It will need
 # FakePhysicalTask to behave much more like PhysicalTask for generator.py to
 # extract config.
-class FakePhysicalTask(PhysicalTaskMixin, scheduler.FakePhysicalTask):
-    logical_node: LogicalTask
+class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTask):
+    logical_node: ProductLogicalTask
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.FakePhysicalTask.__init__(self, logical_task)
-        PhysicalTaskMixin.__init__(
+        ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
         if self.logical_node.metadata_katcp_sensors:
             # Notify about the sensors added by the mixin constructor. This is
-            # done here rather than in the constructor because PhysicalTask
-            # adds further sensors as part of resolve.
+            # done here rather than in the constructor because
+            # ProductPhysicalTask adds further sensors as part of resolve.
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
@@ -744,7 +744,7 @@ class FakePhysicalTask(PhysicalTaskMixin, scheduler.FakePhysicalTask):
         return wrap_katcp_server(katcp_server)
 
 
-AnyPhysicalTask = Union[PhysicalTask, FakePhysicalTask]
+ProductAnyPhysicalTask = Union[ProductPhysicalTask, ProductFakePhysicalTask]
 
 
 class LogicalGroup(scheduler.LogicalExternal):
