@@ -175,6 +175,17 @@ agent). By default, the priority is the total number of volumes, interfaces and
 GPUs it has. This can be overridden by assigning a `katsdpcontroller.priority`
 scalar attribute. Ties are broken by amount of available memory.
 
+Subsystems
+----------
+It may be desirable to restrict particular sets of tasks to particular sets of
+agents for administrative reasons. Each task may be assigned to a "subsystem"
+(a string). Each agent may belong to a set of subsystems, or be unassigned and
+able to run any task. A task with an assigned subsystem will only run on
+agents belonging to that subsystem (or agents without assigned subsystems).
+The subsystems for an agent are specified by assigning a
+`katsdpcontroller.subsystems` attribute as a base64url-encoded JSON string
+conforming to :const:`katsdpcontroller.schemas.SUBSYSTEMS`.
+
 Setting up agents
 -----------------
 The previous sections list a number of resources and attributes that need to be
