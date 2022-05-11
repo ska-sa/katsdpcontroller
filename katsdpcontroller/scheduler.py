@@ -1534,6 +1534,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.volumes = []
         self.numa_nodes = 0.0
         self.host = None
+        self.subsystem = None
         self.capabilities = []
         self.image = None
         self.command = []
@@ -1543,12 +1544,16 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
-    def valid_agent(self, agent):
+    def valid_agent(self, agent) -> bool:
         """Checks whether the attributes of an agent are suitable for running
         this task. Subclasses may override this to enforce constraints e.g.,
         requiring a special type of hardware."""
+        if self.subsystem is not None and self.subsystem not in agent.subsystems:
+            return False
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
-        return self.host is None or agent.host == self.host
+        if self.host is not None and agent.host != self.host:
+            return False
+        return True
 
     def __repr__(self):
         s = io.StringIO()
@@ -1622,6 +1627,13 @@ def _decode_json_base64(value):
     return json.loads(json_bytes.decode('utf-8'))
 
 
+class _Everything:
+    """Acts like a set that contains any possible element."""
+
+    def __contains__(self, x) -> bool:
+        return True
+
+
 class Agent:
     """Collects multiple offers for a single Mesos agent and role and allows
     :class:`ResourceAllocation`s to be made from it.
@@ -1649,6 +1661,7 @@ class Agent:
         self.volumes = []
         self.gpus = []
         self.numa = []
+        self.subsystems = _Everything()
         self.priority = None
         for attribute in offers[0].attributes:
             try:
@@ -1681,6 +1694,10 @@ class Agent:
                     self.infiniband_devices = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
+                elif attribute.name == 'katsdpcontroller.subsystems' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    schemas.SUBSYSTEMS.validate(value)
+                    self.subsystems = set(value)
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
                 logger.warning('Could not parse %s (%s)',
                                attribute.name, attribute.text.value)

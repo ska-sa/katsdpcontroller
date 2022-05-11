@@ -194,6 +194,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
             n_antennas += len(stream.antennas)
 
     telstate = ProductLogicalTask('telstate')
+    telstate.subsystem = 'sdp'
     # redis is nominally single-threaded, but has some helper threads
     # for background tasks so can occasionally exceed 1 CPU.
     telstate.cpus = 1.2 if not configuration.options.develop else 0.2
@@ -221,6 +222,7 @@ def _make_cam2telstate(g: networkx.MultiDiGraph,
                        configuration: Configuration,
                        stream: product_config.CamHttpStream) -> scheduler.LogicalNode:
     cam2telstate = ProductLogicalTask('cam2telstate')
+    cam2telstate.subsystem = 'sdp'
     cam2telstate.image = 'katsdpcam2telstate'
     cam2telstate.command = ['cam2telstate.py']
     cam2telstate.cpus = 0.75
@@ -242,6 +244,7 @@ def _make_cam2telstate(g: networkx.MultiDiGraph,
 def _make_meta_writer(g: networkx.MultiDiGraph,
                       configuration: Configuration) -> scheduler.LogicalNode:
     meta_writer = ProductLogicalTask('meta_writer')
+    meta_writer.subsystem = 'sdp'
     meta_writer.image = 'katsdpmetawriter'
     meta_writer.command = ['meta_writer.py']
     meta_writer.cpus = 0.2
@@ -304,6 +307,7 @@ def _make_dsim(
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
     dsim = ProductLogicalTask(name, streams=streams)
+    dsim.subsystem = 'cbf'
     dsim.image = 'katgpucbf'
     dsim.mem = 2048
     dsim.ports = ['port', 'prometheus']
@@ -443,6 +447,7 @@ def _make_fgpu(
     for i in range(0, n_engines):
         srcs = stream.sources(i)
         fgpu = ProductLogicalTask(f'f.{stream.name}.{i}', streams=[stream])
+        fgpu.subsystem = 'cbf'
         fgpu.image = 'katgpucbf'
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
@@ -648,6 +653,7 @@ def _make_xbgpu(
 
     for i in range(0, stream.n_substreams):
         xbgpu = ProductLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
+        xbgpu.subsystem = 'cbf'
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
@@ -804,6 +810,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
 
     for i in range(n_sim):
         sim = ProductLogicalTask('sim.{}.{}'.format(stream.name, i + 1), streams=[stream])
+        sim.subsystem = 'sdp'
         sim.image = 'katcbfsim'
         # create-*-stream is passed on the command-line instead of telstate
         # for now due to SR-462.
@@ -873,6 +880,7 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
     """Common backend code for creating a single timeplot server."""
     multicast = find_node(g, 'multicast.timeplot.' + name)
     timeplot = ProductLogicalTask('timeplot.' + name)
+    timeplot.subsystem = 'sdp'
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
     timeplot.cpus = cpus
@@ -1129,6 +1137,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
 
     for i in range(1, n_ingest + 1):
         ingest = ProductLogicalTask('ingest.{}.{}'.format(name, i), streams=streams)
+        ingest.subsystem = 'sdp'
         if configuration.options.interface_mode:
             ingest.physical_factory = ProductFakePhysicalTask
         else:
@@ -1301,6 +1310,7 @@ def _make_cal(g: networkx.MultiDiGraph,
     for i in range(1, n_cal + 1):
         cal = ProductLogicalTask('{}.{}'.format(stream.name, i),
                                  streams=(stream,) + tuple(flags_streams))
+        cal.subsystem = 'sdp'
         cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
@@ -1428,6 +1438,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
     vis_writer = ProductLogicalTask('vis_writer.' + output_name, streams=[stream])
+    vis_writer.subsystem = 'sdp'
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
@@ -1505,6 +1516,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
     flag_writer = ProductLogicalTask('flag_writer.' + output_name, streams=[stream])
+    flag_writer.subsystem = 'sdp'
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
@@ -1633,6 +1645,7 @@ def _make_beamformer_engineering_pol(
     assert isinstance(src_multicast, LogicalMulticast)
 
     bf_ingest = ProductLogicalTask(node_name, streams=[stream] if stream is not None else [])
+    bf_ingest.subsystem = 'sdp'
     bf_ingest.image = 'katsdpbfingest'
     bf_ingest.command = ['schedrr', 'bf_ingest.py']
     bf_ingest.cpus = 2
@@ -2075,6 +2088,7 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
         target_name = target_mapper(target)
         imager = ProductLogicalTask(
             f'continuum_image.{stream.name}.{target_name}', streams=[stream])
+        imager.subsystem = 'sdp'
         imager.cpus = cpus
         # These resources are very rough estimates
         imager.mem = 50000 if not configuration.options.develop else 8000
@@ -2176,6 +2190,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
 
             imager = ProductLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 stream.name, first_channel, last_channel, target_name), streams=[stream])
+            imager.subsystem = 'sdp'
             imager.cpus = _spectral_imager_cpus(configuration)
             # TODO: these resources are very rough estimates. The disk
             # estimate is conservative since it assumes no compression.
@@ -2253,6 +2268,7 @@ def _make_spectral_imager_report(
         data_url: str,
         spectral_nodes: Sequence[scheduler.LogicalNode]) -> scheduler.LogicalNode:
     report = ProductLogicalTask(f'spectral_image_report.{stream.name}', streams=[stream])
+    report.subsystem = 'sdp'
     report.cpus = 1.0
     # Memory is a guess - but since we don't open the chunk store it should be lightweight
     report.mem = 4 * 1024
