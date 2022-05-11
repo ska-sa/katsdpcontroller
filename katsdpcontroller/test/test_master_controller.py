@@ -137,7 +137,7 @@ class DummyServer(aiokatcp.DeviceServer):
         self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
                                 default="[]", initial_status=Sensor.Status.NOMINAL))
         self.sensors.add(Sensor(DeviceStatus, "device-status",
-                                "Devices status of the SDP Master Controller",
+                                "Devices status of the Master Controller",
                                 default=DeviceStatus.OK,
                                 status_func=device_status_to_sensor_status))
 

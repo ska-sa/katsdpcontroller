@@ -29,7 +29,7 @@ from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
 from .fake_servers import FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer
 from .tasks import (
-    SDPLogicalTask, SDPPhysicalTask, SDPFakePhysicalTask,
+    ProductLogicalTask, ProductPhysicalTask, ProductFakePhysicalTask,
     LogicalGroup, CaptureBlockState, KatcpTransition)
 from .product_config import (
     BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
@@ -130,7 +130,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         self._endpoint_sensor.value = str(Endpoint(self.host, self.ports['spead']))
 
 
-class TelstateTask(SDPPhysicalTask):
+class TelstateTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph):
         await super().resolve(resolver, graph)
         # Add a port mapping
@@ -150,7 +150,7 @@ class TelstateTask(SDPPhysicalTask):
             parameters.append({'key': 'publish', 'value': f'{LOCALHOST}:{host_port}:6379'})
 
 
-class IngestTask(SDPPhysicalTask):
+class IngestTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph, image_path=None):
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image.
@@ -193,7 +193,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
         if isinstance(stream, product_config.AntennaChannelisedVoltageStreamBase):
             n_antennas += len(stream.antennas)
 
-    telstate = SDPLogicalTask('telstate')
+    telstate = ProductLogicalTask('telstate')
     # redis is nominally single-threaded, but has some helper threads
     # for background tasks so can occasionally exceed 1 CPU.
     telstate.cpus = 1.2 if not configuration.options.develop else 0.2
@@ -206,7 +206,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
         {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     if configuration.options.interface_mode:
-        telstate.physical_factory = SDPFakePhysicalTask
+        telstate.physical_factory = ProductFakePhysicalTask
     else:
         telstate.physical_factory = TelstateTask
     telstate.katsdpservices_logging = False
@@ -220,7 +220,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
 def _make_cam2telstate(g: networkx.MultiDiGraph,
                        configuration: Configuration,
                        stream: product_config.CamHttpStream) -> scheduler.LogicalNode:
-    cam2telstate = SDPLogicalTask('cam2telstate')
+    cam2telstate = ProductLogicalTask('cam2telstate')
     cam2telstate.image = 'katsdpcam2telstate'
     cam2telstate.command = ['cam2telstate.py']
     cam2telstate.cpus = 0.75
@@ -241,7 +241,7 @@ def _make_cam2telstate(g: networkx.MultiDiGraph,
 
 def _make_meta_writer(g: networkx.MultiDiGraph,
                       configuration: Configuration) -> scheduler.LogicalNode:
-    meta_writer = SDPLogicalTask('meta_writer')
+    meta_writer = ProductLogicalTask('meta_writer')
     meta_writer.image = 'katsdpmetawriter'
     meta_writer.command = ['meta_writer.py']
     meta_writer.cpus = 0.2
@@ -303,7 +303,7 @@ def _make_dsim(
     # Generate a unique name. The caller groups streams by
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
     name = f'sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}'
-    dsim = SDPLogicalTask(name, streams=streams)
+    dsim = ProductLogicalTask(name, streams=streams)
     dsim.image = 'katgpucbf'
     dsim.mem = 2048
     dsim.ports = ['port', 'prometheus']
@@ -442,7 +442,7 @@ def _make_fgpu(
 
     for i in range(0, n_engines):
         srcs = stream.sources(i)
-        fgpu = SDPLogicalTask(f'f.{stream.name}.{i}', streams=[stream])
+        fgpu = ProductLogicalTask(f'f.{stream.name}.{i}', streams=[stream])
         fgpu.image = 'katgpucbf'
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
@@ -647,7 +647,7 @@ def _make_xbgpu(
     send_buffer = vis_size * 5  # Magic number is default in XSend class
 
     for i in range(0, stream.n_substreams):
-        xbgpu = SDPLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
+        xbgpu = ProductLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
         xbgpu.image = 'katgpucbf'
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
@@ -760,7 +760,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             n_sim *= 2
     ibv = not configuration.options.develop
 
-    def make_cbf_simulator_config(task: SDPPhysicalTask,
+    def make_cbf_simulator_config(task: ProductPhysicalTask,
                                   resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'cbf_channels': stream.n_chans,
@@ -803,7 +803,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     init_telstate[('sub', 'band')] = stream.antenna_channelised_voltage.band
 
     for i in range(n_sim):
-        sim = SDPLogicalTask('sim.{}.{}'.format(stream.name, i + 1), streams=[stream])
+        sim = ProductLogicalTask('sim.{}.{}'.format(stream.name, i + 1), streams=[stream])
         sim.image = 'katcbfsim'
         # create-*-stream is passed on the command-line instead of telstate
         # for now due to SR-462.
@@ -872,7 +872,7 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
                    extra_config: dict) -> scheduler.LogicalNode:
     """Common backend code for creating a single timeplot server."""
     multicast = find_node(g, 'multicast.timeplot.' + name)
-    timeplot = SDPLogicalTask('timeplot.' + name)
+    timeplot = ProductLogicalTask('timeplot.' + name)
     timeplot.image = 'katsdpdisp'
     timeplot.command = ['time_plot.py']
     timeplot.cpus = cpus
@@ -1128,9 +1128,9 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
 
     for i in range(1, n_ingest + 1):
-        ingest = SDPLogicalTask('ingest.{}.{}'.format(name, i), streams=streams)
+        ingest = ProductLogicalTask('ingest.{}.{}'.format(name, i), streams=streams)
         if configuration.options.interface_mode:
-            ingest.physical_factory = SDPFakePhysicalTask
+            ingest.physical_factory = ProductFakePhysicalTask
         else:
             ingest.physical_factory = IngestTask
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
@@ -1170,7 +1170,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
             data_rate_out += continuum.data_rate()
         ingest.interfaces[1].bandwidth_out = data_rate_out / n_ingest
 
-        def make_ingest_config(task: SDPPhysicalTask,
+        def make_ingest_config(task: ProductPhysicalTask,
                                resolver: 'product_controller.Resolver',
                                server_id: int = i) -> Dict[str, Any]:
             conf = {
@@ -1299,8 +1299,8 @@ def _make_cal(g: networkx.MultiDiGraph,
 
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
-        cal = SDPLogicalTask('{}.{}'.format(stream.name, i),
-                             streams=(stream,) + tuple(flags_streams))
+        cal = ProductLogicalTask('{}.{}'.format(stream.name, i),
+                                 streams=(stream,) + tuple(flags_streams))
         cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
         cal.command = ['run_cal.py']
@@ -1325,7 +1325,7 @@ def _make_cal(g: networkx.MultiDiGraph,
         cal.transitions = CAPTURE_TRANSITIONS
         cal.final_state = CaptureBlockState.POSTPROCESSING
 
-        def make_cal_config(task: SDPPhysicalTask,
+        def make_cal_config(task: ProductPhysicalTask,
                             resolver: 'product_controller.Resolver',
                             server_id: int = i) -> Dict[str, Any]:
             cal_config = {
@@ -1355,7 +1355,7 @@ def _make_cal(g: networkx.MultiDiGraph,
             # streams. This is used as a config= function, but instead of
             # returning config we just stash information in the task object
             # which is retrieved by make_cal_config.
-            def add_flags_endpoint(task: SDPPhysicalTask,
+            def add_flags_endpoint(task: ProductPhysicalTask,
                                    resolver: 'product_controller.Resolver',
                                    endpoint: Endpoint,
                                    name: str = flags_stream.name) -> Dict[str, Any]:
@@ -1427,7 +1427,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
                      max_channels: Optional[int] = None):
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
-    vis_writer = SDPLogicalTask('vis_writer.' + output_name, streams=[stream])
+    vis_writer = ProductLogicalTask('vis_writer.' + output_name, streams=[stream])
     vis_writer.image = 'katsdpdatawriter'
     vis_writer.command = ['vis_writer.py']
     # Don't yet have a good idea of real CPU usage. For now assume that 32
@@ -1464,7 +1464,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
         ])
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
-    def make_vis_writer_config(task: SDPPhysicalTask,
+    def make_vis_writer_config(task: ProductPhysicalTask,
                                resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'l0_name': stream.name,
@@ -1504,7 +1504,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
                       max_channels: Optional[int] = None) -> scheduler.LogicalNode:
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
-    flag_writer = SDPLogicalTask('flag_writer.' + output_name, streams=[stream])
+    flag_writer = ProductLogicalTask('flag_writer.' + output_name, streams=[stream])
     flag_writer.image = 'katsdpdatawriter'
     flag_writer.command = ['flag_writer.py']
 
@@ -1549,7 +1549,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
         ]
     }
 
-    def make_flag_writer_config(task: SDPPhysicalTask,
+    def make_flag_writer_config(task: ProductPhysicalTask,
                                 resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         conf = {
             'flags_name': stream.name,
@@ -1600,7 +1600,7 @@ def _make_beamformer_engineering_pol(
         src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
         node_name: str,
         ram: bool,
-        idx: int) -> SDPLogicalTask:
+        idx: int) -> ProductLogicalTask:
     """Generate node for a single polarisation of beamformer engineering output.
 
     This handles two cases: either it is a capture to file, associated with a
@@ -1632,7 +1632,7 @@ def _make_beamformer_engineering_pol(
     src_multicast = find_node(g, 'multicast.' + src_stream.name)
     assert isinstance(src_multicast, LogicalMulticast)
 
-    bf_ingest = SDPLogicalTask(node_name, streams=[stream] if stream is not None else [])
+    bf_ingest = ProductLogicalTask(node_name, streams=[stream] if stream is not None else [])
     bf_ingest.image = 'katsdpbfingest'
     bf_ingest.command = ['schedrr', 'bf_ingest.py']
     bf_ingest.cpus = 2
@@ -1674,7 +1674,7 @@ def _make_beamformer_engineering_pol(
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
     def make_beamformer_engineering_pol_config(
-            task: SDPPhysicalTask,
+            task: ProductPhysicalTask,
             resolver: 'product_controller.Resolver') -> Dict[str, Any]:
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
@@ -1713,13 +1713,7 @@ def _make_beamformer_engineering(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
         stream: product_config.BeamformerEngineeringStream) -> Sequence[scheduler.LogicalTask]:
-    """Generate nodes for beamformer engineering output.
-
-    If `timeplot` is true, it generates services that only send data to
-    timeplot servers, without capturing the data. In this case `name` may
-    refer to an ``sdp.beamformer`` rather than an
-    ``sdp.beamformer_engineering`` stream.
-    """
+    """Generate nodes for beamformer engineering output."""
     ram = stream.store == 'ram'
     nodes = []
     for i, src in enumerate(stream.tied_array_channelised_voltage):
@@ -1879,7 +1873,7 @@ def build_logical_graph(configuration: Configuration,
     # don't create it.
     need_telstate = False
     for node in g:
-        if isinstance(node, SDPLogicalTask):
+        if isinstance(node, ProductLogicalTask):
             if node.pass_telstate or node.katsdpservices_config:
                 need_telstate = True
     if need_telstate:
@@ -1896,7 +1890,7 @@ def build_logical_graph(configuration: Configuration,
         telstate_extra += data.get('telstate_extra', 0)
     seen = set()
     for node in g:
-        if isinstance(node, SDPLogicalTask):
+        if isinstance(node, ProductLogicalTask):
             assert node.name not in seen, "{} appears twice in graph".format(node.name)
             seen.add(node.name)
             assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
@@ -1937,13 +1931,14 @@ def build_logical_graph(configuration: Configuration,
             if force_host is not None:
                 node.host = force_host
     # For any tasks that don't pick a more specific fake implementation, use
-    # either SDPFakePhysicalTask or FakePhysicalTask depending on the original.
+    # either ProductFakePhysicalTask or FakePhysicalTask depending on
+    # the original.
     if configuration.options.interface_mode:
         for node in g:
             if node.physical_factory == scheduler.PhysicalTask:
                 node.physical_factory = scheduler.FakePhysicalTask
-            elif node.physical_factory == SDPPhysicalTask:
-                node.physical_factory = SDPFakePhysicalTask
+            elif node.physical_factory == ProductPhysicalTask:
+                node.physical_factory = ProductFakePhysicalTask
             elif issubclass(node.physical_factory, scheduler.PhysicalTask):
                 raise TypeError(f'{node.name} needs to specify a fake physical factory')
 
@@ -2078,7 +2073,8 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
 
     for target, obs_time in targets:
         target_name = target_mapper(target)
-        imager = SDPLogicalTask(f'continuum_image.{stream.name}.{target_name}', streams=[stream])
+        imager = ProductLogicalTask(
+            f'continuum_image.{stream.name}.{target_name}', streams=[stream])
         imager.cpus = cpus
         # These resources are very rough estimates
         imager.mem = 50000 if not configuration.options.develop else 8000
@@ -2178,7 +2174,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
                                    extra=dict(capture_block_id=capture_block_id))
                     continue
 
-            imager = SDPLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
+            imager = ProductLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
                 stream.name, first_channel, last_channel, target_name), streams=[stream])
             imager.cpus = _spectral_imager_cpus(configuration)
             # TODO: these resources are very rough estimates. The disk
@@ -2256,7 +2252,7 @@ def _make_spectral_imager_report(
         stream: product_config.SpectralImageStream,
         data_url: str,
         spectral_nodes: Sequence[scheduler.LogicalNode]) -> scheduler.LogicalNode:
-    report = SDPLogicalTask(f'spectral_image_report.{stream.name}', streams=[stream])
+    report = ProductLogicalTask(f'spectral_image_report.{stream.name}', streams=[stream])
     report.cpus = 1.0
     # Memory is a guess - but since we don't open the chunk store it should be lightweight
     report.mem = 4 * 1024
@@ -2309,7 +2305,7 @@ async def build_postprocess_logical_graph(
 
     seen = set()
     for node in g:
-        if isinstance(node, SDPLogicalTask):
+        if isinstance(node, ProductLogicalTask):
             # TODO: most of this code is shared by _build_logical_graph
             assert node.name not in seen, "{} appears twice in graph".format(node.name)
             seen.add(node.name)

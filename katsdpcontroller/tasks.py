@@ -103,7 +103,7 @@ class KatcpTransition(object):
     *args : str
         Request arguments. String arguments are passed through
         :meth:`str.format`: see
-        :meth:`.SDPSubarrayProduct.exec_transitions` for the keys that can
+        :meth:`.SubarrayProduct.exec_transitions` for the keys that can
         be substituted.
     timeout : float
         Maximum time to wait for the query to succeed.
@@ -126,12 +126,12 @@ class KatcpTransition(object):
         return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
 
 
-class SDPLogicalTask(scheduler.LogicalTask):
+class ProductLogicalTask(scheduler.LogicalTask):
     def __init__(self, name, streams=()):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
         self.stream_names = frozenset(stream.name for stream in streams)
-        self.physical_factory = SDPPhysicalTask
+        self.physical_factory = ProductPhysicalTask
         self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
@@ -141,7 +141,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.gui_urls = []
         # Overrides for sensor name remapping
         self.sensor_renames = {}
-        # Passes values to SDPSubarrayProduct to set as gauges
+        # Passes values to SubarrayProduct to set as gauges
         self.static_gauges: MutableMapping[str, float] = defaultdict(float)
         # Whether we should abort the capture block if the task fails
         self.critical = True
@@ -164,7 +164,7 @@ class SDPLogicalTask(scheduler.LogicalTask):
         self.sdp_physical_factory = True
 
 
-class SDPConfigMixin:
+class ConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
     def _graph_config(self, resolver, graph):
         return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
@@ -288,8 +288,8 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
-class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
-    """Augments task classes with SDP-specific functionality.
+class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
+    """Augments task classes with functionality specific to subarray products.
 
     This class is used in a mixin with either :class:`scheduler.PhysicalTask`
     or :class:`scheduler.FakePhysicalTask`.
@@ -306,7 +306,7 @@ class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
         ingest.sdp_l0.1.input_rate
     """
 
-    def __init__(self, logical_task: SDPLogicalTask, sdp_controller,
+    def __init__(self, logical_task: ProductLogicalTask, sdp_controller,
                  subarray_product, capture_block_id: str) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
@@ -540,8 +540,8 @@ class SDPPhysicalTaskMixin(scheduler.PhysicalNode):
         super().kill(driver, **kwargs)
 
 
-class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTask):
-    """Augments the parent class with SDP-specific functionality.
+class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.PhysicalTask):
+    """Augments the parent class with functionality specific to subarray products.
 
     In addition to the augmentations from the mixin classes, this class:
     - Provides Docker labels.
@@ -549,11 +549,11 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
       a port called ``prometheus``.
     """
 
-    logical_node: SDPLogicalTask
+    logical_node: ProductLogicalTask
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.PhysicalTask.__init__(self, logical_task)
-        SDPPhysicalTaskMixin.__init__(
+        ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
         self.consul_services = []
 
@@ -648,7 +648,7 @@ class SDPPhysicalTask(SDPConfigMixin, SDPPhysicalTaskMixin, scheduler.PhysicalTa
             {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
             for (key, value) in labels.items()])
 
-        # Set extra fields for SDP services to log to logstash
+        # Set extra fields for katsdpservices-using services to log to logstash
         if self.logical_node.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
             extras = {
                 **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
@@ -715,23 +715,23 @@ async def wrap_katcp_server(
     await server.stop()
 
 
-# TODO: see if SDPConfigMixin can be re-enabled here. It will need
+# TODO: see if ConfigMixin can be re-enabled here. It will need
 # FakePhysicalTask to behave much more like PhysicalTask for generator.py to
 # extract config.
-class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
-    logical_node: SDPLogicalTask
+class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTask):
+    logical_node: ProductLogicalTask
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.FakePhysicalTask.__init__(self, logical_task)
-        SDPPhysicalTaskMixin.__init__(
+        ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
         if self.logical_node.metadata_katcp_sensors:
             # Notify about the sensors added by the mixin constructor. This is
-            # done here rather than in the constructor because SDPPhysicalTask
-            # adds further sensors as part of resolve.
+            # done here rather than in the constructor because
+            # ProductPhysicalTask adds further sensors as part of resolve.
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
@@ -744,7 +744,7 @@ class SDPFakePhysicalTask(SDPPhysicalTaskMixin, scheduler.FakePhysicalTask):
         return wrap_katcp_server(katcp_server)
 
 
-SDPAnyPhysicalTask = Union[SDPPhysicalTask, SDPFakePhysicalTask]
+ProductAnyPhysicalTask = Union[ProductPhysicalTask, ProductFakePhysicalTask]
 
 
 class LogicalGroup(scheduler.LogicalExternal):
@@ -762,7 +762,7 @@ class LogicalGroup(scheduler.LogicalExternal):
         self.katsdpservices_config = True
 
 
-class PhysicalGroup(SDPConfigMixin, scheduler.PhysicalExternal):
+class PhysicalGroup(ConfigMixin, scheduler.PhysicalExternal):
     pass
 
 

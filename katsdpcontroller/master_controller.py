@@ -1174,17 +1174,19 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_product_configure(self, ctx, name: str, config: str) -> Tuple[str, str, int]:
-        """Configure a SDP subarray product instance.
+        """Configure a subarray product instance.
 
-        A subarray product instance is comprised of a telescope state, a
-        collection of containers running required SDP services, and a
-        networking configuration appropriate for the required data movement.
+        A subarray product instance is comprised of an optional telescope
+        state, a collection of containers running required services, and
+        a networking configuration appropriate for the required data
+        movement.
 
         On configuring a new product, several steps occur:
          * Build initial static configuration. Includes elements such as IP
            addresses of deployment machines, multicast subscription details etc
          * Launch a new Telescope State Repository (redis instance) for this
-           product and copy in static config.
+           product and copy in static config (if the subarray product contains
+           any SDP components).
          * Launch service containers as described in the static configuration.
          * Verify all services are running and reachable.
 
@@ -1258,10 +1260,10 @@ class DeviceServer(aiokatcp.DeviceServer):
     @time_request
     async def request_product_reconfigure(self, ctx, name: str) -> None:
         """
-        Reconfigure the specified SDP subarray product instance.
+        Reconfigure the specified subarray product instance.
 
-        The primary use of this command is to restart the SDP components for a particular
-        subarray without having to reconfigure the rest of the system.
+        The primary use of this command is to restart the components for a particular
+        subarray product without having to reconfigure the rest of the system.
 
         Essentially this runs a deconfigure() followed by a configure() with
         the same parameters as originally specified via the
@@ -1470,7 +1472,11 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_sdp_shutdown(self, ctx) -> str:
-        """Shut down the SDP master controller and all controlled nodes.
+        """Shut down the master controller and all controlled nodes.
+
+        Note that despite the name, this will shut down all nodes that
+        have registered a poweroff-server service with consul, regardless of
+        which subsystem they belong to.
 
         Returns
         -------
@@ -1480,7 +1486,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             On success, a comma-separated lists of hosts that have been shutdown; on
             failure a human-readable message listing success and failure machines.
         """
-        logger.warning("SDP Master Controller interrupted by sdp-shutdown request - "
+        logger.warning("Master Controller interrupted by sdp-shutdown request - "
                        "deconfiguring existing products (may lead to data loss!).")
         await self._deconfigure_all()
         endpoints = await self._poweroff_endpoints(self._consul_url)

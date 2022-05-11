@@ -239,11 +239,11 @@ class Resolver(scheduler.Resolver):
         self.service_overrides = service_overrides
         self.s3_config = s3_config
         self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
-        self.resources: Optional[SDPResources] = None
+        self.resources: Optional[Resources] = None
         self.localhost = localhost
 
 
-class SDPResources:
+class Resources:
     """Helper class to allocate resources for a single subarray-product."""
     def __init__(self, master_controller: aiokatcp.Client, subarray_product_id: str) -> None:
         self.master_controller = master_controller
@@ -365,15 +365,15 @@ class _IndexedKey(dict):
     pass
 
 
-class SDPSubarrayProduct:
-    """Represents an instance of an SDP subarray product.
+class SubarrayProduct:
+    """Represents an instance of a subarray product.
 
     This includes ingest, an appropriate telescope model, and any required
     post-processing.
 
     In general each telescope subarray product is handled in a completely
-    parallel fashion by the SDP. This class encapsulates these instances,
-    handling control input and sensor feedback to CAM.
+    parallel fashion. This class encapsulates these instances, handling control
+    input and sensor feedback to CAM.
 
     State changes are asynchronous operations. There can only be one
     asynchronous operation at a time. Attempting a second one will either
@@ -451,7 +451,7 @@ class SDPSubarrayProduct:
             value = 0.0
             gauge_name = gauge.collect()[0].name
             for node in self.logical_graph:
-                if isinstance(node, tasks.SDPLogicalTask):
+                if isinstance(node, tasks.ProductLogicalTask):
                     value += node.static_gauges.get(gauge_name, 0.0)
             gauge.set(value)
 
@@ -544,16 +544,16 @@ class SDPSubarrayProduct:
         self, *,
         task_type: Optional[str] = None,
         streams: Optional[Iterable[product_config.Stream]] = None
-    ) -> Generator[tasks.SDPAnyPhysicalTask, None, None]:
+    ) -> Generator[tasks.ProductAnyPhysicalTask, None, None]:
         """Find physical nodes matching given criteria.
 
         Parameters
         ----------
         task_type
-            The :attr:`.SDPLogicalTask.task_type` attribute of the logical
+            The :attr:`.ProductLogicalTask.task_type` attribute of the logical
             node. If ``None``, any node can match.
         streams
-            Streams to match against the :attr:`.SDPLogicalTask.streams`
+            Streams to match against the :attr:`.ProductLogicalTask.streams`
             attribute of the logical node. To match, there must be at least
             one stream name in the intersection (only the names are matched,
             not the identity). If ``None``, any node can match.
@@ -561,7 +561,7 @@ class SDPSubarrayProduct:
         stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
         for node in self.physical_graph:
             logical_node = node.logical_node
-            if not isinstance(logical_node, tasks.SDPLogicalTask):
+            if not isinstance(logical_node, tasks.ProductLogicalTask):
                 continue
             if task_type is not None and task_type != logical_node.task_type:
                 continue
@@ -570,7 +570,7 @@ class SDPSubarrayProduct:
                 continue
             yield node
 
-    async def _exec_node_transition(self, node: tasks.SDPPhysicalTask,
+    async def _exec_node_transition(self, node: tasks.ProductPhysicalTask,
                                     reqs: Sequence[KatcpTransition],
                                     deps: Sequence[asyncio.Future],
                                     state: CaptureBlockState,
@@ -591,7 +591,8 @@ class SDPSubarrayProduct:
                 else:
                     for req in reqs:
                         await node.issue_req(req.name, req.args, timeout=req.timeout)
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+            if (isinstance(node, tasks.ProductPhysicalTask)
+                    and state == node.logical_node.final_state):
                 observer = node.capture_block_state_observer
                 if observer is not None:
                     logger.info('Waiting for %s on %s', capture_block.name, node.name)
@@ -600,7 +601,8 @@ class SDPSubarrayProduct:
                 else:
                     logger.debug('Task %s has no capture-block-state observer', node.name)
         finally:
-            if isinstance(node, tasks.SDPPhysicalTask) and state == node.logical_node.final_state:
+            if (isinstance(node, tasks.ProductPhysicalTask)
+                    and state == node.logical_node.final_state):
                 node.remove_capture_block(capture_block)
 
     async def exec_transitions(self, state: CaptureBlockState, reverse: bool,
@@ -636,7 +638,7 @@ class SDPSubarrayProduct:
             try:
                 reqs = node.get_transition(state)
             except AttributeError:
-                # Not all nodes are SDPPhysicalTask
+                # Not all nodes are ProductPhysicalTask
                 pass
             if reqs:
                 # Apply {} substitutions to request data
@@ -658,7 +660,7 @@ class SDPSubarrayProduct:
 
     async def _multi_request(
             self,
-            nodes: Iterable[tasks.SDPAnyPhysicalTask],
+            nodes: Iterable[tasks.ProductAnyPhysicalTask],
             messages: Iterable[Iterable]) -> None:
         """Send katcp requests for multiple nodes in parallel.
 
@@ -765,7 +767,7 @@ class SDPSubarrayProduct:
         try:
             try:
                 resolver = self.resolver
-                resolver.resources = SDPResources(self.master_controller, self.subarray_product_id)
+                resolver.resources = Resources(self.master_controller, self.subarray_product_id)
 
                 # Register static KATCP sensors.
                 for ss in self.physical_graph.graph["static_sensors"].values():
@@ -844,7 +846,7 @@ class SDPSubarrayProduct:
             ready.set()
         else:
             def must_wait(node):
-                return (isinstance(node.logical_node, tasks.SDPLogicalTask)
+                return (isinstance(node.logical_node, tasks.ProductLogicalTask)
                         and node.logical_node.final_state <= CaptureBlockState.BURNDOWN)
             # Start the shutdown in a separate task, so that we can monitor
             # for task shutdown.
@@ -882,7 +884,7 @@ class SDPSubarrayProduct:
         # will update the sensor with the value removed
         capture_block.state = CaptureBlockState.DEAD
         for node in self.physical_graph:
-            if isinstance(node, tasks.SDPPhysicalTask):
+            if isinstance(node, tasks.ProductPhysicalTask):
                 node.remove_capture_block(capture_block)
 
     def _update_capture_block_sensor(self) -> None:
@@ -899,7 +901,7 @@ class SDPSubarrayProduct:
             assert self.telstate is not None
             await self.telstate.add('sdp_capture_block_id', capture_block.name)
             for node in self.physical_graph:
-                if isinstance(node, tasks.SDPPhysicalTask):
+                if isinstance(node, tasks.ProductPhysicalTask):
                     node.add_capture_block(capture_block)
             await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
             if self.state == ProductState.ERROR:
@@ -1308,12 +1310,12 @@ class SDPSubarrayProduct:
                 result = False
         return result, died
 
-    def unexpected_death(self, task: tasks.SDPAnyPhysicalTask) -> None:
+    def unexpected_death(self, task: tasks.ProductAnyPhysicalTask) -> None:
         logger.warning('Task %s died unexpectedly', task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
-    def bad_device_status(self, task: tasks.SDPAnyPhysicalTask) -> None:
+    def bad_device_status(self, task: tasks.ProductAnyPhysicalTask) -> None:
         logger.warning('Task %s has failed (device-status)', task.name)
         if task.logical_node.critical:
             self._go_to_error()
@@ -1389,11 +1391,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.s3_config = _normalise_s3_config(s3_config)
         self.graph_dir = graph_dir
         self.master_controller = master_controller
-        self.product: Optional[SDPSubarrayProduct] = None
+        self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
         super().__init__(host, port)
-        # setup sensors (note: SDPProductController adds other sensors)
+        # setup sensors (note: ProductController adds other sensors)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Devices status of the subarray product controller",
                                 default=DeviceStatus.OK,
@@ -1512,7 +1514,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self.localhost)
 
         # create graph object and build physical graph from specified resources
-        product = SDPSubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
+        product = SubarrayProduct(self.sched, configuration, config_dict, resolver, name, self)
         if self.graph_dir is not None:
             product.write_graphs(self.graph_dir)
         self.product = product   # Prevents another attempt to configure
@@ -1524,7 +1526,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise
 
     async def request_product_configure(self, ctx, name: str, config: str) -> None:
-        """Configure a SDP subarray product instance.
+        """Configure a subarray product instance.
 
         Parameters
         ----------
@@ -1553,7 +1555,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
         await self.configure_product(name, configuration, config_dict)
 
-    def _get_product(self) -> SDPSubarrayProduct:
+    def _get_product(self) -> SubarrayProduct:
         """Check that self.product exists (i.e. ?product-configure has been called).
 
         If it has not, raises a :exc:`FailReply`.

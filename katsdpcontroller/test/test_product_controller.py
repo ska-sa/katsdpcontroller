@@ -38,7 +38,7 @@ import yarl
 from ..consul import ConsulService
 from ..controller import device_server_sockname
 from ..product_controller import (
-    DeviceServer, SDPSubarrayProduct, SDPResources,
+    DeviceServer, SubarrayProduct, Resources,
     ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url)
 from .. import scheduler
 from . import fake_katportalclient
@@ -294,7 +294,7 @@ class TestRelativeUrl(unittest.TestCase):
             _relative_url(yarl.URL('relative/url'), self.base)
 
 
-class BaseTestSDPController(asynctest.TestCase):
+class BaseTestController(asynctest.TestCase):
     """Utilities for test classes"""
 
     def _setup_model(self, model: katsdpmodels.models.Model,
@@ -429,8 +429,8 @@ class BaseTestSDPController(asynctest.TestCase):
 
 
 @timelimit
-class TestSDPControllerInterface(BaseTestSDPController):
-    """Testing of the SDP controller in interface mode."""
+class TestControllerInterface(BaseTestController):
+    """Testing of the controller in interface mode."""
 
     async def setUp(self) -> None:
         await super().setUp()
@@ -505,8 +505,8 @@ class TestSDPControllerInterface(BaseTestSDPController):
 
 
 @timelimit
-class TestSDPController(BaseTestSDPController):
-    """Test :class:`katsdpcontroller.sdpcontroller.SDPController` using
+class TestController(BaseTestController):
+    """Test :class:`katsdpcontroller.product_controller.DeviceServer` using
     mocking of the scheduler.
     """
     def _request_slow(self, name: str, *args: Any, cancelled: bool = False) -> DelayedManager:
@@ -849,7 +849,7 @@ class TestSDPController(BaseTestSDPController):
         # Verify the state of the subarray
         product = self.server.product
         assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        assert isinstance(product, SDPSubarrayProduct)  # For mypy's benefit
+        assert isinstance(product, SubarrayProduct)  # For mypy's benefit
         self.assertFalse(product.async_busy)
         self.assertEqual(ProductState.IDLE, product.state)
 
@@ -1140,7 +1140,7 @@ class TestSDPController(BaseTestSDPController):
         """Capture-init fails if an asynchronous operation is already in progress"""
         await self._test_busy("capture-init", CAPTURE_BLOCK)
 
-    def _ingest_died(self, subarray_product: SDPSubarrayProduct) -> None:
+    def _ingest_died(self, subarray_product: SubarrayProduct) -> None:
         """Mark an ingest process as having died"""
         for node in subarray_product.physical_graph:
             if node.logical_node.name == 'ingest.sdp_l0.1':
@@ -1150,7 +1150,7 @@ class TestSDPController(BaseTestSDPController):
         else:
             raise ValueError('Could not find ingest node')
 
-    def _ingest_bad_device_status(self, subarray_product: SDPSubarrayProduct) -> None:
+    def _ingest_bad_device_status(self, subarray_product: SubarrayProduct) -> None:
         """Mark an ingest process as having bad status"""
         sensor = self.server.sensors['ingest.sdp_l0.1.device-status']
         sensor.set_value(DeviceStatus.FAIL, Sensor.Status.ERROR)
@@ -1222,7 +1222,7 @@ class TestSDPController(BaseTestSDPController):
         await self._test_busy("capture-done")
 
     async def _test_failure_while_capturing(
-            self, failfunc: Callable[[SDPSubarrayProduct], None]) -> None:
+            self, failfunc: Callable[[SubarrayProduct], None]) -> None:
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product
@@ -1513,8 +1513,8 @@ class TestSDPController(BaseTestSDPController):
         self._check_prom('histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
 
 
-class TestSDPResources(asynctest.TestCase):
-    """Test :class:`katsdpcontroller.product_controller.SDPResources`."""
+class TestResources(asynctest.TestCase):
+    """Test :class:`katsdpcontroller.product_controller.Resources`."""
 
     async def setUp(self):
         mc_server = DummyMasterController('127.0.0.1', 0)
@@ -1522,7 +1522,7 @@ class TestSDPResources(asynctest.TestCase):
         self.addCleanup(mc_server.stop)
         mc_address = device_server_sockname(mc_server)
         mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
-        self.resources = SDPResources(mc_client, SUBARRAY_PRODUCT)
+        self.resources = Resources(mc_client, SUBARRAY_PRODUCT)
 
     async def test_get_multicast_groups(self):
         self.assertEqual('239.192.0.1', await self.resources.get_multicast_groups(1))
