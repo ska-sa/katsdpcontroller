@@ -184,6 +184,51 @@ CONFIG = '''{
     "config": {}
 }'''     # noqa: E501
 
+CONFIG_CBF_ONLY = '''{
+    "version": "3.1",
+    "outputs": {
+        "gpucbf_m900v": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
+        },
+        "gpucbf_m900h": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
+        },
+        "gpucbf_m901v": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m901, 0:0:0, 0:0:0, 0, 0"
+        },
+        "gpucbf_m901h": {
+            "type": "sim.dig.raw_antenna_voltage",
+            "band": "l",
+            "adc_sample_rate": 1712000000.0,
+            "centre_frequency": 1284000000.0,
+            "antenna": "m901, 0:0:0, 0:0:0, 0, 0"
+        },
+        "gpucbf_antenna_channelised_voltage": {
+            "type": "gpucbf.antenna_channelised_voltage",
+            "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
+            "n_chans": 4096
+        },
+        "gpucbf_baseline_correlation_products": {
+            "type": "gpucbf.baseline_correlation_products",
+            "src_streams": ["gpucbf_antenna_channelised_voltage"],
+            "int_time": 0.5
+        }
+    },
+    "config": {}
+}'''
+
 S3_CONFIG = '''
 {
     "continuum": {

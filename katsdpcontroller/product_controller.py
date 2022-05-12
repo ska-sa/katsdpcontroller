@@ -468,6 +468,15 @@ class SubarrayProduct:
         self._nodes = {node.logical_node.name: node for node in self.physical_graph}
         self.telstate_node = self._nodes.get(telstate_name)
         self.master_controller = sdp_controller.master_controller
+        # Note: this doesn't take into account the postprocessing graph.
+        # However, there can only be postprocessing if there is a telstate,
+        # and telstate has a final_state of DEAD, so it would make
+        # _delayed_deconfigure true anyway.
+        self._delayed_deconfigure = any(
+            isinstance(node.logical_node, tasks.ProductLogicalTask)
+            and node.logical_node.final_state >= CaptureBlockState.POSTPROCESSING
+            for node in self.physical_graph
+        )
 
         logger.info("Created: %r", self)
         logger.info('Logical graph nodes:\n'
@@ -854,7 +863,10 @@ class SubarrayProduct:
             shutdown_task = asyncio.get_event_loop().create_task(self._shutdown(force=force))
             await asyncio.gather(*wait_tasks)
             self.state = ProductState.POSTPROCESSING
-            ready.set()
+            # If it's going to take a while to shut down, let product-deconfigure
+            # return now. If it's going to be quick then we just wait
+            if self._delayed_deconfigure:
+                ready.set()
             await shutdown_task
 
         # Allow all the postprocessing tasks to finish up
@@ -873,6 +885,8 @@ class SubarrayProduct:
         # Setting dead_event is done by the first callback
         for callback in self.dead_callbacks:
             callback(self)
+        # Might have been set earlier, but harmless to set it twice
+        ready.set()
 
     def _capture_block_dead(self, capture_block: CaptureBlock) -> None:
         """Mark a capture block as dead and remove it from the list."""
@@ -1014,10 +1028,19 @@ class SubarrayProduct:
         # their sensor lists.
         self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
-    async def deconfigure(self, force: bool = False) -> None:
-        """Start deconfiguration of the subarray, but does not wait for it to complete."""
+    async def deconfigure(self, force: bool = False) -> bool:
+        """Start deconfiguration of the subarray, but does not wait for it to complete.
+
+        Returns
+        -------
+        delayed_deconfigure
+            If true, there are remaining tasks which will take an
+            indeterminate amount of time to complete before the product
+            controller will terminate. If false, all the tasks are dead
+            and the product controller will exit soon.
+        """
         if self.state == ProductState.DEAD:
-            return
+            return False
         if self.async_busy:
             if not force:
                 self._fail_if_busy()
@@ -1043,10 +1066,11 @@ class SubarrayProduct:
         task.add_done_callback(self._clear_async_task)
         if await self._replace_async_task(task):
             await ready.wait()
-        # We don't wait for task to complete, but if it's already done we
-        # pass back any exceptions.
-        if task.done():
+        # We don't necessarily wait for task to complete, but if it's already
+        # done we pass back any exceptions.
+        if task.done() or not self._delayed_deconfigure:
             await task
+        return self._delayed_deconfigure
 
     async def capture_init(self, capture_block_id: str, configuration: Configuration) -> str:
         self._fail_if_busy()
@@ -1565,9 +1589,18 @@ class DeviceServer(aiokatcp.DeviceServer):
                             'It must be called before other requests.')
         return self.product
 
-    async def request_product_deconfigure(self, ctx, force: bool = False) -> None:
-        """Deconfigure the product and shut down the server."""
-        await self._get_product().deconfigure(force=force)
+    async def request_product_deconfigure(self, ctx, force: bool = False) -> bool:
+        """Deconfigure the product and shut down the server.
+
+        Returns
+        -------
+        delayed_deconfigure : bool
+            If true, there are remaining tasks which will take an
+            indeterminate amount of time to complete before the product
+            controller will terminate. If false, all the tasks are dead
+            and the product controller will exit soon.
+        """
+        return await self._get_product().deconfigure(force=force)
 
     async def request_capture_init(self, ctx, capture_block_id: str,
                                    override_dict_json: str = '{}') -> None:
