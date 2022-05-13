@@ -175,6 +175,17 @@ agent). By default, the priority is the total number of volumes, interfaces and
 GPUs it has. This can be overridden by assigning a `katsdpcontroller.priority`
 scalar attribute. Ties are broken by amount of available memory.
 
+Subsystems
+----------
+It may be desirable to restrict particular sets of tasks to particular sets of
+agents for administrative reasons. Each task may be assigned to a "subsystem"
+(a string). Each agent may belong to a set of subsystems, or be unassigned and
+able to run any task. A task with an assigned subsystem will only run on
+agents belonging to that subsystem (or agents without assigned subsystems).
+The subsystems for an agent are specified by assigning a
+`katsdpcontroller.subsystems` attribute as a base64url-encoded JSON string
+conforming to :const:`katsdpcontroller.schemas.SUBSYSTEMS`.
+
 Setting up agents
 -----------------
 The previous sections list a number of resources and attributes that need to be
@@ -199,7 +210,7 @@ import base64
 import socket
 import contextlib
 import copy
-from collections import namedtuple, deque
+from collections import namedtuple, deque, defaultdict
 from enum import Enum
 import math
 import asyncio
@@ -1232,138 +1243,155 @@ class InsufficientResourcesError(RuntimeError):
     is also used for internal operations when trying to allocate a specific
     task to a specific agent.
     """
-    pass
+
+    def __init__(self, *args, subsystem: Optional[str] = None) -> None:
+        super().__init__(*args)
+        self.subsystem = subsystem
+
+    def _subsystem_str(self) -> str:
+        if self.subsystem is None:
+            return ''
+        else:
+            return f' (subsystem {self.subsystem})'
 
 
 class TaskNoAgentError(InsufficientResourcesError):
     """Indicates that no agent was suitable for a task. Where possible, a
     sub-class is used to indicate a more specific error.
     """
-    def __init__(self, node):
-        super().__init__()
+    def __init__(self, node, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(subsystem=subsystem)
         self.node = node
 
     def __str__(self):
-        return "No agent was found suitable for {0.node.name}".format(self)
+        return f"No agent was found suitable for {self.node.name}{self._subsystem_str()}"
 
 
 class TaskInsufficientResourcesError(TaskNoAgentError):
     """Indicates that a specific task required more of some resource than
     were available on any agent."""
-    def __init__(self, node, resource, needed, available):
-        super().__init__(node)
+    def __init__(self, node, resource, needed, available,
+                 *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Not enough {0.resource} for {0.node.name} on any agent "
-                "({0.needed} > {0.available})".format(self))
+        return (f"Not enough {self.resource} for {self.node.name} on any agent "
+                f"({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class TaskInsufficientGPUResourcesError(TaskNoAgentError):
     """Indicates that a specific task GPU request needed more of some resource
     than was available on any agent GPU."""
-    def __init__(self, node, request_index, resource, needed, available):
-        super().__init__(node)
+    def __init__(self, node, request_index, resource, needed, available,
+                 *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.request_index = request_index
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Not enough GPU {0.resource} for {0.node.name} (request #{0.request_index}) "
-                "on any agent ({0.needed} > {0.available})".format(self))
+        return (f"Not enough GPU {self.resource} for {self.node.name} "
+                f"(request #{self.request_index}) on any agent "
+                f"({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
     """Indicates that a specific task interface request needed more of some
     resource than was available on any agent interface."""
-    def __init__(self, node, request, resource, needed, available):
-        super().__init__(node)
+    def __init__(self, node, request, resource, needed, available,
+                 *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.request = request
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Not enough interface {0.resource} on {0.request.network} for "
-                "{0.node.name} on any agent ({0.needed} > {0.available})".format(self))
+        return (f"Not enough interface {self.resource} on {self.request.network} for "
+                f"{self.node.name} on any agent "
+                f"({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class TaskNoInterfaceError(TaskNoAgentError):
     """Indicates that a task required a network interface that was not present on any agent."""
-    def __init__(self, node, request):
-        super().__init__(node)
+    def __init__(self, node, request, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.request = request
 
     def __str__(self):
-        return ("No agent matches {1}network request for {0.request.network} from "
-                "task {0.node.name}".format(self, "Infiniband " if self.request.infiniband else ""))
+        infiniband = "Infiniband " if self.request.infiniband else ""
+        return (f"No agent matches {infiniband}network request for {self.request.network} from "
+                f"task {self.node.name}{self._subsystem_str()}")
 
 
 class TaskNoVolumeError(TaskNoAgentError):
     """Indicates that a task required a volume that was not present on any agent."""
-    def __init__(self, node, request):
-        super().__init__(node)
+    def __init__(self, node, request, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.request = request
 
     def __str__(self):
-        return ("No agent matches volume request for {0.request.name} "
-                "from {0.node.name}".format(self))
+        return (f"No agent matches volume request for {self.request.name} "
+                f"from {self.node.name}{self._subsystem_str()}")
 
 
 class TaskNoGPUError(TaskNoAgentError):
     """Indicates that a task required a GPU that did not match any agent"""
-    def __init__(self, node, request_index):
-        super().__init__(node)
+    def __init__(self, node, request_index, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(node, subsystem=subsystem)
         self.request_index = request_index
 
     def __str__(self):
-        return "No agent matches GPU request #{0.request_index} from {0.node.name}".format(self)
+        return (f"No agent matches GPU request #{self.request_index} "
+                f"from {self.node.name}{self._subsystem_str()}")
 
 
 class GroupInsufficientResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     resource than were available between all the agents."""
-    def __init__(self, resource, needed, available):
-        super().__init__()
+    def __init__(self, resource, needed, available, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(subsystem=subsystem)
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Insufficient total {0.resource} to launch all tasks "
-                "({0.needed} > {0.available})".format(self))
+        return (f"Insufficient total {self.resource} to launch all tasks "
+                f"({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     GPU resource than were available between all the agents."""
-    def __init__(self, resource, needed, available):
-        super().__init__()
+    def __init__(self, resource, needed, available, *, subsystem: Optional[str] = None) -> None:
+        super().__init__(subsystem=subsystem)
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Insufficient total GPU {0.resource} to launch all tasks "
-                "({0.needed} > {0.available})".format(self))
+        return (f"Insufficient total GPU {self.resource} to launch all tasks "
+                f"({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
     """Indicates that a group of tasks collectively required more of some
     interface resource than were available between all the agents."""
-    def __init__(self, network, resource, needed, available):
-        super().__init__()
+    def __init__(self, network, resource, needed, available,
+                 *, subsystem: Optional[str] = None) -> None:
+        super().__init__(subsystem=subsystem)
         self.network = network
         self.resource = resource
         self.needed = needed
         self.available = available
 
     def __str__(self):
-        return ("Insufficient total interface {0.resource} on network {0.network} "
-                "to launch all tasks ({0.needed} > {0.available})".format(self))
+        return (f"Insufficient total interface {self.resource} on network {self.network} "
+                f"to launch all tasks ({self.needed} > {self.available}){self._subsystem_str()}")
 
 
 class QueueBusyError(InsufficientResourcesError):
@@ -1534,6 +1562,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.volumes = []
         self.numa_nodes = 0.0
         self.host = None
+        self.subsystem = None
         self.capabilities = []
         self.image = None
         self.command = []
@@ -1543,12 +1572,16 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
-    def valid_agent(self, agent):
+    def valid_agent(self, agent) -> bool:
         """Checks whether the attributes of an agent are suitable for running
         this task. Subclasses may override this to enforce constraints e.g.,
         requiring a special type of hardware."""
+        if self.subsystem is not None and self.subsystem not in agent.subsystems:
+            return False
         # TODO: enforce x86-64, if we ever introduce ARM or other hardware
-        return self.host is None or agent.host == self.host
+        if self.host is not None and agent.host != self.host:
+            return False
+        return True
 
     def __repr__(self):
         s = io.StringIO()
@@ -1622,6 +1655,13 @@ def _decode_json_base64(value):
     return json.loads(json_bytes.decode('utf-8'))
 
 
+class _Everything:
+    """Acts like a set that contains any possible element."""
+
+    def __contains__(self, x) -> bool:
+        return True
+
+
 class Agent:
     """Collects multiple offers for a single Mesos agent and role and allows
     :class:`ResourceAllocation`s to be made from it.
@@ -1649,6 +1689,7 @@ class Agent:
         self.volumes = []
         self.gpus = []
         self.numa = []
+        self.subsystems = _Everything()
         self.priority = None
         for attribute in offers[0].attributes:
             try:
@@ -1681,6 +1722,10 @@ class Agent:
                     self.infiniband_devices = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
+                elif attribute.name == 'katsdpcontroller.subsystems' and attribute.type == 'TEXT':
+                    value = _decode_json_base64(attribute.text.value)
+                    schemas.SUBSYSTEMS.validate(value)
+                    self.subsystems = set(value)
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
                 logger.warning('Could not parse %s (%s)',
                                attribute.name, attribute.text.value)
@@ -2918,11 +2963,12 @@ class SchedulerBase:
             pass
 
     @classmethod
-    def _diagnose_insufficient(cls, agents, nodes):
-        """Try to determine *why* offers are insufficient.
+    def _diagnose_insufficient_subsystem(cls, agents, nodes):
+        """Implementation of :meth:`_diagnose_insufficient` for a single subsystem.
 
-        This function does not return, instead raising an instance of
-        :exc:`InsufficientResourcesError` or a subclass.
+        This function either raises a subclass of :exc:`InsufficientResourcesError`,
+        or returns if it could not identify a bottleneck. It does not populate the
+        `subsystem` attribute of the exception; the caller does that.
 
         Parameters
         ----------
@@ -3036,8 +3082,45 @@ class SchedulerBase:
                     if need > total_interface_resources[network][r]:
                         raise GroupInsufficientInterfaceResourcesError(
                             network, r, need, total_interface_resources[network][r])
-            # Not a simple error e.g. due to packing problems
-            raise InsufficientResourcesError("Insufficient resources to launch all tasks")
+
+    @classmethod
+    def _diagnose_insufficient(cls, agents, nodes):
+        """Try to determine *why* offers are insufficient.
+
+        This function does not return, instead raising an instance of
+        :exc:`InsufficientResourcesError` or a subclass.
+
+        Parameters
+        ----------
+        agents : list
+            :class:`Agent`s from which allocation was attempted
+        nodes : list
+            :class:`PhysicalNode`s for which allocation failed. This may
+            include non-tasks, which will be ignored.
+        """
+        # First see if the failure can be isolated to contention within a
+        # particular subsystem.
+        nodes_by_subsystem = defaultdict(list)
+        for node in nodes:
+            if (isinstance(node.logical_node, LogicalTask)
+                    and node.logical_node.subsystem is not None):
+                nodes_by_subsystem[node.logical_node.subsystem].append(node)
+        for subsystem, sub_nodes in nodes_by_subsystem.items():
+            sub_agents = []
+            for agent in agents:
+                if subsystem in agent.subsystems:
+                    sub_agents.append(agent)
+            # Will raise if it finds a bottleneck
+            try:
+                cls._diagnose_insufficient_subsystem(sub_agents, sub_nodes)
+            except InsufficientResourcesError as exc:
+                exc.subsystem = subsystem
+                raise
+
+        cls._diagnose_insufficient_subsystem(agents, nodes)
+
+        # Not a simple error e.g. due to packing problems
+        raise InsufficientResourcesError("Insufficient resources to launch all tasks")
 
     def _update_agents_multicast(self, agents):
         """Update the multicast group information for a freshly minted set of :class:`Agent` s."""

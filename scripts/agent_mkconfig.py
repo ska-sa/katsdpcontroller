@@ -301,6 +301,9 @@ def attributes_resources(args):
     if args.priority is not None:
         attributes['katsdpcontroller.priority'] = args.priority
 
+    if args.subsystems:
+        attributes['katsdpcontroller.subsystems'] = args.subsystems
+
     attributes['katsdpcontroller.numa'] = hwloc.cpus_by_node()
     resources['cores'] = collapse_ranges(hwloc.cpu_nodes().keys())
     resources['cpus'] = float(len(hwloc.cpu_nodes())) - args.reserve_cpu
@@ -411,6 +414,8 @@ def main():
                         metavar='NAME:PATH[:NUMA]',
                         help='Map host directory to a logical volume name')
     parser.add_argument('--priority', type=float, help='Set agent priority for placement')
+    parser.add_argument('--subsystem', dest='subsystems', action='append', default=[],
+                        help='Restrict agent to a subsystem (can be repeated)')
     args = parser.parse_args()
 
     attributes, resources = attributes_resources(args)

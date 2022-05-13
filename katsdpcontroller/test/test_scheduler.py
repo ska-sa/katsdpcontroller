@@ -728,6 +728,8 @@ class TestAgent(unittest.TestCase):
               'compute_capability': (5, 2), 'numa_node': 0, 'uuid': 'GPU-456'}])
         self.numa_attr = _make_json_attr(
             'katsdpcontroller.numa', [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.subsystem_attr = _make_json_attr(
+            'katsdpcontroller.subsystems', ['subsystem1', 'subsystem2'])
         self.priority_attr = Dict()
         self.priority_attr.name = 'katsdpcontroller.priority'
         self.priority_attr.type = 'SCALAR'
@@ -826,6 +828,14 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.valid_agent = lambda x: False
         agent = scheduler.Agent([self._make_offer({}, [])])
+        with assert_raises(scheduler.InsufficientResourcesError):
+            agent.allocate(task)
+
+    def test_allocate_subsystem_mismatch(self):
+        """allocate raises if the task is owned by a subsystem not valid on the agent"""
+        task = scheduler.LogicalTask('task')
+        task.subsystem = 'foo'
+        agent = scheduler.Agent([self._make_offer({}, [self.subsystem_attr])])
         with assert_raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -1377,9 +1387,25 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.assertEqual(1500e6, cm.exception.needed)
         self.assertEqual(1000e6, cm.exception.available)
 
+    def test_subsystem(self):
+        """A subsystem has insufficient resources, although the system has enough."""
+        self.logical_task.subsystem = 'sdp'
+        self.logical_task.cpus = 32  # Consumes all of cpus_agent
+        self.logical_task2.subsystem = 'sdp'
+        self.logical_task2.cpus = 1
+        self.cpus_agent.subsystems = {'sdp'}
+        self.cores_agent.subsystems = {'cbf', 'other'}
+        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.cpus_agent, self.cores_agent], [self.physical_task, self.physical_task2])
+        self.assertEqual('cpus', cm.exception.resource)
+        self.assertEqual(33, cm.exception.needed)
+        self.assertEqual(32, cm.exception.available)
+        self.assertEqual('sdp', cm.exception.subsystem)
+
     def test_generic(self):
-        """A group of tasks can't fit, but on simpler explanation is available"""
-        # Create a tasks that uses just too much memory for the
+        """A group of tasks can't fit, but no simpler explanation is available"""
+        # Create a task that uses just too much memory for the
         # low-memory agents, forcing them to consume memory from the
         # big-memory agent and not leaving enough for the big-memory task.
         self.logical_task.mem = 5
