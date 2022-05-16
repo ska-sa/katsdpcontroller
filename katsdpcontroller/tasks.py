@@ -130,6 +130,7 @@ class ProductLogicalTask(scheduler.LogicalTask):
     def __init__(self, name, streams=()):
         super().__init__(name)
         self.task_type = name.split('.', 1)[0]
+        self.streams = list(streams)
         self.stream_names = frozenset(stream.name for stream in streams)
         self.physical_factory = ProductPhysicalTask
         self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
@@ -701,6 +702,10 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
     VERSION = "fake-1.0"
     BUILD_STATE = "fake-1.0"
 
+    def __init__(self, host: str, port: int, logical_task: ProductLogicalTask, **kwargs) -> None:
+        super().__init__(host, port, **kwargs)
+        self.logical_task = logical_task
+
     async def unhandled_request(self, ctx, req: aiokatcp.core.Message) -> None:
         """Respond to any unknown requests with an empty reply."""
         ctx.reply(aiokatcp.core.Message.OK)
@@ -740,7 +745,7 @@ class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTa
             return await super()._create_server(port, sock)
         host, port_no = sock.getsockname()[:2]
         sock.close()  # TODO: allow aiokatcp to take an existing socket
-        katcp_server = self.logical_node.fake_katcp_server_cls(host, port_no)
+        katcp_server = self.logical_node.fake_katcp_server_cls(host, port_no, self.logical_node)
         return wrap_katcp_server(katcp_server)
 
 
