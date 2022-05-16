@@ -5,7 +5,7 @@ import numbers
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from aiokatcp import Sensor, FailReply
+from aiokatcp import Sensor, Timestamp, FailReply
 from .tasks import FakeDeviceServer
 
 
@@ -24,6 +24,9 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._gains = [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
+        sync_epoch_pos = self.logical_task.command.index("--sync-epoch")
+        self._sync_epoch = float(self.logical_task.command[sync_epoch_pos + 1])
+        self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
         for pol in range(self.N_POLS):
             self.sensors.add(
                 Sensor(
@@ -47,6 +50,20 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL
                 )
             )
+
+    async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
+        """Add a new first-order polynomial to the delay and fringe correction model."""
+        # The real server only updates once the new model has gone into effect,
+        # but since we're not simulating the data path we'll just update the
+        # sensors immediately.
+        assert len(delays) == self.N_POLS
+        load_time = int((float(start_time) - self._sync_epoch) * self._adc_sample_rate)
+        for i, delay_str in enumerate(delays):
+            delay_args, phase_args = delay_str.split(':')
+            delay, delay_rate = [float(x) for x in delay_args.split(',')]
+            phase, phase_rate = [float(x) for x in phase_args.split(',')]
+            value = f"({load_time}, {delay}, {delay_rate}, {phase}, {phase_rate})"
+            self.sensors[f"input{i}-delay"].value = value
 
     async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
         """Set or query the eq gains."""
