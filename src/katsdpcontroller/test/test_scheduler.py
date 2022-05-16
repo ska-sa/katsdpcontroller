@@ -93,7 +93,7 @@ class SimpleTaskStats(scheduler.TaskStats):
 
 class TestScalarResource:
     """Tests for :class:`katsdpcontroller.scheduler.ScalarResource`"""
-    def setUp(self):
+    def setup(self):
         self.resource = scheduler.ScalarResource('cpus')
         self.parts = [self._make_part('foo', 3.6), self._make_part('*', 2.2)]
 
@@ -169,7 +169,7 @@ class TestScalarResource:
 
 class TestRangeResource:
     """Tests for :class:`katsdpcontroller.scheduler.RangeResource`"""
-    def setUp(self):
+    def setup(self):
         self.resource = scheduler.RangeResource('ports')
         self.parts = [
             self._make_part('foo', [(5, 6), (20, 22)]),
@@ -1087,7 +1087,7 @@ class TestAgent(unittest.TestCase):
 class TestPhysicalTask:
     """Tests for :class:`katsdpcontroller.scheduler.PhysicalTask`"""
 
-    def setUp(self):
+    def setup(self):
         self.logical_task = scheduler.LogicalTask('task')
         self.logical_task.cpus = 4.0
         self.logical_task.mem = 256.0
