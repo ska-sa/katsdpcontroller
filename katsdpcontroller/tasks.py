@@ -133,7 +133,7 @@ class ProductLogicalTask(scheduler.LogicalTask):
         self.streams = list(streams)
         self.stream_names = frozenset(stream.name for stream in streams)
         self.physical_factory = ProductPhysicalTask
-        self.fake_katcp_server_cls: Type[aiokatcp.DeviceServer] = FakeDeviceServer
+        self.fake_katcp_server_cls: Type[FakeDeviceServer] = FakeDeviceServer
         self.transitions = {}
         # Capture block state at which the node no longer deals with the capture block
         self.final_state = CaptureBlockState.BURNDOWN
