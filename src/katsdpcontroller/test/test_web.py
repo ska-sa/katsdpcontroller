@@ -214,7 +214,7 @@ class TestWeb(asynctest.ClockedTestCase):
                 "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, haproxy, True)
             }
         }
-        self.assertEqual(guis, expected)
+        assert guis == expected
 
     async def test_get_guis_not_nominal(self) -> None:
         for name in ['gui-urls', 'product1.gui-urls', 'product2.cal.1.gui-urls']:
@@ -225,7 +225,7 @@ class TestWeb(asynctest.ClockedTestCase):
             "general": [],
             "products": {"product1": [], "product2": []}
         }
-        self.assertEqual(guis, expected)
+        assert guis == expected
 
     async def test_update_bad_gui_sensor(self) -> None:
         with self.assertLogs('katsdpcontroller.web', logging.ERROR):
@@ -234,34 +234,34 @@ class TestWeb(asynctest.ClockedTestCase):
 
     async def test_index(self) -> None:
         async with self.client.get('/') as resp:
-            self.assertEqual(resp.status, 200)
-            self.assertEqual(resp.headers['Content-type'], 'text/html; charset=utf-8')
-            self.assertEqual(resp.headers['Cache-control'], 'no-store')
+            assert resp.status == 200
+            assert resp.headers['Content-type'] == 'text/html; charset=utf-8'
+            assert resp.headers['Cache-control'] == 'no-store'
 
     async def test_favicon(self) -> None:
         async with self.client.get('/favicon.ico') as resp:
-            self.assertEqual(resp.status, 200)
-            self.assertEqual(resp.headers['Content-type'], 'image/vnd.microsoft.icon')
+            assert resp.status == 200
+            assert resp.headers['Content-type'] == 'image/vnd.microsoft.icon'
 
     async def test_prometheus(self) -> None:
         async with self.client.get('/metrics') as resp:
-            self.assertEqual(resp.status, 200)
+            assert resp.status == 200
 
     async def test_rotate(self) -> None:
         # A good test of this probably needs Selenium plus a whole lot of
         # extra infrastructure.
         async with self.client.get('/rotate?width=500&height=600') as resp:
             text = await resp.text()
-            self.assertEqual(resp.status, 200)
-            self.assertIn('width: 500', text)
-            self.assertIn('height: 600', text)
+            assert resp.status == 200
+            assert 'width: 500' in text
+            assert 'height: 600' in text
 
     async def test_missing_gui(self) -> None:
         for path in ['/gui/product3/service/label', '/gui/product3/service/label/foo']:
             async with self.client.get(path) as resp:
                 text = await resp.text()
-                self.assertEqual(resp.status, 404)
-                self.assertIn('product3', text)
+                assert resp.status == 404
+                assert 'product3' in text
 
     async def test_websocket(self) -> None:
         haproxy = self.haproxy_bind is not None
@@ -275,7 +275,7 @@ class TestWeb(asynctest.ClockedTestCase):
         async with self.client.ws_connect('/ws') as ws:
             await ws.send_str('guis')
             guis = await ws.receive_json()
-            self.assertEqual(guis, expected)
+            assert guis == expected
             # Updating should trigger an unsolicited update
             sensor = self.mc_server.sensors['products']
             sensor.value = '["product1"]'
@@ -283,7 +283,7 @@ class TestWeb(asynctest.ClockedTestCase):
             self.dirty_set()
             await self.advance(1)
             guis = await ws.receive_json()
-            self.assertEqual(guis, expected)
+            assert guis == expected
             await ws.close()
 
     async def test_websocket_close_server(self) -> None:
@@ -304,7 +304,7 @@ class TestWebHaproxy(TestWeb):
 
     def test_internal_port(self) -> None:
         """Tests the internal_port property getter"""
-        self.assertEqual(self.app['updater'].internal_port, 2345)
+        assert self.app['updater'].internal_port == 2345
 
     async def test_null_update(self) -> None:
         """Triggered update must not poke haproxy if not required"""
@@ -320,13 +320,13 @@ class TestWebHaproxy(TestWeb):
         guis[0]['title'] = 'Test Title'
         sensor.value = json.dumps(guis).encode()
         await self.advance(1)
-        self.assertIn('test-title', self.app['updater']._haproxy._process.config)
+        assert 'test-title' in self.app['updater']._haproxy._process.config
 
     async def test_haproxy_died(self) -> None:
         """Gracefully handle haproxy dying on its own"""
         with self.assertLogs('katsdpcontroller.web', logging.WARNING) as cm:
             self.app['updater']._haproxy._process.died(-9)
             await self.client.close()
-        self.assertEqual(
-            cm.output,
-            ['WARNING:katsdpcontroller.web:haproxy exited with non-zero exit status -9'])
+        assert cm.output == [
+            'WARNING:katsdpcontroller.web:haproxy exited with non-zero exit status -9'
+        ]

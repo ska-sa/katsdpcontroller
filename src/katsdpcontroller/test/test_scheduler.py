@@ -12,7 +12,7 @@ from decimal import Decimal
 from collections import Counter
 from typing import Optional, Callable
 
-from nose.tools import (assert_equal, assert_raises, assert_false, assert_true, assert_in,
+from nose.tools import (assert_equal, assert_false, assert_true, assert_in,
                         assert_is, assert_is_not, assert_is_none, assert_is_instance,
                         assert_count_equal, assert_not_equal)
 import networkx
@@ -22,6 +22,7 @@ import asynctest
 import aioresponses
 import open_file_mock
 import aiohttp
+import pytest
 from yarl import URL
 
 from .. import scheduler
@@ -129,12 +130,12 @@ class TestScalarResource:
 
     def test_add_wrong_name(self):
         self.parts[0].name = 'mem'
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             self.resource.add(self.parts[0])
 
     def test_add_wrong_type(self):
         self.parts[0].type = 'RANGES'
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             self.resource.add(self.parts[0])
 
     def test_allocate(self):
@@ -158,7 +159,7 @@ class TestScalarResource:
         assert_equal(Decimal('0.0'), self.resource.available)
 
     def test_over_allocate(self):
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             self.resource.allocate(Decimal('3.99'))
 
     def test_empty_request(self):
@@ -203,7 +204,7 @@ class TestRangeResource:
 
     def test_add_wrong_type(self):
         self.parts[0].type = 'SCALAR'
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             self.resource.add(self.parts[0])
 
     def test_allocate(self):
@@ -280,7 +281,7 @@ class TestPollPorts(asynctest.TestCase):
         future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
         await asyncio.sleep(0.2)
         future.cancel()
-        with assert_raises(asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
             await future
 
     async def test_temporary_dns_failure(self):
@@ -332,13 +333,13 @@ class TestTaskState:
         assert_false(TaskState.RUNNING != TaskState.RUNNING)
 
     def test_compare_other(self):
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             TaskState.RUNNING < 3
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             TaskState.RUNNING > 3
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             TaskState.RUNNING <= 3
-        with assert_raises(TypeError):
+        with pytest.raises(TypeError):
             TaskState.RUNNING >= 3
 
 
@@ -507,7 +508,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 self.digest1,
                 status=403)  # unauthorized
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            with assert_raises(scheduler.ImageError):
+            with pytest.raises(scheduler.ImageError):
                 await lookup('myimage', 'latest')
 
     async def test_no_token(self):
@@ -528,7 +529,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 payload={},
                 callback=self._check_basic(self.auth1))
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            with assert_raises(scheduler.ImageError):
+            with pytest.raises(scheduler.ImageError):
                 await lookup('myimage', 'latest')
 
     async def test_invalid_token(self):
@@ -553,7 +554,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 },
                 callback=self._check_basic(self.auth1))
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            with assert_raises(scheduler.ImageError):
+            with pytest.raises(scheduler.ImageError):
                 await lookup('myimage', 'latest')
 
     async def test_missing_authenticate_fields(self):
@@ -568,7 +569,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 }
             )
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
-            with assert_raises(scheduler.ImageError):
+            with pytest.raises(scheduler.ImageError):
                 await lookup('myimage', 'latest')
 
 
@@ -602,7 +603,7 @@ class TestImageResolver(asynctest.TestCase):
     async def test_bad_tag_file(self) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
         self._open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             scheduler.ImageResolver(self.lookup, tag_file='tag_file')
 
     async def test_tag(self) -> None:
@@ -797,7 +798,7 @@ class TestAgent(unittest.TestCase):
 
     def test_no_offers(self):
         """ValueError is raised if zero offers are passed"""
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             scheduler.Agent([])
 
     def test_special_disk_resource(self):
@@ -828,7 +829,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.valid_agent = lambda x: False
         agent = scheduler.Agent([self._make_offer({}, [])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_subsystem_mismatch(self):
@@ -836,7 +837,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.subsystem = 'foo'
         agent = scheduler.Agent([self._make_offer({}, [self.subsystem_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_insufficient_scalar(self):
@@ -844,7 +845,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.cpus = 4.0
         agent = scheduler.Agent([self._make_offer({'cpus': 2.0}, [])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_insufficient_range(self):
@@ -852,7 +853,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.cores = [None] * 3
         agent = scheduler.Agent([self._make_offer({'cores': [(4, 6)]}, [])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_missing_interface(self):
@@ -860,7 +861,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.interfaces = [scheduler.InterfaceRequest('net0'), scheduler.InterfaceRequest('net1')]
         agent = scheduler.Agent([self._make_offer({}, [self.if_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_missing_volume(self):
@@ -868,7 +869,7 @@ class TestAgent(unittest.TestCase):
         task = scheduler.LogicalTask('task')
         task.volumes = [scheduler.VolumeRequest('vol-missing', '/container-path', 'RW')]
         agent = scheduler.Agent([self._make_offer({}, [self.volume_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_insufficient_gpu(self):
@@ -882,7 +883,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 2048.0}, [self.gpu_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_insufficient_interface(self):
@@ -893,7 +894,7 @@ class TestAgent(unittest.TestCase):
         agent = scheduler.Agent([self._make_offer({
             'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_conflicting_multicast_out(self):
@@ -908,7 +909,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
         agent.interfaces[0].multicast_in |= {'mc'}
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_conflicting_multicast_in(self):
@@ -923,7 +924,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.interface.0.bandwidth_in': 1000e6,
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
         agent.interfaces[0].infiniband_multicast_out |= {'mc'}
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_safe_multicast_loopback(self):
@@ -960,7 +961,7 @@ class TestAgent(unittest.TestCase):
             self._make_offer({
                 'cpus': 5.0, 'mem': 200.0, 'cores': [(4, 8)],
             }, [self.numa_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_no_numa_gpu(self):
@@ -980,7 +981,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.gpu.0.mem': 2048.0,
             'katsdpcontroller.gpu.1.compute': 1.0,
             'katsdpcontroller.gpu.1.mem': 512.0}, [self.gpu_attr, self.numa_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_no_numa_interface(self):
@@ -994,7 +995,7 @@ class TestAgent(unittest.TestCase):
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [self.if_attr, self.numa_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_no_infiniband_interface(self):
@@ -1011,7 +1012,7 @@ class TestAgent(unittest.TestCase):
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [if_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_no_numa_volume(self):
@@ -1025,7 +1026,7 @@ class TestAgent(unittest.TestCase):
         agent = scheduler.Agent([self._make_offer(
             {'cpus': 5.0, 'mem': 200.0, 'cores': [(0, 5)]},
             [self.volume_attr, self.numa_attr])])
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
     def test_allocate_success(self):
@@ -1226,63 +1227,63 @@ class TestDiagnoseInsufficient(unittest.TestCase):
     def test_task_insufficient_scalar_resource(self):
         """A task requests more of a scalar resource than any agent has"""
         self.logical_task.cpus = 4
-        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.disk_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual('cpus', cm.exception.resource)
-        self.assertEqual(4, cm.exception.needed)
-        self.assertEqual(1.5, cm.exception.available)
+        assert cm.value.node is self.physical_task
+        assert cm.value.resource == 'cpus'
+        assert cm.value.needed == 4
+        assert cm.value.available == 1.5
 
     def test_task_insufficient_range_resource(self):
         """A task requests more of a range resource than any agent has"""
         self.logical_task.ports = ['a', 'b', 'c']
-        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.disk_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual('ports', cm.exception.resource)
-        self.assertEqual(3, cm.exception.needed)
-        self.assertEqual(0, cm.exception.available)
+        assert cm.value.node is self.physical_task
+        assert cm.value.resource == 'ports'
+        assert cm.value.needed == 3
+        assert cm.value.available == 0
 
     def test_task_insufficient_cores(self):
         """A task requests more cores than are available on a single NUMA node"""
         self.logical_task.cores = ['a', 'b', 'c', 'd']
-        with self.assertRaises(scheduler.TaskInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.cores_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual('cores', cm.exception.resource)
-        self.assertEqual(4, cm.exception.needed)
-        self.assertEqual(3, cm.exception.available)
+        assert cm.value.node is self.physical_task
+        assert cm.value.resource == 'cores'
+        assert cm.value.needed == 4
+        assert cm.value.available == 3
 
     def test_task_insufficient_gpu_scalar_resource(self):
         """A task requests more of a GPU scalar resource than any agent has"""
         req = scheduler.GPURequest()
         req.mem = 2048
         self.logical_task.gpus = [req]
-        with self.assertRaises(scheduler.TaskInsufficientGPUResourcesError) as cm:
+        with pytest.raises(scheduler.TaskInsufficientGPUResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.gpu_compute_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual(0, cm.exception.request_index)
-        self.assertEqual('mem', cm.exception.resource)
-        self.assertEqual(2048, cm.exception.needed)
-        self.assertEqual(2.25, cm.exception.available)
+        assert cm.value.node is self.physical_task
+        assert cm.value.request_index == 0
+        assert cm.value.resource == 'mem'
+        assert cm.value.needed == 2048
+        assert cm.value.available == 2.25
 
     def test_task_insufficient_interface_scalar_resources(self):
         """A task requests more of an interface scalar resource than any agent has"""
         req = scheduler.InterfaceRequest('net0')
         req.bandwidth_in = 5e9
         self.logical_task.interfaces = [req]
-        with self.assertRaises(scheduler.TaskInsufficientInterfaceResourcesError) as cm:
+        with pytest.raises(scheduler.TaskInsufficientInterfaceResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.interface_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual(req, cm.exception.request)
-        self.assertEqual('bandwidth_in', cm.exception.resource)
-        self.assertEqual(5e9, cm.exception.needed)
-        self.assertEqual(1e9, cm.exception.available)
+        assert cm.value.node is self.physical_task
+        assert cm.value.request == req
+        assert cm.value.resource == 'bandwidth_in'
+        assert cm.value.needed == 5e9
+        assert cm.value.available == 1e9
 
     def test_task_no_interface(self):
         """A task requests a network interface that is not available on any agent"""
@@ -1290,11 +1291,11 @@ class TestDiagnoseInsufficient(unittest.TestCase):
             scheduler.InterfaceRequest('net0'),
             scheduler.InterfaceRequest('badnet')
         ]
-        with self.assertRaises(scheduler.TaskNoInterfaceError) as cm:
+        with pytest.raises(scheduler.TaskNoInterfaceError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.interface_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertIs(self.logical_task.interfaces[1], cm.exception.request)
+        assert cm.value.node is self.physical_task
+        assert cm.value.request is self.logical_task.interfaces[1]
 
     def test_task_no_volume(self):
         """A task requests a volume that is not available on any agent"""
@@ -1302,56 +1303,56 @@ class TestDiagnoseInsufficient(unittest.TestCase):
             scheduler.VolumeRequest('vol0', '/vol0', 'RW'),
             scheduler.VolumeRequest('badvol', '/badvol', 'RO')
         ]
-        with self.assertRaises(scheduler.TaskNoVolumeError) as cm:
+        with pytest.raises(scheduler.TaskNoVolumeError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.volume_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertIs(self.logical_task.volumes[1], cm.exception.request)
+        assert cm.value.node is self.physical_task
+        assert cm.value.request is self.logical_task.volumes[1]
 
     def test_task_no_gpu(self):
         """A task requests a GPU that is not available on any agent"""
         req = scheduler.GPURequest()
         req.name = 'GPU that does not exist'
         self.logical_task.gpus = [req]
-        with self.assertRaises(scheduler.TaskNoGPUError) as cm:
+        with pytest.raises(scheduler.TaskNoGPUError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.mem_agent, self.gpu_compute_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
-        self.assertEqual(0, cm.exception.request_index)
+        assert cm.value.node == self.physical_task
+        assert cm.value.request_index == 0
 
     def test_task_no_agent(self):
         """A task does not fit on any agent, but not due to a single reason"""
         # Ask for more combined cpu+ports than is available on one agent
         self.logical_task.cpus = 8
         self.logical_task.ports = ['a', 'b', 'c']
-        with self.assertRaises(scheduler.TaskNoAgentError) as cm:
+        with pytest.raises(scheduler.TaskNoAgentError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.ports_agent], [self.physical_task])
-        self.assertIs(self.physical_task, cm.exception.node)
+        assert cm.value.node is self.physical_task
         # Make sure that it didn't incorrectly return a subclass
-        self.assertEqual(scheduler.TaskNoAgentError, type(cm.exception))
+        assert cm.type == scheduler.TaskNoAgentError
 
     def test_group_insufficient_scalar_resource(self):
         """A group of tasks require more of a scalar resource than available"""
         self.logical_task.cpus = 24
         self.logical_task2.cpus = 16
-        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.mem_agent], [self.physical_task, self.physical_task2])
-        self.assertEqual('cpus', cm.exception.resource)
-        self.assertEqual(40, cm.exception.needed)
-        self.assertEqual(33.25, cm.exception.available)
+        assert cm.value.resource == 'cpus'
+        assert cm.value.needed == 40
+        assert cm.value.available == 33.25
 
     def test_group_insufficient_range_resource(self):
         """A group of tasks require more of a range resource than available"""
         self.logical_task.ports = ['a', 'b', 'c']
         self.logical_task2.ports = ['d', 'e', 'f']
-        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.ports_agent], [self.physical_task, self.physical_task2])
-        self.assertEqual('ports', cm.exception.resource)
-        self.assertEqual(6, cm.exception.needed)
-        self.assertEqual(5, cm.exception.available)
+        assert cm.value.resource == 'ports'
+        assert cm.value.needed == 6
+        assert cm.value.available == 5
 
     def test_group_insufficient_gpu_scalar_resources(self):
         """A group of tasks require more of a GPU scalar resource than available"""
@@ -1359,13 +1360,13 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.logical_task.gpus[-1].compute = 0.75
         self.logical_task2.gpus = [scheduler.GPURequest()]
         self.logical_task2.gpus[-1].compute = 0.5
-        with self.assertRaises(scheduler.GroupInsufficientGPUResourcesError) as cm:
+        with pytest.raises(scheduler.GroupInsufficientGPUResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.gpu_compute_agent, self.gpu_mem_agent],
                 [self.physical_task, self.physical_task2])
-        self.assertEqual('compute', cm.exception.resource)
-        self.assertEqual(1.25, cm.exception.needed)
-        self.assertEqual(1.125, cm.exception.available)
+        assert cm.value.resource == 'compute'
+        assert cm.value.needed == 1.25
+        assert cm.value.available == 1.125
 
     def test_group_insufficient_interface_scalar_resources(self):
         """A group of tasks require more of a network resource than available"""
@@ -1378,14 +1379,14 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.logical_task.interfaces[1].bandwidth_in = 50e6
         self.logical_task2.interfaces = [scheduler.InterfaceRequest('net0')]
         self.logical_task2.interfaces[0].bandwidth_in = 700e6
-        with self.assertRaises(scheduler.GroupInsufficientInterfaceResourcesError) as cm:
+        with pytest.raises(scheduler.GroupInsufficientInterfaceResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.interface_agent],
                 [self.physical_task, self.physical_task2])
-        self.assertEqual('net0', cm.exception.network)
-        self.assertEqual('bandwidth_in', cm.exception.resource)
-        self.assertEqual(1500e6, cm.exception.needed)
-        self.assertEqual(1000e6, cm.exception.available)
+        assert cm.value.network == 'net0'
+        assert cm.value.resource == 'bandwidth_in'
+        assert cm.value.needed == 1500e6
+        assert cm.value.available == 1000e6
 
     def test_subsystem(self):
         """A subsystem has insufficient resources, although the system has enough."""
@@ -1395,13 +1396,13 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         self.logical_task2.cpus = 1
         self.cpus_agent.subsystems = {'sdp'}
         self.cores_agent.subsystems = {'cbf', 'other'}
-        with self.assertRaises(scheduler.GroupInsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.cores_agent], [self.physical_task, self.physical_task2])
-        self.assertEqual('cpus', cm.exception.resource)
-        self.assertEqual(33, cm.exception.needed)
-        self.assertEqual(32, cm.exception.available)
-        self.assertEqual('sdp', cm.exception.subsystem)
+        assert cm.value.resource == 'cpus'
+        assert cm.value.needed == 33
+        assert cm.value.available == 32
+        assert cm.value.subsystem == 'sdp'
 
     def test_generic(self):
         """A group of tasks can't fit, but no simpler explanation is available"""
@@ -1410,12 +1411,12 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         # big-memory agent and not leaving enough for the big-memory task.
         self.logical_task.mem = 5
         self.logical_task2.mem = 251
-        with self.assertRaises(scheduler.InsufficientResourcesError) as cm:
+        with pytest.raises(scheduler.InsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.mem_agent, self.disk_agent],
                 [self.physical_task, self.physical_task2])
         # Check that it wasn't a subclass raised
-        self.assertEqual(scheduler.InsufficientResourcesError, type(cm.exception))
+        assert cm.type == scheduler.InsufficientResourcesError
 
 
 class TestSubgraph:
@@ -1621,7 +1622,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         logical_graph.add_edge(nodes[2], nodes[3], depends_ready=True)
         logical_graph.add_edge(nodes[3], nodes[1], depends_ready=True)
         physical_graph = scheduler.instantiate(logical_graph)
-        with assert_raises(scheduler.CycleError):
+        with pytest.raises(scheduler.CycleError):
             await self.sched.launch(physical_graph, self.resolver)
 
     async def test_launch_omit_dependency(self):
@@ -1634,29 +1635,29 @@ class TestScheduler(asynctest.ClockedTestCase):
         logical_graph.add_edge(nodes[1], nodes[0], depends_resources=True)
         physical_graph = scheduler.instantiate(logical_graph)
         target = [node for node in physical_graph if node.name == 'node1']
-        with assert_raises(scheduler.DependencyError):
+        with pytest.raises(scheduler.DependencyError):
             await self.sched.launch(physical_graph, self.resolver, target)
 
     async def test_add_queue_twice(self):
         queue = scheduler.LaunchQueue('default')
         self.sched.add_queue(queue)
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             self.sched.add_queue(queue)
 
     async def test_remove_nonexistent_queue(self):
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             self.sched.remove_queue(scheduler.LaunchQueue('default'))
 
     async def test_launch_bad_queue(self):
         """Launch raises ValueError if queue has been added"""
         queue = scheduler.LaunchQueue('default')
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             await self.sched.launch(self.physical_graph, self.resolver, queue=queue)
 
     async def test_launch_closing(self):
         """Launch raises asyncio.InvalidStateError if close has been called"""
         await self.sched.close()
-        with assert_raises(asyncio.InvalidStateError):
+        with pytest.raises(asyncio.InvalidStateError):
             # Timeout is just to ensure the test won't hang
             await asyncio.wait_for(self.sched.launch(self.physical_graph, self.resolver),
                                    timeout=1)
@@ -1947,7 +1948,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         """Test a launch failing due to insufficient resources within the timeout"""
         launch, kill = await self._transition_node0(TaskState.STARTING)
         await self.advance(30)
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
         assert_equal(TaskState.NOT_READY, self.nodes[0].state)
         assert_equal(TaskState.NOT_READY, self.nodes[1].state)
@@ -1962,13 +1963,12 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.sched.launch(self.physical_graph, self.resolver, [self.nodes[2]],
                               resources_timeout=2))
         await self.advance(3)
-        with assert_raises(scheduler.QueueBusyError) as cm:
+        with pytest.raises(scheduler.QueueBusyError, match='(2s)') as cm:
             await launch1
-        assert cm.exception.timeout == 2
-        assert '(2s)' in str(cm.exception)
+        assert cm.value.timeout == 2
         assert_false(launch.done())
         await self.advance(30)
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
 
     async def test_launch_force_host(self):
@@ -1989,7 +1989,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, offers)
         await self.advance(30)
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
 
     async def test_launch_multicast_conflict(self):
@@ -2013,7 +2013,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, offers)
         await self.advance(30)
-        with assert_raises(scheduler.InsufficientResourcesError):
+        with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
 
     async def test_launch_resolve_raises(self):
@@ -2024,9 +2024,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch, kill = await self._transition_node0(TaskState.STARTING)
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, offers)
-        with assert_raises(ValueError) as cm:
+        with pytest.raises(ValueError, match='Testing'):
             await launch
-        assert_in('Testing', str(cm.exception))
         # The offers must be returned to Mesos
         assert_equal(AnyOrderList([
             mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
@@ -2244,7 +2243,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         task_id = self.batch_nodes[0].taskinfo.task_id.value
         self._status_update(task_id, 'TASK_FAILED')
         results = await task
-        with assert_raises(scheduler.TaskError):
+        with pytest.raises(scheduler.TaskError):
             raise next(iter(results.values()))
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
@@ -2259,7 +2258,7 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.physical_batch_graph, self.resolver, [self.batch_nodes[0]]))
         await self.advance(30)
         results = await task
-        with assert_raises(scheduler.TaskInsufficientResourcesError):
+        with pytest.raises(scheduler.TaskInsufficientResourcesError):
             raise next(iter(results.values()))
         assert_equal(self.task_stats.batch_created, 1)
         assert_equal(self.task_stats.batch_started, 1)
@@ -2320,9 +2319,9 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Next task shouldn't even try to start
         assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
         results = await task
-        with assert_raises(scheduler.TaskError):
+        with pytest.raises(scheduler.TaskError):
             raise results[self.batch_nodes[0]]
-        with assert_raises(scheduler.TaskSkipped):
+        with pytest.raises(scheduler.TaskSkipped):
             raise results[self.batch_nodes[1]]
         assert_equal(self.task_stats.batch_created, 2)
         assert_equal(self.task_stats.batch_started, 1)
@@ -2352,7 +2351,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
         await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
         results = await task
-        with assert_raises(scheduler.TaskError):
+        with pytest.raises(scheduler.TaskError):
             raise results[self.batch_nodes[0]]
         assert_is_none(results[self.batch_nodes[1]])
         assert_equal(self.task_stats.batch_created, 2)
