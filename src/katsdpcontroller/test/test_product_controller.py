@@ -17,7 +17,6 @@ import asynctest
 from aioresponses import aioresponses
 import astropy.table
 import astropy.units as u
-from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
 import aiokatcp
@@ -1171,19 +1170,19 @@ class TestController(BaseTestController):
     async def test_capture_init_bad_json(self) -> None:
         """Check that capture-init fails if an override is illegal"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request("capture-init", CAPTURE_BLOCK, 'not json')
 
     async def test_capture_init_bad_override(self) -> None:
         """Check that capture-init fails if an override makes the config illegal"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request("capture-init", CAPTURE_BLOCK, '{"outputs": null}')
 
     async def test_capture_init_bad_override_change(self) -> None:
         """Check that capture-init fails if an override makes an invalid change"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request(
                 "capture-init", CAPTURE_BLOCK,
                 '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}')

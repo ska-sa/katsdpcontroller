@@ -12,9 +12,7 @@ from decimal import Decimal
 from collections import Counter
 from typing import Optional, Callable
 
-from nose.tools import (assert_equal, assert_false, assert_true, assert_in,
-                        assert_is, assert_is_not, assert_is_none, assert_is_instance,
-                        assert_count_equal, assert_not_equal)
+from nose.tools import assert_count_equal
 import networkx
 import pymesos
 from addict import Dict
@@ -108,25 +106,25 @@ class TestScalarResource:
         })
 
     def test_empty(self):
-        assert_equal('cpus', self.resource.name)
-        assert_is_instance(self.resource.available, Decimal)
-        assert_equal(0, self.resource.available)
-        assert_false(self.resource)
-        assert_count_equal([], self.resource.info())
+        assert self.resource.name == 'cpus'
+        assert isinstance(self.resource.available, Decimal)
+        assert self.resource.available == 0
+        assert not self.resource
+        assert list(self.resource.info()) == []
 
     def test_construct(self):
         for part in self.parts:
             self.resource.add(part)
-        assert_equal(Decimal('5.8'), self.resource.available)
-        assert_true(self.resource)
-        assert_count_equal(self.parts, self.resource.info())
+        assert self.resource.available == Decimal('5.8')
+        assert self.resource
+        assert_count_equal(self.resource.info(), self.parts)
 
     def test_construct_other_order(self):
         for part in reversed(self.parts):
             self.resource.add(part)
-        assert_equal(Decimal('5.8'), self.resource.available)
-        assert_true(self.resource)
-        assert_count_equal(self.parts, self.resource.info())
+        assert self.resource.available == Decimal('5.8')
+        assert self.resource
+        assert_count_equal(self.resource.info(), self.parts)
 
     def test_add_wrong_name(self):
         self.parts[0].name = 'mem'
@@ -143,20 +141,20 @@ class TestScalarResource:
             self.resource.add(part)
         alloced = self.resource.allocate(Decimal('3.9'))
         assert_count_equal(
-            [self._make_part('foo', 3.6), self._make_part('*', 0.3)],
-            alloced.info())
-        assert_equal(Decimal('3.9'), alloced.available)
-        assert_count_equal([self._make_part('*', 1.9)], self.resource.info())
-        assert_equal(Decimal('1.9'), self.resource.available)
+            alloced.info(),
+            [self._make_part('foo', 3.6), self._make_part('*', 0.3)])
+        assert alloced.available == Decimal('3.9')
+        assert_count_equal(self.resource.info(), [self._make_part('*', 1.9)])
+        assert self.resource.available == Decimal('1.9')
 
     def test_allocate_all(self):
         for part in self.parts:
             self.resource.add(part)
         alloced = self.resource.allocate(Decimal('5.8'))
-        assert_count_equal(self.parts, alloced.info())
-        assert_equal(Decimal('5.8'), alloced.available)
-        assert_count_equal([], self.resource.info())
-        assert_equal(Decimal('0.0'), self.resource.available)
+        assert_count_equal(alloced.info(), self.parts)
+        assert alloced.available == Decimal('5.8')
+        assert list(self.resource.info()) == []
+        assert self.resource.available == Decimal('0.0')
 
     def test_over_allocate(self):
         with pytest.raises(ValueError):
@@ -164,8 +162,8 @@ class TestScalarResource:
 
     def test_empty_request(self):
         request = self.resource.empty_request()
-        assert_is_instance(request, scheduler.ScalarResourceRequest)
-        assert_equal(Decimal('0.000'), request.amount)
+        assert isinstance(request, scheduler.ScalarResourceRequest)
+        assert request.amount == Decimal('0.000')
 
 
 class TestRangeResource:
@@ -188,19 +186,19 @@ class TestRangeResource:
         })
 
     def test_empty(self):
-        assert_equal('ports', self.resource.name)
-        assert_is_instance(self.resource.available, int)
-        assert_equal(0, self.resource.available)
-        assert_false(self.resource)
-        assert_equal([], list(self.resource.info()))
+        assert self.resource.name == 'ports'
+        assert isinstance(self.resource.available, int)
+        assert self.resource.available == 0
+        assert not self.resource
+        assert list(self.resource.info()) == []
 
     def test_construct(self):
         for part in self.parts:
             self.resource.add(part)
-        assert_equal(9, len(self.resource))
-        assert_equal(9, self.resource.available)
-        assert_equal([5, 6, 20, 21, 22, 10, 11, 12, 30], list(self.resource))
-        assert_count_equal(self.parts, list(self.resource.info()))
+        assert len(self.resource) == 9
+        assert self.resource.available == 9
+        assert list(self.resource) == [5, 6, 20, 21, 22, 10, 11, 12, 30]
+        assert_count_equal(list(self.resource.info()), self.parts)
 
     def test_add_wrong_type(self):
         self.parts[0].type = 'SCALAR'
@@ -211,53 +209,51 @@ class TestRangeResource:
         for part in self.parts:
             self.resource.add(part)
         alloced = self.resource.allocate(6)
-        assert_equal(6, alloced.available)
+        assert alloced.available == 6
         assert_count_equal(
+            alloced.info(),
             [
                 self._make_part('foo', [(5, 6), (20, 22)]),
                 self._make_part('*', [(10, 10)])
-            ], alloced.info())
-        assert_equal([5, 6, 20, 21, 22, 10], list(alloced))
-        assert_equal(3, self.resource.available)
-        assert_count_equal(
-            [self._make_part('*', [(11, 12), (30, 30)])],
-            self.resource.info())
+            ])
+        assert list(alloced) == [5, 6, 20, 21, 22, 10]
+        assert self.resource.available == 3
+        assert_count_equal(self.resource.info(), [self._make_part('*', [(11, 12), (30, 30)])])
 
     def test_allocate_random(self):
         for part in self.parts:
             self.resource.add(part)
         alloced = self.resource.allocate(5, use_random=True)
-        assert_equal(5, alloced.available)
+        assert alloced.available == 5
         # It should have allocated exactly the foo resources
         assert_count_equal(
+            alloced.info(),
             [
                 self._make_part('foo', [(5, 5), (6, 6), (20, 20), (21, 21), (22, 22)]),
-            ], alloced.info())
-        assert_equal([5, 6, 20, 21, 22], list(alloced))
-        assert_equal(4, self.resource.available)
-        assert_count_equal(
-            [
-                self._make_part('*', [(10, 12), (30, 30)])
-            ], self.resource.info())
+            ])
+        assert list(alloced) == [5, 6, 20, 21, 22]
+        assert self.resource.available == 4
+        assert_count_equal(self.resource.info(), [self._make_part('*', [(10, 12), (30, 30)])])
 
     def test_subset(self):
         for part in self.parts:
             self.resource.add(part)
         sub = self.resource.subset([5, 6, 10, 12, 40])
-        assert_equal(4, sub.available)
+        assert sub.available == 4
         assert_count_equal(
+            sub.info(),
             [
                 self._make_part('foo', [(5, 5), (6, 6)]),
                 self._make_part('*', [(10, 10), (12, 12)])
-            ], sub.info())
+            ])
 
     def test_subset_empty(self):
         for part in self.parts:
             self.resource.add(part)
         sub = self.resource.subset([40])
-        assert_equal(0, sub.available)
-        assert_false(sub)
-        assert_count_equal([], sub.info())
+        assert sub.available == 0
+        assert not sub
+        assert list(sub.info()) == []
 
 
 class TestPollPorts(asynctest.TestCase):
@@ -272,7 +268,7 @@ class TestPollPorts(asynctest.TestCase):
         future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
         # Sleep for while, give poll_ports time to poll a few times
         await asyncio.sleep(1)
-        assert_false(future.done())
+        assert not future.done()
         self.sock.listen(1)
         await asyncio.wait_for(future, timeout=5)
 
@@ -299,38 +295,38 @@ class TestPollPorts(asynctest.TestCase):
             future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
             await asyncio.sleep(1)
             # temporary DNS failure
-            assert_false(future.done())
+            assert not future.done()
             # wait for retry loop (currently 5s)
             # Note: it's tempting to try asynctest.ClockedTestCase, but that
             # only works if ALL interactions with the outside world are mocked
             # to be instantaneous.
             await asyncio.sleep(6)
-            assert_true(future.done())
+            assert future.done()
 
 
 class TestTaskState:
     """Tests that TaskState ordering works as expected"""
     def test_compare(self):
-        assert_true(TaskState.NOT_READY <= TaskState.RUNNING)
-        assert_true(TaskState.NOT_READY < TaskState.RUNNING)
-        assert_false(TaskState.NOT_READY > TaskState.RUNNING)
-        assert_false(TaskState.NOT_READY >= TaskState.RUNNING)
-        assert_false(TaskState.NOT_READY == TaskState.RUNNING)
-        assert_true(TaskState.NOT_READY != TaskState.RUNNING)
+        assert TaskState.NOT_READY <= TaskState.RUNNING
+        assert TaskState.NOT_READY < TaskState.RUNNING
+        assert not (TaskState.NOT_READY > TaskState.RUNNING)
+        assert not (TaskState.NOT_READY >= TaskState.RUNNING)
+        assert not (TaskState.NOT_READY == TaskState.RUNNING)
+        assert TaskState.NOT_READY != TaskState.RUNNING
 
-        assert_false(TaskState.DEAD <= TaskState.RUNNING)
-        assert_false(TaskState.DEAD < TaskState.RUNNING)
-        assert_true(TaskState.DEAD > TaskState.RUNNING)
-        assert_true(TaskState.DEAD >= TaskState.RUNNING)
-        assert_false(TaskState.DEAD == TaskState.RUNNING)
-        assert_true(TaskState.DEAD != TaskState.RUNNING)
+        assert not (TaskState.DEAD <= TaskState.RUNNING)
+        assert not (TaskState.DEAD < TaskState.RUNNING)
+        assert TaskState.DEAD > TaskState.RUNNING
+        assert TaskState.DEAD >= TaskState.RUNNING
+        assert not (TaskState.DEAD == TaskState.RUNNING)
+        assert TaskState.DEAD != TaskState.RUNNING
 
-        assert_true(TaskState.RUNNING <= TaskState.RUNNING)
-        assert_false(TaskState.RUNNING < TaskState.RUNNING)
-        assert_false(TaskState.RUNNING > TaskState.RUNNING)
-        assert_true(TaskState.RUNNING >= TaskState.RUNNING)
-        assert_true(TaskState.RUNNING == TaskState.RUNNING)
-        assert_false(TaskState.RUNNING != TaskState.RUNNING)
+        assert TaskState.RUNNING <= TaskState.RUNNING
+        assert not (TaskState.RUNNING < TaskState.RUNNING)
+        assert not (TaskState.RUNNING > TaskState.RUNNING)
+        assert TaskState.RUNNING >= TaskState.RUNNING
+        assert TaskState.RUNNING == TaskState.RUNNING
+        assert not (TaskState.RUNNING != TaskState.RUNNING)
 
     def test_compare_other(self):
         with pytest.raises(TypeError):
@@ -346,7 +342,7 @@ class TestTaskState:
 class TestSimpleImageLookup(asynctest.TestCase):
     async def test(self) -> None:
         lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
-        assert_equal('registry.invalid:5000/foo:latest', await lookup('foo', 'latest'))
+        assert await lookup('foo', 'latest') == 'registry.invalid:5000/foo:latest'
 
 
 class TestHTTPImageLookup(asynctest.TestCase):
@@ -443,7 +439,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 callback=self._check_basic(self.auth1))
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
             image = await lookup('myimage', 'latest')
-        assert_equal('registry.invalid:5000/myimage@' + self.digest1, image)
+        assert image == 'registry.invalid:5000/myimage@' + self.digest1
 
     async def test_absolute(self) -> None:
         """Resolve an image with an explicit registry."""
@@ -455,7 +451,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 callback=self._check_basic(self.auth2))
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
             image = await lookup('registry2.invalid:5000/anotherimage', 'custom')
-        assert_equal('registry2.invalid:5000/anotherimage@' + self.digest2, image)
+        assert image == 'registry2.invalid:5000/anotherimage@' + self.digest2
 
     async def test_anonymous(self) -> None:
         """Resolve an image with a registry having no authentication information."""
@@ -466,7 +462,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 self.digest2)
             lookup = scheduler.HTTPImageLookup('anon.invalid:5000')
             image = await lookup('myimage', 'latest')
-        assert_equal('anon.invalid:5000/myimage@' + self.digest2, image)
+        assert image == 'anon.invalid:5000/myimage@' + self.digest2
 
     async def test_token_service(self) -> None:
         """Test redirection via a token service."""
@@ -497,7 +493,7 @@ class TestHTTPImageLookup(asynctest.TestCase):
                 callback=self._check_token)
             lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
             image = await lookup('myimage', 'latest')
-        assert_equal('registry.invalid:5000/myimage@' + self.digest1, image)
+        assert image == 'registry.invalid:5000/myimage@' + self.digest1
 
     async def test_http_fail(self) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
@@ -584,10 +580,10 @@ class TestImageResolver(asynctest.TestCase):
         resolver = scheduler.ImageResolver(self.lookup)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
-        assert_equal('registry.invalid:5000/test1:latest', await resolver('test1'))
-        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', await(resolver('foo')))
-        assert_equal('registry.invalid:5000/baz:mytag', await(resolver('baz')))
+        assert await resolver('test1') == 'registry.invalid:5000/test1:latest'
+        assert await resolver('test1:tagged') == 'registry.invalid:5000/test1:tagged'
+        assert await(resolver('foo')) == 'my-registry:5000/bar:custom'
+        assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
 
     async def test_tag_file(self) -> None:
         """Test with a tag file"""
@@ -595,10 +591,10 @@ class TestImageResolver(asynctest.TestCase):
         resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
-        assert_equal('registry.invalid:5000/test1:tag1', await resolver('test1'))
-        assert_equal('registry.invalid:5000/test1:tagged', await resolver('test1:tagged'))
-        assert_equal('my-registry:5000/bar:custom', await resolver('foo'))
-        assert_equal('registry.invalid:5000/baz:mytag', await(resolver('baz')))
+        assert await resolver('test1') == 'registry.invalid:5000/test1:tag1'
+        assert await resolver('test1:tagged') == 'registry.invalid:5000/test1:tagged'
+        assert await resolver('foo') == 'my-registry:5000/bar:custom'
+        assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
 
     async def test_bad_tag_file(self) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
@@ -609,7 +605,7 @@ class TestImageResolver(asynctest.TestCase):
     async def test_tag(self) -> None:
         """Test with an explicit tag"""
         resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file', tag='mytag')
-        assert_equal('registry.invalid:5000/test1:mytag', await resolver('test1'))
+        assert await resolver('test1') == 'registry.invalid:5000/test1:mytag'
 
 
 class TestTaskIDAllocator:
@@ -619,15 +615,15 @@ class TestTaskIDAllocator:
         a = scheduler.TaskIDAllocator('test-foo-')
         b = scheduler.TaskIDAllocator('test-bar-')
         c = scheduler.TaskIDAllocator('test-foo-')
-        assert_is(a, c)
-        assert_is_not(a, b)
+        assert a is c
+        assert a is not b
 
     def test_call(self):
         a = scheduler.TaskIDAllocator('test-baz-')
         tid0 = a()
         tid1 = a()
-        assert_equal('test-baz-00000000', tid0)
-        assert_equal('test-baz-00000001', tid1)
+        assert tid0 == 'test-baz-00000000'
+        assert tid1 == 'test-baz-00000001'
 
 
 def _make_resources(resources, role='default'):
@@ -756,36 +752,37 @@ class TestAgent(unittest.TestCase):
                               'katsdpcontroller.interface.0.bandwidth_out': 2e8})
         ]
         agent = scheduler.Agent(offers)
-        assert_equal(self.agent_id, agent.agent_id)
-        assert_equal(self.host, agent.host)
-        assert_equal(len(attrs), len(agent.attributes))
+        assert self.agent_id == agent.agent_id
+        assert self.host == agent.host
+        assert len(attrs) == len(agent.attributes)
         for attr, agent_attr in zip(attrs, agent.attributes):
-            assert_equal(attr, agent_attr)
-        assert_equal(4.5, agent.resources['cpus'].available)
-        assert_equal(1147.5, agent.resources['mem'].available)
-        assert_equal(1024.5, agent.resources['disk'].available)
-        assert_equal(2, len(agent.gpus))
-        assert_equal(0.75, agent.gpus[0].resources['compute'].available)
-        assert_equal(1280.0, agent.gpus[0].resources['mem'].available)
-        assert_equal(0.125, agent.gpus[1].resources['compute'].available)
-        assert_equal(2048.0, agent.gpus[1].resources['mem'].available)
-        assert_equal([0, 2, 4, 6], list(agent.numa_cores[0]))
-        assert_equal([1, 3, 5, 7], list(agent.numa_cores[1]))
-        assert_equal(list(range(100, 200)) + list(range(300, 350)), list(agent.resources['ports']))
-        assert_equal(1, len(agent.interfaces))
-        assert_equal('eth0', agent.interfaces[0].name)
-        assert_equal({'net0'}, agent.interfaces[0].networks)
-        assert_equal(ipaddress.IPv4Address('192.168.254.254'), agent.interfaces[0].ipv4_address)
-        assert_equal(1, agent.interfaces[0].numa_node)
-        assert_equal(11e8, agent.interfaces[0].resources['bandwidth_in'].available)
-        assert_equal(12e8, agent.interfaces[0].resources['bandwidth_out'].available)
-        assert_equal(['/dev/infiniband/foo'], agent.interfaces[0].infiniband_devices)
-        assert_equal(False, agent.interfaces[0].infiniband_multicast_loopback)
-        assert_equal([scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
-                      scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
-                     agent.volumes)
-        assert_equal([[0, 2, 4, 6], [1, 3, 5, 7]], agent.numa)
-        assert_equal(8.5, agent.priority)
+            assert attr == agent_attr
+        assert agent.resources['cpus'].available == 4.5
+        assert agent.resources['mem'].available == 1147.5
+        assert agent.resources['disk'].available == 1024.5
+        assert len(agent.gpus) == 2
+        assert agent.gpus[0].resources['compute'].available == 0.75
+        assert agent.gpus[0].resources['mem'].available == 1280.0
+        assert agent.gpus[1].resources['compute'].available == 0.125
+        assert agent.gpus[1].resources['mem'].available == 2048.0
+        assert list(agent.numa_cores[0]) == [0, 2, 4, 6]
+        assert list(agent.numa_cores[1]) == [1, 3, 5, 7]
+        assert list(agent.resources['ports']) == list(range(100, 200)) + list(range(300, 350))
+        assert len(agent.interfaces) == 1
+        assert agent.interfaces[0].name == 'eth0'
+        assert agent.interfaces[0].networks == {'net0'}
+        assert agent.interfaces[0].ipv4_address == ipaddress.IPv4Address('192.168.254.254')
+        assert agent.interfaces[0].numa_node == 1
+        assert agent.interfaces[0].resources['bandwidth_in'].available == 11e8
+        assert agent.interfaces[0].resources['bandwidth_out'].available == 12e8
+        assert agent.interfaces[0].infiniband_devices == ['/dev/infiniband/foo']
+        assert agent.interfaces[0].infiniband_multicast_loopback is False
+        assert agent.volumes == [
+            scheduler.Volume(name='vol1', host_path='/host1', numa_node=None),
+            scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)
+        ]
+        assert agent.numa == [[0, 2, 4, 6], [1, 3, 5, 7]]
+        assert agent.priority == 8.5
 
     def test_construct_implicit_priority(self):
         """Test computation of priority when none is given"""
@@ -794,7 +791,7 @@ class TestAgent(unittest.TestCase):
             self._make_offer({'cpus': 0.5, 'mem': 123.5, 'disk': 1024.5}, attrs)
         ]
         agent = scheduler.Agent(offers)
-        assert_equal(5, agent.priority)
+        assert agent.priority == 5
 
     def test_no_offers(self):
         """ValueError is raised if zero offers are passed"""
@@ -808,21 +805,21 @@ class TestAgent(unittest.TestCase):
         offers[0].resources[0].disk.source.type = 'PATH'
         offers[0].resources[0].disk.source.path.root = '/mnt/data'
         agent = scheduler.Agent(offers)
-        assert_equal(0, agent.resources['disk'].available)
+        assert agent.resources['disk'].available == 0
 
     def test_bad_json(self):
         """A warning must be printed if an interface description is not valid JSON"""
         offers = [self._make_offer({}, [self.if_attr_bad_json])]
         with self.assertLogs('katsdpcontroller.scheduler', logging.WARN):
             agent = scheduler.Agent(offers)
-        assert_equal([], agent.interfaces)
+        assert agent.interfaces == []
 
     def test_bad_schema(self):
         """A warning must be printed if an interface description does not conform to the schema"""
         offers = [self._make_offer({}, [self.if_attr_bad_schema])]
         with self.assertLogs('katsdpcontroller.scheduler', logging.WARN):
             agent = scheduler.Agent(offers)
-        assert_equal([], agent.interfaces)
+        assert agent.interfaces == []
 
     def test_allocate_not_valid(self):
         """allocate raises if the task does not accept the agent"""
@@ -937,7 +934,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr_loopback])])
         agent.interfaces[0].multicast_in |= {'mc'}
         agent.allocate(task)
-        assert_equal({'mc'}, agent.interfaces[0].infiniband_multicast_out)
+        assert agent.interfaces[0].infiniband_multicast_out == {'mc'}
 
     def test_allocate_safe_no_infiniband(self):
         """allocate does not raise on multicast conflict if infiniband is not used."""
@@ -949,7 +946,7 @@ class TestAgent(unittest.TestCase):
             'katsdpcontroller.interface.0.bandwidth_out': 2000e6}, [self.if_attr])])
         agent.interfaces[0].multicast_in |= {'mc'}
         agent.allocate(task)
-        assert_equal(set(), agent.interfaces[0].infiniband_multicast_out)
+        assert agent.interfaces[0].infiniband_multicast_out == set()
 
     def test_allocate_no_numa_cores(self):
         """allocate raises if no NUMA node has enough cores on its own"""
@@ -1056,33 +1053,32 @@ class TestAgent(unittest.TestCase):
                 'katsdpcontroller.interface.0.bandwidth_out': 2100e6
             }, [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr])])
         ra = agent.allocate(task)
-        assert_equal(4.0, ra.resources['cpus'].available)
-        assert_equal(128.0, ra.resources['mem'].available)
-        assert_equal(1, len(ra.interfaces))
-        assert_equal(1000e6, ra.interfaces[0].resources['bandwidth_in'].available)
-        assert_equal(500e6, ra.interfaces[0].resources['bandwidth_out'].available)
-        assert_equal(0, ra.interfaces[0].index)
-        assert_equal([scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)],
-                     ra.volumes)
-        assert_equal(2, len(ra.gpus))
-        assert_equal(0.5, ra.gpus[0].resources['compute'].available)
-        assert_equal(1024.0, ra.gpus[0].resources['mem'].available)
-        assert_equal(1, ra.gpus[0].index)
-        assert_equal(0.5, ra.gpus[1].resources['compute'].available)
-        assert_equal(256.0, ra.gpus[1].resources['mem'].available)
-        assert_equal(0, ra.gpus[1].index)
-        assert_equal([3, 5, 7], list(ra.resources['cores']))
+        assert ra.resources['cpus'].available == 4.0
+        assert ra.resources['mem'].available == 128.0
+        assert len(ra.interfaces) == 1
+        assert ra.interfaces[0].resources['bandwidth_in'].available == 1000e6
+        assert ra.interfaces[0].resources['bandwidth_out'].available == 500e6
+        assert ra.interfaces[0].index == 0
+        assert ra.volumes == [scheduler.Volume(name='vol2', host_path='/host2', numa_node=1)]
+        assert len(ra.gpus) == 2
+        assert ra.gpus[0].resources['compute'].available == 0.5
+        assert ra.gpus[0].resources['mem'].available == 1024.0
+        assert ra.gpus[0].index == 1
+        assert ra.gpus[1].resources['compute'].available == 0.5
+        assert ra.gpus[1].resources['mem'].available == 256.0
+        assert ra.gpus[1].index == 0
+        assert list(ra.resources['cores']) == [3, 5, 7]
         # Check that the resources were subtracted
-        assert_equal(0.0, agent.resources['cpus'].available)
-        assert_equal(72.0, agent.resources['mem'].available)
-        assert_equal([4, 6], list(agent.numa_cores[0]))
-        assert_equal([], list(agent.numa_cores[1]))
-        assert_equal(1000e6, agent.interfaces[0].resources['bandwidth_in'].available)
-        assert_equal(1600e6, agent.interfaces[0].resources['bandwidth_out'].available)
-        assert_equal(0.25, agent.gpus[0].resources['compute'].available)
-        assert_equal(0.0, agent.gpus[0].resources['mem'].available)
-        assert_equal(0.25, agent.gpus[1].resources['compute'].available)
-        assert_equal(1024.0, agent.gpus[1].resources['mem'].available)
+        assert agent.resources['cpus'].available == 0.0
+        assert agent.resources['mem'].available == 72.0
+        assert list(agent.numa_cores[0]) == [4, 6]
+        assert list(agent.numa_cores[1]) == []
+        assert agent.interfaces[0].resources['bandwidth_in'].available == 1000e6
+        assert agent.interfaces[0].resources['bandwidth_out'].available == 1600e6
+        assert agent.gpus[0].resources['compute'].available == 0.25
+        assert agent.gpus[0].resources['mem'].available == 0.0
+        assert agent.gpus[1].resources['compute'].available == 0.25
+        assert agent.gpus[1].resources['mem'].available == 1024.0
 
 
 class TestPhysicalTask:
@@ -1128,37 +1124,39 @@ class TestPhysicalTask:
     def test_properties_init(self):
         """Resolved properties are ``None`` on construction"""
         physical_task = scheduler.PhysicalTask(self.logical_task)
-        assert_is_none(physical_task.agent)
-        assert_is_none(physical_task.host)
-        assert_is_none(physical_task.agent_id)
-        assert_is_none(physical_task.taskinfo)
-        assert_is_none(physical_task.allocation)
-        assert_equal({}, physical_task.interfaces)
-        assert_equal({}, physical_task.endpoints)
-        assert_equal({}, physical_task.ports)
-        assert_equal({}, physical_task.cores)
+        assert physical_task.agent is None
+        assert physical_task.host is None
+        assert physical_task.agent_id is None
+        assert physical_task.taskinfo is None
+        assert physical_task.allocation is None
+        assert physical_task.interfaces == {}
+        assert physical_task.endpoints == {}
+        assert physical_task.ports == {}
+        assert physical_task.cores == {}
 
     def test_allocate(self):
         physical_task = scheduler.PhysicalTask(self.logical_task)
         physical_task.allocate(self.allocation)
-        assert_is(self.allocation.agent, physical_task.agent)
-        assert_equal('agenthost', physical_task.host)
-        assert_equal('agentid', physical_task.agent_id)
-        assert_is(self.allocation, physical_task.allocation)
-        assert_in('net0', physical_task.interfaces)
-        assert_equal('eth0', physical_task.interfaces['net0'].name)
-        assert_equal(ipaddress.IPv4Address('192.168.1.1'),
-                     physical_task.interfaces['net0'].ipv4_address)
-        assert_in('net1', physical_task.interfaces)
-        assert_equal('eth1', physical_task.interfaces['net1'].name)
-        assert_equal(ipaddress.IPv4Address('192.168.2.1'),
-                     physical_task.interfaces['net1'].ipv4_address)
-        assert_equal({}, physical_task.endpoints)
-        assert_equal({'port1': mock.ANY, 'port2': mock.ANY}, physical_task.ports)
-        assert_in(physical_task.ports['port1'], range(30000, 31001))
-        assert_in(physical_task.ports['port2'], range(30000, 31001))
-        assert_not_equal(physical_task.ports['port1'], physical_task.ports['port2'])
-        assert_equal({'core1': 2, 'core2': 4, 'core3': 6}, physical_task.cores)
+        assert self.allocation.agent is physical_task.agent
+        assert physical_task.host == 'agenthost'
+        assert physical_task.agent_id == 'agentid'
+        assert self.allocation is physical_task.allocation
+        assert 'net0' in physical_task.interfaces
+        assert physical_task.interfaces['net0'].name == 'eth0'
+        assert (
+            physical_task.interfaces['net0'].ipv4_address == ipaddress.IPv4Address('192.168.1.1')
+        )
+        assert 'net1' in physical_task.interfaces
+        assert physical_task.interfaces['net1'].name == 'eth1'
+        assert (
+            ipaddress.IPv4Address('192.168.2.1') == physical_task.interfaces['net1'].ipv4_address
+        )
+        assert physical_task.endpoints == {}
+        assert physical_task.ports == {'port1': mock.ANY, 'port2': mock.ANY}
+        assert physical_task.ports['port1'] in range(30000, 31001)
+        assert physical_task.ports['port2'] in range(30000, 31001)
+        assert physical_task.ports['port1'] != physical_task.ports['port2']
+        assert physical_task.cores == {'core1': 2, 'core2': 4, 'core3': 6}
 
 
 class TestDiagnoseInsufficient(unittest.TestCase):
@@ -1434,18 +1432,18 @@ class TestSubgraph:
     def test_simple(self):
         """Test with string filter and all nodes"""
         out = scheduler.subgraph(self.g, 'key2')
-        assert_equal({('c', 'a'), ('c', 'b')}, set(out.edges()))
-        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+        assert set(out.edges()) == {('c', 'a'), ('c', 'b')}
+        assert set(out.nodes()) == {'a', 'b', 'c'}
 
     def test_restrict_nodes(self):
         out = scheduler.subgraph(self.g, 'key2', {'a', 'c'})
-        assert_equal({('c', 'a')}, set(out.edges()))
-        assert_equal({'a', 'c'}, set(out.nodes()))
+        assert set(out.edges()) == {('c', 'a')}
+        assert set(out.nodes()) == {'a', 'c'}
 
     def test_callable_filter(self):
         out = scheduler.subgraph(self.g, lambda data: 'key1' in data)
-        assert_equal({('a', 'b'), ('b', 'c'), ('c', 'b')}, set(out.edges()))
-        assert_equal({'a', 'b', 'c'}, set(out.nodes()))
+        assert set(out.edges()) == {('a', 'b'), ('b', 'c'), ('c', 'b')}
+        assert set(out.nodes()) == {'a', 'b', 'c'}
 
 
 class TestScheduler(asynctest.ClockedTestCase):
@@ -1606,11 +1604,10 @@ class TestScheduler(asynctest.ClockedTestCase):
         ]
         self.sched.resourceOffers(self.driver, offers)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(
-            AnyOrderList([
-                mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
-                mock.call.suppressOffers({'default'})
-            ]), self._driver_calls())
+        assert self._driver_calls() == AnyOrderList([
+            mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
+            mock.call.suppressOffers({'default'})
+        ])
 
     async def test_launch_cycle(self):
         """Launch raises CycleError if there is a cycle of depends_ready edges"""
@@ -1728,64 +1725,63 @@ class TestScheduler(asynctest.ClockedTestCase):
         # The tasks must be in state STARTING, but not yet RUNNING because
         # there are no offers.
         for node in self.nodes:
-            assert_equal(TaskState.STARTING, node.state)
-            assert_false(node.ready_event.is_set())
-            assert_false(node.dead_event.is_set())
-        assert_equal({TaskState.STARTING: 2}, self.task_stats.state_counts)
-        assert_equal([mock.call.reviveOffers({'default'})], self._driver_calls())
+            assert node.state == TaskState.STARTING
+            assert not node.ready_event.is_set()
+            assert not node.dead_event.is_set()
+        assert self.task_stats.state_counts == {TaskState.STARTING: 2}
+        assert self._driver_calls() == [mock.call.reviveOffers({'default'})]
         self.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
         self.sched.resourceOffers(self.driver, [offer1])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal([], self._driver_calls())
+        assert self._driver_calls() == []
         for node in self.nodes:
-            assert_equal(TaskState.STARTING, node.state)
-            assert_false(node.ready_event.is_set())
-            assert_false(node.dead_event.is_set())
+            assert node.state == TaskState.STARTING
+            assert not node.ready_event.is_set()
+            assert not node.dead_event.is_set()
         # Provide offer suitable for launching node0. At this point all nodes
         # should launch.
         self.sched.resourceOffers(self.driver, [offer0])
         await self.advance(60)   # For the benefit of test_launch_slow_resolve
 
-        assert_equal(TaskState.STARTED, self.nodes[0].state)
-        assert_equal(expected_taskinfo0.resources, self.nodes[0].taskinfo.resources)
-        assert_equal(expected_taskinfo0, self.nodes[0].taskinfo)
-        assert_equal('agenthost0', self.nodes[0].host)
-        assert_equal('agentid0', self.nodes[0].agent_id)
-        assert_equal({'port': 30000}, self.nodes[0].ports)
-        assert_equal({}, self.nodes[0].cores)
-        assert_is_none(self.nodes[0].status)
+        assert self.nodes[0].state == TaskState.STARTED
+        assert self.nodes[0].taskinfo.resources == expected_taskinfo0.resources
+        assert self.nodes[0].taskinfo == expected_taskinfo0
+        assert self.nodes[0].host == 'agenthost0'
+        assert self.nodes[0].agent_id == 'agentid0'
+        assert self.nodes[0].ports == {'port': 30000}
+        assert self.nodes[0].cores == {}
+        assert self.nodes[0].status is None
 
-        assert_equal(expected_taskinfo1, self.nodes[1].taskinfo)
-        assert_equal('agentid1', self.nodes[1].agent_id)
-        assert_equal(TaskState.STARTED, self.nodes[1].state)
+        assert self.nodes[1].taskinfo == expected_taskinfo1
+        assert self.nodes[1].agent_id == 'agentid1'
+        assert self.nodes[1].state == TaskState.STARTED
 
-        assert_equal(TaskState.READY, self.nodes[2].state)
-        assert_equal(AnyOrderList([
+        assert self.nodes[2].state == TaskState.READY
+        assert self._driver_calls() == AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers({'default'})
-        ]), self._driver_calls())
+        ])
         self.driver.reset_mock()
-        assert_equal({TaskState.STARTED: 2}, self.task_stats.state_counts)
+        assert self.task_stats.state_counts == {TaskState.STARTED: 2}
 
         # Tell scheduler that node1 is now running. It should go to RUNNING
         # but not READY, because node0 isn't ready yet.
         status = self._status_update(self.task_ids[1], 'TASK_RUNNING')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.RUNNING, self.nodes[1].state)
-        assert_equal(status, self.nodes[1].status)
-        assert_equal([mock.call.acknowledgeStatusUpdate(status)],
-                     self._driver_calls())
+        assert self.nodes[1].state == TaskState.RUNNING
+        assert self.nodes[1].status == status
+        assert self._driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
         self.driver.reset_mock()
-        assert_equal({TaskState.STARTED: 1, TaskState.RUNNING: 1}, self.task_stats.state_counts)
+        assert self.task_stats.state_counts == {TaskState.STARTED: 1, TaskState.RUNNING: 1}
 
         # A real node1 would issue an HTTP request back to the scheduler. Fake
         # it instead, to check the timing.
         wait_request = self.loop.create_task(self._wait_request(self.task_ids[1]))
         await asynctest.exhaust_callbacks(self.loop)
-        assert_false(wait_request.done())
+        assert not wait_request.done()
 
         # Tell scheduler that node0 is now running. This will start up the
         # the waiter, so we need to mock poll_ports.
@@ -1793,23 +1789,22 @@ class TestScheduler(asynctest.ClockedTestCase):
             poll_future = future_return(poll_ports)
             status = self._status_update(self.task_ids[0], 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
-            assert_equal(TaskState.RUNNING, self.nodes[0].state)
-            assert_equal(status, self.nodes[0].status)
-            assert_equal([mock.call.acknowledgeStatusUpdate(status)],
-                         self._driver_calls())
+            assert self.nodes[0].state == TaskState.RUNNING
+            assert self.nodes[0].status == status
+            assert self._driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
             self.driver.reset_mock()
             poll_ports.assert_called_once_with('agenthost0', [30000])
-        assert_equal({TaskState.RUNNING: 2}, self.task_stats.state_counts)
+        assert self.task_stats.state_counts == {TaskState.RUNNING: 2}
 
         # Make poll_ports ready. Node 0 should now become ready, which will
         # make node 1 ready too.
         poll_future.set_result(None)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.READY, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.READY
         await wait_request
-        assert_equal(TaskState.READY, self.nodes[1].state)
-        assert_true(launch.done())
-        assert_equal({TaskState.READY: 2}, self.task_stats.state_counts)
+        assert self.nodes[1].state == TaskState.READY
+        assert launch.done()
+        assert self.task_stats.state_counts == {TaskState.READY: 2}
         await launch
 
     async def test_launch_slow_resolve(self):
@@ -1851,32 +1846,32 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.sched.launch(self.physical_graph, self.resolver, nodes))
         kill = None
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.STARTING
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = future_return(poll_ports)
             if target_state > TaskState.STARTING:
                 self.sched.resourceOffers(self.driver, offers)
                 await asynctest.exhaust_callbacks(self.loop)
-                assert_equal(TaskState.STARTED, self.nodes[0].state)
+                assert self.nodes[0].state == TaskState.STARTED
                 task_id = self.nodes[0].taskinfo.task_id.value
                 if target_state > TaskState.STARTED:
                     self._status_update(task_id, 'TASK_RUNNING')
                     await asynctest.exhaust_callbacks(self.loop)
-                    assert_equal(TaskState.RUNNING, self.nodes[0].state)
+                    assert self.nodes[0].state == TaskState.RUNNING
                     if target_state > TaskState.RUNNING:
                         poll_future.set_result(None)   # Mark ports as ready
                         await asynctest.exhaust_callbacks(self.loop)
-                        assert_equal(TaskState.READY, self.nodes[0].state)
+                        assert self.nodes[0].state == TaskState.READY
                         if target_state > TaskState.READY:
                             kill = asyncio.ensure_future(
                                 self.sched.kill(self.physical_graph, nodes))
                             await asynctest.exhaust_callbacks(self.loop)
-                            assert_equal(TaskState.KILLING, self.nodes[0].state)
+                            assert self.nodes[0].state == TaskState.KILLING
                             if target_state > TaskState.KILLING:
                                 self._status_update(task_id, 'TASK_KILLED')
                             await asynctest.exhaust_callbacks(self.loop)
         self.driver.reset_mock()
-        assert_equal(target_state, self.nodes[0].state)
+        assert self.nodes[0].state == target_state
         return (launch, kill)
 
     async def _ready_graph(self):
@@ -1884,7 +1879,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch, kill = await self._transition_node0(TaskState.READY)
         self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_true(launch.done())  # Ensures the next line won't hang the test
+        assert launch.done()  # Ensures the next line won't hang the test
         await launch
         self.driver.reset_mock()
 
@@ -1905,36 +1900,36 @@ class TestScheduler(asynctest.ClockedTestCase):
         offers = self._make_offers()
         self.sched.resourceOffers(self.driver, [offers[1]])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTED, self.nodes[1].state)
+        assert self.nodes[1].state == TaskState.STARTED
         self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_true(launch1.done())
+        assert launch1.done()
 
         # Now unblock node0
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.STARTING
         self.sched.resourceOffers(self.driver, [offers[0]])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTED, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.STARTED
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = future_return(poll_ports)
             poll_future.set_result(None)   # Mark ports as ready
             self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
             await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.READY, self.nodes[0].state)
-        assert_true(launch0.done())
+        assert self.nodes[0].state == TaskState.READY
+        assert launch0.done()
 
     async def _test_launch_cancel(self, target_state):
         launch, kill = await self._transition_node0(target_state)
-        assert_false(launch.done())
+        assert not launch.done()
         # Now cancel and check that nodes go back to NOT_READY if they were
         # in STARTING, otherwise keep their state.
         launch.cancel()
         await asynctest.exhaust_callbacks(self.loop)
         if target_state == TaskState.STARTING:
             for node in self.nodes:
-                assert_equal(TaskState.NOT_READY, node.state)
+                assert node.state == TaskState.NOT_READY
         else:
-            assert_equal(target_state, self.nodes[0].state)
+            assert self.nodes[0].state == target_state
 
     async def test_launch_cancel_wait_task(self):
         """Test cancelling a launch while waiting for a task to become READY"""
@@ -1950,11 +1945,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         await self.advance(30)
         with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
-        assert_equal(TaskState.NOT_READY, self.nodes[0].state)
-        assert_equal(TaskState.NOT_READY, self.nodes[1].state)
-        assert_equal(TaskState.NOT_READY, self.nodes[2].state)
+        assert self.nodes[0].state == TaskState.NOT_READY
+        assert self.nodes[1].state == TaskState.NOT_READY
+        assert self.nodes[2].state == TaskState.NOT_READY
         # Once we abort, we should no longer be interested in offers
-        assert_equal([mock.call.suppressOffers({'default'})], self._driver_calls())
+        assert self._driver_calls() == [mock.call.suppressOffers({'default'})]
 
     async def test_launch_queue_busy(self):
         """Test a launch failing due to tasks ahead of it blocking the queue."""
@@ -1966,7 +1961,7 @@ class TestScheduler(asynctest.ClockedTestCase):
         with pytest.raises(scheduler.QueueBusyError, match='(2s)') as cm:
             await launch1
         assert cm.value.timeout == 2
-        assert_false(launch.done())
+        assert not launch.done()
         await self.advance(30)
         with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
@@ -2027,9 +2022,10 @@ class TestScheduler(asynctest.ClockedTestCase):
         with pytest.raises(ValueError, match='Testing'):
             await launch
         # The offers must be returned to Mesos
-        assert_equal(AnyOrderList([
+        assert self._driver_calls() == AnyOrderList([
             mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
-            mock.call.suppressOffers({'default'})]), self._driver_calls())
+            mock.call.suppressOffers({'default'})
+        ])
 
     async def test_offer_rescinded(self):
         """Test offerRescinded"""
@@ -2038,20 +2034,20 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Provide an offer that is sufficient only for node 0
         self.sched.resourceOffers(self.driver, [offers[0]])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.STARTING
         # Rescind the offer
         self.sched.offerRescinded(self.driver, offers[0].id)
         # Make a new offer, which is also insufficient, but which with the
         # original one would have been sufficient.
         self.sched.resourceOffers(self.driver, [offers[1]])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
+        assert self.nodes[0].state == TaskState.STARTING
         # Rescind an unknown offer. This can happen if an offer was accepted at
         # the same time as it was rescinded.
         offer2 = self._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         self.sched.offerRescinded(self.driver, offer2.id)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal([], self._driver_calls())
+        assert self._driver_calls() == []
         launch.cancel()
 
     async def test_decline_unneeded_offers(self):
@@ -2062,8 +2058,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         offers[0] = self._make_offer({'cpus': 0.1})
         self.sched.resourceOffers(self.driver, offers)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer([offers[0].id])], self._driver_calls())
+        assert self.nodes[0].state == TaskState.STARTING
+        assert self._driver_calls() == [mock.call.declineOffer([offers[0].id])]
         launch.cancel()
 
     async def test_unavailability(self):
@@ -2075,8 +2071,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         offer0.unavailability.duration.nanoseconds = int(3600e9)
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer([offer0.id])], self._driver_calls())
+        assert self.nodes[0].state == TaskState.STARTING
+        assert self._driver_calls() == [mock.call.declineOffer([offer0.id])]
         launch.cancel()
 
     async def test_unavailability_forever(self):
@@ -2089,8 +2085,8 @@ class TestScheduler(asynctest.ClockedTestCase):
         offer0.unavailability.start.nanoseconds = int(time.time() * 1e9)
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTING, self.nodes[0].state)
-        assert_equal([mock.call.declineOffer([offer0.id])], self._driver_calls())
+        assert self.nodes[0].state == TaskState.STARTING
+        assert self._driver_calls() == [mock.call.declineOffer([offer0.id])]
         launch.cancel()
 
     async def test_unavailability_past(self):
@@ -2102,11 +2098,11 @@ class TestScheduler(asynctest.ClockedTestCase):
         offer0.unavailability.duration.nanoseconds = int(3600e9)
         self.sched.resourceOffers(self.driver, [offer0])
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.STARTED, self.nodes[0].state)
-        assert_equal([
+        assert self.nodes[0].state == TaskState.STARTED
+        assert self._driver_calls() == [
             mock.call.launchTasks([offer0.id], mock.ANY),
             mock.call.suppressOffers({'default'})
-        ], self._driver_calls())
+        ]
         launch.cancel()
 
     async def _test_kill_in_state(self, state):
@@ -2115,12 +2111,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         kill = asyncio.ensure_future(self.sched.kill(self.physical_graph, [self.nodes[0]]))
         await asynctest.exhaust_callbacks(self.loop)
         if state > TaskState.STARTING:
-            assert_equal(TaskState.KILLING, self.nodes[0].state)
+            assert self.nodes[0].state == TaskState.KILLING
             status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
             await asynctest.exhaust_callbacks(self.loop)
-            assert_is(status, self.nodes[0].status)
-            assert_equal({TaskState.DEAD: 1}, self.task_stats.state_counts)
-        assert_equal(TaskState.DEAD, self.nodes[0].state)
+            assert status is self.nodes[0].status
+            assert self.task_stats.state_counts == {TaskState.DEAD: 1}
+        assert self.nodes[0].state == TaskState.DEAD
         await launch
         await kill
 
@@ -2149,10 +2145,10 @@ class TestScheduler(asynctest.ClockedTestCase):
         launch, kill = await self._transition_node0(state, [self.nodes[0]])
         status = self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_is(status, self.nodes[0].status)
-        assert_equal(TaskState.DEAD, self.nodes[0].state)
-        assert_true(self.nodes[0].ready_event.is_set())
-        assert_true(self.nodes[0].dead_event.is_set())
+        assert status is self.nodes[0].status
+        assert self.nodes[0].state == TaskState.DEAD
+        assert self.nodes[0].ready_event.is_set()
+        assert self.nodes[0].dead_event.is_set()
         await launch
 
     async def test_die_while_started(self):
@@ -2173,32 +2169,29 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Now kill it. node1 must be dead before node0, node2 get killed
         kill = asyncio.ensure_future(self.sched.kill(self.physical_graph))
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal([mock.call.killTask(self.nodes[1].taskinfo.task_id)],
-                     self._driver_calls())
-        assert_equal(TaskState.READY, self.nodes[0].state)
-        assert_equal(TaskState.KILLING, self.nodes[1].state)
-        assert_equal(TaskState.READY, self.nodes[2].state)
+        assert self._driver_calls() == [mock.call.killTask(self.nodes[1].taskinfo.task_id)]
+        assert self.nodes[0].state == TaskState.READY
+        assert self.nodes[1].state == TaskState.KILLING
+        assert self.nodes[2].state == TaskState.READY
         self.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
         status = self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(
-            AnyOrderList([
-                mock.call.killTask(self.nodes[0].taskinfo.task_id),
-                mock.call.acknowledgeStatusUpdate(status)
-            ]),
-            self._driver_calls())
-        assert_equal(TaskState.KILLING, self.nodes[0].state)
-        assert_equal(TaskState.DEAD, self.nodes[1].state)
-        assert_equal(TaskState.DEAD, self.nodes[2].state)
-        assert_false(kill.done())
+        assert self._driver_calls() == AnyOrderList([
+            mock.call.killTask(self.nodes[0].taskinfo.task_id),
+            mock.call.acknowledgeStatusUpdate(status)
+        ])
+        assert self.nodes[0].state == TaskState.KILLING
+        assert self.nodes[1].state == TaskState.DEAD
+        assert self.nodes[2].state == TaskState.DEAD
+        assert not kill.done()
         # node0 now dies, to finish the cleanup
         self._status_update(self.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.DEAD, self.nodes[0].state)
-        assert_equal(TaskState.DEAD, self.nodes[1].state)
-        assert_equal(TaskState.DEAD, self.nodes[2].state)
-        assert_true(kill.done())
+        assert self.nodes[0].state == TaskState.DEAD
+        assert self.nodes[1].state == TaskState.DEAD
+        assert self.nodes[2].state == TaskState.DEAD
+        assert kill.done()
         await kill
 
     async def _transition_batch_run(self, node, state):
@@ -2210,16 +2203,16 @@ class TestScheduler(asynctest.ClockedTestCase):
             await asynctest.exhaust_callbacks(self.loop)
             self.sched.resourceOffers(self.driver, self._make_offers())
             await asynctest.exhaust_callbacks(self.loop)
-            assert_equal(TaskState.STARTED, node.state)
+            assert node.state == TaskState.STARTED
             if state >= TaskState.READY:
                 task_id = node.taskinfo.task_id.value
                 self._status_update(task_id, 'TASK_RUNNING')
                 await asynctest.exhaust_callbacks(self.loop)
-                assert_equal(TaskState.READY, node.state)
+                assert node.state == TaskState.READY
                 if state >= TaskState.DEAD:
                     self._status_update(task_id, 'TASK_FINISHED')
                     await asynctest.exhaust_callbacks(self.loop)
-                    assert_equal(TaskState.DEAD, node.state)
+                    assert node.state == TaskState.DEAD
 
     async def test_batch_run_success(self):
         """batch_run for the case of a successful run"""
@@ -2227,13 +2220,13 @@ class TestScheduler(asynctest.ClockedTestCase):
             self.physical_batch_graph, self.resolver, [self.batch_nodes[0]]))
         await self._transition_batch_run(self.batch_nodes[0], TaskState.DEAD)
         results = await task
-        assert_equal(results, {self.batch_nodes[0]: None})
-        assert_equal(self.task_stats.batch_created, 1)
-        assert_equal(self.task_stats.batch_started, 1)
-        assert_equal(self.task_stats.batch_done, 1)
-        assert_equal(self.task_stats.batch_retried, 0)
-        assert_equal(self.task_stats.batch_failed, 0)
-        assert_equal(self.task_stats.batch_skipped, 0)
+        assert results == {self.batch_nodes[0]: None}
+        assert self.task_stats.batch_created == 1
+        assert self.task_stats.batch_started == 1
+        assert self.task_stats.batch_done == 1
+        assert self.task_stats.batch_retried == 0
+        assert self.task_stats.batch_failed == 0
+        assert self.task_stats.batch_skipped == 0
 
     async def test_batch_run_failure(self):
         """batch_run with a failing task"""
@@ -2245,12 +2238,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         results = await task
         with pytest.raises(scheduler.TaskError):
             raise next(iter(results.values()))
-        assert_equal(self.task_stats.batch_created, 1)
-        assert_equal(self.task_stats.batch_started, 1)
-        assert_equal(self.task_stats.batch_done, 1)
-        assert_equal(self.task_stats.batch_retried, 0)
-        assert_equal(self.task_stats.batch_failed, 1)
-        assert_equal(self.task_stats.batch_skipped, 0)
+        assert self.task_stats.batch_created == 1
+        assert self.task_stats.batch_started == 1
+        assert self.task_stats.batch_done == 1
+        assert self.task_stats.batch_retried == 0
+        assert self.task_stats.batch_failed == 1
+        assert self.task_stats.batch_skipped == 0
 
     async def test_batch_run_resources_timeout(self):
         """batch_run with a task that doesn't get resources in time"""
@@ -2260,12 +2253,12 @@ class TestScheduler(asynctest.ClockedTestCase):
         results = await task
         with pytest.raises(scheduler.TaskInsufficientResourcesError):
             raise next(iter(results.values()))
-        assert_equal(self.task_stats.batch_created, 1)
-        assert_equal(self.task_stats.batch_started, 1)
-        assert_equal(self.task_stats.batch_done, 1)
-        assert_equal(self.task_stats.batch_retried, 0)
-        assert_equal(self.task_stats.batch_failed, 1)
-        assert_equal(self.task_stats.batch_skipped, 0)
+        assert self.task_stats.batch_created == 1
+        assert self.task_stats.batch_started == 1
+        assert self.task_stats.batch_done == 1
+        assert self.task_stats.batch_retried == 0
+        assert self.task_stats.batch_failed == 1
+        assert self.task_stats.batch_skipped == 0
 
     async def _batch_run_retry_second(self, task):
         """Do the retry on a test_batch_run_retry_* test."""
@@ -2275,12 +2268,12 @@ class TestScheduler(asynctest.ClockedTestCase):
                                    if node.name == 'batch0')
         await self._transition_batch_run(self.batch_nodes[0], TaskState.DEAD)
         await task
-        assert_equal(self.task_stats.batch_created, 1)
-        assert_equal(self.task_stats.batch_started, 1)
-        assert_equal(self.task_stats.batch_done, 1)
-        assert_equal(self.task_stats.batch_retried, 1)
-        assert_equal(self.task_stats.batch_failed, 0)
-        assert_equal(self.task_stats.batch_skipped, 0)
+        assert self.task_stats.batch_created == 1
+        assert self.task_stats.batch_started == 1
+        assert self.task_stats.batch_done == 1
+        assert self.task_stats.batch_retried == 1
+        assert self.task_stats.batch_failed == 0
+        assert self.task_stats.batch_skipped == 0
 
     async def test_batch_run_retry(self):
         """batch_run where first attempt fails, later attempt succeeds."""
@@ -2297,16 +2290,16 @@ class TestScheduler(asynctest.ClockedTestCase):
         task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
         await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
         # Ensure that we haven't even tried to launch the second one
-        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        assert self.batch_nodes[1].state == TaskState.NOT_READY
         # Kill it, the next one should start up
         self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
-        assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
+        assert self.batch_nodes[0].state == TaskState.DEAD
+        assert self.batch_nodes[1].state == TaskState.STARTING
 
         await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
         results = await task
-        assert_equal(results, {self.batch_nodes[0]: None, self.batch_nodes[1]: None})
+        assert results == {self.batch_nodes[0]: None, self.batch_nodes[1]: None}
 
     async def test_batch_run_skip(self):
         """If a dependency fails, the dependent task is skipped"""
@@ -2315,20 +2308,20 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Kill it
         self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
+        assert self.batch_nodes[0].state == TaskState.DEAD
         # Next task shouldn't even try to start
-        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        assert self.batch_nodes[1].state == TaskState.NOT_READY
         results = await task
         with pytest.raises(scheduler.TaskError):
             raise results[self.batch_nodes[0]]
         with pytest.raises(scheduler.TaskSkipped):
             raise results[self.batch_nodes[1]]
-        assert_equal(self.task_stats.batch_created, 2)
-        assert_equal(self.task_stats.batch_started, 1)
-        assert_equal(self.task_stats.batch_done, 2)
-        assert_equal(self.task_stats.batch_retried, 0)
-        assert_equal(self.task_stats.batch_failed, 1)
-        assert_equal(self.task_stats.batch_skipped, 1)
+        assert self.task_stats.batch_created == 2
+        assert self.task_stats.batch_started == 1
+        assert self.task_stats.batch_done == 2
+        assert self.task_stats.batch_retried == 0
+        assert self.task_stats.batch_failed == 1
+        assert self.task_stats.batch_skipped == 1
 
     async def test_batch_run_non_critical_failure(self):
         """If a non-critical dependency fails, the dependent task runs anyway."""
@@ -2342,24 +2335,24 @@ class TestScheduler(asynctest.ClockedTestCase):
 
         task = asyncio.ensure_future(self.sched.batch_run(self.physical_batch_graph, self.resolver))
         await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
-        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        assert self.batch_nodes[1].state == TaskState.NOT_READY
         # Kill it
         self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
+        assert self.batch_nodes[0].state == TaskState.DEAD
         # Next task should now start
-        assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
+        assert self.batch_nodes[1].state == TaskState.STARTING
         await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
         results = await task
         with pytest.raises(scheduler.TaskError):
             raise results[self.batch_nodes[0]]
-        assert_is_none(results[self.batch_nodes[1]])
-        assert_equal(self.task_stats.batch_created, 2)
-        assert_equal(self.task_stats.batch_started, 2)
-        assert_equal(self.task_stats.batch_done, 2)
-        assert_equal(self.task_stats.batch_retried, 0)
-        assert_equal(self.task_stats.batch_failed, 1)
-        assert_equal(self.task_stats.batch_skipped, 0)
+        assert results[self.batch_nodes[1]] is None
+        assert self.task_stats.batch_created == 2
+        assert self.task_stats.batch_started == 2
+        assert self.task_stats.batch_done == 2
+        assert self.task_stats.batch_retried == 0
+        assert self.task_stats.batch_failed == 1
+        assert self.task_stats.batch_skipped == 0
 
     async def test_batch_run_depends_retry(self):
         """If a dependencies fails once, wait until it's retried."""
@@ -2376,16 +2369,16 @@ class TestScheduler(asynctest.ClockedTestCase):
         # Retry the first task. The next task must not have started yet.
         await self._transition_batch_run(self.batch_nodes[0], TaskState.READY)
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.NOT_READY, self.batch_nodes[1].state)
+        assert self.batch_nodes[1].state == TaskState.NOT_READY
         # Finish the retried first task.
         self._status_update(self.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await asynctest.exhaust_callbacks(self.loop)
-        assert_equal(TaskState.DEAD, self.batch_nodes[0].state)
-        assert_equal(TaskState.STARTING, self.batch_nodes[1].state)
+        assert self.batch_nodes[0].state == TaskState.DEAD
+        assert self.batch_nodes[1].state == TaskState.STARTING
         # Finish the second task
         await self._transition_batch_run(self.batch_nodes[1], TaskState.DEAD)
         results = await task
-        assert_equal(list(results.values()), [None, None])
+        assert list(results.values()) == [None, None]
 
     async def test_close(self):
         """Close must kill off all remaining tasks and abort any pending launches"""
@@ -2403,18 +2396,18 @@ class TestScheduler(asynctest.ClockedTestCase):
         # join the driver thread. Wait up to 5 seconds for that to happen.
         await asyncio.wait_for(close, 5)
         for node in self.physical_graph:
-            assert_equal(TaskState.DEAD, node.state)
+            assert node.state == TaskState.DEAD
         for node in physical_graph2:
-            assert_equal(TaskState.DEAD, node.state)
+            assert node.state == TaskState.DEAD
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
         driver_calls = self._driver_calls()
-        assert_in(mock.call.suppressOffers({'default'}), driver_calls)
+        assert mock.call.suppressOffers({'default'}) in driver_calls
         pos = driver_calls.index(mock.call.suppressOffers({'default'}))
-        assert_true(1 <= pos < len(driver_calls) - 2)
+        assert 1 <= pos < len(driver_calls) - 2
         del driver_calls[pos]
-        assert_equal([
+        assert [
             mock.call.reviveOffers({'default'}),
             mock.call.killTask(self.nodes[1].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status1),
@@ -2422,8 +2415,8 @@ class TestScheduler(asynctest.ClockedTestCase):
             mock.call.acknowledgeStatusUpdate(status0),
             mock.call.stop(),
             mock.call.join()
-            ], driver_calls)
-        assert_true(launch.done())
+            ] == driver_calls
+        assert launch.done()
         await launch
 
     async def test_status_unknown_task_id(self):
