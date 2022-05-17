@@ -953,7 +953,7 @@ class TestController(BaseTestController):
 
         # Verify the state of the subarray
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert isinstance(product, SubarrayProduct)  # For mypy's benefit
         assert not product.async_busy
         assert product.state == ProductState.IDLE
@@ -1119,7 +1119,7 @@ class TestController(BaseTestController):
             await assert_request_fails(self.client, 'product-deconfigure', False)
         # Check that the subarray still exists and has the right state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert not product.async_busy
         assert product.state == ProductState.CAPTURING
 
@@ -1148,7 +1148,7 @@ class TestController(BaseTestController):
         await self.client.request("capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert not product.async_busy
         assert product.state == ProductState.CAPTURING
         # Check that the graph transitions were called. Each call may be made
@@ -1194,7 +1194,7 @@ class TestController(BaseTestController):
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert product.state == ProductState.ERROR
         assert self.server.sensors['state'].value == ProductState.ERROR
         assert self.server.sensors['device-status'].value == DeviceStatus.FAIL
@@ -1225,7 +1225,7 @@ class TestController(BaseTestController):
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert product.state == ProductState.ERROR
         assert product.capture_blocks == {}
         # check that the subarray can be safely deconfigured
@@ -1264,7 +1264,7 @@ class TestController(BaseTestController):
         """Capture-init fails if a child process is dead."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         self._ingest_died(product)
         assert product.state == ProductState.ERROR
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
@@ -1276,7 +1276,7 @@ class TestController(BaseTestController):
         """Capture-init fails if a child dies half-way through."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         with pytest.raises(FailReply):
             async with self._capture_init_slow(CAPTURE_BLOCK):
                 self._ingest_died(product)
@@ -1293,7 +1293,7 @@ class TestController(BaseTestController):
         await self.client.request("capture-done")
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert not product.async_busy
         assert product.state == ProductState.IDLE
         # Check that the graph transitions succeeded
@@ -1331,7 +1331,7 @@ class TestController(BaseTestController):
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert product.state == ProductState.CAPTURING
         failfunc(product)
         assert product.state == ProductState.ERROR
@@ -1353,7 +1353,7 @@ class TestController(BaseTestController):
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert product.state == ProductState.CAPTURING
         assert product.capture_blocks == {CAPTURE_BLOCK: mock.ANY}
         with pytest.raises(FailReply):
