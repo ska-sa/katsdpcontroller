@@ -12,7 +12,6 @@ from decimal import Decimal
 from collections import Counter
 from typing import Optional, Callable
 
-from nose.tools import assert_count_equal
 import networkx
 import pymesos
 from addict import Dict
@@ -117,14 +116,14 @@ class TestScalarResource:
             self.resource.add(part)
         assert self.resource.available == Decimal('5.8')
         assert self.resource
-        assert_count_equal(self.resource.info(), self.parts)
+        assert list(self.resource.info()) == self.parts[::-1]
 
     def test_construct_other_order(self):
         for part in reversed(self.parts):
             self.resource.add(part)
         assert self.resource.available == Decimal('5.8')
         assert self.resource
-        assert_count_equal(self.resource.info(), self.parts)
+        assert list(self.resource.info()) == self.parts[::-1]
 
     def test_add_wrong_name(self):
         self.parts[0].name = 'mem'
@@ -140,18 +139,19 @@ class TestScalarResource:
         for part in self.parts:
             self.resource.add(part)
         alloced = self.resource.allocate(Decimal('3.9'))
-        assert_count_equal(
-            alloced.info(),
-            [self._make_part('foo', 3.6), self._make_part('*', 0.3)])
+        assert list(alloced.info()) == [
+            self._make_part('*', 0.3),
+            self._make_part('foo', 3.6)
+        ]
         assert alloced.available == Decimal('3.9')
-        assert_count_equal(self.resource.info(), [self._make_part('*', 1.9)])
+        assert list(self.resource.info()) == [self._make_part('*', 1.9)]
         assert self.resource.available == Decimal('1.9')
 
     def test_allocate_all(self):
         for part in self.parts:
             self.resource.add(part)
         alloced = self.resource.allocate(Decimal('5.8'))
-        assert_count_equal(alloced.info(), self.parts)
+        assert list(alloced.info()) == self.parts[::-1]
         assert alloced.available == Decimal('5.8')
         assert list(self.resource.info()) == []
         assert self.resource.available == Decimal('0.0')
@@ -198,7 +198,7 @@ class TestRangeResource:
         assert len(self.resource) == 9
         assert self.resource.available == 9
         assert list(self.resource) == [5, 6, 20, 21, 22, 10, 11, 12, 30]
-        assert_count_equal(list(self.resource.info()), self.parts)
+        assert list(self.resource.info()) == self.parts[::-1]
 
     def test_add_wrong_type(self):
         self.parts[0].type = 'SCALAR'
@@ -210,15 +210,13 @@ class TestRangeResource:
             self.resource.add(part)
         alloced = self.resource.allocate(6)
         assert alloced.available == 6
-        assert_count_equal(
-            alloced.info(),
-            [
-                self._make_part('foo', [(5, 6), (20, 22)]),
-                self._make_part('*', [(10, 10)])
-            ])
+        assert list(alloced.info()) == [
+            self._make_part('*', [(10, 10)]),
+            self._make_part('foo', [(5, 6), (20, 22)])
+        ]
         assert list(alloced) == [5, 6, 20, 21, 22, 10]
         assert self.resource.available == 3
-        assert_count_equal(self.resource.info(), [self._make_part('*', [(11, 12), (30, 30)])])
+        assert list(self.resource.info()) == [self._make_part('*', [(11, 12), (30, 30)])]
 
     def test_allocate_random(self):
         for part in self.parts:
@@ -226,26 +224,22 @@ class TestRangeResource:
         alloced = self.resource.allocate(5, use_random=True)
         assert alloced.available == 5
         # It should have allocated exactly the foo resources
-        assert_count_equal(
-            alloced.info(),
-            [
-                self._make_part('foo', [(5, 5), (6, 6), (20, 20), (21, 21), (22, 22)]),
-            ])
+        assert list(alloced.info()) == [
+            self._make_part('foo', [(5, 5), (6, 6), (20, 20), (21, 21), (22, 22)]),
+        ]
         assert list(alloced) == [5, 6, 20, 21, 22]
         assert self.resource.available == 4
-        assert_count_equal(self.resource.info(), [self._make_part('*', [(10, 12), (30, 30)])])
+        assert list(self.resource.info()) == [self._make_part('*', [(10, 12), (30, 30)])]
 
     def test_subset(self):
         for part in self.parts:
             self.resource.add(part)
         sub = self.resource.subset([5, 6, 10, 12, 40])
         assert sub.available == 4
-        assert_count_equal(
-            sub.info(),
-            [
-                self._make_part('foo', [(5, 5), (6, 6)]),
-                self._make_part('*', [(10, 10), (12, 12)])
-            ])
+        assert list(sub.info()) == [
+            self._make_part('*', [(10, 10), (12, 12)]),
+            self._make_part('foo', [(5, 5), (6, 6)])
+        ]
 
     def test_subset_empty(self):
         for part in self.parts:
