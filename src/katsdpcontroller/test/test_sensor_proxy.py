@@ -11,7 +11,6 @@ Still TODO:
 import enum
 import asyncio
 import functools
-import unittest
 from unittest import mock
 from typing import Dict, Mapping, Any, Optional
 
@@ -162,8 +161,8 @@ class TestSensorProxyClient(asynctest.TestCase):
         self._check_sensors()
 
 
-class TestPrometheusWatcher(unittest.TestCase):
-    def setUp(self) -> None:
+class TestPrometheusWatcher:
+    def setup(self) -> None:
         # Create a custom registry, to avoid polluting the global one
         self.registry = CollectorRegistry()
         # Custom metric cache, to avoid polluting the global one
