@@ -1,9 +1,6 @@
 """Utilities for unit tests"""
 
 import asyncio
-import functools
-import inspect
-import sys
 import unittest
 from unittest import mock
 from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
@@ -12,7 +9,6 @@ from types import TracebackType
 
 import aiokatcp
 import asynctest
-import async_timeout
 import pytest
 
 
@@ -453,37 +449,11 @@ def future_return(mock: mock.Mock) -> asyncio.Future:
     return future
 
 
-def timelimit(limit=5.0):
-    """Decorator to run tests with a time limit. It is designed to be used
-    with :class:`asynctest.TestCase`. It can be used as either a method or
-    a class decorator. It can be used as either ``@timelimit(limit)`` or
-    just ``@timelimit`` to use the default of 5 seconds.
-    """
-    if inspect.isfunction(limit) or inspect.isclass(limit):
-        # Used without parameters
-        return timelimit()(limit)
+async def exhaust_callbacks():
+    """Run the loop until all immediately-scheduled work has finished.
 
-    def decorator(arg):
-        if inspect.isclass(arg):
-            for key, value in arg.__dict__.items():
-                if (inspect.iscoroutinefunction(value) and key.startswith('test_')
-                        and not hasattr(arg, '_timelimit')):
-                    setattr(arg, key, decorator(value))
-            return arg
-        else:
-            @functools.wraps(arg)
-            async def wrapper(self, *args, **kwargs):
-                try:
-                    async with async_timeout.timeout(limit, loop=self.loop) as cm:
-                        await arg(self, *args, **kwargs)
-                except asyncio.TimeoutError:
-                    if not cm.expired:
-                        raise
-                    for task in asyncio.Task.all_tasks(loop=self.loop):
-                        if task.get_stack(limit=1):
-                            print()
-                            task.print_stack(file=sys.stdout)
-                    raise asyncio.TimeoutError('Test did not complete within {}s'.format(limit))
-            wrapper._timelimit = limit
-            return wrapper
-    return decorator
+    This is inspired by :func:`asynctest.exhaust_callbacks`.
+    """
+    loop = asyncio.get_running_loop()
+    while loop._ready:
+        await asyncio.sleep(0)
