@@ -10,7 +10,7 @@ from unittest import mock
 import time
 from decimal import Decimal
 from collections import Counter
-from typing import Optional, Callable
+from typing import Optional, Callable, Generator, Any
 
 import networkx
 import pymesos
@@ -250,52 +250,60 @@ class TestRangeResource:
         assert list(sub.info()) == []
 
 
-class TestPollPorts(asynctest.TestCase):
+class TestPollPorts:
     """Tests for poll_ports"""
-    def setUp(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.bind(('127.0.0.1', 0))
-        self.addCleanup(self.sock.close)
-        self.port = self.sock.getsockname()[1]
 
-    async def test_normal(self):
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
+    @pytest.fixture
+    def sock(self) -> Generator[socket.socket, None, None]:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(('127.0.0.1', 0))
+            yield sock
+
+    @pytest.fixture
+    def port(self, sock: socket.socket) -> int:
+        return sock.getsockname()[1]
+
+    async def test_normal(self, sock: socket.socket, port: int) -> None:
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [port]))
         # Sleep for while, give poll_ports time to poll a few times
         await asyncio.sleep(1)
         assert not future.done()
-        self.sock.listen(1)
+        sock.listen(1)
         await asyncio.wait_for(future, timeout=5)
 
-    async def test_cancel(self):
+    async def test_cancel(self, port: int) -> None:
         """poll_ports must be able to be cancelled gracefully"""
-        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [port]))
         await asyncio.sleep(0.2)
         future.cancel()
         with pytest.raises(asyncio.CancelledError):
             await future
 
-    async def test_temporary_dns_failure(self):
+    async def test_temporary_dns_failure(self, mocker, sock: socket.socket, port: int) -> None:
         """Test poll ports against a temporary DNS failure."""
-        with mock.patch.object(self.loop, 'getaddrinfo', autospec=True) as getaddrinfo:
-            test_address = socket.getaddrinfo('127.0.0.1', self.port)
-            # create a legitimate return future for getaddrinfo
-            legit_future = asyncio.Future()
-            legit_future.set_result(test_address)
+        getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), 'getaddrinfo', autospec=True)
+        test_address = socket.getaddrinfo('127.0.0.1', port)
+        # create a legitimate return future for getaddrinfo
+        legit_future = asyncio.Future()  # type: asyncio.Future[Any]
+        legit_future.set_result(test_address)
 
-            # sequential calls to getaddrinfo produce failure and success
-            getaddrinfo.side_effect = [socket.gaierror("Failed to resolve"), legit_future]
+        # sequential calls to getaddrinfo produce failure and success
+        getaddrinfo.side_effect = [
+            socket.gaierror(socket.EAI_FAIL, "Failed to resolve"),
+            legit_future
+        ]
 
-            self.sock.listen(1)
-            future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [self.port]))
-            await asyncio.sleep(1)
-            # temporary DNS failure
-            assert not future.done()
-            # wait for retry loop (currently 5s)
-            # Note: it's tempting to try asynctest.ClockedTestCase, but that
-            # only works if ALL interactions with the outside world are mocked
-            # to be instantaneous.
-            await asyncio.sleep(6)
-            assert future.done()
+        sock.listen(1)
+        future = asyncio.ensure_future(scheduler.poll_ports('127.0.0.1', [port]))
+        await asyncio.sleep(1)
+        # temporary DNS failure
+        assert not future.done()
+        # wait for retry loop (currently 5s)
+        # Note: it's tempting to try asynctest.ClockedTestCase, but that
+        # only works if ALL interactions with the outside world are mocked
+        # to be instantaneous.
+        await asyncio.sleep(6)
+        assert future.done()
 
 
 class TestTaskState:
