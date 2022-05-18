@@ -8,7 +8,6 @@ import ipaddress
 import os
 import re
 import socket
-import unittest
 from unittest import mock
 from typing import Tuple, Set, List, Optional, Any
 
@@ -954,14 +953,20 @@ class _ParserError(Exception):
     """Exception substituted for parser.error, which normally raises SystemExit"""
 
 
-class TestParseArgs(unittest.TestCase):
+class TestParseArgs:
     @staticmethod
     def _error(message: str) -> None:
         raise _ParserError(message)
 
-    def setUp(self) -> None:
-        self.open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
-        create_patch(self, 'argparse.ArgumentParser.error', side_effect=self._error)
+    @pytest.fixture(autouse=True)
+    def catch_argparse_error(self, mocker) -> None:
+        mocker.patch('argparse.ArgumentParser.error', side_effect=self._error)
+
+    @pytest.fixture(autouse=True)
+    def open_mock(self, mocker) -> open_file_mock.MockOpen:
+        return mocker.patch('builtins.open', new_callable=open_file_mock.MockOpen)
+
+    def setup(self) -> None:
         self.content1 = '''
             [
                 {
@@ -989,18 +994,18 @@ class TestParseArgs(unittest.TestCase):
             ]
         '''
 
-    def test_gui_urls_file(self) -> None:
-        self.open_mock.set_read_data_for('gui-urls.json', self.content1)
+    def test_gui_urls_file(self, open_mock) -> None:
+        open_mock.set_read_data_for('gui-urls.json', self.content1)
         args = parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
         assert args.gui_urls == json.loads(self.content1)
 
-    def test_gui_urls_bad_json(self) -> None:
-        self.open_mock.set_read_data_for('gui-urls.json', 'not json')
+    def test_gui_urls_bad_json(self, open_mock) -> None:
+        open_mock.set_read_data_for('gui-urls.json', 'not json')
         with pytest.raises(_ParserError, match='Invalid JSON'):
             parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
 
-    def test_gui_urls_not_list(self) -> None:
-        self.open_mock.set_read_data_for('gui-urls.json', '{}')
+    def test_gui_urls_not_list(self, open_mock) -> None:
+        open_mock.set_read_data_for('gui-urls.json', '{}')
         with pytest.raises(_ParserError, match=r'gui-urls\.json does not contain a list'):
             parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
 
@@ -1008,9 +1013,9 @@ class TestParseArgs(unittest.TestCase):
         with pytest.raises(_ParserError, match=r'Cannot read gui-urls\.json: File .* not found'):
             parse_args(['--gui-urls=gui-urls.json', '--interface-mode', '', ''])
 
-    def test_gui_urls_dir(self) -> None:
-        self.open_mock.set_read_data_for('./file1.json', self.content1)
-        self.open_mock.set_read_data_for('./file2.json', self.content2)
+    def test_gui_urls_dir(self, open_mock) -> None:
+        open_mock.set_read_data_for('./file1.json', self.content1)
+        open_mock.set_read_data_for('./file2.json', self.content2)
         # This is a bit fragile, because open_file_mock doesn't emulate all
         # the os functions to simulate a filesystem.
         with mock.patch('os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']), \
