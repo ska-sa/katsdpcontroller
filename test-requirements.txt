@@ -7,3 +7,4 @@ open-mock-file==1.0.2
 pytest
 pytest-asyncio
 pytest-cov
+pytest-mock
