@@ -28,7 +28,7 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  DeviceServer, parse_args)
 from . import fake_zk, fake_singularity
 from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
-                    DelayedManager, Background, run_clocked,
+                    DelayedManager, Background, run_clocked, exhaust_callbacks,
                     CONFIG, CONFIG_CBF_ONLY, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
@@ -363,8 +363,8 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
 
     async def test_singularity_down(self) -> None:
         await self.start_manager()
-        with asynctest.patch('aiohttp.ClientSession._request',
-                             side_effect=aiohttp.client.ClientConnectionError):
+        with mock.patch('aiohttp.ClientSession._request',
+                        side_effect=aiohttp.client.ClientConnectionError):
             with pytest.raises(ProductFailed):
                 await run_clocked(self, 10, self.manager.create_product('foo', {}))
         # Product must be cleared
@@ -555,7 +555,7 @@ class TestSingularityProductManager(asynctest.ClockedTestCase):
         with pytest.raises(ValueError):
             await self.manager.get_multicast_groups(product, 0)
 
-    @asynctest.patch('time.time')
+    @mock.patch('time.time')
     async def test_capture_block_id(self, mock_time) -> None:
         await self.start_manager()
         mock_time.return_value = 1122334455.123
@@ -643,7 +643,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         interface_changed_callback = mock.MagicMock()
         self.client.add_inform_callback('interface-changed', interface_changed_callback)
         await self.client.request('product-configure', 'product', CONFIG)
-        await asynctest.exhaust_callbacks(self.loop)
+        await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b'sensor-list')
         # Prepend the subarray product ID to the names
         expected_product_sensors = [
@@ -668,7 +668,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
         await self.client.request('product-deconfigure', 'product')
-        await asynctest.exhaust_callbacks(self.loop)
+        await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b'sensor-list')
         await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(self.client, 'products', '[]')
@@ -851,7 +851,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         """Test capture-status with a subarray_product_id that does not exist"""
         await assert_request_fails(self.client, 'capture-status', 'product')
 
-    @asynctest.patch('time.time')
+    @mock.patch('time.time')
     async def test_product_list_all(self, time_mock) -> None:
         """Test product-list without a subarray_product_id argument"""
         time_mock.return_value = 1122334455.123
@@ -867,7 +867,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             (b'product2', b'idle, started at 2009-02-13T23:31:30Z')
         ]
 
-    @asynctest.patch('time.time', return_value=1122334455.123)
+    @mock.patch('time.time', return_value=1122334455.123)
     async def test_product_list_one(self, time_mock) -> None:
         """Test product-list with a subarray_product_id argument"""
         await self.client.request('product-configure', 'product', CONFIG)
