@@ -97,24 +97,23 @@ class TestSensorProxyClient(asynctest.TestCase):
             qualname = 'prefix-' + sensor.name
             if sensor.name == 'bytes-sensor':
                 qualname = 'custom-bytes-sensor'
-            self.assertIn(qualname, self.mirror.sensors)
+            assert qualname in self.mirror.sensors
             sensor2 = self.mirror.sensors[qualname]
-            self.assertEqual(sensor.description, sensor2.description)
-            self.assertEqual(sensor.type_name, sensor2.type_name)
-            self.assertEqual(sensor.units, sensor2.units)
+            assert sensor.description == sensor2.description
+            assert sensor.type_name == sensor2.type_name
+            assert sensor.units == sensor2.units
             # We compare the encoded values rather than the values themselves,
             # because discretes have some special magic and it's the encoded
             # value that matters.
-            self.assertEqual(aiokatcp.encode(sensor.value), aiokatcp.encode(sensor2.value))
-            self.assertEqual(sensor.timestamp, sensor2.timestamp)
-            self.assertEqual(sensor.status, sensor2.status)
+            assert aiokatcp.encode(sensor.value) == aiokatcp.encode(sensor2.value)
+            assert sensor.timestamp == sensor2.timestamp
+            assert sensor.status == sensor2.status
         # Check that we don't have any we shouldn't
         for sensor2 in self.mirror.sensors.values():
-            self.assertTrue(sensor2.name.startswith('prefix-')
-                            or sensor2.name == 'custom-bytes-sensor')
+            assert sensor2.name.startswith('prefix-') or sensor2.name == 'custom-bytes-sensor'
             base_name = sensor2.name[7:]
-            self.assertIn(base_name, self.server.sensors)
-        self.assertNotIn('prefix-bytes-sensor', self.mirror.sensors)
+            assert base_name in self.server.sensors
+        assert 'prefix-bytes-sensor' not in self.mirror.sensors
 
     async def test_init(self) -> None:
         self._check_sensors()
@@ -208,8 +207,8 @@ class TestPrometheusWatcher(unittest.TestCase):
             value_labels.update(extra_value_labels)
         actual_value = self.registry.get_sample_value(name + suffix, value_labels)
         actual_status = self.registry.get_sample_value(name + '_status', labels)
-        self.assertEqual(value, actual_value)
-        self.assertEqual(status.value if status is not None else None, actual_status)
+        assert actual_value == value
+        assert actual_status == (status.value if status is not None else None)
 
     def test_gauge(self) -> None:
         self._check_prom('test_float_sensor', 3.0)

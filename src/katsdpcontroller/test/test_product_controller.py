@@ -17,7 +17,6 @@ import asynctest
 from aioresponses import aioresponses
 import astropy.table
 import astropy.units as u
-from nose.tools import assert_raises
 import numpy as np
 from addict import Dict
 import aiokatcp
@@ -33,6 +32,7 @@ import katdal
 import katsdpmodels.band_mask
 import katsdpmodels.rfi_mask
 import katsdpmodels.primary_beam
+import pytest
 import yarl
 
 from ..consul import ConsulService
@@ -169,7 +169,7 @@ class TestRedactKeys(unittest.TestCase):
     def test_no_command(self) -> None:
         taskinfo = Dict()
         result = _redact_keys(taskinfo, self.s3_config)
-        self.assertEqual(result, taskinfo)
+        assert result == taskinfo
 
     def run_it(self, arguments: List[str]) -> List[str]:
         taskinfo = Dict()
@@ -179,11 +179,11 @@ class TestRedactKeys(unittest.TestCase):
 
     def test_with_equals(self) -> None:
         result = self.run_it(['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'])
-        self.assertEqual(result, ['--secret=REDACTED', '--key=REDACTED', '--other=safe'])
+        assert result == ['--secret=REDACTED', '--key=REDACTED', '--other=safe']
 
     def test_without_equals(self) -> None:
         result = self.run_it(['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'])
-        self.assertEqual(result, ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe'])
+        assert result == ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe']
 
 
 class TestNormaliseS3Config(unittest.TestCase):
@@ -216,12 +216,12 @@ class TestNormaliseS3Config(unittest.TestCase):
             }
         }
         result = _normalise_s3_config(s3_config)
-        self.assertEqual(result, expected)
+        assert result == expected
 
         del s3_config['archive']['read']
         expected['archive']['read'] = {'url': 'http://invalid/'}
         result = _normalise_s3_config(s3_config)
-        self.assertEqual(result, expected)
+        assert result == expected
 
     def test_already_split(self) -> None:
         s3_config = {
@@ -240,7 +240,7 @@ class TestNormaliseS3Config(unittest.TestCase):
         }
         expected = copy.deepcopy(s3_config)
         result = _normalise_s3_config(s3_config)
-        self.assertEqual(result, expected)
+        assert result == expected
 
 
 class TestRelativeUrl(unittest.TestCase):
@@ -249,48 +249,48 @@ class TestRelativeUrl(unittest.TestCase):
 
     def test_success(self):
         url = yarl.URL('http://test.invalid/foo/bar/baz')
-        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz'))
+        assert _relative_url(self.base, url) == yarl.URL('baz')
         url = yarl.URL('http://test.invalid/foo/bar/baz/')
-        self.assertEqual(_relative_url(self.base, url), yarl.URL('baz/'))
-        self.assertEqual(_relative_url(self.base, self.base), yarl.URL())
+        assert _relative_url(self.base, url) == yarl.URL('baz/')
+        assert _relative_url(self.base, self.base) == yarl.URL()
 
     def test_root_relative(self):
         base = yarl.URL('http://test.invalid/')
         url = yarl.URL('http://test.invalid/foo/bar/')
-        self.assertEqual(_relative_url(base, url), yarl.URL('foo/bar/'))
+        assert _relative_url(base, url) == yarl.URL('foo/bar/')
 
     def test_different_origin(self):
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('https://test.invalid/foo/bar/baz'))
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('http://another.test.invalid/foo/bar/baz'))
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('http://test.invalid:1234/foo/bar/baz'))
 
     def test_outside_tree(self):
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('http://test.invalid/foo/bart'))
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('http://test.invalid/'))
 
     def test_query_strings(self):
         qs = yarl.URL('http://test.invalid/foo/bar/?query=yes')
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, qs)
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(qs, self.base)
 
     def test_fragments(self):
         frag = yarl.URL('http://test.invalid/foo/bar/#frag')
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, frag)
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(frag, self.base)
 
     def test_not_absolute(self):
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(self.base, yarl.URL('relative/url'))
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _relative_url(yarl.URL('relative/url'), self.base)
 
 
@@ -449,7 +449,7 @@ class TestControllerInterface(BaseTestController):
         await self.client.request("capture-init", CAPTURE_BLOCK)
 
         reply, informs = await self.client.request("capture-status")
-        self.assertEqual(reply, [b"capturing"])
+        assert reply == [b"capturing"]
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
 
     async def test_interface_sensors(self) -> None:
@@ -477,7 +477,7 @@ class TestControllerInterface(BaseTestController):
 
         await self.client.request("capture-init", CAPTURE_BLOCK)
         reply, informs = await self.client.request("capture-done")
-        self.assertEqual(reply, [CAPTURE_BLOCK.encode()])
+        assert reply == [CAPTURE_BLOCK.encode()]
         await assert_request_fails(self.client, "capture-done")
 
     async def test_deconfigure_subarray_product(self) -> None:
@@ -502,14 +502,14 @@ class TestControllerInterface(BaseTestController):
     async def test_help(self) -> None:
         reply, informs = await self.client.request('help')
         requests = [inform.arguments[0].decode('utf-8') for inform in informs]
-        self.assertEqual(set(EXPECTED_REQUEST_LIST), set(requests))
+        assert set(EXPECTED_REQUEST_LIST) == set(requests)
 
     async def test_gain_single(self) -> None:
         """Test gain with a single gain to apply to all channels."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         reply, _ = await self.client.request(
             'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1+2j')
-        self.assertEqual(reply, [b'1.0+2.0j'])
+        assert reply == [b'1.0+2.0j']
         await assert_sensor_value(
             self.client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq',
@@ -523,7 +523,7 @@ class TestControllerInterface(BaseTestController):
         gains = [b'%d.0+2.0j' % i for i in range(4096)]
         reply, _ = await self.client.request(
             'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains)
-        self.assertEqual(reply, gains)
+        assert reply == gains
         await assert_sensor_value(
             self.client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq',
@@ -864,8 +864,8 @@ class TestController(BaseTestController):
         #     json.dump(value, f, indent=2, default=str, sort_keys=True)
         # with open('actual.json', 'w') as f:
         #     json.dump(self.telstate[key], f, indent=2, default=str, sort_keys=True)
-        self.assertEqual(await self.telstate[key], value)
-        self.assertEqual(await self.telstate.key_type(key), key_type)
+        assert await self.telstate[key] == value
+        assert await self.telstate.key_type(key) == key_type
 
     async def test_product_configure_success(self) -> None:
         """A ?product-configure request must wait for the tasks to come up,
@@ -953,10 +953,10 @@ class TestController(BaseTestController):
 
         # Verify the state of the subarray
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         assert isinstance(product, SubarrayProduct)  # For mypy's benefit
-        self.assertFalse(product.async_busy)
-        self.assertEqual(ProductState.IDLE, product.state)
+        assert not product.async_busy
+        assert product.state == ProductState.IDLE
 
         # Verify katcp sensors.
 
@@ -1075,7 +1075,7 @@ class TestController(BaseTestController):
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
-        self.assertIsNone(self.server.product)
+        assert self.server.product is None
 
     async def test_product_configure_task_fail(self) -> None:
         """If a task other than telstate fails, product-configure must fail"""
@@ -1087,7 +1087,7 @@ class TestController(BaseTestController):
         self.sched.launch.assert_called_with(mock.ANY, mock.ANY)
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
-        self.assertIsNone(self.server.product)
+        assert self.server.product is None
 
     async def test_product_deconfigure(self) -> None:
         """Checks success path of product-deconfigure"""
@@ -1119,9 +1119,9 @@ class TestController(BaseTestController):
             await assert_request_fails(self.client, 'product-deconfigure', False)
         # Check that the subarray still exists and has the right state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertFalse(product.async_busy)
-        self.assertEqual(ProductState.CAPTURING, product.state)
+        assert product is not None
+        assert not product.async_busy
+        assert product.state == ProductState.CAPTURING
 
     async def test_product_deconfigure_busy_force(self) -> None:
         """forced product-deconfigure must succeed while in capture-init"""
@@ -1140,7 +1140,7 @@ class TestController(BaseTestController):
         # Check that the graph was shut down
         self.sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Verify the state
-        self.assertIsNone(self.server.product)
+        assert self.server.product is None
 
     async def test_capture_init(self) -> None:
         """Checks that capture-init succeeds and sets appropriate state"""
@@ -1148,9 +1148,9 @@ class TestController(BaseTestController):
         await self.client.request("capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertFalse(product.async_busy)
-        self.assertEqual(ProductState.CAPTURING, product.state)
+        assert product is not None
+        assert not product.async_busy
+        assert product.state == ProductState.CAPTURING
         # Check that the graph transitions were called. Each call may be made
         # multiple times, depending on the number of instances of each child.
         # We thus collapse them into groups of equal calls and don't worry
@@ -1165,24 +1165,24 @@ class TestController(BaseTestController):
             mock.call('capture-start', 'i0_tied_array_channelised_voltage_0x', mock.ANY),
             mock.call('capture-start', 'i0_tied_array_channelised_voltage_0y', mock.ANY)
         ]
-        self.assertEqual(grouped_calls, expected_calls)
+        assert grouped_calls == expected_calls
 
     async def test_capture_init_bad_json(self) -> None:
         """Check that capture-init fails if an override is illegal"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request("capture-init", CAPTURE_BLOCK, 'not json')
 
     async def test_capture_init_bad_override(self) -> None:
         """Check that capture-init fails if an override makes the config illegal"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request("capture-init", CAPTURE_BLOCK, '{"outputs": null}')
 
     async def test_capture_init_bad_override_change(self) -> None:
         """Check that capture-init fails if an override makes an invalid change"""
         await self._configure_subarray(SUBARRAY_PRODUCT)
-        with assert_raises(FailReply):
+        with pytest.raises(FailReply):
             await self.client.request(
                 "capture-init", CAPTURE_BLOCK,
                 '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}')
@@ -1194,12 +1194,12 @@ class TestController(BaseTestController):
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertEqual(ProductState.ERROR, product.state)
-        self.assertEqual(ProductState.ERROR, self.server.sensors['state'].value)
-        self.assertEqual(DeviceStatus.FAIL, self.server.sensors['device-status'].value)
-        self.assertEqual(Sensor.Status.ERROR, self.server.sensors['device-status'].status)
-        self.assertEqual({}, product.capture_blocks)
+        assert product is not None
+        assert product.state == ProductState.ERROR
+        assert self.server.sensors['state'].value == ProductState.ERROR
+        assert self.server.sensors['device-status'].value == DeviceStatus.FAIL
+        assert self.server.sensors['device-status'].status == Sensor.Status.ERROR
+        assert product.capture_blocks == {}
         # check that the subarray can be safely deconfigured, and that it
         # goes via DECONFIGURING state. Rather than trying to directly
         # observe the internal state during deconfigure (e.g. with
@@ -1208,8 +1208,8 @@ class TestController(BaseTestController):
         self.server.sensors['state'].attach(state_observer)
         await self.client.request('product-deconfigure')
         # call 0, arguments, argument 1
-        self.assertEqual(state_observer.mock_calls[0][1][1].value, ProductState.DECONFIGURING)
-        self.assertEqual(ProductState.DEAD, product.state)
+        assert state_observer.mock_calls[0][1][1].value == ProductState.DECONFIGURING
+        assert product.state == ProductState.DEAD
 
     async def test_capture_done_failed_req(self) -> None:
         """Capture-done fails on some task"""
@@ -1225,12 +1225,12 @@ class TestController(BaseTestController):
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertEqual(ProductState.ERROR, product.state)
-        self.assertEqual({}, product.capture_blocks)
+        assert product is not None
+        assert product.state == ProductState.ERROR
+        assert product.capture_blocks == {}
         # check that the subarray can be safely deconfigured
         await self.client.request('product-deconfigure')
-        self.assertEqual(ProductState.DEAD, product.state)
+        assert product.state == ProductState.DEAD
 
     async def _test_busy(self, command: str, *args: Any) -> None:
         """Test that a command fails if issued while ?capture-init or
@@ -1264,25 +1264,25 @@ class TestController(BaseTestController):
         """Capture-init fails if a child process is dead."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
+        assert product is not None
         self._ingest_died(product)
-        self.assertEqual(ProductState.ERROR, product.state)
+        assert product.state == ProductState.ERROR
         await assert_request_fails(self.client, "capture-init", CAPTURE_BLOCK)
         # check that the subarray is in an appropriate state
-        self.assertEqual(ProductState.ERROR, product.state)
-        self.assertEqual({}, product.capture_blocks)
+        assert product.state == ProductState.ERROR
+        assert product.capture_blocks == {}
 
     async def test_capture_init_process_dies(self) -> None:
         """Capture-init fails if a child dies half-way through."""
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        with self.assertRaises(FailReply):
+        assert product is not None
+        with pytest.raises(FailReply):
             async with self._capture_init_slow(CAPTURE_BLOCK):
                 self._ingest_died(product)
         # check that the subarray is in an appropriate state
-        self.assertEqual(ProductState.ERROR, product.state)
-        self.assertEqual({}, product.capture_blocks)
+        assert product.state == ProductState.ERROR
+        assert product.capture_blocks == {}
 
     async def test_capture_done(self) -> None:
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -1293,9 +1293,9 @@ class TestController(BaseTestController):
         await self.client.request("capture-done")
         # check that the subarray is in an appropriate state
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertFalse(product.async_busy)
-        self.assertEqual(ProductState.IDLE, product.state)
+        assert product is not None
+        assert not product.async_busy
+        assert product.state == ProductState.IDLE
         # Check that the graph transitions succeeded
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('capture-done')
@@ -1307,8 +1307,8 @@ class TestController(BaseTestController):
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
 
         # Check that postprocessing ran and didn't fail
-        self.assertEqual(product.capture_blocks, {})
-        self.assertEqual(self.n_batch_tasks, 11)    # 4 continuum, 3x2 spectral, 1 report
+        assert product.capture_blocks == {}
+        assert self.n_batch_tasks == 11    # 4 continuum, 3x2 spectral, 1 report
 
     async def test_capture_done_disable_batch(self) -> None:
         """Checks that capture-init with override takes effect"""
@@ -1320,7 +1320,7 @@ class TestController(BaseTestController):
         await self.client.request("capture-done")
         cal_sensor.value = b'{}'
         await asynctest.exhaust_callbacks(self.loop)
-        self.assertEqual(self.n_batch_tasks, 4)    # 4 continuum, no spectral
+        assert self.n_batch_tasks == 4    # 4 continuum, no spectral
 
     async def test_capture_done_busy(self):
         """Capture-done fails if an asynchronous operation is already in progress"""
@@ -1331,14 +1331,14 @@ class TestController(BaseTestController):
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertEqual(ProductState.CAPTURING, product.state)
+        assert product is not None
+        assert product.state == ProductState.CAPTURING
         failfunc(product)
-        self.assertEqual(ProductState.ERROR, product.state)
-        self.assertEqual({CAPTURE_BLOCK: mock.ANY}, product.capture_blocks)
+        assert product.state == ProductState.ERROR
+        assert product.capture_blocks == {CAPTURE_BLOCK: mock.ANY}
         # In the background it will terminate the capture block
         await asynctest.exhaust_callbacks(self.loop)
-        self.assertEqual({}, product.capture_blocks)
+        assert product.capture_blocks == {}
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
 
@@ -1353,19 +1353,19 @@ class TestController(BaseTestController):
         await self.client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await self.client.request("capture-init", CAPTURE_BLOCK)
         product = self.server.product
-        assert product is not None       # mypy doesn't understand self.assertIsNotNone
-        self.assertEqual(ProductState.CAPTURING, product.state)
-        self.assertEqual({CAPTURE_BLOCK: mock.ANY}, product.capture_blocks)
-        with self.assertRaises(FailReply):
+        assert product is not None
+        assert product.state == ProductState.CAPTURING
+        assert product.capture_blocks == {CAPTURE_BLOCK: mock.ANY}
+        with pytest.raises(FailReply):
             async with self._capture_done_slow():
                 self._ingest_died(product)
         # check that the subarray is in an appropriate state and that final
         # writeback occurred.
-        self.assertEqual(ProductState.ERROR, product.state)
+        assert product.state == ProductState.ERROR
         await asynctest.exhaust_callbacks(self.loop)
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
-        self.assertEqual({}, product.capture_blocks)
+        assert product.capture_blocks == {}
 
     async def test_deconfigure_on_stop(self) -> None:
         """Calling stop will force-deconfigure existing subarrays, even if capturing."""
@@ -1401,17 +1401,17 @@ class TestController(BaseTestController):
         await assert_request_fails(self.client, 'telstate-endpoint')
         await self._configure_subarray(SUBARRAY_PRODUCT)
         reply, _ = await self.client.request('telstate-endpoint')
-        self.assertEqual(reply, [b'host.telstate:20000'])
+        assert reply == [b'host.telstate:20000']
 
     async def test_capture_status(self) -> None:
         """Test capture-status"""
         await assert_request_fails(self.client, 'capture-status')
         await self._configure_subarray(SUBARRAY_PRODUCT)
         reply, _ = await self.client.request('capture-status')
-        self.assertEqual(reply, [b'idle'])
+        assert reply == [b'idle']
         await self.client.request('capture-init', CAPTURE_BLOCK)
         reply, _ = await self.client.request('capture-status')
-        self.assertEqual(reply, [b'capturing'])
+        assert reply == [b'capturing']
 
     async def test_gain_bad_stream(self) -> None:
         """Test gain with a stream that doesn't exist."""
@@ -1446,7 +1446,7 @@ class TestController(BaseTestController):
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('gain', 1, '1.0+2.0j')
-        self.assertEqual(reply, [b'1.0+2.0j'])
+        assert reply == [b'1.0+2.0j']
 
     async def test_gain_multi(self) -> None:
         """Test gain with a different gain for each channel."""
@@ -1458,7 +1458,7 @@ class TestController(BaseTestController):
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = self.sensor_proxy_client_class.return_value
         katcp_client.request.assert_any_call('gain', 1, *[g.decode() for g in gains])
-        self.assertEqual(reply, gains)
+        assert reply == gains
 
     async def test_gain_all_bad_stream(self) -> None:
         """Test gain-all with a stream that doesn't exist."""
@@ -1592,7 +1592,7 @@ class TestController(BaseTestController):
                 break
         else:
             raise KeyError(f'Metric {name} not found')
-        self.assertEqual(metric.type, type)
+        assert metric.type == type
         labels = {'subarray_product_id': SUBARRAY_PRODUCT, 'service': service}
         if sample_name is None:
             sample_name = name
@@ -1600,7 +1600,7 @@ class TestController(BaseTestController):
             sample_name = 'katsdpcontroller_' + sample_name
         if extra_labels is not None:
             labels.update(extra_labels)
-        self.assertEqual(registry.get_sample_value(sample_name, labels), value)
+        assert registry.get_sample_value(sample_name, labels) == value
 
     async def test_prom_sensors(self) -> None:
         """Test that sensors are mirrored into Prometheus."""
@@ -1629,5 +1629,5 @@ class TestResources(asynctest.TestCase):
         self.resources = Resources(mc_client, SUBARRAY_PRODUCT)
 
     async def test_get_multicast_groups(self):
-        self.assertEqual('239.192.0.1', await self.resources.get_multicast_groups(1))
-        self.assertEqual('239.192.0.2+3', await self.resources.get_multicast_groups(4))
+        assert '239.192.0.1' == await self.resources.get_multicast_groups(1)
+        assert '239.192.0.2+3' == await self.resources.get_multicast_groups(4)

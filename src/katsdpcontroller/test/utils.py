@@ -13,7 +13,7 @@ from types import TracebackType
 import aiokatcp
 import asynctest
 import async_timeout
-from nose.tools import assert_raises, assert_equal, assert_true
+import pytest
 
 
 _T = TypeVar('_T')
@@ -303,7 +303,7 @@ def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:
 
 
 async def assert_request_fails(client: aiokatcp.Client, name: str, *args: Any) -> None:
-    with assert_raises(aiokatcp.FailReply):
+    with pytest.raises(aiokatcp.FailReply):
         await client.request(name, *args)
 
 
@@ -312,8 +312,8 @@ async def assert_sensor_value(
         status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL) -> None:
     encoded = aiokatcp.encode(value)
     reply, informs = await client.request("sensor-value", name)
-    assert_equal(informs[0].arguments[4], encoded)
-    assert_equal(informs[0].arguments[3], aiokatcp.encode(status))
+    assert informs[0].arguments[4] == encoded
+    assert informs[0].arguments[3] == aiokatcp.encode(status)
 
 
 async def assert_sensors(client: aiokatcp.Client,
@@ -333,7 +333,7 @@ async def assert_sensors(client: aiokatcp.Client,
         if not subset or inform.arguments[0] in expected:
             # Skip the description
             actual[inform.arguments[0]] = tuple(inform.arguments[2:])
-    assert_equal(expected, actual)
+    assert expected == actual
 
 
 class DelayedManager:
@@ -379,9 +379,8 @@ class DelayedManager:
             self._request_task.cancel()
             return
         if self.cancelled:
-            with assert_raises(aiokatcp.FailReply) as cm:
+            with pytest.raises(aiokatcp.FailReply, match='request cancelled'):
                 await self._request_task
-            assert_equal('request cancelled', str(cm.exception))
         else:
             await self._request_task     # Will raise if it failed
 
@@ -416,7 +415,7 @@ class Background(Generic[_T]):
                  exc_value: Optional[BaseException],
                  traceback: Optional[TracebackType]) -> None:
         if not exc_type:
-            assert_true(self._future.done())
+            assert self._future.done()
 
     async def __aenter__(self) -> 'Background':
         return self
