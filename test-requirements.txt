@@ -1,6 +1,7 @@
 -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
 
 aioresponses==0.7.1
+async-solipsism
 asynctest
 coverage
 open-mock-file==1.0.2
