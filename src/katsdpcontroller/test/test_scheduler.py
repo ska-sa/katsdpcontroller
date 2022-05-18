@@ -573,15 +573,20 @@ class TestHTTPImageLookup:
             await lookup('myimage', 'latest')
 
 
-class TestImageResolver(asynctest.TestCase):
+class TestImageResolver:
     """Tests for :class:`katsdpcontroller.scheduler.ImageResolver`."""
-    def setUp(self) -> None:
-        self._open_mock = create_patch(self, 'builtins.open', new_callable=open_file_mock.MockOpen)
-        self.lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
 
-    async def test_simple(self) -> None:
+    @pytest.fixture(autouse=True)
+    def open_mock(self, mocker) -> open_file_mock.MockOpen:
+        return mocker.patch('builtins.open', new_callable=open_file_mock.MockOpen)
+
+    @pytest.fixture
+    def lookup(self) -> scheduler.SimpleImageLookup:
+        return scheduler.SimpleImageLookup('registry.invalid:5000')
+
+    async def test_simple(self, lookup: scheduler.SimpleImageLookup) -> None:
         """Test the base case"""
-        resolver = scheduler.ImageResolver(self.lookup)
+        resolver = scheduler.ImageResolver(lookup)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
         assert await resolver('test1') == 'registry.invalid:5000/test1:latest'
@@ -589,10 +594,13 @@ class TestImageResolver(asynctest.TestCase):
         assert await(resolver('foo')) == 'my-registry:5000/bar:custom'
         assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
 
-    async def test_tag_file(self) -> None:
+    async def test_tag_file(
+            self,
+            open_mock: open_file_mock.MockOpen,
+            lookup: scheduler.SimpleImageLookup) -> None:
         """Test with a tag file"""
-        self._open_mock.set_read_data_for('tag_file', 'tag1\n')
-        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file')
+        open_mock.set_read_data_for('tag_file', 'tag1\n')
+        resolver = scheduler.ImageResolver(lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
         assert await resolver('test1') == 'registry.invalid:5000/test1:tag1'
@@ -600,15 +608,18 @@ class TestImageResolver(asynctest.TestCase):
         assert await resolver('foo') == 'my-registry:5000/bar:custom'
         assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
 
-    async def test_bad_tag_file(self) -> None:
+    async def test_bad_tag_file(
+            self,
+            open_mock: open_file_mock.MockOpen,
+            lookup: scheduler.SimpleImageLookup) -> None:
         """A ValueError is raised if the tag file contains illegal content"""
-        self._open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
+        open_mock.set_read_data_for('tag_file', 'not a good :tag\n')
         with pytest.raises(ValueError):
-            scheduler.ImageResolver(self.lookup, tag_file='tag_file')
+            scheduler.ImageResolver(lookup, tag_file='tag_file')
 
-    async def test_tag(self) -> None:
+    async def test_tag(self, lookup: scheduler.SimpleImageLookup) -> None:
         """Test with an explicit tag"""
-        resolver = scheduler.ImageResolver(self.lookup, tag_file='tag_file', tag='mytag')
+        resolver = scheduler.ImageResolver(lookup, tag_file='tag_file', tag='mytag')
         assert await resolver('test1') == 'registry.invalid:5000/test1:mytag'
 
 
