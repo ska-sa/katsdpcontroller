@@ -1,6 +1,5 @@
 """Tests for :mod:`katsdpcontroller.product_controller."""
 
-import unittest
 from unittest import mock
 import copy
 import itertools
@@ -150,8 +149,8 @@ def get_metric(metric):
     return metric.collect()[0].samples[0][2]
 
 
-class TestRedactKeys(unittest.TestCase):
-    def setUp(self) -> None:
+class TestRedactKeys:
+    def setup(self) -> None:
         self.s3_config = {
             'archive': {
                 'read': {
@@ -186,7 +185,7 @@ class TestRedactKeys(unittest.TestCase):
         assert result == ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe']
 
 
-class TestNormaliseS3Config(unittest.TestCase):
+class TestNormaliseS3Config:
     def test_single_url(self) -> None:
         s3_config = {
             'archive': {
@@ -243,8 +242,8 @@ class TestNormaliseS3Config(unittest.TestCase):
         assert result == expected
 
 
-class TestRelativeUrl(unittest.TestCase):
-    def setUp(self):
+class TestRelativeUrl:
+    def setup(self):
         self.base = yarl.URL('http://test.invalid/foo/bar/')
 
     def test_success(self):
