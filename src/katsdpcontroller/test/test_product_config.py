@@ -77,23 +77,23 @@ class TestOverride:
 
     def test_add(self) -> None:
         out = product_config.override({"a": 1}, {"b": 2})
-        assert {"a": 1, "b": 2} == out
+        assert out == {"a": 1, "b": 2}
 
     def test_remove(self) -> None:
         out = product_config.override({"a": 1, "b": 2}, {"b": None})
-        assert {"a": 1} == out
+        assert out == {"a": 1}
         out = product_config.override(out, {"b": None})  # Already absent
-        assert {"a": 1} == out
+        assert out == {"a": 1}
 
     def test_replace(self) -> None:
         out = product_config.override({"a": 1, "b": 2}, {"b": 3})
-        assert {"a": 1, "b": 3} == out
+        assert out == {"a": 1, "b": 3}
 
     def test_recurse(self) -> None:
         orig = {"a": {"aa": 1, "ab": 2}, "b": {"ba": {"c": 10}, "bb": [5]}}
         override = {"a": {"aa": [], "ab": None, "ac": 3}, "b": {"bb": [1, 2]}}
         out = product_config.override(orig, override)
-        assert {"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}} == out
+        assert out == {"a": {"aa": [], "ac": 3}, "b": {"ba": {"c": 10}, "bb": [1, 2]}}
 
 
 class TestUrlNEndpoints:

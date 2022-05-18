@@ -806,10 +806,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert [
+        assert inform_args == [
             (b'product1', b''),
             (b'product2', b'')
-        ] == inform_args
+        ]
 
     async def test_telstate_endpoint_one(self) -> None:
         """Test telstate-endpoint with a subarray_product_id argument"""
@@ -830,17 +830,17 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert [
+        assert inform_args == [
             (b'product1', b'idle'),
             (b'product2', b'capturing')
-        ] == inform_args
+        ]
 
     async def test_capture_status_one(self) -> None:
         """Test capture-status with a subarray_product_id argument"""
         await self.client.request('product-configure', 'product', CONFIG)
         reply, informs = await self.client.request('capture-status', 'product')
         assert reply == [b'idle']
-        assert [] == informs
+        assert informs == []
         await self.client.request('capture-init', 'product')
         reply, informs = await self.client.request('capture-status', 'product')
         assert reply == [b'capturing']
@@ -863,10 +863,10 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert [
+        assert inform_args == [
             (b'product1', b'idle, started at 2005-07-25T23:34:15Z'),
             (b'product2', b'idle, started at 2009-02-13T23:31:30Z')
-        ] == inform_args
+        ]
 
     @asynctest.patch('time.time', return_value=1122334455.123)
     async def test_product_list_one(self, time_mock) -> None:
@@ -876,7 +876,7 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         assert reply == [b'1']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert [(b'product', b'idle, started at 2005-07-25T23:34:15Z')] == inform_args
+        assert inform_args == [(b'product', b'idle, started at 2005-07-25T23:34:15Z')]
 
     async def test_product_list_not_found(self) -> None:
         """Test product-list with a subarray_product_id that does not exist"""
