@@ -5,7 +5,6 @@ import logging
 import uuid
 import asyncio
 import ipaddress
-import unittest
 from unittest import mock
 import time
 from decimal import Decimal
@@ -690,15 +689,13 @@ def _make_status(task_id, state):
     return status
 
 
-class TestAgent(unittest.TestCase):
-    """Tests for :class:`katsdpcontroller.scheduler.Agent`.
+class TestAgent:
+    """Tests for :class:`katsdpcontroller.scheduler.Agent`."""
 
-    This imports from :class:`unittest.TestCase` so that we can use
-    ``assertLogs``, which has not been ported to :mod:`nose.tools` yet."""
     def _make_offer(self, resources, attrs=()):
         return _make_offer(self.framework_id, self.agent_id, self.host, resources, attrs)
 
-    def setUp(self):
+    def setup(self):
         self.agent_id = 'agentid'
         self.host = 'agenthostname'
         self.framework_id = 'framework'
@@ -822,18 +819,20 @@ class TestAgent(unittest.TestCase):
         agent = scheduler.Agent(offers)
         assert agent.resources['disk'].available == 0
 
-    def test_bad_json(self):
+    def test_bad_json(self, caplog):
         """A warning must be printed if an interface description is not valid JSON"""
         offers = [self._make_offer({}, [self.if_attr_bad_json])]
-        with self.assertLogs('katsdpcontroller.scheduler', logging.WARN):
+        with caplog.at_level(logging.WARNING, logger='katsdpcontroller.scheduler'):
             agent = scheduler.Agent(offers)
+        assert 'Could not parse' in caplog.text
         assert agent.interfaces == []
 
-    def test_bad_schema(self):
+    def test_bad_schema(self, caplog):
         """A warning must be printed if an interface description does not conform to the schema"""
         offers = [self._make_offer({}, [self.if_attr_bad_schema])]
-        with self.assertLogs('katsdpcontroller.scheduler', logging.WARN):
+        with caplog.at_level(logging.WARNING, logger='katsdpcontroller.scheduler'):
             agent = scheduler.Agent(offers)
+        assert 'Validation error' in caplog.text
         assert agent.interfaces == []
 
     def test_allocate_not_valid(self):
@@ -1174,7 +1173,7 @@ class TestPhysicalTask:
         assert physical_task.cores == {'core1': 2, 'core2': 4, 'core3': 6}
 
 
-class TestDiagnoseInsufficient(unittest.TestCase):
+class TestDiagnoseInsufficient:
     """Test :class:`katsdpcontroller.scheduler.Scheduler._diagnose_insufficient.
 
     This is split out from TestScheduler to make it easier to set up fixtures.
@@ -1183,7 +1182,7 @@ class TestDiagnoseInsufficient(unittest.TestCase):
         return _make_offer('frameworkid', 'agentid{}'.format(agent_num),
                            'agenthost{}'.format(agent_num), resources, attrs)
 
-    def setUp(self):
+    def setup(self):
         # Create a number of agents, each of which has a large quantity of
         # some resource but not much of others. This makes it easier to
         # control which resources are plentiful in the simulated cluster.
