@@ -1,12 +1,12 @@
 -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
 
 aioresponses==0.7.1
-async-solipsism
+async-solipsism==0.4.0
 asynctest
 coverage
 open-mock-file==1.0.2
 pytest
-pytest-asyncio
+pytest-asyncio==0.18.3
 pytest-cov
-pytest-mock
-pytest-timeout
+pytest-mock==3.7.0
+pytest-timeout==2.1.0
