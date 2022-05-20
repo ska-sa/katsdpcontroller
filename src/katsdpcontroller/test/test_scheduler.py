@@ -1548,7 +1548,7 @@ class TestScheduler:
                      'infiniband_multicast_loopback': False}]),
                 self.numa_attr
             ]
-            self._make_physical()
+            self.make_physical()
             self.task_stats = SimpleTaskStats()
             self.sched = scheduler.Scheduler('default', '127.0.0.1', 80, 'http://scheduler/',
                                              task_stats=self.task_stats)
@@ -1559,16 +1559,16 @@ class TestScheduler:
             self.sched.set_driver(self.driver)
             self.sched.registered(self.driver, 'framework', mock.sentinel.master_info)
 
-        def _make_offer(self, resources, agent_num=0, attrs=()):
+        def make_offer(self, resources, agent_num=0, attrs=()):
             return _make_offer(self.framework_id, 'agentid{}'.format(agent_num),
                                'agenthost{}'.format(agent_num), resources, attrs)
 
-        def _make_offers(self, ports=None):
+        def make_offers(self, ports=None):
             if ports is None:
                 ports = [(30000, 31000)]
             return [
                 # Suitable for node0
-                self._make_offer({
+                self.make_offer({
                     'cpus': 2.0, 'mem': 1024.0, 'ports': ports,
                     'katsdpcontroller.gpu.0.compute': 0.25,
                     'katsdpcontroller.gpu.0.mem': 2048.0,
@@ -1578,18 +1578,18 @@ class TestScheduler:
                     'katsdpcontroller.interface.0.bandwidth_out': 1e9
                 }, 0, self.agent0_attrs),
                 # Suitable for node1
-                self._make_offer({
+                self.make_offer({
                     'cpus': 0.5, 'mem': 128.0, 'ports': [(31000, 32000)],
                     'cores': [(0, 8)]
                 }, 1, [self.numa_attr])
             ]
 
-        def _status_update(self, task_id, state):
+        def status_update(self, task_id, state):
             status = _make_status(task_id, state)
             self.sched.statusUpdate(self.driver, status)
             return status
 
-        def _make_physical(self):
+        def make_physical(self):
             self.physical_graph = scheduler.instantiate(self.logical_graph)
             self.physical_batch_graph = scheduler.instantiate(self.logical_batch_graph)
             self.nodes = []
@@ -1603,18 +1603,18 @@ class TestScheduler:
                 self.batch_nodes.append(next(node for node in self.physical_batch_graph
                                              if node.name == 'batch{}'.format(i)))
 
-        async def _wait_request(self, task_id):
+        async def wait_request(self, task_id):
             async with aiohttp.ClientSession() as session:
                 async with session.get('http://127.0.0.1:{}/tasks/{}/wait_start'.format(
                         self.sched.http_port, task_id)) as resp:
                     resp.raise_for_status()
                     await resp.read()
 
-        def _driver_calls(self):
+        def driver_calls(self):
             """self.driver.mock_calls, with reconcileTasks filtered out."""
             return [call for call in self.driver.mock_calls if call[0] != 'reconcileTasks']
 
-        async def _transition_node0(self, target_state, nodes=None, ports=None):
+        async def transition_node0(self, target_state, nodes=None, ports=None):
             """Launch the graph and proceed until node0 is in `target_state`.
 
             This is intended to be used in test setup. It is assumed that this
@@ -1629,7 +1629,7 @@ class TestScheduler:
                 :const:`TaskState.DEAD`, then `kill` is ``None``
             """
             assert target_state > TaskState.NOT_READY
-            offers = self._make_offers(ports)
+            offers = self.make_offers(ports)
             launch = asyncio.ensure_future(
                 self.sched.launch(self.physical_graph, self.resolver, nodes))
             kill = None
@@ -1643,7 +1643,7 @@ class TestScheduler:
                     assert self.nodes[0].state == TaskState.STARTED
                     task_id = self.nodes[0].taskinfo.task_id.value
                     if target_state > TaskState.STARTED:
-                        self._status_update(task_id, 'TASK_RUNNING')
+                        self.status_update(task_id, 'TASK_RUNNING')
                         await exhaust_callbacks()
                         assert self.nodes[0].state == TaskState.RUNNING
                         if target_state > TaskState.RUNNING:
@@ -1656,13 +1656,13 @@ class TestScheduler:
                                 await exhaust_callbacks()
                                 assert self.nodes[0].state == TaskState.KILLING
                                 if target_state > TaskState.KILLING:
-                                    self._status_update(task_id, 'TASK_KILLED')
+                                    self.status_update(task_id, 'TASK_KILLED')
                                 await exhaust_callbacks()
             self.driver.reset_mock()
             assert self.nodes[0].state == target_state
             return (launch, kill)
 
-        async def _transition_batch_run(
+        async def transition_batch_run(
                 self, node: scheduler.PhysicalTask, state: TaskState) -> None:
             """Interact with scheduler to get batch task to state `state`.
 
@@ -1670,23 +1670,23 @@ class TestScheduler:
             """
             if state >= TaskState.STARTED:
                 await exhaust_callbacks()
-                self.sched.resourceOffers(self.driver, self._make_offers())
+                self.sched.resourceOffers(self.driver, self.make_offers())
                 await exhaust_callbacks()
                 assert node.state == TaskState.STARTED
                 if state >= TaskState.READY:
                     task_id = node.taskinfo.task_id.value  # type: ignore
-                    self._status_update(task_id, 'TASK_RUNNING')
+                    self.status_update(task_id, 'TASK_RUNNING')
                     await exhaust_callbacks()
                     assert node.state == TaskState.READY
                     if state >= TaskState.DEAD:
-                        self._status_update(task_id, 'TASK_FINISHED')
+                        self.status_update(task_id, 'TASK_FINISHED')
                         await exhaust_callbacks()
                         assert node.state == TaskState.DEAD
 
-        async def _ready_graph(self):
+        async def ready_graph(self):
             """Gets the whole graph to READY state"""
-            launch, kill = await self._transition_node0(TaskState.READY)
-            self._status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
+            launch, kill = await self.transition_node0(TaskState.READY)
+            self.status_update(self.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
             await exhaust_callbacks()
             assert launch.done()  # Ensures the next line won't hang the test
             await launch
@@ -1705,13 +1705,13 @@ class TestScheduler:
     async def test_initial_offers(self, fix: 'TestScheduler.Fixture') -> None:
         """Offers passed to resourcesOffers in initial state are declined"""
         offers = [
-            fix._make_offer({'cpus': 2.0}, 0),
-            fix._make_offer({'cpus': 1.0}, 1),
-            fix._make_offer({'cpus': 1.5}, 0)
+            fix.make_offer({'cpus': 2.0}, 0),
+            fix.make_offer({'cpus': 1.0}, 1),
+            fix.make_offer({'cpus': 1.5}, 0)
         ]
         fix.sched.resourceOffers(fix.driver, offers)
         await exhaust_callbacks()
-        assert fix._driver_calls() == AnyOrderList([
+        assert fix.driver_calls() == AnyOrderList([
             mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
             mock.call.suppressOffers({'default'})
         ])
@@ -1770,7 +1770,7 @@ class TestScheduler:
         """Test launch on the success path, with no concurrent calls."""
         # TODO: still need to extend this to test:
         # - custom wait_ports
-        offer0, offer1 = fix._make_offers()
+        offer0, offer1 = fix.make_offers()
         expected_taskinfo0 = Dict()
         expected_taskinfo0.name = 'node0'
         expected_taskinfo0.task_id.value = fix.task_ids[0]
@@ -1836,13 +1836,13 @@ class TestScheduler:
             assert not node.ready_event.is_set()
             assert not node.dead_event.is_set()
         assert fix.task_stats.state_counts == {TaskState.STARTING: 2}
-        assert fix._driver_calls() == [mock.call.reviveOffers({'default'})]
+        assert fix.driver_calls() == [mock.call.reviveOffers({'default'})]
         fix.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
         fix.sched.resourceOffers(fix.driver, [offer1])
         await exhaust_callbacks()
-        assert fix._driver_calls() == []
+        assert fix.driver_calls() == []
         for node in fix.nodes:
             assert node.state == TaskState.STARTING
             assert not node.ready_event.is_set()
@@ -1866,7 +1866,7 @@ class TestScheduler:
         assert fix.nodes[1].state == TaskState.STARTED
 
         assert fix.nodes[2].state == TaskState.READY
-        assert fix._driver_calls() == AnyOrderList([
+        assert fix.driver_calls() == AnyOrderList([
             mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
             mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
             mock.call.suppressOffers({'default'})
@@ -1876,17 +1876,17 @@ class TestScheduler:
 
         # Tell scheduler that node1 is now running. It should go to RUNNING
         # but not READY, because node0 isn't ready yet.
-        status = fix._status_update(fix.task_ids[1], 'TASK_RUNNING')
+        status = fix.status_update(fix.task_ids[1], 'TASK_RUNNING')
         await exhaust_callbacks()
         assert fix.nodes[1].state == TaskState.RUNNING
         assert fix.nodes[1].status == status
-        assert fix._driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
+        assert fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
         fix.driver.reset_mock()
         assert fix.task_stats.state_counts == {TaskState.STARTED: 1, TaskState.RUNNING: 1}
 
         # A real node1 would issue an HTTP request back to the scheduler. Fake
         # it instead, to check the timing.
-        wait_request = asyncio.create_task(fix._wait_request(fix.task_ids[1]))
+        wait_request = asyncio.create_task(fix.wait_request(fix.task_ids[1]))
         await exhaust_callbacks()
         assert not wait_request.done()
 
@@ -1894,11 +1894,11 @@ class TestScheduler:
         # the waiter, so we need to mock poll_ports.
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = future_return(poll_ports)
-            status = fix._status_update(fix.task_ids[0], 'TASK_RUNNING')
+            status = fix.status_update(fix.task_ids[0], 'TASK_RUNNING')
             await exhaust_callbacks()
             assert fix.nodes[0].state == TaskState.RUNNING
             assert fix.nodes[0].status == status
-            assert fix._driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
+            assert fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
             fix.driver.reset_mock()
             poll_ports.assert_called_once_with('agenthost0', [30000])
         assert fix.task_stats.state_counts == {TaskState.RUNNING: 2}
@@ -1930,7 +1930,7 @@ class TestScheduler:
                 break
         else:
             raise KeyError('Could not find node0')
-        fix._make_physical()
+        fix.make_physical()
         await self.test_launch_serial(fix)
 
     async def test_multiple_queues(self, fix: 'TestScheduler.Fixture') -> None:
@@ -1942,16 +1942,16 @@ class TestScheduler:
         # Schedule the nodes separately on separate queues
         queue = scheduler.LaunchQueue('default')
         fix.sched.add_queue(queue)
-        launch0, kill0 = await fix._transition_node0(TaskState.STARTING, [fix.nodes[0]])
+        launch0, kill0 = await fix.transition_node0(TaskState.STARTING, [fix.nodes[0]])
         launch1 = asyncio.ensure_future(
             fix.sched.launch(fix.physical_graph, fix.resolver,
                              fix.nodes[1:], queue=queue))
         # Make an offer so that node1 can start
-        offers = fix._make_offers()
+        offers = fix.make_offers()
         fix.sched.resourceOffers(fix.driver, [offers[1]])
         await exhaust_callbacks()
         assert fix.nodes[1].state == TaskState.STARTED
-        fix._status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
+        fix.status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_RUNNING')
         await exhaust_callbacks()
         assert launch1.done()
 
@@ -1963,14 +1963,14 @@ class TestScheduler:
         with mock.patch.object(scheduler, 'poll_ports', autospec=True) as poll_ports:
             poll_future = future_return(poll_ports)
             poll_future.set_result(None)   # Mark ports as ready
-            fix._status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
+            fix.status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_RUNNING')
             await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.READY
         assert launch0.done()
 
     async def _test_launch_cancel(
             self, target_state: TaskState, fix: 'TestScheduler.Fixture') -> None:
-        launch, kill = await fix._transition_node0(target_state)
+        launch, kill = await fix.transition_node0(target_state)
         assert not launch.done()
         # Now cancel and check that nodes go back to NOT_READY if they were
         # in STARTING, otherwise keep their state.
@@ -1992,7 +1992,7 @@ class TestScheduler:
 
     async def test_launch_resources_timeout(self, fix: 'TestScheduler.Fixture') -> None:
         """Test a launch failing due to insufficient resources within the timeout"""
-        launch, kill = await fix._transition_node0(TaskState.STARTING)
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
         await asyncio.sleep(30)
         with pytest.raises(scheduler.InsufficientResourcesError):
             await launch
@@ -2000,11 +2000,11 @@ class TestScheduler:
         assert fix.nodes[1].state == TaskState.NOT_READY
         assert fix.nodes[2].state == TaskState.NOT_READY
         # Once we abort, we should no longer be interested in offers
-        assert fix._driver_calls() == [mock.call.suppressOffers({'default'})]
+        assert fix.driver_calls() == [mock.call.suppressOffers({'default'})]
 
     async def test_launch_queue_busy(self, fix: 'TestScheduler.Fixture') -> None:
         """Test a launch failing due to tasks ahead of it blocking the queue."""
-        launch, kill = await fix._transition_node0(TaskState.STARTING, nodes=[fix.nodes[0]])
+        launch, kill = await fix.transition_node0(TaskState.STARTING, nodes=[fix.nodes[0]])
         launch1 = asyncio.ensure_future(
             fix.sched.launch(fix.physical_graph, fix.resolver, [fix.nodes[2]],
                              resources_timeout=2))
@@ -2022,7 +2022,7 @@ class TestScheduler:
         for node in fix.logical_graph.nodes():
             if node.name == 'node0':
                 node.host = 'agenthost0'
-        fix._make_physical()
+        fix.make_physical()
         await self.test_launch_serial(fix)
 
     async def test_launch_bad_host(self, fix: 'TestScheduler.Fixture') -> None:
@@ -2030,9 +2030,9 @@ class TestScheduler:
         for node in fix.logical_graph.nodes():
             if node.name == 'node0':
                 node.host = 'agenthost1'
-        fix._make_physical()
-        launch, kill = await fix._transition_node0(TaskState.STARTING, [fix.nodes[0]])
-        offers = fix._make_offers()
+        fix.make_physical()
+        launch, kill = await fix.transition_node0(TaskState.STARTING, [fix.nodes[0]])
+        offers = fix.make_offers()
         fix.sched.resourceOffers(fix.driver, offers)
         await asyncio.sleep(30)
         with pytest.raises(scheduler.InsufficientResourcesError):
@@ -2054,9 +2054,9 @@ class TestScheduler:
         node3.interfaces[-1].bandwidth_out = 1e6
         fix.logical_graph.add_node(node3)
 
-        fix._make_physical()
-        launch, kill = await fix._transition_node0(TaskState.STARTING)
-        offers = fix._make_offers()
+        fix.make_physical()
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
         fix.sched.resourceOffers(fix.driver, offers)
         await asyncio.sleep(30)
         with pytest.raises(scheduler.InsufficientResourcesError):
@@ -2067,21 +2067,21 @@ class TestScheduler:
             raise ValueError('Testing')
 
         fix.nodes[0].resolve = resolve_raise
-        launch, kill = await fix._transition_node0(TaskState.STARTING)
-        offers = fix._make_offers()
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
         fix.sched.resourceOffers(fix.driver, offers)
         with pytest.raises(ValueError, match='Testing'):
             await launch
         # The offers must be returned to Mesos
-        assert fix._driver_calls() == AnyOrderList([
+        assert fix.driver_calls() == AnyOrderList([
             mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
             mock.call.suppressOffers({'default'})
         ])
 
     async def test_offer_rescinded(self, fix: 'TestScheduler.Fixture') -> None:
         """Test offerRescinded"""
-        launch, kill = await fix._transition_node0(TaskState.STARTING)
-        offers = fix._make_offers()
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
         # Provide an offer that is sufficient only for node 0
         fix.sched.resourceOffers(fix.driver, [offers[0]])
         await exhaust_callbacks()
@@ -2095,50 +2095,50 @@ class TestScheduler:
         assert fix.nodes[0].state == TaskState.STARTING
         # Rescind an unknown offer. This can happen if an offer was accepted at
         # the same time as it was rescinded.
-        offer2 = fix._make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
+        offer2 = fix.make_offer({'cpus': 0.8, 'mem': 128.0, 'ports': [(31000, 32000)]}, 1)
         fix.sched.offerRescinded(fix.driver, offer2.id)
         await exhaust_callbacks()
-        assert fix._driver_calls() == []
+        assert fix.driver_calls() == []
         launch.cancel()
 
     async def test_decline_unneeded_offers(self, fix: 'TestScheduler.Fixture') -> None:
         """Test that useless offers are not hoarded."""
-        launch, kill = await fix._transition_node0(TaskState.STARTING)
-        offers = fix._make_offers()
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
         # Replace offer 0 with a useless offer
-        offers[0] = fix._make_offer({'cpus': 0.1})
+        offers[0] = fix.make_offer({'cpus': 0.1})
         fix.sched.resourceOffers(fix.driver, offers)
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTING
-        assert fix._driver_calls() == [mock.call.declineOffer([offers[0].id])]
+        assert fix.driver_calls() == [mock.call.declineOffer([offers[0].id])]
         launch.cancel()
 
     @pytest.mark.parametrize('end_time', [True, False])
     async def test_unavailability(self, end_time: bool, fix: 'TestScheduler.Fixture') -> None:
         """Test offers with unavailability information"""
-        launch, kill = await fix._transition_node0(TaskState.STARTING, [fix.nodes[0]])
+        launch, kill = await fix.transition_node0(TaskState.STARTING, [fix.nodes[0]])
         # Provide an offer that would be sufficient if not for unavailability
-        offer0 = fix._make_offers()[0]
+        offer0 = fix.make_offers()[0]
         offer0.unavailability.start.nanoseconds = int(time.time() * 1e9)
         if end_time:
             offer0.unavailability.duration.nanoseconds = int(3600e9)
         fix.sched.resourceOffers(fix.driver, [offer0])
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTING
-        assert fix._driver_calls() == [mock.call.declineOffer([offer0.id])]
+        assert fix.driver_calls() == [mock.call.declineOffer([offer0.id])]
         launch.cancel()
 
     async def test_unavailability_past(self, fix: 'TestScheduler.Fixture') -> None:
         """Test offers with unavailability information in the past"""
-        launch, kill = await fix._transition_node0(TaskState.STARTING, [fix.nodes[0]])
+        launch, kill = await fix.transition_node0(TaskState.STARTING, [fix.nodes[0]])
         # Provide an offer that would be sufficient if not for unavailability
-        offer0 = fix._make_offers()[0]
+        offer0 = fix.make_offers()[0]
         offer0.unavailability.start.nanoseconds = int(time.time() * 1e9 - 7200e9)
         offer0.unavailability.duration.nanoseconds = int(3600e9)
         fix.sched.resourceOffers(fix.driver, [offer0])
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTED
-        assert fix._driver_calls() == [
+        assert fix.driver_calls() == [
             mock.call.launchTasks([offer0.id], mock.ANY),
             mock.call.suppressOffers({'default'})
         ]
@@ -2156,12 +2156,12 @@ class TestScheduler:
     )
     async def test_kill_in_state(self, state: TaskState, fix: 'TestScheduler.Fixture') -> None:
         """Test killing a node while it is in the given state"""
-        launch, kill = await fix._transition_node0(state, [fix.nodes[0]])
+        launch, kill = await fix.transition_node0(state, [fix.nodes[0]])
         kill = asyncio.ensure_future(fix.sched.kill(fix.physical_graph, [fix.nodes[0]]))
         await exhaust_callbacks()
         if state > TaskState.STARTING:
             assert fix.nodes[0].state == TaskState.KILLING
-            status = fix._status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
+            status = fix.status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
             await exhaust_callbacks()
             assert status is fix.nodes[0].status
             assert fix.task_stats.state_counts == {TaskState.DEAD: 1}
@@ -2179,8 +2179,8 @@ class TestScheduler:
     )
     async def test_die_in_state(self, state: TaskState, fix: 'TestScheduler.Fixture') -> None:
         """Test a node dying on its own while it is in the given state"""
-        launch, kill = await fix._transition_node0(state, [fix.nodes[0]])
-        status = fix._status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
+        launch, kill = await fix.transition_node0(state, [fix.nodes[0]])
+        status = fix.status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await exhaust_callbacks()
         assert status is fix.nodes[0].status
         assert fix.nodes[0].state == TaskState.DEAD
@@ -2190,19 +2190,19 @@ class TestScheduler:
 
     async def test_kill_order(self, fix: 'TestScheduler.Fixture') -> None:
         """Kill must respect dependency ordering"""
-        await fix._ready_graph()
+        await fix.ready_graph()
         # Now kill it. node1 must be dead before node0, node2 get killed
         kill = asyncio.ensure_future(fix.sched.kill(fix.physical_graph))
         await exhaust_callbacks()
-        assert fix._driver_calls() == [mock.call.killTask(fix.nodes[1].taskinfo.task_id)]
+        assert fix.driver_calls() == [mock.call.killTask(fix.nodes[1].taskinfo.task_id)]
         assert fix.nodes[0].state == TaskState.READY
         assert fix.nodes[1].state == TaskState.KILLING
         assert fix.nodes[2].state == TaskState.READY
         fix.driver.reset_mock()
         # node1 now dies, and node0 and node2 should be killed
-        status = fix._status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
+        status = fix.status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         await exhaust_callbacks()
-        assert fix._driver_calls() == AnyOrderList([
+        assert fix.driver_calls() == AnyOrderList([
             mock.call.killTask(fix.nodes[0].taskinfo.task_id),
             mock.call.acknowledgeStatusUpdate(status)
         ])
@@ -2211,7 +2211,7 @@ class TestScheduler:
         assert fix.nodes[2].state == TaskState.DEAD
         assert not kill.done()
         # node0 now dies, to finish the cleanup
-        fix._status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
+        fix.status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.DEAD
         assert fix.nodes[1].state == TaskState.DEAD
@@ -2223,7 +2223,7 @@ class TestScheduler:
         """batch_run for the case of a successful run"""
         task = asyncio.ensure_future(fix.sched.batch_run(
             fix.physical_batch_graph, fix.resolver, [fix.batch_nodes[0]]))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.DEAD)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.DEAD)
         results = await task
         assert results == {fix.batch_nodes[0]: None}
         assert fix.task_stats.batch_created == 1
@@ -2237,9 +2237,9 @@ class TestScheduler:
         """batch_run with a failing task"""
         task = asyncio.ensure_future(fix.sched.batch_run(
             fix.physical_batch_graph, fix.resolver, [fix.batch_nodes[0]]))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         task_id = fix.batch_nodes[0].taskinfo.task_id.value
-        fix._status_update(task_id, 'TASK_FAILED')
+        fix.status_update(task_id, 'TASK_FAILED')
         results = await task
         with pytest.raises(scheduler.TaskError):
             raise next(iter(results.values()))
@@ -2272,7 +2272,7 @@ class TestScheduler:
         # get the new physical node
         fix.batch_nodes[0] = next(node for node in fix.physical_batch_graph
                                   if node.name == 'batch0')
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.DEAD)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.DEAD)
         await task
         assert fix.task_stats.batch_created == 1
         assert fix.task_stats.batch_started == 1
@@ -2285,34 +2285,34 @@ class TestScheduler:
         """batch_run where first attempt fails, later attempt succeeds."""
         task = asyncio.ensure_future(fix.sched.batch_run(
             fix.physical_batch_graph, fix.resolver, [fix.batch_nodes[0]], attempts=2))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         task_id = fix.batch_nodes[0].taskinfo.task_id.value
-        fix._status_update(task_id, 'TASK_FAILED')
+        fix.status_update(task_id, 'TASK_FAILED')
         await exhaust_callbacks()
         await self._batch_run_retry_second(task, fix)
 
     async def test_batch_run_depends(self, fix: 'TestScheduler.Fixture') -> None:
         """Batch launch with one task depending on another"""
         task = asyncio.ensure_future(fix.sched.batch_run(fix.physical_batch_graph, fix.resolver))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         # Ensure that we haven't even tried to launch the second one
         assert fix.batch_nodes[1].state == TaskState.NOT_READY
         # Kill it, the next one should start up
-        fix._status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
+        fix.status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await exhaust_callbacks()
         assert fix.batch_nodes[0].state == TaskState.DEAD
         assert fix.batch_nodes[1].state == TaskState.STARTING
 
-        await fix._transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
+        await fix.transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
         results = await task
         assert results == {fix.batch_nodes[0]: None, fix.batch_nodes[1]: None}
 
     async def test_batch_run_skip(self, fix: 'TestScheduler.Fixture') -> None:
         """If a dependency fails, the dependent task is skipped"""
         task = asyncio.ensure_future(fix.sched.batch_run(fix.physical_batch_graph, fix.resolver))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         # Kill it
-        fix._status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
+        fix.status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
         await exhaust_callbacks()
         assert fix.batch_nodes[0].state == TaskState.DEAD
         # Next task shouldn't even try to start
@@ -2337,18 +2337,18 @@ class TestScheduler:
                 data['depends_finished_critical'] = False
         for u, v, data in fix.logical_batch_graph.edges(data=True):
             print(u, v, data)
-        fix._make_physical()
+        fix.make_physical()
 
         task = asyncio.ensure_future(fix.sched.batch_run(fix.physical_batch_graph, fix.resolver))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         assert fix.batch_nodes[1].state == TaskState.NOT_READY
         # Kill it
-        fix._status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
+        fix.status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FAILED')
         await exhaust_callbacks()
         assert fix.batch_nodes[0].state == TaskState.DEAD
         # Next task should now start
         assert fix.batch_nodes[1].state == TaskState.STARTING
-        await fix._transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
+        await fix.transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
         results = await task
         with pytest.raises(scheduler.TaskError):
             raise results[fix.batch_nodes[0]]
@@ -2364,40 +2364,40 @@ class TestScheduler:
         """If a dependencies fails once, wait until it's retried."""
         task = asyncio.ensure_future(fix.sched.batch_run(
             fix.physical_batch_graph, fix.resolver, attempts=3))
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         task_id = fix.batch_nodes[0].taskinfo.task_id.value
-        fix._status_update(task_id, 'TASK_FAILED')
+        fix.status_update(task_id, 'TASK_FAILED')
         await exhaust_callbacks()
         # The graph should now have been modified in place, so we need to
         # get the new physical node
         fix.batch_nodes[0] = next(node for node in fix.physical_batch_graph
                                   if node.name == 'batch0')
         # Retry the first task. The next task must not have started yet.
-        await fix._transition_batch_run(fix.batch_nodes[0], TaskState.READY)
+        await fix.transition_batch_run(fix.batch_nodes[0], TaskState.READY)
         await exhaust_callbacks()
         assert fix.batch_nodes[1].state == TaskState.NOT_READY
         # Finish the retried first task.
-        fix._status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
+        fix.status_update(fix.batch_nodes[0].taskinfo.task_id.value, 'TASK_FINISHED')
         await exhaust_callbacks()
         assert fix.batch_nodes[0].state == TaskState.DEAD
         assert fix.batch_nodes[1].state == TaskState.STARTING
         # Finish the second task
-        await fix._transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
+        await fix.transition_batch_run(fix.batch_nodes[1], TaskState.DEAD)
         results = await task
         assert list(results.values()) == [None, None]
 
     async def test_close(self, fix: 'TestScheduler.Fixture') -> None:
         """Close must kill off all remaining tasks and abort any pending launches"""
-        await fix._ready_graph()
+        await fix.ready_graph()
         # Start launching a second graph, but do not give it resources
         physical_graph2 = scheduler.instantiate(fix.logical_graph)
         launch = asyncio.ensure_future(fix.sched.launch(physical_graph2, fix.resolver))
         await exhaust_callbacks()
         close = asyncio.ensure_future(fix.sched.close())
         await exhaust_callbacks()
-        status1 = fix._status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
+        status1 = fix.status_update(fix.nodes[1].taskinfo.task_id.value, 'TASK_KILLED')
         await exhaust_callbacks()
-        status0 = fix._status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
+        status0 = fix.status_update(fix.nodes[0].taskinfo.task_id.value, 'TASK_KILLED')
         # defer is insufficient here, because close() uses run_in_executor to
         # join the driver thread. Wait up to 5 seconds for that to happen.
         await asyncio.wait_for(close, 5)
@@ -2408,7 +2408,7 @@ class TestScheduler:
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
-        driver_calls = fix._driver_calls()
+        driver_calls = fix.driver_calls()
         assert mock.call.suppressOffers({'default'}) in driver_calls
         pos = driver_calls.index(mock.call.suppressOffers({'default'}))
         assert 1 <= pos < len(driver_calls) - 2
@@ -2430,14 +2430,14 @@ class TestScheduler:
 
         It must also kill it if it's not already dead.
         """
-        fix._status_update('test-01234567', 'TASK_LOST')
-        fix._status_update('test-12345678', 'TASK_RUNNING')
+        fix.status_update('test-01234567', 'TASK_LOST')
+        fix.status_update('test-12345678', 'TASK_RUNNING')
         await exhaust_callbacks()
         fix.driver.killTask.assert_called_once_with({'value': 'test-12345678'})
 
     async def test_retry_kill(self, fix: 'TestScheduler.Fixture') -> None:
         """Killing a task must be retried after a timeout."""
-        await fix._ready_graph()
+        await fix.ready_graph()
         kill = asyncio.ensure_future(fix.sched.kill(fix.physical_graph, [fix.nodes[0]]))
         await exhaust_callbacks()
         fix.driver.killTask.assert_called_once_with(fix.nodes[0].taskinfo.task_id)
@@ -2445,23 +2445,23 @@ class TestScheduler:
         # Send a task status update in less than the kill timeout. It must not
         # lead to a retry.
         await asyncio.sleep(1.0)
-        fix._status_update(fix.task_ids[0], 'TASK_RUNNING')
+        fix.status_update(fix.task_ids[0], 'TASK_RUNNING')
         await exhaust_callbacks()
         fix.driver.killTask.assert_not_called()
 
         # Give time for reconciliation requests to occur
         await asyncio.sleep(70.0)
         fix.driver.reconcileTasks.assert_called()
-        fix._status_update(fix.task_ids[0], 'TASK_RUNNING')
+        fix.status_update(fix.task_ids[0], 'TASK_RUNNING')
         await exhaust_callbacks()
         fix.driver.killTask.assert_called_once_with(fix.nodes[0].taskinfo.task_id)
 
         # Send an update for TASK_KILLING state: must not trigger another attempt
         fix.driver.killTask.reset_mock()
-        fix._status_update(fix.task_ids[0], 'TASK_KILLING')
+        fix.status_update(fix.task_ids[0], 'TASK_KILLING')
         await exhaust_callbacks()
         fix.driver.killTask.assert_not_called()
 
         # Let it die so that we can clean up the async task
-        fix._status_update(fix.task_ids[0], 'TASK_FAILED')
+        fix.status_update(fix.task_ids[0], 'TASK_FAILED')
         await kill
