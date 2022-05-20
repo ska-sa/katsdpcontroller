@@ -427,18 +427,6 @@ class Background(Generic[_T]):
         return self._future.result()
 
 
-async def run_clocked(test_case: asynctest.ClockedTestCase, time: float,
-                      awaitable: Awaitable[_T]) -> _T:
-    """Run a coroutine while advancing the clock on a clocked test case.
-
-    This is useful if the implementation of the `awaitable` sleeps and hence
-    needs the time advanced to make progress.
-    """
-    with Background(awaitable) as cm:
-        await test_case.advance(time)
-    return cm.result
-
-
 def future_return(mock: mock.Mock) -> asyncio.Future:
     """Modify a callable mock so that it blocks on a future then returns it."""
     async def replacement(*args, **kwargs):
