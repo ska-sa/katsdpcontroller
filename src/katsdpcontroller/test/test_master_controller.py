@@ -9,7 +9,7 @@ import ipaddress
 import os
 import socket
 from unittest import mock
-from typing import AsyncGenerator, Callable, Generator, Tuple, Set, List, Optional, Any
+from typing import AsyncGenerator, Generator, Tuple, Set, List, Optional, Any
 
 import aiokatcp
 from aiokatcp import Sensor, Client
@@ -206,13 +206,22 @@ async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
 
 
 class TestSingularityProductManager:
-    class Manager:
+    class Fixture:
         """Handles starting and stopping a :class:`SingularityProductManager`."""
 
-        def __init__(self, factory: Callable[[], SingularityProductManager]) -> None:
-            self.factory = factory
+        def __init__(
+                self,
+                args: argparse.Namespace,
+                server: DummyServer,
+                singularity_server: fake_singularity.SingularityServer) -> None:
+            self.args = args
+            self.server = server
+            self.singularity_server = singularity_server
+            image_lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
+            self.image_resolver_factory = make_image_resolver_factory(image_lookup, args)
             with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
-                self.manager = factory()
+                self.manager = SingularityProductManager(
+                    self.args, self.server, self.image_resolver_factory)
 
         async def start(self) -> None:
             await self.manager.start()
@@ -227,15 +236,29 @@ class TestSingularityProductManager:
             # We don't model ephemeral nodes in fake_zk, so have to delete manually
             await zk.delete('/running')
             with mock.patch('aiozk.ZKClient', return_value=zk):
-                self.manager = self.factory()
+                self.manager = SingularityProductManager(
+                    self.args, self.server, self.image_resolver_factory)
             await self.manager.start()
 
         async def get_zk_state(self) -> dict:
             payload = (await self.manager._zk.get('/state'))[0]
             return json.loads(payload)
 
+        async def start_product(
+                self,
+                name: str = 'foo',
+                lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
+            if lifecycle:
+                self.singularity_server.lifecycles.append(lifecycle)
+            # shield because if the configure fails, the calling task is cancelled,
+            # and we don't want to cancel the whole test.
+            product = await asyncio.shield(self.manager.create_product(name, {}))
+            await self.manager.product_active(product)
+            return product
+
     @pytest.fixture
     def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+        """Use async_solipsism's event loop for the tests."""
         loop = async_solipsism.EventLoop()
         yield loop
         loop.close()
@@ -294,37 +317,30 @@ class TestSingularityProductManager:
             'zk.invalid:2181', singularity_server.root_url
         ])
 
-    @pytest.fixture
-    def image_resolver_factory(self, args: argparse.Namespace) -> scheduler.ImageResolverFactory:
-        image_lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
-        return make_image_resolver_factory(image_lookup, args)
-
     # Note: needs to be an async method just so that the event loop is running.
     @pytest.fixture
-    async def manager_unstarted(
+    async def fix_unstarted(
             self,
             args: argparse.Namespace,
             server: DummyServer,
-            image_resolver_factory: scheduler.ImageResolverFactory) \
-            -> 'TestSingularityProductManager.Manager':
-        def factory() -> SingularityProductManager:
-            return SingularityProductManager(args, server, image_resolver_factory)
-
-        return self.Manager(factory)
+            singularity_server: fake_singularity.SingularityServer) \
+            -> 'TestSingularityProductManager.Fixture':
+        return self.Fixture(args, server, singularity_server)
 
     @pytest.fixture
-    async def manager(
-            self, manager_unstarted: 'TestSingularityProductManager.Manager') \
-            -> AsyncGenerator['TestSingularityProductManager.Manager', None]:
-        await manager_unstarted.start()
-        yield manager_unstarted
-        await manager_unstarted.stop()
+    async def fix(
+            self, fix_unstarted: 'TestSingularityProductManager.Fixture') \
+            -> AsyncGenerator['TestSingularityProductManager.Fixture', None]:
+        await fix_unstarted.start()
+        yield fix_unstarted
+        await fix_unstarted.stop()
 
-    async def test_start_clean(self, manager) -> None:
+    async def test_start_clean(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         await asyncio.sleep(30)     # Runs reconciliation a few times
 
-    async def test_create_product(self, manager, client_mock, singularity_server) -> None:
-        product = await manager.manager.create_product('foo', {})
+    async def test_create_product(
+            self, fix: 'TestSingularityProductManager.Fixture', client_mock) -> None:
+        product = await fix.manager.create_product('foo', {})
         assert product.task_state == Product.TaskState.STARTING
         assert product.host == ipaddress.ip_address('192.0.2.0')
         assert product.ports['katcp'] == 12345
@@ -334,10 +350,10 @@ class TestSingularityProductManager:
         assert product.ports['dashboard'] == 12349
         client_mock.assert_called_with('192.0.2.0', 12345)
 
-        await manager.manager.product_active(product)
+        await fix.manager.product_active(product)
         assert product.task_state == Product.TaskState.ACTIVE
         # Check that the right image selection options were passed to the task
-        task = list(singularity_server.tasks.values())[0]
+        task = list(fix.singularity_server.tasks.values())[0]
         arguments = task.arguments()
         assert '--image-tag=a_tag' in arguments
         assert '--image-override=katsdptelstate:branch' in arguments
@@ -346,14 +362,14 @@ class TestSingularityProductManager:
             == 'registry.invalid:5000/katsdpcontroller:a_tag'
         )
 
-    async def test_config_tag_override(self, manager, singularity_server) -> None:
+    async def test_config_tag_override(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Image tag in the config dict overrides tag file."""
         config = {
             'config': {'image_tag': 'custom_tag'}
         }
-        product = await manager.manager.create_product('foo', config)
-        await manager.manager.product_active(product)
-        task = list(singularity_server.tasks.values())[0]
+        product = await fix.manager.create_product('foo', config)
+        await fix.manager.product_active(product)
+        task = list(fix.singularity_server.tasks.values())[0]
         # Check that the right image was used
         assert (
             task.deploy.config['containerInfo']['docker']['image']
@@ -365,31 +381,34 @@ class TestSingularityProductManager:
         arguments = task.arguments()
         assert '--image-tag=custom_tag' in arguments
 
-    async def test_config_image_override(self, manager, singularity_server) -> None:
+    async def test_config_image_override(
+            self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Image override in the config dict overrides the product controller image."""
         config = {
             'config': {'image_overrides': {'katsdpcontroller': 'katsdpcontroller:custom_tag'}}
         }
-        product = await manager.manager.create_product('foo', config)
-        await manager.manager.product_active(product)
-        task = list(singularity_server.tasks.values())[0]
+        product = await fix.manager.create_product('foo', config)
+        await fix.manager.product_active(product)
+        task = list(fix.singularity_server.tasks.values())[0]
         # Check that the right image was used
         assert (
             task.deploy.config['containerInfo']['docker']['image']
             == 'registry.invalid:5000/katsdpcontroller:custom_tag'
         )
 
-    async def test_create_product_dies_fast(self, manager, singularity_server) -> None:
+    async def test_create_product_dies_fast(
+            self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Task dies before we observe it running"""
-        singularity_server.lifecycles.append(quick_death_lifecycle)
+        fix.singularity_server.lifecycles.append(quick_death_lifecycle)
         with pytest.raises(ProductFailed):
-            await manager.manager.create_product('foo', {})
-        assert manager.manager.products == {}
+            await fix.manager.create_product('foo', {})
+        assert fix.manager.products == {}
 
-    async def test_create_product_parallel(self, manager) -> None:
+    async def test_create_product_parallel(
+            self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Can configure two subarray products at the same time"""
-        with Background(manager.manager.create_product('product1', {})) as cm1, \
-                Background(manager.manager.create_product('product2', {})) as cm2:
+        with Background(fix.manager.create_product('product1', {})) as cm1, \
+                Background(fix.manager.create_product('product2', {})) as cm2:
             await asyncio.sleep(100)
         product1 = cm1.result
         product2 = cm2.result
@@ -408,48 +427,32 @@ class TestSingularityProductManager:
         ]
     )
     async def test_create_product_dies_after_task_id(
-            self, init_wait: float, manager, singularity_server) -> None:
+            self, init_wait: float, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Task dies immediately after we learn its task ID.
 
         This test is parametrised so that we can control whether the task ID is
         learnt during polling for the new task or during task reconciliation.
         """
-        singularity_server.lifecycles.append(
+        fix.singularity_server.lifecycles.append(
             functools.partial(death_after_task_id_lifecycle, init_wait))
         with pytest.raises(ProductFailed):
-            await manager.manager.create_product('foo', {})
-        assert manager.manager.products == {}
+            await fix.manager.create_product('foo', {})
+        assert fix.manager.products == {}
 
-    async def test_singularity_down(self, manager) -> None:
+    async def test_singularity_down(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         with mock.patch('aiohttp.ClientSession._request',
                         side_effect=aiohttp.client.ClientConnectionError):
             with pytest.raises(ProductFailed):
-                await manager.manager.create_product('foo', {})
+                await fix.manager.create_product('foo', {})
         # Product must be cleared
-        assert manager.manager.products == {}
+        assert fix.manager.products == {}
 
-    @pytest.fixture
-    def start_product(
-            self,
-            manager: 'TestSingularityProductManager.Manager',
-            singularity_server: fake_singularity.SingularityServer):
-        async def _start_product(
-                name: str = 'foo',
-                lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
-            if lifecycle:
-                singularity_server.lifecycles.append(lifecycle)
-            product = await asyncio.shield(manager.manager.create_product(name, {}))
-            await manager.manager.product_active(product)
-            return product
+    async def test_persist(self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        product = await fix.start_product()
+        await fix.reset()
+        assert fix.manager.products == {'foo': mock.ANY}
 
-        return _start_product
-
-    async def test_persist(self, manager, start_product) -> None:
-        product = await start_product()
-        await manager.reset()
-        assert manager.manager.products == {'foo': mock.ANY}
-
-        product2 = manager.manager.products['foo']
+        product2 = fix.manager.products['foo']
         assert product.task_state == product2.task_state
         assert product.run_id == product2.run_id
         assert product.task_id == product2.task_id
@@ -460,26 +463,26 @@ class TestSingularityProductManager:
         assert product2.katcp_conn is not None
         assert product is not product2   # Must be reconstituted from state
 
-    async def test_spontaneous_death(self, manager, start_product) -> None:
+    async def test_spontaneous_death(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Product must be cleaned up if it dies on its own"""
-        product = await start_product(lifecycle=spontaneous_death_lifecycle)
+        product = await fix.start_product(lifecycle=spontaneous_death_lifecycle)
         # Check that Zookeeper initially knows about the product
-        assert (await manager.get_zk_state())['products'] == {'foo': mock.ANY}
+        assert (await fix.get_zk_state())['products'] == {'foo': mock.ANY}
 
         await asyncio.sleep(1100)   # Task will die during this time
         assert product.task_state == Product.TaskState.DEAD
-        assert manager.manager.products == {}
+        assert fix.manager.products == {}
         # Check that Zookeeper was updated
-        assert (await manager.get_zk_state())['products'] == {}
+        assert (await fix.get_zk_state())['products'] == {}
 
-    async def test_stuck_pending(self, manager, singularity_server) -> None:
+    async def test_stuck_pending(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Task takes a long time to be launched.
 
         The configure gets cancelled before then, and reconciliation must
         clean up the task.
         """
-        singularity_server.lifecycles.append(long_pending_lifecycle)
-        task = asyncio.create_task(manager.manager.create_product('foo', {}))
+        fix.singularity_server.lifecycles.append(long_pending_lifecycle)
+        task = asyncio.create_task(fix.manager.create_product('foo', {}))
         await asyncio.sleep(500)
         assert not task.done()
         task.cancel()
@@ -489,35 +492,35 @@ class TestSingularityProductManager:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    async def test_reuse_deploy(self, manager, singularity_server, start_product) -> None:
+    async def test_reuse_deploy(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         def get_deploy_id() -> str:
-            request = list(singularity_server.requests.values())[0]
+            request = list(fix.singularity_server.requests.values())[0]
             assert request.active_deploy is not None
             return request.active_deploy.deploy_id
 
-        product = await start_product()
+        product = await fix.start_product()
         deploy_id = get_deploy_id()
 
         # Reuse, without restarting the manager
-        await manager.manager.kill_product(product)
+        await fix.manager.kill_product(product)
         # Give it time to die
         await asyncio.sleep(100)
-        product = await start_product()
+        product = await fix.start_product()
         assert get_deploy_id() == deploy_id
 
         # Reuse, after a restart
-        await manager.manager.kill_product(product)
+        await fix.manager.kill_product(product)
         # Give it time to die
         await asyncio.sleep(100)
-        await manager.reset()
-        product = await start_product()
+        await fix.reset()
+        product = await fix.start_product()
         assert get_deploy_id() == deploy_id
 
         # Alter the necessary state to ensure that a new deploy is used
-        await manager.manager.kill_product(product)
+        await fix.manager.kill_product(product)
         await asyncio.sleep(100)
         with mock.patch.dict(os.environ, {'KATSDP_LOG_LEVEL': 'test'}):
-            product = await start_product()
+            product = await fix.start_product()
         assert get_deploy_id() != deploy_id
 
     @pytest.mark.parametrize(
@@ -533,13 +536,17 @@ class TestSingularityProductManager:
             json.dumps({"version": 1}).encode()
         ]
     )
-    async def test_bad_zk(self, payload: bytes, manager_unstarted, caplog) -> None:
+    async def test_bad_zk(
+            self,
+            payload: bytes,
+            fix_unstarted: 'TestSingularityProductManager.Fixture',
+            caplog) -> None:
         """Existing state data in Zookeeper is not valid"""
-        await manager_unstarted.manager._zk.create('/state', payload)
+        await fix_unstarted.manager._zk.create('/state', payload)
         with caplog.at_level(logging.WARNING):
-            await manager_unstarted.start()
+            await fix_unstarted.start()
         assert 'Could not load existing state' in caplog.records[0].message
-        await manager_unstarted.stop()
+        await fix_unstarted.stop()
 
     @pytest.mark.parametrize(
         'content',
@@ -548,48 +555,54 @@ class TestSingularityProductManager:
             None
         ]
     )
-    async def test_bad_s3_config(self, content: Optional[str], manager, open_mock) -> None:
+    async def test_bad_s3_config(
+            self,
+            content: Optional[str],
+            fix: 'TestSingularityProductManager.Fixture',
+            open_mock: open_file_mock.MockOpen) -> None:
         open_mock.unregister_path('s3_config.json')
         if content is not None:
             open_mock.set_read_data_for('s3_config.json', content)
         with pytest.raises(ProductFailed):
-            await manager.manager.create_product('foo', {})
+            await fix.manager.create_product('foo', {})
 
-    async def test_get_multicast_groups(self, manager, start_product) -> None:
-        product1 = await start_product('product1')
-        product2 = await start_product('product2')
-        assert await manager.manager.get_multicast_groups(product1, 1) == '239.192.0.1'
-        assert await manager.manager.get_multicast_groups(product1, 4) == '239.192.0.2+3'
+    async def test_get_multicast_groups(self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        product1 = await fix.start_product('product1')
+        product2 = await fix.start_product('product2')
+        assert await fix.manager.get_multicast_groups(product1, 1) == '239.192.0.1'
+        assert await fix.manager.get_multicast_groups(product1, 4) == '239.192.0.2+3'
         with pytest.raises(NoAddressesError):
-            await manager.manager.get_multicast_groups(product1, 1000)
+            await fix.manager.get_multicast_groups(product1, 1000)
 
-        assert await manager.manager.get_multicast_groups(product2, 128) == '239.192.0.6+127'
+        assert await fix.manager.get_multicast_groups(product2, 128) == '239.192.0.6+127'
         # Now product1 owns .1-.5, product2 owns .6-.133.
-        await manager.manager.kill_product(product2)
+        await fix.manager.kill_product(product2)
         await asyncio.sleep(100)   # Give it time to clean up
 
         # Allocations should continue from where they left off, then cycle
         # around to reuse the space freed by product2.
-        assert await manager.manager.get_multicast_groups(product1, 100) == '239.192.0.134+99'
-        assert await manager.manager.get_multicast_groups(product1, 100) == '239.192.0.6+99'
+        assert await fix.manager.get_multicast_groups(product1, 100) == '239.192.0.134+99'
+        assert await fix.manager.get_multicast_groups(product1, 100) == '239.192.0.6+99'
 
-    async def test_get_multicast_groups_persist(self, manager, start_product) -> None:
-        await self.test_get_multicast_groups(manager, start_product)
-        await manager.reset()
-        product1 = manager.manager.products['product1']
+    async def test_get_multicast_groups_persist(
+            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        await self.test_get_multicast_groups(fix)
+        await fix.reset()
+        product1 = fix.manager.products['product1']
         expected: Set[ipaddress.IPv4Address] = set()
         for i in range(105):
             expected.add(ipaddress.IPv4Address('239.192.0.1') + i)
         for i in range(100):
             expected.add(ipaddress.IPv4Address('239.192.0.134') + i)
         assert product1.multicast_groups == expected
-        assert manager.manager._next_multicast_group == ipaddress.IPv4Address('239.192.0.106')
+        assert fix.manager._next_multicast_group == ipaddress.IPv4Address('239.192.0.106')
 
-    async def test_multicast_group_out_of_range(self, manager, start_product, args, caplog) -> None:
-        await self.test_get_multicast_groups(manager, start_product)
-        args.safe_multicast_cidr = '225.101.0.0/24'
+    async def test_multicast_group_out_of_range(
+            self, fix: 'TestSingularityProductManager.Fixture', caplog) -> None:
+        await self.test_get_multicast_groups(fix)
+        fix.args.safe_multicast_cidr = '225.101.0.0/24'
         with caplog.at_level(logging.WARNING, 'katsdpcontroller.master_controller'):
-            await manager.reset()
+            await fix.reset()
         assert caplog.record_tuples == [
             (
                 'katsdpcontroller.master_controller',
@@ -599,43 +612,45 @@ class TestSingularityProductManager:
             )
         ]
 
-    async def test_get_multicast_groups_negative(self, manager, start_product) -> None:
-        product = await start_product()
+    async def test_get_multicast_groups_negative(
+            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        product = await fix.start_product()
         with pytest.raises(ValueError):
-            await manager.manager.get_multicast_groups(product, -1)
+            await fix.manager.get_multicast_groups(product, -1)
         with pytest.raises(ValueError):
-            await manager.manager.get_multicast_groups(product, 0)
+            await fix.manager.get_multicast_groups(product, 0)
 
-    async def test_capture_block_id(self, manager, mocker) -> None:
+    async def test_capture_block_id(
+            self, fix: 'TestSingularityProductManager.Fixture', mocker) -> None:
         mock_time = mocker.patch('time.time')
         mock_time.return_value = 1122334455.123
-        assert await manager.manager.get_capture_block_id() == '1122334455'
-        assert await manager.manager.get_capture_block_id() == '1122334456'
+        assert await fix.manager.get_capture_block_id() == '1122334455'
+        assert await fix.manager.get_capture_block_id() == '1122334456'
         # Must still be monotonic, even if time.time goes backwards
         mock_time.return_value -= 10
-        assert await manager.manager.get_capture_block_id() == '1122334457'
+        assert await fix.manager.get_capture_block_id() == '1122334457'
         # Once time.time goes past next, must use that again
         mock_time.return_value = 1122334460.987
-        assert await manager.manager.get_capture_block_id() == '1122334460'
+        assert await fix.manager.get_capture_block_id() == '1122334460'
 
         # Must persist state over restarts
-        await manager.reset()
-        assert await manager.manager.get_capture_block_id() == '1122334461'
+        await fix.reset()
+        assert await fix.manager.get_capture_block_id() == '1122334461'
 
-    async def test_katcp(self, server, manager, singularity_server, mocker) -> None:
+    async def test_katcp(self, fix: 'TestSingularityProductManager.Fixture', mocker) -> None:
         # Disable the mocking by making the real version the side effect
         mocker.patch('aiokatcp.Client', Client)
-        singularity_server.lifecycles.append(katcp_server_lifecycle)
-        product = await manager.manager.create_product('product1', {})
+        fix.singularity_server.lifecycles.append(katcp_server_lifecycle)
+        product = await fix.manager.create_product('product1', {})
 
         # We haven't called product_active yet, so it should still be CONFIGURING
         assert await product.get_state() == ProductState.CONFIGURING
         assert await product.get_telstate_endpoint() == ''
 
-        await manager.manager.product_active(product)
+        await fix.manager.product_active(product)
         assert await product.get_state() == ProductState.IDLE
         assert await product.get_telstate_endpoint() == 'telstate.invalid:31000'
-        assert server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value == 42
+        assert fix.server.sensors['product1.ingest.sdp_l0.1.input-bytes-total'].value == 42
 
         # Have the remote katcp server tell us it is going away. This also
         # provides test coverage of this shutdown path.
