@@ -1484,6 +1484,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 logger.warning('Failed to deconfigure product %s during shutdown', exc_info=True)
         self.master_controller.close()
         await self.master_controller.wait_closed()
+        await self.sched.close()
 
     async def configure_product(self, name: str, configuration: Configuration,
                                 config_dict: dict) -> None:
