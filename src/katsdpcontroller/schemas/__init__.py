@@ -56,8 +56,8 @@ class MultiVersionValidator(object):
 
 for name in pkg_resources.resource_listdir(__name__, '.'):
     if name.endswith('.json'):
-        reader = codecs.getreader('utf-8')(pkg_resources.resource_stream(__name__, name))
-        schema = json.load(reader)
+        with codecs.getreader('utf-8')(pkg_resources.resource_stream(__name__, name)) as reader:
+            schema = json.load(reader)
         globals()[name[:-5].upper()] = _make_validator(schema)
     elif name.endswith('.json.j2'):
         globals()[name[:-8].upper()] = MultiVersionValidator(name)
