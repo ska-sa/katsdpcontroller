@@ -9,7 +9,7 @@ from unittest import mock
 import time
 from decimal import Decimal
 from collections import Counter
-from typing import Optional, Callable, Generator, Any
+from typing import AsyncGenerator, Optional, Callable, Generator, Any
 
 import networkx
 import pymesos
@@ -1689,14 +1689,18 @@ class TestScheduler:
             self.driver.reset_mock()
 
     @pytest.fixture(autouse=True)
-    async def fix(self, mocker) -> 'TestScheduler.Fixture':
+    async def fix(self, mocker) -> AsyncGenerator['TestScheduler.Fixture', None]:
         # Mock out the random generator so that port allocations will be
         # predictable.
         mocker.patch('katsdpcontroller.scheduler.Agent._random.random', self._dummy_random)
         mocker.patch('katsdpcontroller.scheduler.Agent._random.randint', self._dummy_randint)
         fix = TestScheduler.Fixture()
         await fix.sched.start()
-        return fix
+        yield fix
+        # Without this mocking, close() will try to kill running tasks, but
+        # will block forever because we won't simulate them dying.
+        with mock.patch.object(fix.sched, 'kill'):
+            await fix.sched.close()
 
     async def test_initial_offers(self, fix: 'TestScheduler.Fixture') -> None:
         """Offers passed to resourcesOffers in initial state are declined"""

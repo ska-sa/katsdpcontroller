@@ -2807,6 +2807,8 @@ class TaskStats:
 
 
 async def _cleanup_task(task):
+    if not task:
+        return
     task.cancel()
     try:
         await task
