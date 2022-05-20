@@ -13,7 +13,6 @@ from typing import AsyncGenerator, Generator, Tuple, Set, List, Optional, Any
 
 import aiokatcp
 from aiokatcp import Sensor, Client
-import asynctest
 import async_solipsism
 import aiohttp.client
 import open_file_mock
@@ -28,7 +27,7 @@ from ..master_controller import (ProductFailed, Product, SingularityProduct,
                                  ProductManagerBase, SingularityProductManager, NoAddressesError,
                                  DeviceServer, parse_args)
 from . import fake_zk, fake_singularity
-from .utils import (create_patch, assert_request_fails, assert_sensors, assert_sensor_value,
+from .utils import (assert_request_fails, assert_sensors, assert_sensor_value,
                     DelayedManager, Background, exhaust_callbacks,
                     CONFIG, CONFIG_CBF_ONLY, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
                     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
@@ -205,6 +204,16 @@ async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
         await server.stop()
 
 
+@pytest.fixture(autouse=True)
+def mock_getaddrinfo(mocker, event_loop) -> None:
+    """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
+    return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('192.0.2.0', 0))
+    ]
+    mocker.patch('socket.getaddrinfo', return_value=return_value)
+    mocker.patch.object(event_loop, 'getaddrinfo', return_value=return_value)
+
+
 class TestSingularityProductManager:
     class Fixture:
         """Handles starting and stopping a :class:`SingularityProductManager`."""
@@ -292,14 +301,6 @@ class TestSingularityProductManager:
         open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
         open_mock.set_read_data_for('sdp_image_tag', 'a_tag')
         return open_mock
-
-    @pytest.fixture(autouse=True)
-    def mock_getaddrinfo(self, mocker, event_loop) -> None:
-        return_value = [
-            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('192.0.2.0', 0))
-        ]
-        mocker.patch('socket.getaddrinfo', return_value=return_value)
-        mocker.patch.object(event_loop, 'getaddrinfo', return_value=return_value)
 
     @pytest.fixture
     def args(self, server, singularity_server) -> argparse.Namespace:
@@ -660,52 +661,87 @@ class TestSingularityProductManager:
         assert await product.get_telstate_endpoint() == ''
 
 
-class TestDeviceServer(asynctest.ClockedTestCase):
+class TestDeviceServer:
     """Tests for :class:`.master_controller.DeviceServer`.
 
     The tests use interface mode, because that avoids the complications of
     emulating Singularity and Zookeeper, and allows interaction with a mostly
     real product controller.
     """
-    async def setUp(self) -> None:
-        self.args = parse_args([
+
+    @pytest.fixture
+    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+        """Use async_solipsism's event loop for the tests."""
+        loop = async_solipsism.EventLoop()
+        yield loop
+        loop.close()
+
+    @pytest.fixture
+    def rmock(self) -> Generator[aioresponses.aioresponses, None, None]:
+        with aioresponses.aioresponses() as rmock:
+            yield rmock
+
+    @pytest.fixture
+    async def server(self) -> AsyncGenerator[DeviceServer, None]:
+        args = parse_args([
             '--localhost',
             '--interface-mode',
-            '--port', '0',
+            '--port', '7147',
             '--name', 'sdpmc_test',
             '--registry', 'registry.invalid:5000',
             '--safe-multicast-cidr', '239.192.0.0/24',
             'unused argument (zk)', 'unused argument (Singularity)'
         ])
-        self.server = DeviceServer(self.args)
-        await self.server.start()
-        self.addCleanup(self.server.stop)
-        host, port = device_server_sockname(self.server)
-        self.client = aiokatcp.Client(host, port)
-        await self.client.wait_connected()
-        self.addCleanup(self.client.wait_closed)
-        self.addCleanup(self.client.close)
+        server = DeviceServer(args)
+        await server.start()
+        yield server
+        await server.stop()
 
-    async def test_capture_init(self) -> None:
-        await assert_request_fails(self.client, "capture-init", "product")
-        await self.client.request("product-configure", "product", CONFIG)
-        reply, informs = await self.client.request("capture-init", "product")
+    @pytest.fixture
+    async def client(self, server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:
+        host, port = device_server_sockname(server)
+        client = await aiokatcp.Client.connect(host, port)
+        yield client
+        client.close()
+        await client.wait_closed()
+
+    @pytest.fixture(autouse=True)
+    def mock_socket(self, mocker) -> None:
+        """Mock :meth:`.FakePhysicalTask._create_socket` to use async_solipsism."""
+        next_port = 49152
+
+        def create_socket(self, host: str, port: int) -> async_solipsism.ListenSocket:
+            nonlocal next_port
+            next_port += 1
+            return async_solipsism.ListenSocket((host, next_port))
+
+        mocker.patch('katsdpcontroller.scheduler.FakePhysicalTask._create_socket', create_socket)
+
+    @pytest.fixture(autouse=True)
+    def mock_poll_ports(self, mocker) -> None:
+        """Stub out :func:`poll_ports` so that it works with async_solipsism."""
+        mocker.patch('katsdpcontroller.scheduler.poll_ports', autospec=True)
+
+    async def test_capture_init(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "capture-init", "product")
+        await client.request("product-configure", "product", CONFIG)
+        reply, informs = await client.request("capture-init", "product")
         assert reply == [b"0000000002"]
 
-        reply, informs = await self.client.request("capture-status", "product")
+        reply, informs = await client.request("capture-status", "product")
         assert reply == [b"capturing"]
-        await assert_request_fails(self.client, "capture-init", "product")
+        await assert_request_fails(client, "capture-init", "product")
 
-    async def test_capture_init_while_configuring(self) -> None:
-        async with self._product_configure_slow('product'):
-            await assert_request_fails(self.client, 'capture-init', 'product')
+    async def test_capture_init_while_configuring(self, client: aiokatcp.Client, mocker) -> None:
+        async with self._product_configure_slow(client, mocker, 'product'):
+            await assert_request_fails(client, 'capture-init', 'product')
 
-    async def test_interface_sensors(self) -> None:
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
-        await assert_sensor_value(self.client, 'products', '[]')
+    async def test_interface_sensors(self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        await assert_sensors(client, EXPECTED_SENSOR_LIST)
+        await assert_sensor_value(client, 'products', '[]')
         interface_changed_callback = mock.MagicMock()
-        self.client.add_inform_callback('interface-changed', interface_changed_callback)
-        await self.client.request('product-configure', 'product', CONFIG)
+        client.add_inform_callback('interface-changed', interface_changed_callback)
+        await client.request('product-configure', 'product', CONFIG)
         await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b'sensor-list')
         # Prepend the subarray product ID to the names
@@ -714,125 +750,137 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             for s in (EXPECTED_INTERFACE_SENSOR_LIST
                       + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
                       + EXPECTED_PRODUCT_SENSOR_LIST)]
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST + expected_product_sensors,
+        await assert_sensors(client, EXPECTED_SENSOR_LIST + expected_product_sensors,
                              subset=True)
-        await assert_sensor_value(self.client, 'products', '["product"]')
-        product = self.server._manager.products['product']
+        await assert_sensor_value(client, 'products', '["product"]')
+        product = server._manager.products['product']
         await assert_sensor_value(
-            self.client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
+            client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
 
         # Change the product's device-status to FAIL and check that the top-level sensor
         # is updated.
         product.server.sensors['device-status'].value = DeviceStatus.FAIL
         # Do a round trip to the product server to give time for the change to propagate
-        await self.client.request('capture-status', 'product')
-        await assert_sensor_value(self.client, 'device-status', 'fail', Sensor.Status.ERROR)
+        await client.request('capture-status', 'product')
+        await assert_sensor_value(client, 'device-status', 'fail', Sensor.Status.ERROR)
 
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
-        await self.client.request('product-deconfigure', 'product')
+        await client.request('product-deconfigure', 'product')
         await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b'sensor-list')
-        await assert_sensors(self.client, EXPECTED_SENSOR_LIST)
-        await assert_sensor_value(self.client, 'products', '[]')
+        await assert_sensors(client, EXPECTED_SENSOR_LIST)
+        await assert_sensor_value(client, 'products', '[]')
         # With the product gone, the device status must go back to OK
-        await assert_sensor_value(self.client, 'device-status', 'ok')
+        await assert_sensor_value(client, 'device-status', 'ok')
 
-    async def test_capture_done(self) -> None:
-        await assert_request_fails(self.client, "capture-done", "product")
-        await self.client.request("product-configure", "product", CONFIG)
-        await assert_request_fails(self.client, "capture-done", "product")
+    async def test_capture_done(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "capture-done", "product")
+        await client.request("product-configure", "product", CONFIG)
+        await assert_request_fails(client, "capture-done", "product")
 
-        await self.client.request("capture-init", "product")
-        reply, informs = await self.client.request("capture-done", "product")
+        await client.request("capture-init", "product")
+        reply, informs = await client.request("capture-done", "product")
         assert reply == [b"0000000001"]
-        await assert_request_fails(self.client, "capture-done", "product")
+        await assert_request_fails(client, "capture-done", "product")
 
-    async def test_set_config_override_bad(self) -> None:
-        await assert_request_fails(self.client, "set-config-override", "product", "not json")
-        await assert_request_fails(self.client, "set-config-override", "product", "[]")
+    async def test_set_config_override_bad(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "set-config-override", "product", "not json")
+        await assert_request_fails(client, "set-config-override", "product", "[]")
 
-    async def test_product_configure(self) -> None:
-        await assert_request_fails(self.client, "product-deconfigure", "product")
-        await self.client.request("product-list")
-        await self.client.request("product-configure", "product", CONFIG)
+    async def test_product_configure(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "product-deconfigure", "product")
+        await client.request("product-list")
+        await client.request("product-configure", "product", CONFIG)
         # Cannot configure an already-configured array
-        await assert_request_fails(self.client, "product-configure", "product", CONFIG)
+        await assert_request_fails(client, "product-configure", "product", CONFIG)
 
-    async def test_product_configure_bad_name(self) -> None:
-        await assert_request_fails(self.client, 'product-configure', '!$@#', CONFIG)
+    async def test_product_configure_bad_name(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, 'product-configure', '!$@#', CONFIG)
 
-    async def test_product_configure_bad_json(self) -> None:
-        await assert_request_fails(self.client, 'product-configure', 'product', 'not JSON')
+    async def test_product_configure_bad_json(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, 'product-configure', 'product', 'not JSON')
 
-    async def test_product_configure_generate_names(self) -> None:
+    async def test_product_configure_generate_names(self, client: aiokatcp.Client) -> None:
         """Name with trailing * must generate lowest-numbered name"""
         async def product_configure():
-            return (await self.client.request('product-configure', 'prefix_*', CONFIG))[0][0]
+            return (await client.request('product-configure', 'prefix_*', CONFIG))[0][0]
 
         assert b'prefix_0' == await product_configure()
         assert b'prefix_1' == await product_configure()
         # Deconfigure the product, then check that the name is recycled
-        await self.client.request('product-deconfigure', 'prefix_0')
+        await client.request('product-deconfigure', 'prefix_0')
         # Interface mode has some small sleeps, which we have to get past for
         # it to properly die.
         await asyncio.sleep(1)
         assert b'prefix_0' == await product_configure()
 
-    def _product_configure_slow(self, subarray_product: str,
-                                cancelled: bool = False) -> DelayedManager:
-        create_patch(self, 'aiokatcp.Client.wait_connected',
-                     side_effect=aiokatcp.Client.wait_connected, autospec=True)
+    def _product_configure_slow(
+            self,
+            client: aiokatcp.Client,
+            mocker,
+            subarray_product: str,
+            cancelled: bool = False) -> DelayedManager:
+        mocker.patch('aiokatcp.Client.wait_connected',
+                     side_effect=aiokatcp.Client.wait_connected,
+                     autospec=True)
         return DelayedManager(
-            self.client.request('product-configure', subarray_product, CONFIG),
+            client.request('product-configure', subarray_product, CONFIG),
             aiokatcp.Client.wait_connected,         # type: ignore
             None, cancelled)
 
-    async def test_product_deconfigure(self) -> None:
-        await assert_request_fails(self.client, "product-configure", "product")
-        await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("capture-init", "product")
+    async def test_product_deconfigure(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "product-configure", "product")
+        await client.request("product-configure", "product", CONFIG)
+        await client.request("capture-init", "product")
         # should not be able to deconfigure when not in idle state
-        await assert_request_fails(self.client, "product-deconfigure", "product")
-        await self.client.request("capture-done", "product")
-        await self.advance(1)    # interface mode has some sleeps in capture-done
-        await self.client.request("product-deconfigure", "product")
+        await assert_request_fails(client, "product-deconfigure", "product")
+        await client.request("capture-done", "product")
+        await asyncio.sleep(1)    # interface mode has some sleeps in capture-done
+        await client.request("product-deconfigure", "product")
 
-    async def test_product_deconfigure_while_configuring_force(self) -> None:
+    async def test_product_deconfigure_while_configuring_force(
+            self,
+            client: aiokatcp.Client,
+            server: DeviceServer,
+            mocker) -> None:
         """Forced product-deconfigure must succeed while in product-configure"""
-        async with self._product_configure_slow('product', cancelled=True):
-            await self.client.request("product-deconfigure", 'product', True)
+        async with self._product_configure_slow(client, mocker, 'product', cancelled=True):
+            await client.request("product-deconfigure", 'product', True)
         # Verify that it's gone
-        assert self.server._manager.products == {}
+        assert server._manager.products == {}
 
-    async def test_product_deconfigure_capturing_force(self) -> None:
+    async def test_product_deconfigure_capturing_force(self, client: aiokatcp.Client) -> None:
         """forced product-deconfigure must succeed while capturing"""
-        await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("capture-init", "product")
-        await self.client.request("product-deconfigure", "product", True)
+        await client.request("product-configure", "product", CONFIG)
+        await client.request("capture-init", "product")
+        await client.request("product-deconfigure", "product", True)
 
-    async def test_product_reconfigure(self) -> None:
-        await assert_request_fails(self.client, "product-reconfigure", "product")
-        await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("product-reconfigure", "product")
-        await self.client.request("capture-init", "product")
-        await assert_request_fails(self.client, "product-reconfigure", "product")
+    async def test_product_reconfigure(self, client: aiokatcp.Client) -> None:
+        await assert_request_fails(client, "product-reconfigure", "product")
+        await client.request("product-configure", "product", CONFIG)
+        await client.request("product-reconfigure", "product")
+        await client.request("capture-init", "product")
+        await assert_request_fails(client, "product-reconfigure", "product")
 
-    async def test_product_reconfigure_override(self) -> None:
+    async def test_product_reconfigure_override(
+            self, client: aiokatcp.Client, server: DeviceServer) -> None:
         """?product-reconfigure must pick up config overrides"""
-        await self.client.request("product-configure", "product", CONFIG)
-        await self.client.request("set-config-override", "product", '{"config": {"develop": true}}')
-        await self.client.request("product-reconfigure", "product")
-        config = self.server._manager.products['product'].config
+        await client.request("product-configure", "product", CONFIG)
+        await client.request("set-config-override", "product", '{"config": {"develop": true}}')
+        await client.request("product-reconfigure", "product")
+        config = server._manager.products['product'].config
         assert config['config'].get('develop') is True
 
-    async def test_product_reconfigure_configure_busy(self) -> None:
+    async def test_product_reconfigure_configure_busy(
+            self, client: aiokatcp.Client, mocker) -> None:
         """Can run product-reconfigure concurrently with another product-configure"""
-        await self.client.request('product-configure', 'product1', CONFIG)
-        async with self._product_configure_slow('product2'):
-            await self.client.request('product-reconfigure', 'product1')
+        await client.request('product-configure', 'product1', CONFIG)
+        async with self._product_configure_slow(client, mocker, 'product2'):
+            await client.request('product-reconfigure', 'product1')
 
-    async def test_product_reconfigure_configure_fails(self) -> None:
+    async def test_product_reconfigure_configure_fails(
+            self, client: aiokatcp.Client, server: DeviceServer) -> None:
         """Tests product-reconfigure when the new graph fails"""
         async def request(self, name: str,
                           *args: Any) -> Tuple[List[bytes], List[aiokatcp.Message]]:
@@ -842,29 +890,29 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             else:
                 return await orig_request(self, name, *args)
 
-        await self.client.request('product-configure', 'product', CONFIG)
+        await client.request('product-configure', 'product', CONFIG)
         orig_request = aiokatcp.Client.request
         with mock.patch.object(aiokatcp.Client, 'request', new=request):
             with pytest.raises(aiokatcp.FailReply):
-                await self.client.request('product-reconfigure', 'product')
+                await client.request('product-reconfigure', 'product')
         # Check that the subarray was deconfigured cleanly
-        assert self.server._manager.products == {}
+        assert server._manager.products == {}
 
-    async def test_product_configure_reuse_name(self) -> None:
-        await self.client.request('product-configure', 'product', CONFIG_CBF_ONLY)
-        await self.client.request('product-deconfigure', 'product')
-        await self.client.request('product-configure', 'product', CONFIG)
+    async def test_product_configure_reuse_name(self, client: aiokatcp.Client) -> None:
+        await client.request('product-configure', 'product', CONFIG_CBF_ONLY)
+        await client.request('product-deconfigure', 'product')
+        await client.request('product-configure', 'product', CONFIG)
 
-    async def test_help(self) -> None:
-        reply, informs = await self.client.request('help')
+    async def test_help(self, client: aiokatcp.Client) -> None:
+        reply, informs = await client.request('help')
         requests = [inform.arguments[0].decode('utf-8') for inform in informs]
         assert set(requests) == set(EXPECTED_REQUEST_LIST)
 
-    async def test_telstate_endpoint_all(self) -> None:
+    async def test_telstate_endpoint_all(self, client: aiokatcp.Client) -> None:
         """Test telstate-endpoint without a subarray_product_id argument"""
-        await self.client.request('product-configure', 'product1', CONFIG)
-        await self.client.request('product-configure', 'product2', CONFIG)
-        reply, informs = await self.client.request('telstate-endpoint')
+        await client.request('product-configure', 'product1', CONFIG)
+        await client.request('product-configure', 'product2', CONFIG)
+        reply, informs = await client.request('telstate-endpoint')
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
@@ -873,22 +921,22 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             (b'product2', b'')
         ]
 
-    async def test_telstate_endpoint_one(self) -> None:
+    async def test_telstate_endpoint_one(self, client: aiokatcp.Client) -> None:
         """Test telstate-endpoint with a subarray_product_id argument"""
-        await self.client.request('product-configure', 'product', CONFIG)
-        reply, informs = await self.client.request('telstate-endpoint', 'product')
+        await client.request('product-configure', 'product', CONFIG)
+        reply, informs = await client.request('telstate-endpoint', 'product')
         assert reply == [b'']
 
-    async def test_telstate_endpoint_not_found(self) -> None:
+    async def test_telstate_endpoint_not_found(self, client: aiokatcp.Client) -> None:
         """Test telstate-endpoint with a subarray_product_id that does not exist"""
-        await assert_request_fails(self.client, 'telstate-endpoint', 'product')
+        await assert_request_fails(client, 'telstate-endpoint', 'product')
 
-    async def test_capture_status_all(self) -> None:
+    async def test_capture_status_all(self, client: aiokatcp.Client) -> None:
         """Test capture-status without a subarray_product_id argument"""
-        await self.client.request('product-configure', 'product1', CONFIG)
-        await self.client.request('product-configure', 'product2', CONFIG)
-        await self.client.request('capture-init', 'product2')
-        reply, informs = await self.client.request('capture-status')
+        await client.request('product-configure', 'product1', CONFIG)
+        await client.request('product-configure', 'product2', CONFIG)
+        await client.request('capture-init', 'product2')
+        reply, informs = await client.request('capture-status')
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
@@ -897,31 +945,31 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             (b'product2', b'capturing')
         ]
 
-    async def test_capture_status_one(self) -> None:
+    async def test_capture_status_one(self, client: aiokatcp.Client) -> None:
         """Test capture-status with a subarray_product_id argument"""
-        await self.client.request('product-configure', 'product', CONFIG)
-        reply, informs = await self.client.request('capture-status', 'product')
+        await client.request('product-configure', 'product', CONFIG)
+        reply, informs = await client.request('capture-status', 'product')
         assert reply == [b'idle']
         assert informs == []
-        await self.client.request('capture-init', 'product')
-        reply, informs = await self.client.request('capture-status', 'product')
+        await client.request('capture-init', 'product')
+        reply, informs = await client.request('capture-status', 'product')
         assert reply == [b'capturing']
-        await self.client.request('capture-done', 'product')
-        reply, informs = await self.client.request('capture-status', 'product')
+        await client.request('capture-done', 'product')
+        reply, informs = await client.request('capture-status', 'product')
         assert reply == [b'idle']
 
-    async def test_capture_status_not_found(self) -> None:
+    async def test_capture_status_not_found(self, client: aiokatcp.Client) -> None:
         """Test capture-status with a subarray_product_id that does not exist"""
-        await assert_request_fails(self.client, 'capture-status', 'product')
+        await assert_request_fails(client, 'capture-status', 'product')
 
-    @mock.patch('time.time')
-    async def test_product_list_all(self, time_mock) -> None:
+    async def test_product_list_all(self, client: aiokatcp.Client, mocker) -> None:
         """Test product-list without a subarray_product_id argument"""
+        time_mock = mocker.patch('time.time')
         time_mock.return_value = 1122334455.123
-        await self.client.request('product-configure', 'product1', CONFIG)
+        await client.request('product-configure', 'product1', CONFIG)
         time_mock.return_value = 1234567890.987
-        await self.client.request('product-configure', 'product2', CONFIG)
-        reply, informs = await self.client.request('product-list')
+        await client.request('product-configure', 'product2', CONFIG)
+        reply, informs = await client.request('product-list')
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
@@ -930,39 +978,42 @@ class TestDeviceServer(asynctest.ClockedTestCase):
             (b'product2', b'idle, started at 2009-02-13T23:31:30Z')
         ]
 
-    @mock.patch('time.time', return_value=1122334455.123)
-    async def test_product_list_one(self, time_mock) -> None:
+    async def test_product_list_one(self, client: aiokatcp.Client, mocker) -> None:
         """Test product-list with a subarray_product_id argument"""
-        await self.client.request('product-configure', 'product', CONFIG)
-        reply, informs = await self.client.request('product-list', 'product')
+        mocker.patch('time.time', return_value=1122334455.123)
+        await client.request('product-configure', 'product', CONFIG)
+        reply, informs = await client.request('product-list', 'product')
         assert reply == [b'1']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
         assert inform_args == [(b'product', b'idle, started at 2005-07-25T23:34:15Z')]
 
-    async def test_product_list_not_found(self) -> None:
+    async def test_product_list_not_found(self, client: aiokatcp.Client) -> None:
         """Test product-list with a subarray_product_id that does not exist"""
-        await assert_request_fails(self.client, 'product-list', 'product')
+        await assert_request_fails(client, 'product-list', 'product')
 
-    async def test_get_multicast_groups(self) -> None:
+    async def test_get_multicast_groups(self, client: aiokatcp.Client) -> None:
         # Prevent product-configure from actually allocating multicast groups,
         # since that would throw off the expected values.
         with mock.patch.object(ProductManagerBase, 'get_multicast_groups', return_value='0.0.0.0'):
-            await self.client.request('product-configure', 'product', CONFIG)
-        reply, informs = await self.client.request('get-multicast-groups', 'product', 10)
+            await client.request('product-configure', 'product', CONFIG)
+        reply, informs = await client.request('get-multicast-groups', 'product', 10)
         assert reply == [b'239.192.0.1+9']
-        reply, informs = await self.client.request('get-multicast-groups', 'product', 1)
+        reply, informs = await client.request('get-multicast-groups', 'product', 1)
         assert reply == [b'239.192.0.11']
-        await assert_request_fails(self.client, 'get-multicast-groups', 'product', 0)
-        await assert_request_fails(self.client, 'get-multicast-groups', 'wrong-product', 1)
-        await assert_request_fails(self.client, 'get-multicast-groups', 'product', 1000000)
+        await assert_request_fails(client, 'get-multicast-groups', 'product', 0)
+        await assert_request_fails(client, 'get-multicast-groups', 'wrong-product', 1)
+        await assert_request_fails(client, 'get-multicast-groups', 'product', 1000000)
 
-    async def test_image_lookup(self) -> None:
-        reply, informs = await self.client.request('image-lookup', 'foo', 'tag')
+    async def test_image_lookup(self, client: aiokatcp.Client) -> None:
+        reply, informs = await client.request('image-lookup', 'foo', 'tag')
         assert reply == [b'registry.invalid:5000/foo:tag']
 
-    @aioresponses.aioresponses()
-    async def test_sdp_shutdown(self, rmock: aioresponses) -> None:
+    async def test_sdp_shutdown(
+            self,
+            rmock: aioresponses.aioresponses,
+            client: aiokatcp.Client,
+            server: DeviceServer) -> None:
         rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
         poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
             status=202, payload={"stdout": "", "stderr": ""}))
@@ -970,29 +1021,35 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
         rmock.post(url1, callback=poweroff_mock)
         rmock.post(url2, callback=poweroff_mock)
-        await self.client.request('product-configure', 'product', CONFIG)
-        await self.client.request('capture-init', 'product')
-        reply, informs = await self.client.request('sdp-shutdown')
+        await client.request('product-configure', 'product', CONFIG)
+        await client.request('capture-init', 'product')
+        reply, informs = await client.request('sdp-shutdown')
         assert reply[0] == b'127.0.0.144,127.0.0.42'
         poweroff_mock.assert_any_call(
             url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
         poweroff_mock.assert_any_call(
             url2, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
         # The product should have been forcibly deconfigured
-        assert self.server._manager.products == {}
+        assert server._manager.products == {}
 
-    @aioresponses.aioresponses()
-    async def test_sdp_shutdown_no_consul(self, rmock: aioresponses) -> None:
-        await self.client.request('product-configure', 'product', CONFIG)
-        await self.client.request('capture-init', 'product')
+    async def test_sdp_shutdown_no_consul(
+            self,
+            rmock: aioresponses.aioresponses,
+            client: aiokatcp.Client,
+            server: DeviceServer) -> None:
+        await client.request('product-configure', 'product', CONFIG)
+        await client.request('capture-init', 'product')
         with pytest.raises(aiokatcp.FailReply,
                            match='Could not retrieve list of nodes running poweroff service'):
-            await self.client.request('sdp-shutdown')
+            await client.request('sdp-shutdown')
         # The product should still have been forcibly deconfigured
-        assert self.server._manager.products == {}
+        assert server._manager.products == {}
 
-    @aioresponses.aioresponses()
-    async def test_sdp_shutdown_failure(self, rmock: aioresponses) -> None:
+    async def test_sdp_shutdown_failure(
+            self,
+            rmock: aioresponses.aioresponses,
+            client: aiokatcp.Client,
+            server: DeviceServer) -> None:
         rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
         poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
             status=202, payload={"stdout": "", "stderr": ""}))
@@ -1000,16 +1057,16 @@ class TestDeviceServer(asynctest.ClockedTestCase):
         url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
         rmock.post(url1, callback=poweroff_mock)
         rmock.post(url2, status=500, payload={"stdout": "", "stderr": "Simulated failure"})
-        await self.client.request('product-configure', 'product', CONFIG)
-        await self.client.request('capture-init', 'product')
+        await client.request('product-configure', 'product', CONFIG)
+        await client.request('capture-init', 'product')
         with pytest.raises(aiokatcp.FailReply,
                            match=r'^Success: 127\.0\.0\.42 Failed: 127.0.0.144$'):
-            await self.client.request('sdp-shutdown')
+            await client.request('sdp-shutdown')
         # Other machine must still have been powered off
         poweroff_mock.assert_any_call(
             url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
         # The product should have been forcibly deconfigured
-        assert self.server._manager.products == {}
+        assert server._manager.products == {}
 
 
 class _ParserError(Exception):

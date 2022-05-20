@@ -1,14 +1,12 @@
 """Utilities for unit tests"""
 
 import asyncio
-import unittest
 from unittest import mock
 from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
                     Type, Any, TypeVar, Generic)
 from types import TracebackType
 
 import aiokatcp
-import asynctest
 import pytest
 
 
@@ -288,14 +286,6 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'timeplot.sdp_l0.gui-urls', b'', b'string'),
     (b'timeplot.sdp_l0.html_port', b'', b'address')
 ]
-
-
-def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:
-    """Wrap asynctest.patch such that it will be unpatched as part of test case cleanup."""
-    patcher = asynctest.patch(*args, **kwargs)
-    mock_obj = patcher.start()
-    test_case.addCleanup(patcher.stop)
-    return mock_obj
 
 
 async def assert_request_fails(client: aiokatcp.Client, name: str, *args: Any) -> None:
