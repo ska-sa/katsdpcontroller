@@ -347,17 +347,13 @@ class TestSimpleImageLookup:
 
 
 class TestHTTPImageLookup:
-    @pytest.fixture
-    def data(self) -> dict:
-        return {
-            'digest1': 'sha256:1234567812345678123456781234567812345678123456781234567812345678',
-            'digest2': 'sha256:2345678123456781234567812345678123456781234567812345678123456781',
-            'auth1': aiohttp.BasicAuth('myuser', 'mypassword'),
-            'auth2': aiohttp.BasicAuth('myuser2', 'mypassword2')
-        }
+    digest1 = 'sha256:1234567812345678123456781234567812345678123456781234567812345678'
+    digest2 = 'sha256:2345678123456781234567812345678123456781234567812345678123456781'
+    auth1 = aiohttp.BasicAuth('myuser', 'mypassword')
+    auth2 = aiohttp.BasicAuth('myuser2', 'mypassword2')
 
     @pytest.fixture(autouse=True)
-    def mock_load_config(self, mocker, data) -> None:
+    def mock_load_config(self, mocker) -> None:
         mocker.patch(
             'docker.auth.load_config',
             autospec=True,
@@ -365,14 +361,14 @@ class TestHTTPImageLookup:
                 'auths': {
                     'registry.invalid:5000': {
                         'email': None,
-                        'username': data['auth1'].login,
-                        'password': data['auth1'].password,
+                        'username': self.auth1.login,
+                        'password': self.auth1.password,
                         'serveraddress': 'registry.invalid:5000'
                     },
                     'registry2.invalid:5000': {
                         'email': None,
-                        'username': data['auth2'].login,
-                        'password': data['auth2'].password,
+                        'username': self.auth2.login,
+                        'password': self.auth2.password,
                         'serveraddress': 'registry2.invalid:5000'
                     }
                 }
@@ -441,39 +437,39 @@ class TestHTTPImageLookup:
             return aioresponses.CallbackResult(status=401, reason='Token not found')
         return None  # Tells aioresponses to use its normal mechanisms
 
-    async def test_relative(self, data, rmock) -> None:
+    async def test_relative(self, rmock) -> None:
         """Resolve an image without a registry, using the default registry."""
         self._prepare_image(
             rmock,
             'https://registry.invalid:5000/v2/myimage/manifests/latest',
-            data['digest1'],
-            callback=self._check_basic(data['auth1']))
+            self.digest1,
+            callback=self._check_basic(self.auth1))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'registry.invalid:5000/myimage@' + data['digest1']
+        assert image == 'registry.invalid:5000/myimage@' + self.digest1
 
-    async def test_absolute(self, data, rmock) -> None:
+    async def test_absolute(self, rmock) -> None:
         """Resolve an image with an explicit registry."""
         self._prepare_image(
             rmock,
             'https://registry2.invalid:5000/v2/anotherimage/manifests/custom',
-            data['digest2'],
-            callback=self._check_basic(data['auth2']))
+            self.digest2,
+            callback=self._check_basic(self.auth2))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('registry2.invalid:5000/anotherimage', 'custom')
-        assert image == 'registry2.invalid:5000/anotherimage@' + data['digest2']
+        assert image == 'registry2.invalid:5000/anotherimage@' + self.digest2
 
-    async def test_anonymous(self, data, rmock) -> None:
+    async def test_anonymous(self, rmock) -> None:
         """Resolve an image with a registry having no authentication information."""
         self._prepare_image(
             rmock,
             'https://anon.invalid:5000/v2/myimage/manifests/latest',
-            data['digest2'])
+            self.digest2)
         lookup = scheduler.HTTPImageLookup('anon.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'anon.invalid:5000/myimage@' + data['digest2']
+        assert image == 'anon.invalid:5000/myimage@' + self.digest2
 
-    async def test_token_service(self, data, rmock) -> None:
+    async def test_token_service(self, rmock) -> None:
         """Test redirection via a token service."""
         self._prepare_image_auth_required(
             rmock,
@@ -492,28 +488,28 @@ class TestHTTPImageLookup:
                 'expires_in': 1800,
                 'issued_at': '2021-09-29T11:01:59Z'
             },
-            callback=self._check_basic(data['auth1']))
+            callback=self._check_basic(self.auth1))
         self._prepare_image(
             rmock,
             'https://registry.invalid:5000/v2/myimage/manifests/latest',
-            data['digest1'],
+            self.digest1,
             callback=self._check_token)
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'registry.invalid:5000/myimage@' + data['digest1']
+        assert image == 'registry.invalid:5000/myimage@' + self.digest1
 
-    async def test_http_fail(self, data, rmock) -> None:
+    async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
         self._prepare_image(
             rmock,
             'https://registry.invalid:5000/v2/myimage/manifests/latest',
-            data['digest1'],
+            self.digest1,
             status=403)  # unauthorized
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         with pytest.raises(scheduler.ImageError):
             await lookup('myimage', 'latest')
 
-    async def test_no_token(self, data, rmock) -> None:
+    async def test_no_token(self, rmock) -> None:
         """Test that appropriate error is raised if token service doesn't return a token."""
         self._prepare_image_auth_required(
             rmock,
@@ -528,12 +524,12 @@ class TestHTTPImageLookup:
             }),
             content_type='application/json; charset=utf-8',
             payload={},
-            callback=self._check_basic(data['auth1']))
+            callback=self._check_basic(self.auth1))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         with pytest.raises(scheduler.ImageError):
             await lookup('myimage', 'latest')
 
-    async def test_invalid_token(self, data, rmock) -> None:
+    async def test_invalid_token(self, rmock) -> None:
         """Test that appropriate error is raised if token isn't valid base64."""
         self._prepare_image_auth_required(
             rmock,
@@ -552,7 +548,7 @@ class TestHTTPImageLookup:
                 'expires_in': 1800,
                 'issued_at': '2021-09-29T11:01:59Z'
             },
-            callback=self._check_basic(data['auth1']))
+            callback=self._check_basic(self.auth1))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         with pytest.raises(scheduler.ImageError):
             await lookup('myimage', 'latest')
