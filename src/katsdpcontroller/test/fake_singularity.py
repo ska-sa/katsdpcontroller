@@ -192,7 +192,7 @@ async def default_lifecycle(task: Task,
 
 
 class SingularityServer:
-    def __init__(self) -> None:
+    def __init__(self, *, aiohttp_server_kwargs: Mapping = {}) -> None:
         app = aiohttp.web.Application()
         app.add_routes([
             aiohttp.web.get('/api/requests/request/{request_id}', self._get_request),
@@ -205,7 +205,7 @@ class SingularityServer:
             aiohttp.web.get('/api/tasks/ids/request/{request_id}', self._get_request_tasks),
             aiohttp.web.get('/api/track/run/{request_id}/{run_id}', self._track_run)
         ])
-        self.server = aiohttp.test_utils.TestServer(app)
+        self.server = aiohttp.test_utils.TestServer(app, **aiohttp_server_kwargs)
         # Each time a task is created, the next class is taken from this deque and
         # used to construct it's lifecycle controller.
         self.lifecycles: Deque[Lifecycle] = deque()
