@@ -930,7 +930,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         except (scheduler.ImageError, aiohttp.ClientError, singularity.SingularityError) as exc:
             raise ProductFailed(f'Failed to start product controller: {exc}') from exc
         finally:
-            if not success:
+            if success:
+                product.configure_task = None   # Stops died() from trying to cancel us
+            else:
                 if task_id is not None:
                     # Make best effort to kill it; it might be dead already though
                     kill_task = loop.create_task(self._try_kill_task(task_id))

@@ -196,7 +196,7 @@ async def long_pending_lifecycle(task: fake_singularity.Task) -> None:
 
 async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
     """The default lifecycle, but creates a real katcp port"""
-    server = DummyProductController('127.0.0.1', 0)
+    server = DummyProductController('127.0.0.1', 12345)
     await server.start()
     try:
         task.host, task.ports[0] = device_server_sockname(server)
@@ -250,9 +250,7 @@ class TestSingularityProductManager:
                 lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
             if lifecycle:
                 self.singularity_server.lifecycles.append(lifecycle)
-            # shield because if the configure fails, the calling task is cancelled,
-            # and we don't want to cancel the whole test.
-            product = await asyncio.shield(self.manager.create_product(name, {}))
+            product = await self.manager.create_product(name, {})
             await self.manager.product_active(product)
             return product
 
@@ -646,6 +644,7 @@ class TestSingularityProductManager:
         # We haven't called product_active yet, so it should still be CONFIGURING
         assert await product.get_state() == ProductState.CONFIGURING
         assert await product.get_telstate_endpoint() == ''
+        await asyncio.sleep(1)  # Give katcp a chance to connect
 
         await fix.manager.product_active(product)
         assert await product.get_state() == ProductState.IDLE
