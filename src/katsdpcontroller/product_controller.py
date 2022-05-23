@@ -1486,6 +1486,14 @@ class DeviceServer(aiokatcp.DeviceServer):
         await self.master_controller.wait_closed()
         await self.sched.close()
 
+    async def join(self) -> None:
+        await super().join()
+        # Ensure that the connection is closed even if start() did not
+        # complete (in which case on_stop might not run). This could happen
+        # if cancelled while waiting to connect to the master controller.
+        self.master_controller.close()
+        await self.master_controller.wait_closed()
+
     async def configure_product(self, name: str, configuration: Configuration,
                                 config_dict: dict) -> None:
         """Configure a subarray product in response to a request.
