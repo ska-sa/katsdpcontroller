@@ -474,7 +474,7 @@ def timelimit(limit=5.0):
             @functools.wraps(arg)
             async def wrapper(self, *args, **kwargs):
                 try:
-                    async with async_timeout.timeout(limit, loop=self.loop) as cm:
+                    async with async_timeout.timeout(limit) as cm:
                         await arg(self, *args, **kwargs)
                 except asyncio.TimeoutError:
                     if not cm.expired:
