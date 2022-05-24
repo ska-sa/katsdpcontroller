@@ -369,7 +369,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         self.logger.info("Issuing request %s %s to node %s (timeout %gs)",
                          req, args, self.name, timeout)
         try:
-            with async_timeout.timeout(timeout):
+            async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
                 reply, informs = await self.katcp_connection.request(req, *args)
             self.logger.info("Request %s %s to node %s successful", req, args, self.name)
