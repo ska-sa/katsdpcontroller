@@ -9,7 +9,7 @@ import logging
 import signal
 import socket
 from unittest import mock
-from typing import List, Dict, Tuple, Any, Optional
+from typing import AsyncGenerator, List, Dict, Tuple, Any, Optional
 
 import yarl
 from aiokatcp import Sensor, SensorSet
@@ -221,12 +221,13 @@ class TestWeb:
         return web.make_app(mc_server, haproxy_bind)
 
     @pytest.fixture
-    async def server(self, app: Application) -> TestServer:
-        async with TestServer(app, socket_factory=socket_factory) as server:
+    async def server(self, app: Application) -> AsyncGenerator[TestServer, None]:
+        server = TestServer(app, socket_factory=socket_factory)
+        async with server:
             yield server
 
     @pytest.fixture
-    async def client(self, server: TestServer) -> TestClient:
+    async def client(self, server: TestServer) -> AsyncGenerator[TestClient, None]:
         async with TestClient(server) as client:
             yield client
 

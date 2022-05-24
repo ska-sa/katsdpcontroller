@@ -1204,6 +1204,8 @@ class TaskIDAllocator:
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
     _by_prefix: ClassVar[typing.Dict[str, 'TaskIDAllocator']] = {}
+    _prefix: str
+    _next_id: int
 
     def __init__(self, prefix=''):
         pass   # Initialised by new

@@ -778,7 +778,8 @@ class TestController(BaseTestController):
         The request must operate by issuing requests to the tasks, as this is
         used to block it from completing.
         """
-        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # grab the mock
+        # grab the mock
+        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # type: ignore
         return DelayedManager(
             client.request(name, *args),
             sensor_proxy_client.request,
@@ -805,7 +806,8 @@ class TestController(BaseTestController):
         """Asynchronous context manager that runs its block with a
         product-configure in progress.
         """
-        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # grab the mock
+        # grab the mock
+        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # type: ignore
         return DelayedManager(
             client.request(*self._configure_args(subarray_product)),
             sensor_proxy_client.wait_synced,
@@ -1404,7 +1406,7 @@ class TestController(BaseTestController):
         assert product.capture_blocks == {}
 
     async def test_capture_done(
-            self, client: aiokatcp.Client, server: aiokatcp.DeviceServer,
+            self, client: aiokatcp.Client, server: DeviceServer,
             sensor_proxy_client, dummy_sched: DummyScheduler) -> None:
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
