@@ -411,6 +411,8 @@ class BaseTestController:
     async def server(
             self, mc_client, mc_server, mock_aioresponses, mock_consul,
             registry, server_kwargs) -> AsyncGenerator[DeviceServer, None]:
+        # The mock_* fixtures are autouse but are listed explicitly in the
+        # parameter list to ensure they're ordered before this fixture.
         if 'sched' not in server_kwargs:
             server_kwargs['sched'] = scheduler.SchedulerBase('realtime', '127.0.0.1', 0)
         server = DeviceServer(
