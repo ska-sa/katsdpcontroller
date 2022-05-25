@@ -6,7 +6,7 @@ import yarl
 import pytest
 from aioresponses import aioresponses
 
-from ..consul import ConsulService, CONSUL_URL
+from katsdpcontroller.consul import ConsulService, CONSUL_URL
 
 
 class TestConsulService:

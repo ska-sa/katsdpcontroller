@@ -18,7 +18,7 @@ from aiohttp.web import Application
 import async_solipsism
 import pytest
 
-from .. import web
+from katsdpcontroller import web
 
 
 EXTERNAL_URL = yarl.URL('http://proxy.invalid:1234')

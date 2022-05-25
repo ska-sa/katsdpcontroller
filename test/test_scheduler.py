@@ -21,8 +21,8 @@ import pytest
 import async_solipsism
 from yarl import URL
 
-from .. import scheduler
-from ..scheduler import TaskState
+from katsdpcontroller import scheduler
+from katsdpcontroller.scheduler import TaskState
 from .utils import exhaust_callbacks, future_return
 
 

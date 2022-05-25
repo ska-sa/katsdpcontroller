@@ -10,8 +10,8 @@ import katpoint
 import katportalclient
 import pytest
 
-from .. import product_config, defaults
-from ..product_config import (
+from katsdpcontroller import product_config, defaults
+from katsdpcontroller.product_config import (
     DigRawAntennaVoltageStream,
     SimDigRawAntennaVoltageStream,
     AntennaChannelisedVoltageStream,
