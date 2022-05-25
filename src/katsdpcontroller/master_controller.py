@@ -481,7 +481,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
             '127.0.0.1', 0, mc_client, name, sched, self._args.batch_role,
             True, self._args.localhost, self._image_resolver_factory,
             s3_config={}, shutdown_delay=0)
-        product = InternalProduct(name, config, asyncio.Task.current_task(), server)
+        product = InternalProduct(name, config, asyncio.current_task(), server)
         self._add_product(product)
         await product.server.start()
         host, port = device_server_sockname(product.server)
@@ -872,7 +872,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             f'zk://{self._args.zk}/mesos'
         ])
 
-        product = SingularityProduct(name, config, asyncio.Task.current_task())
+        product = SingularityProduct(name, config, asyncio.current_task())
         self._add_product(product)
         success = False
         task_id: Optional[str] = None

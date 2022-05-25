@@ -366,7 +366,7 @@ async def poll_ports(host, ports):
                     await loop.sock_connect(sock, (sockaddr[0], port))
                 except OSError as error:
                     logger.debug('Port %d on %s not ready: %s', port, host, error)
-                    await asyncio.sleep(1, loop=loop)
+                    await asyncio.sleep(1)
                 else:
                     break
         logger.debug('Port %d on %s ready', port, host)
@@ -2807,6 +2807,8 @@ class TaskStats:
 
 
 async def _cleanup_task(task):
+    if not task:
+        return
     task.cancel()
     try:
         await task
