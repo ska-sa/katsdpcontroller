@@ -1204,6 +1204,8 @@ class TaskIDAllocator:
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
     _by_prefix: ClassVar[typing.Dict[str, 'TaskIDAllocator']] = {}
+    _prefix: str
+    _next_id: int
 
     def __init__(self, prefix=''):
         pass   # Initialised by new
@@ -2510,11 +2512,16 @@ class FakePhysicalTask(PhysicalNode):
         # `allocate` but we don't have that method.
         for port_name in self.logical_node.ports:
             if port_name is not None:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-                sock.bind((self.host, 0))
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+                sock = self._create_socket(self.host, 0)
                 self._sockets[port_name] = sock
                 self.ports[port_name] = sock.getsockname()[1]
+
+    def _create_socket(self, host: str, port: int) -> socket.socket:
+        # This method is mocked by the unit tests, so do not inline it.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        sock.bind((host, port))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        return sock
 
     @staticmethod
     async def _connected_cb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

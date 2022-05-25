@@ -1,18 +1,12 @@
 """Utilities for unit tests"""
 
 import asyncio
-import functools
-import inspect
-import sys
-import unittest
 from unittest import mock
 from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
                     Type, Any, TypeVar, Generic)
 from types import TracebackType
 
 import aiokatcp
-import asynctest
-import async_timeout
 import pytest
 
 
@@ -294,14 +288,6 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
 ]
 
 
-def create_patch(test_case: unittest.TestCase, *args, **kwargs) -> Any:
-    """Wrap asynctest.patch such that it will be unpatched as part of test case cleanup."""
-    patcher = asynctest.patch(*args, **kwargs)
-    mock_obj = patcher.start()
-    test_case.addCleanup(patcher.stop)
-    return mock_obj
-
-
 async def assert_request_fails(client: aiokatcp.Client, name: str, *args: Any) -> None:
     with pytest.raises(aiokatcp.FailReply):
         await client.request(name, *args)
@@ -431,18 +417,6 @@ class Background(Generic[_T]):
         return self._future.result()
 
 
-async def run_clocked(test_case: asynctest.ClockedTestCase, time: float,
-                      awaitable: Awaitable[_T]) -> _T:
-    """Run a coroutine while advancing the clock on a clocked test case.
-
-    This is useful if the implementation of the `awaitable` sleeps and hence
-    needs the time advanced to make progress.
-    """
-    with Background(awaitable) as cm:
-        await test_case.advance(time)
-    return cm.result
-
-
 def future_return(mock: mock.Mock) -> asyncio.Future:
     """Modify a callable mock so that it blocks on a future then returns it."""
     async def replacement(*args, **kwargs):
@@ -453,37 +427,11 @@ def future_return(mock: mock.Mock) -> asyncio.Future:
     return future
 
 
-def timelimit(limit=5.0):
-    """Decorator to run tests with a time limit. It is designed to be used
-    with :class:`asynctest.TestCase`. It can be used as either a method or
-    a class decorator. It can be used as either ``@timelimit(limit)`` or
-    just ``@timelimit`` to use the default of 5 seconds.
-    """
-    if inspect.isfunction(limit) or inspect.isclass(limit):
-        # Used without parameters
-        return timelimit()(limit)
+async def exhaust_callbacks():
+    """Run the loop until all immediately-scheduled work has finished.
 
-    def decorator(arg):
-        if inspect.isclass(arg):
-            for key, value in arg.__dict__.items():
-                if (inspect.iscoroutinefunction(value) and key.startswith('test_')
-                        and not hasattr(arg, '_timelimit')):
-                    setattr(arg, key, decorator(value))
-            return arg
-        else:
-            @functools.wraps(arg)
-            async def wrapper(self, *args, **kwargs):
-                try:
-                    async with async_timeout.timeout(limit) as cm:
-                        await arg(self, *args, **kwargs)
-                except asyncio.TimeoutError:
-                    if not cm.expired:
-                        raise
-                    for task in asyncio.Task.all_tasks(loop=self.loop):
-                        if task.get_stack(limit=1):
-                            print()
-                            task.print_stack(file=sys.stdout)
-                    raise asyncio.TimeoutError('Test did not complete within {}s'.format(limit))
-            wrapper._timelimit = limit
-            return wrapper
-    return decorator
+    This is inspired by :func:`asynctest.exhaust_callbacks`.
+    """
+    loop = asyncio.get_running_loop()
+    while loop._ready:
+        await asyncio.sleep(0)

@@ -3,7 +3,7 @@
 Still TODO:
 
 - tests for Prometheus wrapping
-- test that self.mirror.mass_inform is called
+- test that mirror.mass_inform is called
 - test for the server removing a sensor before we can subscribe to it
 - test for cancellation of the update in various cases
 """
@@ -11,19 +11,17 @@ Still TODO:
 import enum
 import asyncio
 import functools
-import unittest
 from unittest import mock
-from typing import Dict, Mapping, Any, Optional
+from typing import Dict, Mapping, Any, Optional, AsyncGenerator
 
 import aiokatcp
 from aiokatcp import Sensor, SensorSet, Address
 from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
-import asynctest
+import pytest
 
 from ..sensor_proxy import SensorProxyClient, PrometheusInfo, PrometheusWatcher
 from ..controller import device_server_sockname
-from .utils import timelimit
 
 
 class MyEnum(enum.Enum):
@@ -73,32 +71,41 @@ class FutureObserver:
         self.future.set_result(reading)
 
 
-@timelimit
-class TestSensorProxyClient(asynctest.TestCase):
-    async def setUp(self) -> None:
-        self.mirror = mock.create_autospec(aiokatcp.DeviceServer, instance=True)
-        self.mirror.sensors = aiokatcp.SensorSet()
-        self.server = DummyServer('127.0.0.1', 0)
-        await self.server.start()
-        self.addCleanup(self.server.stop)
-        assert self.server.server is not None
-        assert self.server.server.sockets is not None
-        port = device_server_sockname(self.server)[1]
-        self.client = SensorProxyClient(
-            self.mirror, 'prefix-', renames={'bytes-sensor': 'custom-bytes-sensor'},
-            host='127.0.0.1', port=port)
-        self.addCleanup(self.client.wait_closed)
-        self.addCleanup(self.client.close)
-        await self.client.wait_synced()
+@pytest.mark.timeout(5)
+class TestSensorProxyClient:
+    @pytest.fixture
+    def mirror(self, mocker) -> mock.MagicMock:
+        mirror = mocker.create_autospec(aiokatcp.DeviceServer, instance=True)
+        mirror.sensors = aiokatcp.SensorSet()
+        return mirror
 
-    def _check_sensors(self) -> None:
+    @pytest.fixture
+    async def server(self) -> AsyncGenerator[DummyServer, None]:
+        server = DummyServer('127.0.0.1', 0)
+        await server.start()
+        yield server
+        await server.stop()
+
+    @pytest.fixture(autouse=True)
+    async def client(self, mirror, server: DummyServer) -> AsyncGenerator[SensorProxyClient, None]:
+        port = device_server_sockname(server)[1]
+        client = SensorProxyClient(
+            mirror, 'prefix-', renames={'bytes-sensor': 'custom-bytes-sensor'},
+            host='127.0.0.1', port=port)
+        await client.wait_synced()
+        yield client
+
+        client.close()
+        await client.wait_closed()
+
+    def _check_sensors(self, mirror, server: DummyServer) -> None:
         """Compare the upstream sensors against the mirror"""
-        for sensor in self.server.sensors.values():
+        for sensor in server.sensors.values():
             qualname = 'prefix-' + sensor.name
             if sensor.name == 'bytes-sensor':
                 qualname = 'custom-bytes-sensor'
-            assert qualname in self.mirror.sensors
-            sensor2 = self.mirror.sensors[qualname]
+            assert qualname in mirror.sensors
+            sensor2 = mirror.sensors[qualname]
             assert sensor.description == sensor2.description
             assert sensor.type_name == sensor2.type_name
             assert sensor.units == sensor2.units
@@ -109,61 +116,63 @@ class TestSensorProxyClient(asynctest.TestCase):
             assert sensor.timestamp == sensor2.timestamp
             assert sensor.status == sensor2.status
         # Check that we don't have any we shouldn't
-        for sensor2 in self.mirror.sensors.values():
+        for sensor2 in mirror.sensors.values():
             assert sensor2.name.startswith('prefix-') or sensor2.name == 'custom-bytes-sensor'
             base_name = sensor2.name[7:]
-            assert base_name in self.server.sensors
-        assert 'prefix-bytes-sensor' not in self.mirror.sensors
+            assert base_name in server.sensors
+        assert 'prefix-bytes-sensor' not in mirror.sensors
 
-    async def test_init(self) -> None:
-        self._check_sensors()
+    async def test_init(self, mirror, server: DummyServer) -> None:
+        self._check_sensors(mirror, server)
 
-    async def _set(self, name: str, value: Any, **kwargs) -> None:
+    async def _set(self, mirror, server: DummyServer, name: str, value: Any, **kwargs) -> None:
         """Set a sensor on the server and wait for the mirror to observe it"""
         observer = FutureObserver()
-        self.mirror.sensors['prefix-' + name].attach(observer)
-        self.server.sensors[name].set_value(value, **kwargs)
+        mirror.sensors['prefix-' + name].attach(observer)
+        server.sensors[name].set_value(value, **kwargs)
         await observer.future
-        self.mirror.sensors['prefix-' + name].detach(observer)
+        mirror.sensors['prefix-' + name].detach(observer)
 
-    async def test_set_value(self) -> None:
-        await self._set('int-sensor', 2, timestamp=123456790.0)
-        self._check_sensors()
+    async def test_set_value(self, mirror, server: DummyServer) -> None:
+        await self._set(mirror, server, 'int-sensor', 2, timestamp=123456790.0)
+        self._check_sensors(mirror, server)
 
-    async def test_add_sensor(self) -> None:
-        self.server.sensors.add(Sensor(int, 'another', 'another sensor', '', 234))
+    async def test_add_sensor(self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
+        server.sensors.add(Sensor(int, 'another', 'another sensor', '', 234))
         # Rather than having server send an interface-changed inform, we invoke
         # it directly on the client so that we don't need to worry about timing.
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
-        self.client.handle_inform(changed)
-        await self.client.wait_synced()
-        self._check_sensors()
+        client.handle_inform(changed)
+        await client.wait_synced()
+        self._check_sensors(mirror, server)
 
-    async def test_remove_sensor(self) -> None:
-        del self.server.sensors['int-sensor']
+    async def test_remove_sensor(
+            self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
+        del server.sensors['int-sensor']
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
-        self.client.handle_inform(changed)
-        await self.client.wait_synced()
-        self._check_sensors()
+        client.handle_inform(changed)
+        await client.wait_synced()
+        self._check_sensors(mirror, server)
 
-    async def test_replace_sensor(self) -> None:
-        self.server.sensors.add(Sensor(bool, 'int-sensor', 'Replaced by bool'))
+    async def test_replace_sensor(
+            self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
+        server.sensors.add(Sensor(bool, 'int-sensor', 'Replaced by bool'))
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
-        self.client.handle_inform(changed)
-        await self.client.wait_synced()
-        self._check_sensors()
+        client.handle_inform(changed)
+        await client.wait_synced()
+        self._check_sensors(mirror, server)
 
-    async def test_reconnect(self) -> None:
+    async def test_reconnect(self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
         # Cheat: the client will disconnect if given a #disconnect inform, and
         # we don't actually need to kill the server.
-        self.client.inform_disconnect('Test')
-        await self.client.wait_disconnected()
-        await self.client.wait_synced()
-        self._check_sensors()
+        client.inform_disconnect('Test')
+        await client.wait_disconnected()
+        await client.wait_synced()
+        self._check_sensors(mirror, server)
 
 
-class TestPrometheusWatcher(unittest.TestCase):
-    def setUp(self) -> None:
+class TestPrometheusWatcher:
+    def setup(self) -> None:
         # Create a custom registry, to avoid polluting the global one
         self.registry = CollectorRegistry()
         # Custom metric cache, to avoid polluting the global one

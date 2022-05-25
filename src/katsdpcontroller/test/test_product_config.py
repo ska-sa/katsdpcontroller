@@ -4,7 +4,6 @@ import copy
 from unittest import mock
 from typing import Dict, Optional, Any
 
-import asynctest
 import jsonschema
 import yarl
 import katpoint
@@ -1188,10 +1187,10 @@ class TestSpectralImageStream:
         assert spec.parameters == {}
 
 
-class Fixture(asynctest.TestCase):
+class Fixture:
     """Base class providing some sample config dicts"""
 
-    def setUp(self):
+    def setup(self):
         self.config = {
             "version": "3.1",
             "inputs": {
@@ -1527,11 +1526,18 @@ class TestUpgrade(Fixture):
 class TestConfiguration(Fixture):
     """Test :class:`~.Configuration`."""
 
-    def setUp(self) -> None:
-        super().setUp()
+    def setup(self) -> None:
+        super().setup()
+        # Needed to make the updated config valid relative to the fake katportalclient
+        del self.config['outputs']['l0']['output_channels']
+        del self.config['outputs']['beamformer_engineering']['output_channels']
+        self.config['outputs']['spectral_image']['output_channels'] = [100, 400]
+
+    @pytest.fixture(autouse=True)
+    def client(self, mocker) -> fake_katportalclient.KATPortalClient:
         # Create dummy sensors. Some deliberately have different values to
         # self.config_v2 to ensure that the changes are picked up.
-        self.client = fake_katportalclient.KATPortalClient(
+        client = fake_katportalclient.KATPortalClient(
             components={'cbf': 'cbf_1', 'sub': 'subarray_1'},
             sensors={
                 'cbf_1_i0_antenna_channelised_voltage_n_chans': 1024,
@@ -1551,13 +1557,8 @@ class TestConfiguration(Fixture):
                 'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 64,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
             })
-        # Needed to make the updated config valid
-        del self.config['outputs']['l0']['output_channels']
-        del self.config['outputs']['beamformer_engineering']['output_channels']
-        self.config['outputs']['spectral_image']['output_channels'] = [100, 400]
-        patcher = mock.patch('katportalclient.KATPortalClient', return_value=self.client)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        mocker.patch('katportalclient.KATPortalClient', return_value=client)
+        return client
 
     async def test_sim(self) -> None:
         """Test with no sensors required."""
@@ -1591,30 +1592,30 @@ class TestConfiguration(Fixture):
         assert bcp.antenna_channelised_voltage.band == 'u'
         assert bcp.int_time == 0.25
 
-    async def test_connection_failed(self) -> None:
-        with mock.patch.object(self.client, 'sensor_subarray_lookup',
+    async def test_connection_failed(self, client) -> None:
+        with mock.patch.object(client, 'sensor_subarray_lookup',
                                side_effect=ConnectionRefusedError):
             with pytest.raises(product_config.SensorFailure):
                 await Configuration.from_config(self.config)
 
-        with mock.patch.object(self.client, 'sensor_values',
+        with mock.patch.object(client, 'sensor_values',
                                side_effect=ConnectionRefusedError):
             with pytest.raises(product_config.SensorFailure):
                 await Configuration.from_config(self.config)
 
-    async def test_sensor_not_found(self):
-        del self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls']
+    async def test_sensor_not_found(self, client):
+        del client.sensors['cbf_1_i0_baseline_correlation_products_n_bls']
         with pytest.raises(product_config.SensorFailure):
             await Configuration.from_config(self.config)
 
-    async def test_sensor_bad_status(self):
-        self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
+    async def test_sensor_bad_status(self, client):
+        client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
             katportalclient.SensorSample(1234567890.0, 40, 'unreachable')
         with pytest.raises(product_config.SensorFailure):
             await Configuration.from_config(self.config)
 
-    async def test_sensor_bad_type(self):
-        self.client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
+    async def test_sensor_bad_type(self, client):
+        client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
             katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
         with pytest.raises(product_config.SensorFailure):
             await Configuration.from_config(self.config)

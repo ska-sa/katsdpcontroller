@@ -7,16 +7,18 @@ import json
 import functools
 import logging
 import signal
+import socket
 from unittest import mock
-from typing import List, Dict, Tuple, Any, Optional
+from typing import AsyncGenerator, List, Dict, Tuple, Any, Optional
 
 import yarl
 from aiokatcp import Sensor, SensorSet
 from aiohttp.test_utils import TestClient, TestServer
-import asynctest
+from aiohttp.web import Application
+import async_solipsism
+import pytest
 
 from .. import web
-from .utils import create_patch
 
 
 EXTERNAL_URL = yarl.URL('http://proxy.invalid:1234')
@@ -160,173 +162,214 @@ async def dummy_create_subprocess_exec(*args: str) -> DummyHaproxyProcess:
     return DummyHaproxyProcess(*args)
 
 
-class TestWeb(asynctest.ClockedTestCase):
-    haproxy_bind: Optional[Tuple[str, int]] = None
-    maxDiff = None
+def socket_factory(host: str, port: int, family: socket.AddressFamily) -> socket.socket:
+    """Connects aiohttp test_utils to async-solipsism."""
+    return async_solipsism.ListenSocket((host, port if port else 80))
 
-    async def setUp(self) -> None:
-        self.mc_server = mock.MagicMock()
-        self.mc_server.sensors = SensorSet()
-        self.mc_server.orig_sensors = SensorSet()
 
-        self.mc_server.sensors.add(
+class TestWeb:
+    @pytest.fixture
+    def use_haproxy(self) -> bool:
+        return False  # Overridden in TestHaproxyWeb
+
+    @pytest.fixture
+    def haproxy_bind(self, use_haproxy) -> Optional[Tuple[str, int]]:
+        return ('localhost.invalid', 80) if use_haproxy else None
+
+    @pytest.fixture
+    def event_loop(self):
+        loop = async_solipsism.EventLoop()
+        yield loop
+        loop.close()
+
+    @pytest.fixture
+    def mc_server(self, use_haproxy: bool) -> mock.MagicMock:
+        mc_server = mock.MagicMock()
+        mc_server.sensors = SensorSet()
+        mc_server.orig_sensors = SensorSet()
+
+        mc_server.sensors.add(
             Sensor(str, 'products', '', default='["product1", "product2"]',
                    initial_status=Sensor.Status.NOMINAL))
-        self.mc_server.sensors.add(
+        mc_server.sensors.add(
             Sensor(str, 'gui-urls', '', default=json.dumps(ROOT_GUI_URLS),
                    initial_status=Sensor.Status.NOMINAL))
 
-        self.mc_server.orig_sensors.add(
+        mc_server.orig_sensors.add(
             Sensor(str, 'product1.gui-urls', '', default=json.dumps(PRODUCT1_GUI_URLS),
                    initial_status=Sensor.Status.NOMINAL))
-        self.mc_server.orig_sensors.add(
+        mc_server.orig_sensors.add(
             Sensor(str, 'product2.cal.1.gui-urls', '', default=json.dumps(PRODUCT2_CAL_GUI_URLS),
                    initial_status=Sensor.Status.NOMINAL))
-        self.mc_server.orig_sensors.add(
+        mc_server.orig_sensors.add(
             Sensor(str, 'product2.ingest.1.gui-urls', '', default=json.dumps(PRODUCT2_CAL_GUI_URLS),
                    initial_status=Sensor.Status.UNKNOWN))
-        for sensor in self.mc_server.orig_sensors.values():
-            if self.haproxy_bind is not None and sensor.name.endswith('.gui-urls'):
+        for sensor in mc_server.orig_sensors.values():
+            if use_haproxy and sensor.name.endswith('.gui-urls'):
                 new_value = web.rewrite_gui_urls(EXTERNAL_URL, sensor)
                 new_sensor = Sensor(sensor.stype, sensor.name, sensor.description, sensor.units)
                 new_sensor.set_value(new_value, timestamp=sensor.timestamp, status=sensor.status)
-                self.mc_server.sensors.add(new_sensor)
+                mc_server.sensors.add(new_sensor)
             else:
-                self.mc_server.sensors.add(sensor)
+                mc_server.sensors.add(sensor)
+        return mc_server
 
-        self.app = web.make_app(self.mc_server, self.haproxy_bind)
-        self.server = TestServer(self.app)
-        self.client = TestClient(self.server)
-        await self.client.start_server()
-        self.addCleanup(self.client.close)
-        self.mc_server.add_interface_changed_callback.assert_called_once()
-        self.dirty_set = self.mc_server.add_interface_changed_callback.mock_calls[0][1][0]
-        self.dirty_set()
-        await self.advance(1)
+    @pytest.fixture
+    async def app(self, mc_server, haproxy_bind) -> Application:
+        # Declared async to ensure that the pytest-asyncio event loop is
+        # installed before anything tries to get the current event loop.
+        return web.make_app(mc_server, haproxy_bind)
 
-    async def test_get_guis(self) -> None:
-        guis = web._get_guis(self.mc_server)
-        haproxy = self.haproxy_bind is not None
+    @pytest.fixture
+    async def server(self, app: Application) -> AsyncGenerator[TestServer, None]:
+        server = TestServer(app, socket_factory=socket_factory)
+        async with server:
+            yield server
+
+    @pytest.fixture
+    async def client(self, server: TestServer) -> AsyncGenerator[TestClient, None]:
+        async with TestClient(server) as client:
+            yield client
+
+    @pytest.fixture(autouse=True)
+    def dirty_set(self, mc_server, client: TestClient) -> None:
+        mc_server.add_interface_changed_callback.assert_called_once()
+        dirty_set = mc_server.add_interface_changed_callback.mock_calls[0][1][0]
+        dirty_set()
+        return dirty_set
+
+    async def test_get_guis(self, mc_server, use_haproxy: bool) -> None:
+        guis = web._get_guis(mc_server)
         expected = {
             "general": ROOT_GUI_URLS,
             "products": {
-                "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, haproxy, True),
-                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, haproxy, True)
+                "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, use_haproxy, True),
+                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, True)
             }
         }
         assert guis == expected
 
-    async def test_get_guis_not_nominal(self) -> None:
+    def test_get_guis_not_nominal(self, mc_server) -> None:
         for name in ['gui-urls', 'product1.gui-urls', 'product2.cal.1.gui-urls']:
-            sensor = self.mc_server.sensors[name]
+            sensor = mc_server.sensors[name]
             sensor.set_value(sensor.value, status=Sensor.Status.ERROR)
-        guis = web._get_guis(self.mc_server)
+        guis = web._get_guis(mc_server)
         expected = {
             "general": [],
             "products": {"product1": [], "product2": []}
         }
         assert guis == expected
 
-    async def test_update_bad_gui_sensor(self) -> None:
-        with self.assertLogs('katsdpcontroller.web', logging.ERROR):
-            self.mc_server.sensors['product1.gui-urls'].value = 'not valid json'
-            await self.advance(1)
+    async def test_update_bad_gui_sensor(self, mc_server, caplog) -> None:
+        with caplog.at_level(logging.ERROR, logger='katsdpcontroller.web'):
+            mc_server.sensors['product1.gui-urls'].value = 'not valid json'
+            await asyncio.sleep(1)
+        assert caplog.text
 
-    async def test_index(self) -> None:
-        async with self.client.get('/') as resp:
+    async def test_index(self, client: TestClient) -> None:
+        async with client.get('/') as resp:
             assert resp.status == 200
             assert resp.headers['Content-type'] == 'text/html; charset=utf-8'
             assert resp.headers['Cache-control'] == 'no-store'
 
-    async def test_favicon(self) -> None:
-        async with self.client.get('/favicon.ico') as resp:
+    async def test_favicon(self, client: TestClient) -> None:
+        async with client.get('/favicon.ico') as resp:
             assert resp.status == 200
             assert resp.headers['Content-type'] == 'image/vnd.microsoft.icon'
 
-    async def test_prometheus(self) -> None:
-        async with self.client.get('/metrics') as resp:
+    async def test_prometheus(self, client: TestClient) -> None:
+        async with client.get('/metrics') as resp:
             assert resp.status == 200
 
-    async def test_rotate(self) -> None:
+    async def test_rotate(self, client: TestClient) -> None:
         # A good test of this probably needs Selenium plus a whole lot of
         # extra infrastructure.
-        async with self.client.get('/rotate?width=500&height=600') as resp:
+        async with client.get('/rotate?width=500&height=600') as resp:
             text = await resp.text()
             assert resp.status == 200
             assert 'width: 500' in text
             assert 'height: 600' in text
 
-    async def test_missing_gui(self) -> None:
+    async def test_missing_gui(self, client: TestClient) -> None:
         for path in ['/gui/product3/service/label', '/gui/product3/service/label/foo']:
-            async with self.client.get(path) as resp:
+            async with client.get(path) as resp:
                 text = await resp.text()
                 assert resp.status == 404
                 assert 'product3' in text
 
-    async def test_websocket(self) -> None:
-        haproxy = self.haproxy_bind is not None
+    async def test_websocket(self, client: TestClient, mc_server,
+                             dirty_set, use_haproxy: bool) -> None:
         expected = {
             "general": ROOT_GUI_URLS,
             "products": {
-                "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, haproxy, False),
-                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, haproxy, False)
+                "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, use_haproxy, False),
+                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, False)
             }
         }
-        async with self.client.ws_connect('/ws') as ws:
+        async with client.ws_connect('/ws') as ws:
             await ws.send_str('guis')
             guis = await ws.receive_json()
             assert guis == expected
             # Updating should trigger an unsolicited update
-            sensor = self.mc_server.sensors['products']
+            sensor = mc_server.sensors['products']
             sensor.value = '["product1"]'
             del expected["products"]["product2"]    # type: ignore
-            self.dirty_set()
-            await self.advance(1)
+            dirty_set()
+            await asyncio.sleep(1)
             guis = await ws.receive_json()
             assert guis == expected
             await ws.close()
 
-    async def test_websocket_close_server(self) -> None:
+    async def test_websocket_close_server(self, client: TestClient, server: TestServer) -> None:
         """Close the server while a websocket is still connected"""
-        async with self.client.ws_connect('/ws'):
-            await self.server.close()
+        async with client.ws_connect('/ws'):
+            await server.close()
 
 
 class TestWebHaproxy(TestWeb):
-    haproxy_bind = ('localhost.invalid', 80)
+    @pytest.fixture
+    def use_haproxy(self) -> bool:
+        return True
 
-    async def setUp(self) -> None:
-        create_patch(self, 'asyncio.create_subprocess_exec',
-                     dummy_create_subprocess_exec)
-        await super().setUp()
-        self.app['updater'].internal_port = 2345
-        await self.advance(1)
+    @pytest.fixture(autouse=True)
+    def mock_subprocess(self, mocker) -> None:
+        mocker.patch('asyncio.create_subprocess_exec', dummy_create_subprocess_exec)
 
-    def test_internal_port(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _set_app_internal_port(self, app) -> None:
+        app['updater'].internal_port = 2345
+        return app
+
+    def test_internal_port(self, app) -> None:
         """Tests the internal_port property getter"""
-        assert self.app['updater'].internal_port == 2345
+        assert app['updater'].internal_port == 2345
 
-    async def test_null_update(self) -> None:
+    async def test_null_update(self, mocker, dirty_set) -> None:
         """Triggered update must not poke haproxy if not required"""
-        with mock.patch.object(DummyHaproxyProcess, 'send_signal') as m:
-            self.dirty_set()
-            await self.advance(1)
-            m.assert_not_called()
+        m = mocker.patch.object(DummyHaproxyProcess, 'send_signal')
+        dirty_set()
+        await asyncio.sleep(1)
+        m.assert_not_called()
 
-    async def test_update(self) -> None:
+    async def test_update(self, app: Application, mc_server) -> None:
         """Sensor update must update haproxy config and reload it"""
-        sensor = self.mc_server.sensors['product1.gui-urls']
+        sensor = mc_server.sensors['product1.gui-urls']
         guis = json.loads(sensor.value)
         guis[0]['title'] = 'Test Title'
         sensor.value = json.dumps(guis).encode()
-        await self.advance(1)
-        assert 'test-title' in self.app['updater']._haproxy._process.config
+        await asyncio.sleep(1)
+        assert 'test-title' in app['updater']._haproxy._process.config
 
-    async def test_haproxy_died(self) -> None:
+    async def test_haproxy_died(self, app: Application, client: TestClient, caplog) -> None:
         """Gracefully handle haproxy dying on its own"""
-        with self.assertLogs('katsdpcontroller.web', logging.WARNING) as cm:
-            self.app['updater']._haproxy._process.died(-9)
-            await self.client.close()
-        assert cm.output == [
-            'WARNING:katsdpcontroller.web:haproxy exited with non-zero exit status -9'
+        with caplog.at_level(logging.WARNING, 'katsdpcontroller.web'):
+            await asyncio.sleep(1)  # Give simulated process a chance to start
+            app['updater']._haproxy._process.died(-9)
+            await client.close()
+        assert caplog.record_tuples == [
+            (
+                'katsdpcontroller.web',
+                logging.WARNING,
+                'haproxy exited with non-zero exit status -9'
+            )
         ]
