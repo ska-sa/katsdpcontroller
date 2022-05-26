@@ -9,7 +9,7 @@ import ipaddress
 import os
 import socket
 from unittest import mock
-from typing import AsyncGenerator, Generator, Tuple, Set, List, Optional, Any
+from typing import AsyncGenerator, Dict, Generator, Tuple, Set, List, Optional, Any
 
 import aiokatcp
 from aiokatcp import Sensor, Client
@@ -1074,6 +1074,154 @@ class TestDeviceServer:
             url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
         # The product should have been forcibly deconfigured
         assert server._manager.products == {}
+
+
+class TestDeviceServerReal:
+    """Tests for :class:`.master_controller.DeviceServer` that don't use interface mode.
+
+    This contains only a few ad-hoc tests, because most functionality is
+    tested via either :class:`TestDeviceServer` or
+    :class:`TestSingularityProductManager`.
+    """
+
+    @pytest.fixture
+    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+        """Use async_solipsism's event loop for the tests."""
+        loop = async_solipsism.EventLoop()
+        yield loop
+        loop.close()
+
+    @pytest.fixture(autouse=True)
+    def open_mock(self, mocker) -> open_file_mock.MockOpen:
+        open_mock = mocker.patch('builtins.open', new_callable=open_file_mock.MockOpen)
+        open_mock.set_read_data_for('s3_config.json', S3_CONFIG)
+
+    @pytest.fixture
+    def rmock(self) -> Generator[aioresponses.aioresponses, None, None]:
+        with aioresponses.aioresponses() as rmock:
+            yield rmock
+
+    @pytest.fixture
+    def mock_zk(self, mocker) -> Dict[Optional[str], fake_zk.ZKClient]:
+        """Use fake_zk to mock out aiozk.
+
+        The return value contains a dictionary that is updated with clients
+        as they are created, keyed by the `chroot` they pass to the
+        constructor.
+        """
+        def zkclient(server: str, chroot: str = None, *args, **kwargs) -> fake_zk.ZKClient:
+            client = fake_zk.ZKClient(server, chroot, *args, **kwargs)
+            clients[chroot] = client
+            return client
+
+        clients: Dict[Optional[str], fake_zk.ZKClient] = {}
+        mocker.patch('aiozk.ZKClient', side_effect=zkclient)
+        return clients
+
+    @pytest.fixture
+    async def server(self, mocker, rmock, mock_zk) -> AsyncGenerator[DeviceServer, None]:
+        # rmock and mock_zk are listed just for ordering
+        args = parse_args([
+            '--localhost',
+            '--port', '7147',
+            '--name', 'sdpmc_test',
+            '--s3-config-file', 's3config.json',
+            '--registry', 'registry.invalid:5000',
+            '--safe-multicast-cidr', '239.192.0.0/24',
+            'zk.invalid:2181', 'http://singularity.invalid:7099/singularity'
+        ])
+        mocker.patch('katsdpcontroller.master_controller.SingularityProductManager', autospec=True)
+        server = DeviceServer(args)
+        await server.start()
+        yield server
+        await server.stop()
+
+    async def test_cbf_resource_sensors(
+            self,
+            server: DeviceServer,
+            rmock: aioresponses.aioresponses,
+            mock_zk: Dict[Optional[str], fake_zk.ZKClient]) -> None:
+        zk = mock_zk['mesos']
+        await zk.create('/log_replicas')
+        # This is adapted from an actual Zookeeper value
+        await zk.create(
+            '/json.info_0000000005',
+            b'{"address":{"hostname":"leader.invalid","ip":"1.1.1.1","port":5050},'
+            b'"capabilities":[{"type":"AGENT_UPDATE"},{"type":"AGENT_DRAINING"},'
+            b'{"type":"QUOTA_V2"}],"hostname":"leader.invalid",'
+            b'"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","ip":592513034,'
+            b'"pid":"master@1.1.1.1:5050","port":5050,"version":"1.12.0"}'
+        )
+
+        rmock.get('http://1.1.1.1:5050/master/maintenance/status', payload={
+            "down_machines": [
+                {
+                    "hostname": "machine1",
+                    "ip": "10.0.0.1"
+                }
+            ],
+            "draining_machines": [
+                {
+                    "id": {
+                        "hostname": "machine2",
+                        "ip": "10.0.0.2"
+                    }
+                }
+            ]
+        })
+        # This is only a tiny subset of what is returned, sufficient for
+        # what the code expects to find.
+        rmock.get('http://1.1.1.1:5050/master/slaves', payload={
+            "slaves": [
+                {
+                    # Draining machine
+                    "attributes": {
+                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+                    },
+                    "hostname": "machine2",
+                    "used_resources": {"cpus": 0}
+                },
+                {
+                    # Machine that's not marked for CBF
+                    "attributes": {
+                        "katsdpcontroller.subsystems": "WyJzZHAiXSAg"  # {"sdp"}
+                    },
+                    "hostname": "machine3",
+                    "used_resources": {"cpus": 0}
+                },
+                {
+                    # No subsystems specified. Not counted as it's assumed to
+                    # not contain the hardware needed for CBF-specific tasks.
+                    "attributes": {},
+                    "hostname": "machine4",
+                    "used_resources": {"cpus": 0}
+                },
+                {
+                    # Machine that's usable but unused
+                    "attributes": {
+                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+                    },
+                    "hostname": "machine5",
+                    "used_resources": {"cpus": 0}
+                },
+                {
+                    # Machine that's usable and at least partly used
+                    "attributes": {
+                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+                    },
+                    "hostname": "machine6",
+                    "used_resources": {"cpus": 16}
+                }
+            ]
+        })
+
+        await asyncio.sleep(6)  # Give the polling loop time to run
+        assert server.sensors['cbf-resources-total'].value == 3
+        assert server.sensors['cbf-resources-total'].status == Sensor.Status.NOMINAL
+        assert server.sensors['cbf-resources-maintenance'].value == 1
+        assert server.sensors['cbf-resources-maintenance'].status == Sensor.Status.NOMINAL
+        assert server.sensors['cbf-resources-free'].value == 1
+        assert server.sensors['cbf-resources-free'].status == Sensor.Status.NOMINAL
 
 
 class _ParserError(Exception):
