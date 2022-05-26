@@ -1055,10 +1055,17 @@ class DeviceServer(aiokatcp.DeviceServer):
     async def _update_resource_sensors(self, zk: aiozk.ZKClient) -> None:
         try:
             cbf_resources_total = 0
+            cbf_resources_maintenance = 0
             cbf_resources_free = 0
             url = await self._mesos_master_url(zk)
             timeout = aiohttp.ClientTimeout(total=5)
+            draining_machines = set()
             async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url / 'master/maintenance/status') as resp:
+                    data = await resp.json()
+                    draining = data.get('draining_machines', [])
+                    for machine in draining:
+                        draining_machines.add(machine['id']['hostname'])
                 async with session.get(url / 'master/slaves') as resp:
                     data = await resp.json()
                     for agent in data['slaves']:
@@ -1075,14 +1082,18 @@ class DeviceServer(aiokatcp.DeviceServer):
                         if not is_cbf:
                             continue
                         cbf_resources_total += 1
-                        if agent['used_resources']['cpus'] == 0:
+                        if agent['hostname'] in draining_machines:
+                            cbf_resources_maintenance += 1
+                        elif agent['used_resources']['cpus'] == 0:
                             cbf_resources_free += 1
         except Exception as exc:
             logger.warning('Failed to get resource information from Mesos: %s', exc)
             self.sensors['cbf-resources-total'].set_value(0, status=Sensor.Status.FAILURE)
+            self.sensors['cbf-resources-maintenance'].set_value(0, status=Sensor.Status.FAILURE)
             self.sensors['cbf-resources-free'].set_value(0, status=Sensor.Status.FAILURE)
         else:
             self.sensors['cbf-resources-total'].value = cbf_resources_total
+            self.sensors['cbf-resources-maintenance'].value = cbf_resources_maintenance
             self.sensors['cbf-resources-free'].value = cbf_resources_free
 
     async def _update_resource_sensors_repeat(self) -> None:
