@@ -20,12 +20,16 @@ import aioresponses
 import yarl
 import pytest
 
-from .. import scheduler
-from ..controller import (DeviceStatus, ProductState, device_server_sockname,
-                          make_image_resolver_factory, device_status_to_sensor_status)
-from ..master_controller import (ProductFailed, Product, SingularityProduct,
-                                 ProductManagerBase, SingularityProductManager, NoAddressesError,
-                                 DeviceServer, parse_args)
+from katsdpcontroller import scheduler
+from katsdpcontroller.controller import (
+    DeviceStatus, ProductState, device_server_sockname,
+    make_image_resolver_factory, device_status_to_sensor_status
+)
+from katsdpcontroller.master_controller import (
+    ProductFailed, Product, SingularityProduct,
+    ProductManagerBase, SingularityProductManager, NoAddressesError,
+    DeviceServer, parse_args
+)
 from . import fake_zk, fake_singularity
 from .utils import (assert_request_fails, assert_sensors, assert_sensor_value,
                     DelayedManager, Background, exhaust_callbacks,

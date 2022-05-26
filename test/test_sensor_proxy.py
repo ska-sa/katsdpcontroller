@@ -20,8 +20,8 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
 
 import pytest
 
-from ..sensor_proxy import SensorProxyClient, PrometheusInfo, PrometheusWatcher
-from ..controller import device_server_sockname
+from katsdpcontroller.sensor_proxy import SensorProxyClient, PrometheusInfo, PrometheusWatcher
+from katsdpcontroller.controller import device_server_sockname
 
 
 class MyEnum(enum.Enum):

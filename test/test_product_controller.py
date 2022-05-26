@@ -34,12 +34,12 @@ import katsdpmodels.primary_beam
 import pytest
 import yarl
 
-from ..consul import ConsulService
-from ..controller import device_server_sockname
-from ..product_controller import (
+from katsdpcontroller.consul import ConsulService
+from katsdpcontroller.controller import device_server_sockname
+from katsdpcontroller.product_controller import (
     DeviceServer, SubarrayProduct, Resources,
     ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url)
-from .. import scheduler, sensor_proxy
+from katsdpcontroller import scheduler, sensor_proxy
 from . import fake_katportalclient
 from .utils import (assert_request_fails, assert_sensor_value,
                     assert_sensors, exhaust_callbacks, DelayedManager,
