@@ -1041,8 +1041,9 @@ class DeviceServer(aiokatcp.DeviceServer):
             children = [child for child in children if child.startswith('json.info_')]
             if not children:
                 raise RuntimeError('no Mesos masters found')
+            child = min(children)
             try:
-                raw_data = await zk.get_data(f'/{children[0]}')
+                raw_data = await zk.get_data(f'/{child}')
             except aiozk.exc.NoNode:
                 # The node vanished before we were able to query it. Check
                 # for the new leader.
