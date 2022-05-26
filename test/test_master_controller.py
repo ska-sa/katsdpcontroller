@@ -1141,6 +1141,13 @@ class TestDeviceServerReal:
             server: DeviceServer,
             rmock: aioresponses.aioresponses,
             mock_zk: Dict[Optional[str], fake_zk.ZKClient]) -> None:
+        # Let the loop run once. It should fail to populate the sensors because
+        # it won't be able to find a Mesos master in zookeeper.
+        await asyncio.sleep(1)
+        assert server.sensors['cbf-resources-total'].status == Sensor.Status.FAILURE
+        assert server.sensors['cbf-resources-maintenance'].status == Sensor.Status.FAILURE
+        assert server.sensors['cbf-resources-free'].status == Sensor.Status.FAILURE
+
         zk = mock_zk['mesos']
         await zk.create('/log_replicas')
         # This is adapted from an actual Zookeeper value
@@ -1215,7 +1222,7 @@ class TestDeviceServerReal:
             ]
         })
 
-        await asyncio.sleep(6)  # Give the polling loop time to run
+        await asyncio.sleep(5)  # Give the polling loop time to run
         assert server.sensors['cbf-resources-total'].value == 3
         assert server.sensors['cbf-resources-total'].status == Sensor.Status.NOMINAL
         assert server.sensors['cbf-resources-maintenance'].value == 1
