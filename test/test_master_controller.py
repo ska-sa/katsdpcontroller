@@ -40,7 +40,10 @@ from .utils import (assert_request_fails, assert_sensors, assert_sensor_value,
 EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
     (b'gui-urls', b'', b'string'),
-    (b'products', b'', b'string')
+    (b'products', b'', b'string'),
+    (b'cbf-resources-total', b'', b'integer'),
+    (b'cbf-resources-maintenance', b'', b'integer'),
+    (b'cbf-resources-free', b'', b'integer')
 ]
 
 # Sensors created per-product by the master controller

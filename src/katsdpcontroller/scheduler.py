@@ -1651,7 +1651,7 @@ class AgentInterface(InterfaceResources):
         self.multicast_in = set()
 
 
-def _decode_json_base64(value):
+def decode_json_base64(value):
     """Decodes a object that has been encoded with JSON then url-safe base64."""
     json_bytes = base64.urlsafe_b64decode(value)
     return json.loads(json_bytes.decode('utf-8'))
@@ -1696,11 +1696,11 @@ class Agent:
         for attribute in offers[0].attributes:
             try:
                 if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.INTERFACES.validate(value)
                     self.interfaces = [AgentInterface(item, i) for i, item in enumerate(value)]
                 elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.VOLUMES.validate(value)
                     volumes = []
                     for item in value:
@@ -1710,22 +1710,22 @@ class Agent:
                             numa_node=item.get('numa_node')))
                     self.volumes = volumes
                 elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.GPUS.validate(value)
                     self.gpus = [AgentGPU(item, i) for i, item in enumerate(value)]
                 elif attribute.name == 'katsdpcontroller.numa' and attribute.type == 'TEXT':
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.NUMA.validate(value)
                     self.numa = value
                 elif (attribute.name == 'katsdpcontroller.infiniband_devices'
                       and attribute.type == 'TEXT'):
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.INFINIBAND_DEVICES.validate(value)
                     self.infiniband_devices = value
                 elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
                     self.priority = attribute.scalar.value
                 elif attribute.name == 'katsdpcontroller.subsystems' and attribute.type == 'TEXT':
-                    value = _decode_json_base64(attribute.text.value)
+                    value = decode_json_base64(attribute.text.value)
                     schemas.SUBSYSTEMS.validate(value)
                     self.subsystems = set(value)
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
