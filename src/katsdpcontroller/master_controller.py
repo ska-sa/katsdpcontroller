@@ -35,7 +35,8 @@ import katsdpservices
 import katsdpcontroller
 from . import singularity, product_config, product_controller, scheduler, sensor_proxy
 from .defaults import LOCALHOST
-from .schemas import ZK_STATE       # type: ignore
+from .scheduler import decode_json_base64
+from .schemas import ZK_STATE, SUBSYSTEMS       # type: ignore
 from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
                          add_shared_options, extract_shared_options, make_image_resolver_factory,
                          ProductState, DeviceStatus, device_status_to_sensor_status)
@@ -824,7 +825,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         await self._mark_running()
         await self._load_state()
         await self._reconcile_once()
-        self._reconciliation_task = asyncio.get_event_loop().create_task(self._reconcile_repeat())
+        self._reconciliation_task = asyncio.create_task(self._reconcile_repeat(), name="reconcile")
         log_task_exceptions(self._reconciliation_task, logger, 'reconciliation')
         await super().start()
 
@@ -980,6 +981,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._consul_url = args.consul_url
         self._override_dicts = {}
         self._interface_changed_callbacks = []
+        self._args = args
         super().__init__(args.host, args.port)
         self.sensors.add(Sensor(DeviceStatus, "device-status",
                                 "Combined (worst) status of all subarray product controllers",
@@ -990,6 +992,17 @@ class DeviceServer(aiokatcp.DeviceServer):
                                 initial_status=Sensor.Status.NOMINAL))
         self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
                                 default="[]", initial_status=Sensor.Status.NOMINAL))
+        self.sensors.add(Sensor(int, "cbf-resources-total",
+                                "Total number of devices (e.g. servers) that are known "
+                                "to the master controller and suitable for running CBF "
+                                "tasks, including those reserved for maintenance."))
+        self.sensors.add(Sensor(int, "cbf-resources-maintenance",
+                                "Total number of devices that have been flagged for "
+                                "maintenance and which will not be used to run any "
+                                "new subarray products."))
+        self.sensors.add(Sensor(int, "cbf-resources-free",
+                                "Number of devices that are not in maintenance "
+                                "and are not currently running any tasks."))
 
         # Updated by SensorProxyClient with sensor values prior to gui-url rewriting
         self.orig_sensors = SensorSet()
@@ -998,6 +1011,9 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     async def start(self) -> None:
         await self._manager.start()
+        if not self._args.interface_mode:
+            self.add_service_task(asyncio.create_task(
+                self._update_resource_sensors_repeat(), name="update_resource_sensors"))
         await super().start()
 
     async def on_stop(self) -> None:
@@ -1012,6 +1028,84 @@ class DeviceServer(aiokatcp.DeviceServer):
         if name == 'interface-changed':
             for callback in self._interface_changed_callbacks:
                 callback()
+
+    async def _mesos_master_url(self, zk: aiozk.ZKClient) -> yarl.URL:
+        """Get the address of the leading Mesos master.
+
+        This can fail and raise an exception in lots of ways. Callers should
+        be prepared to treat any exception as a failure.
+        """
+        while True:
+            children = await zk.get_children('/')
+            # Limit to names involved in leadership election.
+            children = [child for child in children if child.startswith('json.info_')]
+            if not children:
+                raise RuntimeError('no Mesos masters found')
+            child = min(children)
+            try:
+                raw_data = await zk.get_data(f'/{child}')
+            except aiozk.exc.NoNode:
+                # The node vanished before we were able to query it. Check
+                # for the new leader.
+                continue
+            data = json.loads(raw_data)
+            ip_addr = data['address']['ip']
+            port = data['address']['port']
+            return yarl.URL.build(scheme='http', host=ip_addr, port=port)
+
+    async def _update_resource_sensors(self, zk: aiozk.ZKClient) -> None:
+        try:
+            cbf_resources_total = 0
+            cbf_resources_maintenance = 0
+            cbf_resources_free = 0
+            url = await self._mesos_master_url(zk)
+            timeout = aiohttp.ClientTimeout(total=5)
+            draining_machines = set()
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url / 'master/maintenance/status') as resp:
+                    data = await resp.json()
+                    draining = data.get('draining_machines', [])
+                    for machine in draining:
+                        draining_machines.add(machine['id']['hostname'])
+                async with session.get(url / 'master/slaves') as resp:
+                    data = await resp.json()
+                    for agent in data['slaves']:
+                        attributes = agent.get('attributes', {})
+                        try:
+                            subsystems_raw = attributes['katsdpcontroller.subsystems']
+                            subsystems = decode_json_base64(subsystems_raw)
+                            SUBSYSTEMS.validate(subsystems)
+                            is_cbf = 'cbf' in subsystems
+                        except Exception:
+                            # Lots of possible exceptions: missing attributes, bad base64,
+                            # bad JSON, schema error...
+                            is_cbf = False
+                        if not is_cbf:
+                            continue
+                        cbf_resources_total += 1
+                        if agent['hostname'] in draining_machines:
+                            cbf_resources_maintenance += 1
+                        elif agent['used_resources']['cpus'] == 0:
+                            cbf_resources_free += 1
+        except Exception as exc:
+            logger.warning('Failed to get resource information from Mesos: %s', exc)
+            self.sensors['cbf-resources-total'].set_value(0, status=Sensor.Status.FAILURE)
+            self.sensors['cbf-resources-maintenance'].set_value(0, status=Sensor.Status.FAILURE)
+            self.sensors['cbf-resources-free'].set_value(0, status=Sensor.Status.FAILURE)
+        else:
+            self.sensors['cbf-resources-total'].value = cbf_resources_total
+            self.sensors['cbf-resources-maintenance'].value = cbf_resources_maintenance
+            self.sensors['cbf-resources-free'].value = cbf_resources_free
+
+    async def _update_resource_sensors_repeat(self) -> None:
+        zk = aiozk.ZKClient(self._args.zk, chroot='mesos', allow_read_only=True)
+        await zk.start()
+        try:
+            while True:
+                await self._update_resource_sensors(zk)
+                await asyncio.sleep(5)
+        finally:
+            await zk.close()
 
     def _unique_name(self, prefix: str) -> str:
         """Find first unused name with the given prefix"""

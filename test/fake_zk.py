@@ -5,7 +5,7 @@ functions don't return values that they should.
 """
 
 import time
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import aiozk
 import aiozk.protocol.stat
@@ -39,7 +39,7 @@ class _Node:
 
 
 class ZKClient:
-    def __init__(self, server: str, chroot: str = None) -> None:
+    def __init__(self, server: str, chroot: str = None, *args, **kwargs) -> None:
         self._nodes: Dict[str, _Node] = {'/': _Node()}
 
     def normalize_path(self, path: str) -> str:
@@ -47,6 +47,9 @@ class ZKClient:
 
     def _parent(self, path: str) -> str:
         return self.normalize_path(path.rsplit('/', 1)[0])
+
+    def _parts(self, path: str) -> List[str]:
+        return [name for name in path.split('/') if name]
 
     async def start(self) -> None:
         pass
@@ -85,6 +88,10 @@ class ZKClient:
             raise aiozk.exc.NoNode
         return node.content, node.stat()
 
+    async def get_data(self, path: str) -> bytes:
+        response = await self.get(path)
+        return response[0]
+
     async def ensure_path(self, path: str) -> None:
         path = self.normalize_path(path)
         if path != '/':
@@ -100,3 +107,12 @@ class ZKClient:
             if name != path and name.startswith(path):
                 raise aiozk.exc.NotEmpty
         del self._nodes[path]
+
+    async def get_children(self, path: str) -> List[str]:
+        parts = self._parts(path)
+        result = []
+        for node in self._nodes.keys():
+            node_parts = self._parts(node)
+            if len(node_parts) == len(parts) + 1 and node_parts[:-1] == parts:
+                result.append(node_parts[-1])
+        return result
