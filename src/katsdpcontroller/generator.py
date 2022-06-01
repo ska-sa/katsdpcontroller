@@ -333,10 +333,14 @@ def _make_dsim(
         total_adc_sample_rate = sum(stream.adc_sample_rate for stream in streams)
         dsim.cpus = min(1.0, total_adc_sample_rate / (2 * _MAX_ADC_SAMPLE_RATE))
     else:
-        dsim.cpus = 2
-        dsim.cores = ['main', 'send']
-        dsim.command = ['taskset', '-c', '{cores[main]}'] + dsim.command + [
-            '--affinity', '{cores[send]}']
+        dsim.cpus = 4
+        # Two cores for specific purposes, the rest to parallelise computation
+        # of signals.
+        dsim.cores = ['main', 'send', None, None]
+        dsim.command = dsim.command + [
+            '--affinity', '{cores[send]}',
+            '--main-affinity', '{cores[main]}'
+        ]
     if ibv:
         dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
         dsim.command += ['--ibv']
