@@ -309,7 +309,7 @@ def _make_dsim(
     dsim = ProductLogicalTask(name, streams=streams)
     dsim.subsystem = 'cbf'
     dsim.image = 'katgpucbf'
-    dsim.mem = 2048
+    dsim.mem = 4096
     dsim.ports = ['port', 'prometheus']
     dsim.interfaces = [scheduler.InterfaceRequest(
         'cbf', infiniband=ibv, multicast_out={stream.name for stream in streams}
