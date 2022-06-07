@@ -316,7 +316,7 @@ def _make_dsim(
     )]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
-        'schedrr', 'dsim',
+        'dsim',
         '--interface', '{interfaces[cbf].name}',
         '--adc-sample-rate', str(streams[0].adc_sample_rate),
         '--ttl', '4',
@@ -324,7 +324,8 @@ def _make_dsim(
         '--katcp-port', '{ports[port]}',
         '--prometheus-port', '{ports[prometheus]}'
     ]
-    dsim.capabilities.append('SYS_NICE')  # For schedrr
+    # Allow dsim task to set a realtime scheduling priority itself
+    dsim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "rtprio=1"}]
     if configuration.options.develop:
         # In develop mode, scale down reservation for low bandwidths to allow
         # testing low-bandwidth arrays on a single machine. Use a full core
