@@ -484,6 +484,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
 
+        host_sensor = Sensor(str, f'{self.name}.host', 'Host running the task')
+        host_sensor.set_value(self.host)
+        self._add_sensor(host_sensor)
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
                 aiokatcp.Address,
