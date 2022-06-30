@@ -48,7 +48,8 @@ EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
 
 # Sensors created per-product by the master controller
 EXPECTED_PRODUCT_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'katcp-address', b'', b'address')
+    (b'katcp-address', b'', b'address'),
+    (b'host', b'', b'string'),
 ]
 
 EXPECTED_REQUEST_LIST = [
@@ -766,6 +767,8 @@ class TestDeviceServer:
         product = server._manager.products['product']
         await assert_sensor_value(
             client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
+        await assert_sensor_value(
+            client, 'product.host', '127.0.0.1')
 
         # Change the product's device-status to FAIL and check that the top-level sensor
         # is updated.
