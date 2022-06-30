@@ -354,6 +354,8 @@ class TestSingularityProductManager:
         assert product.ports['aiomonitor'] == 12347
         assert product.ports['aioconsole'] == 12348
         assert product.ports['dashboard'] == 12349
+        assert product.image == 'registry.invalid:5000/katsdpcontroller:a_tag'
+        assert fix.server.sensors['foo.version'].value == product.image
         client_mock.assert_called_with('192.0.2.0', 12345)
 
         await fix.manager.product_active(product)
@@ -462,6 +464,7 @@ class TestSingularityProductManager:
         assert product.task_state == product2.task_state
         assert product.run_id == product2.run_id
         assert product.task_id == product2.task_id
+        assert product.image == product2.image
         assert product.multicast_groups == product2.multicast_groups
         assert product.host == product2.host
         assert product.ports == product2.ports

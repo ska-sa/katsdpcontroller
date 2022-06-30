@@ -42,7 +42,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
                          ProductState, DeviceStatus, device_status_to_sensor_status)
 
 
-ZK_STATE_VERSION = 3
+ZK_STATE_VERSION = 4
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
@@ -261,7 +261,7 @@ class ProductManagerBase(Generic[_P]):
         """Persist the state of the manager."""
 
     def _save_state_bg(self) -> None:
-        """Persistent current state in the background"""
+        """Persist current state in the background"""
         task = asyncio.get_event_loop().create_task(self._save_state())
         log_task_exceptions(task, logger, '_save_state')
 
@@ -506,6 +506,7 @@ class SingularityProduct(Product):
         super().__init__(name, config, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
+        self._image: Optional[str] = None
         self.sensors.add(Sensor(
             Address, f'{name}.http-address',
             'Address of internal HTTP server (which is NOT the dashboard)'))
@@ -518,6 +519,22 @@ class SingularityProduct(Product):
         self.sensors.add(Sensor(
             Address, f'{name}.dashboard-address',
             'Address of product controller dashboard'))
+        self.sensors.add(Sensor(
+            str, f'{self.name}.version',
+            'Docker image running the product controller'))
+
+    @property
+    def image(self) -> Optional[str]:
+        return self._image
+
+    @image.setter
+    def image(self, value: Optional[str]) -> None:
+        self._image = value
+        sensor = self.sensors[f'{self.name}.version']
+        if value is not None:
+            sensor.value = value
+        else:
+            sensor.set_value('', status=Sensor.Status.UNKNOWN)
 
 
 class SingularityProductManager(ProductManagerBase[SingularityProduct]):
@@ -716,6 +733,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
+                prod.image = info.get('image')  # Only introduced in version 4
                 try:
                     prod.start_time = info['start_time']
                 except KeyError:
@@ -745,6 +763,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'config': prod.config,
                         'run_id': prod.run_id,
                         'task_id': prod.task_id,
+                        'image': prod.image,
                         'host': str(prod.host),
                         'ports': prod.ports,
                         'multicast_groups': [str(group) for group in prod.multicast_groups],
@@ -879,6 +898,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         task_id: Optional[str] = None
         try:
             image = await image_resolver('katsdpcontroller')
+            product.image = image
             request_id = await self._ensure_request(name)
             await self._ensure_deploy(name, image)
             await self._sing.create_run(request_id, {

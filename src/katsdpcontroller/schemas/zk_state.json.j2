@@ -7,7 +7,7 @@
         "version": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 3
+            "maximum": 4
         }
     }
 }
@@ -45,6 +45,9 @@
 {% else %}
                     "port",
 {% endif %}
+{% if version >= 4 %}
+                    "image",
+{% endif %}
                     "run_id", "task_id", "host", "config", "multicast_groups"
                 ],
                 "properties": {
@@ -62,6 +65,9 @@
 {% endif %}
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},
+{% if version >= 4 %}
+                    "image": {"type": "string"},
+{% endif %}
                     "host": {"type": "string"},
                     "config": {"type": "object"},
                     "multicast_groups": {
