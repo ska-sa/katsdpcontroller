@@ -48,7 +48,8 @@ EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
 
 # Sensors created per-product by the master controller
 EXPECTED_PRODUCT_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'katcp-address', b'', b'address')
+    (b'katcp-address', b'', b'address'),
+    (b'host', b'', b'string'),
 ]
 
 EXPECTED_REQUEST_LIST = [
@@ -354,6 +355,8 @@ class TestSingularityProductManager:
         assert product.ports['aiomonitor'] == 12347
         assert product.ports['aioconsole'] == 12348
         assert product.ports['dashboard'] == 12349
+        assert product.image == 'registry.invalid:5000/katsdpcontroller:a_tag'
+        assert fix.server.sensors['foo.version'].value == product.image
         client_mock.assert_called_with('192.0.2.0', 12345)
 
         await fix.manager.product_active(product)
@@ -462,6 +465,7 @@ class TestSingularityProductManager:
         assert product.task_state == product2.task_state
         assert product.run_id == product2.run_id
         assert product.task_id == product2.task_id
+        assert product.image == product2.image
         assert product.multicast_groups == product2.multicast_groups
         assert product.host == product2.host
         assert product.ports == product2.ports
@@ -763,6 +767,8 @@ class TestDeviceServer:
         product = server._manager.products['product']
         await assert_sensor_value(
             client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
+        await assert_sensor_value(
+            client, 'product.host', '127.0.0.1')
 
         # Change the product's device-status to FAIL and check that the top-level sensor
         # is updated.

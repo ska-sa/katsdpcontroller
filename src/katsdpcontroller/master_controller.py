@@ -42,7 +42,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
                          ProductState, DeviceStatus, device_status_to_sensor_status)
 
 
-ZK_STATE_VERSION = 3
+ZK_STATE_VERSION = 4
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
@@ -117,6 +117,7 @@ class Product:
         self.katcp_conn: Optional[aiokatcp.Client] = None
         self.task_state = Product.TaskState.CREATED
         self.host: Optional[_IPAddress] = None
+        self.hostname: Optional[str] = None  # Human-friendly form of .host
         self.ports: Dict[str, int] = {}
         self.multicast_groups: Set[ipaddress.IPv4Address] = set()
         self.logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
@@ -126,17 +127,21 @@ class Product:
         self.sensors = SensorSet()     # Sensors created internally - not proxied
         self.sensors.add(Sensor(Address, f'{self.name}.katcp-address',
                                 'Address of the katcp server for the product controller'))
+        self.sensors.add(Sensor(str, f'{self.name}.host',
+                                'Name of the host running the product controller'))
 
     def connect(self, server: aiokatcp.DeviceServer,
                 rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
-                host: _IPAddress, ports: Dict[str, int]) -> None:
+                hostname: str, host: _IPAddress, ports: Dict[str, int]) -> None:
         """Notify product of the location of the katcp interface.
 
-        After calling this, :attr:`host`, :attr:`ports` and :attr:`katcp_conn`
+        After calling this, :attr:`host`, :attr:`hostname`, :attr:`ports` and :attr:`katcp_conn`
         are all ready to use.
         """
+        self.hostname = hostname
         self.host = host
         self.ports = ports
+        self.sensors[f'{self.name}.host'].value = hostname
         for (port_name, port_value) in ports.items():
             sensor_name = f'{self.name}.{port_name}-address'
             try:
@@ -261,7 +266,7 @@ class ProductManagerBase(Generic[_P]):
         """Persist the state of the manager."""
 
     def _save_state_bg(self) -> None:
-        """Persistent current state in the background"""
+        """Persist current state in the background"""
         task = asyncio.get_event_loop().create_task(self._save_state())
         log_task_exceptions(task, logger, '_save_state')
 
@@ -427,7 +432,7 @@ class ProductManagerBase(Generic[_P]):
     def _gen_capture_block_id(self, minimum: int) -> int:
         """Create a new capture block ID that must be at least `minimum`"""
 
-    def _connect(self, product: _P, host: _IPAddress, ports: Dict[str, int]) -> None:
+    def _connect(self, product: _P, hostname: str, host: _IPAddress, ports: Dict[str, int]) -> None:
         """Establish a connection to a product's katcp server.
 
         Subclasses should always call this method rather than directly using
@@ -436,7 +441,7 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        product.connect(self._server, self._rewrite_gui_urls, host, ports)
+        product.connect(self._server, self._rewrite_gui_urls, hostname, host, ports)
         assert product.katcp_conn is not None
         product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
@@ -487,7 +492,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         await product.server.start()
         host, port = device_server_sockname(product.server)
         product.task_state = Product.TaskState.STARTING
-        self._connect(product, ipaddress.ip_address(host), {'katcp': port})
+        self._connect(product, host, ipaddress.ip_address(host), {'katcp': port})
         return product
 
     async def kill_product(self, product: InternalProduct) -> None:
@@ -506,6 +511,7 @@ class SingularityProduct(Product):
         super().__init__(name, config, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
+        self._image: Optional[str] = None
         self.sensors.add(Sensor(
             Address, f'{name}.http-address',
             'Address of internal HTTP server (which is NOT the dashboard)'))
@@ -518,6 +524,22 @@ class SingularityProduct(Product):
         self.sensors.add(Sensor(
             Address, f'{name}.dashboard-address',
             'Address of product controller dashboard'))
+        self.sensors.add(Sensor(
+            str, f'{self.name}.version',
+            'Docker image running the product controller'))
+
+    @property
+    def image(self) -> Optional[str]:
+        return self._image
+
+    @image.setter
+    def image(self, value: Optional[str]) -> None:
+        self._image = value
+        sensor = self.sensors[f'{self.name}.version']
+        if value is not None:
+            sensor.value = value
+        else:
+            sensor.set_value('', status=Sensor.Status.UNKNOWN)
 
 
 class SingularityProductManager(ProductManagerBase[SingularityProduct]):
@@ -716,6 +738,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
+                prod.image = info.get('image')  # Only introduced in version 4
                 try:
                     prod.start_time = info['start_time']
                 except KeyError:
@@ -730,7 +753,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                                          for addr in info['multicast_groups']}
                 prod.logger.info('Reconnecting to existing product %s at %s:%d',
                                  prod.name, info['host'], ports['katcp'])
-                self._connect(prod, await _resolve_host(info['host']), ports)
+                self._connect(prod, info['host'], await _resolve_host(info['host']), ports)
                 products.append(prod)
             self._init_state(products, data['next_capture_block_id'],
                              ipaddress.IPv4Address(data['next_multicast_group']))
@@ -745,7 +768,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'config': prod.config,
                         'run_id': prod.run_id,
                         'task_id': prod.task_id,
-                        'host': str(prod.host),
+                        'image': prod.image,
+                        'host': prod.hostname,
                         'ports': prod.ports,
                         'multicast_groups': [str(group) for group in prod.multicast_groups],
                         'start_time': prod.start_time
@@ -879,6 +903,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         task_id: Optional[str] = None
         try:
             image = await image_resolver('katsdpcontroller')
+            product.image = image
             request_id = await self._ensure_request(name)
             await self._ensure_deploy(name, image)
             await self._sing.create_run(request_id, {
@@ -926,7 +951,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 'aioconsole': int(env['PORT3']),
                 'dashboard': int(env['PORT4'])
             }
-            self._connect(product, host, ports)
+            self._connect(product, env['TASK_HOST'], host, ports)
             success = True
         except (scheduler.ImageError, aiohttp.ClientError, singularity.SingularityError) as exc:
             raise ProductFailed(f'Failed to start product controller: {exc}') from exc
