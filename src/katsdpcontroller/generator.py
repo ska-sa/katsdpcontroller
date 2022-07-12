@@ -451,6 +451,7 @@ def _make_fgpu(
 
     for i in range(0, n_engines):
         srcs = stream.sources(i)
+        input_labels = (stream.input_labels[2 * i], stream.input_labels[2 * i + 1])
         fgpu = ProductLogicalTask(f'f.{stream.name}.{i}', streams=[stream])
         fgpu.subsystem = 'cbf'
         fgpu.image = 'katgpucbf'
@@ -534,9 +535,9 @@ def _make_fgpu(
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
 
         # Rename sensors that are relevant to the stream rather than the process
-        for j, src in enumerate(srcs):
-            fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{src.name}-eq"
-            fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{src.name}-delay"
+        for j, label in enumerate(input_labels):
+            fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{label}-eq"
+            fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{label}-delay"
         # Prepare expected data rate
         fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
