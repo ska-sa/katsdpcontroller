@@ -1,3 +1,4 @@
+import enum
 import math
 import itertools
 import logging
@@ -96,8 +97,15 @@ COMPLEX = 2
 logger = logging.getLogger(__name__)
 
 
+class TransmitState(enum.Enum):
+    UNKNOWN = 0
+    DOWN = 1
+    UP = 2
+
+
 class LogicalMulticast(scheduler.LogicalExternal):
-    def __init__(self, stream_name, n_addresses=None, endpoint=None):
+    def __init__(self, stream_name, n_addresses=None, endpoint=None,
+                 initial_transmit_state=TransmitState.UNKNOWN):
         super().__init__('multicast.' + stream_name)
         self.stream_name = stream_name
         self.physical_factory = PhysicalMulticast
@@ -106,11 +114,13 @@ class LogicalMulticast(scheduler.LogicalExternal):
         self.endpoint = endpoint
         if (self.n_addresses is None) == (self.endpoint is None):
             raise ValueError('Exactly one of n_addresses and endpoint must be specified')
+        self.initial_transmit_state = initial_transmit_state
 
 
 class PhysicalMulticast(scheduler.PhysicalExternal):
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         super().__init__(logical_task)
+        self.transmit_state = logical_task.initial_transmit_state
         stream_name = logical_task.stream_name
         self._endpoint_sensor = Sensor(
             str,
@@ -371,7 +381,8 @@ def _make_fgpu(
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
     g.add_node(fgpu_group)
 
-    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams)
+    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams,
+                                     initial_transmit_state=TransmitState.UP)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
@@ -557,7 +568,8 @@ def _make_xbgpu(
     xbgpu_group = LogicalGroup(f'xbgpu.{stream.name}')
     g.add_node(xbgpu_group)
 
-    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams)
+    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams,
+                                     initial_transmit_state=TransmitState.UP)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 

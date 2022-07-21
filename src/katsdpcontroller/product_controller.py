@@ -21,6 +21,7 @@ from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGI
 import yarl
 import katsdptelstate.aio.memory
 import katsdptelstate.aio.redis
+from katsdptelstate.endpoint import Endpoint
 import katsdpmodels.fetch.aiohttp
 
 import katsdpcontroller
@@ -29,6 +30,7 @@ from .consul import ConsulService
 from .controller import (load_json_dict, log_task_exceptions,
                          DeviceStatus, device_status_to_sensor_status, ProductState)
 from .defaults import LOCALHOST
+from .generator import TransmitState
 from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
                     POSTPROCESSING_TIME_BUCKETS, POSTPROCESSING_REL_BUCKETS)
 from .product_config import Configuration
@@ -1225,6 +1227,18 @@ class SubarrayProduct:
             self.find_nodes(task_type="xb", streams=[stream]),
             itertools.repeat((command,))
         )
+        for node in self.physical_graph.nodes:
+            if (isinstance(node, generator.PhysicalMulticast)
+                    and node.logical_node.name == "multicast." + stream_name):
+                node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
+
+    def capture_list(self) -> Sequence[generator.PhysicalMulticast]:
+        """Return all :class:`.PhysicalMulticast` nodes that has known stream state."""
+        return [
+            node for node in self.physical_graph
+            if (isinstance(node, generator.PhysicalMulticast)
+                and node.transmit_state != TransmitState.UNKNOWN)
+        ]
 
     async def _launch_telstate(self) -> katsdptelstate.aio.TelescopeState:
         """Make sure the telstate node is launched"""
@@ -1738,3 +1752,24 @@ class DeviceServer(aiokatcp.DeviceServer):
     async def request_capture_stop(self, ctx, stream: str) -> None:
         """Halt data transmission for the named data stream."""
         await self._get_product().capture_start_stop(stream, start=False)
+
+    async def request_capture_list(self, ctx, stream: str = None) -> None:
+        """List CBF data streams."""
+        multicasts = self._get_product().capture_list()
+        response = []
+        for mc in multicasts:
+            name = mc.logical_node.name.split('.', 1)[1]  # Strip off "multicast." prefix
+            if stream is not None and stream != name:
+                continue
+            response.append(
+                (
+                    name,
+                    str(Endpoint(mc.host, mc.ports['spead'])),
+                    mc.transmit_state.name.lower()
+                )
+            )
+        if stream is not None and not response:
+            raise FailReply(f"Unknown stream {stream!r}")
+        # ctx.informs normally sends a count, but the ICD for ?capture-list
+        # does not include this.
+        ctx.informs(response, send_reply=False)
