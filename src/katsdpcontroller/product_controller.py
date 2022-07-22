@@ -1233,7 +1233,7 @@ class SubarrayProduct:
                 node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:
-        """Return all :class:`.PhysicalMulticast` nodes that has known stream state."""
+        """Return all :class:`.PhysicalMulticast` nodes that have known stream state."""
         return [
             node for node in self.physical_graph
             if (isinstance(node, generator.PhysicalMulticast)
