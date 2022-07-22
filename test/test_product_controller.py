@@ -7,6 +7,7 @@ import itertools
 import json
 import asyncio
 import io
+import re
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
 import ipaddress
@@ -68,6 +69,7 @@ STREAMS = '''{
 EXPECTED_REQUEST_LIST = [
     'capture-done',
     'capture-init',
+    'capture-list',
     'capture-start',
     'capture-status',
     'capture-stop',
@@ -1717,12 +1719,41 @@ class TestController(BaseTestController):
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await client.request(
-            'capture-start', 'gpucbf_baseline_correlation_products')
+        await client.request('capture-stop', 'gpucbf_baseline_correlation_products')
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call('capture-start')
+        katcp_client.request.assert_any_call('capture-stop')
+        # Check that the state changed to down in capture-list
+        _, informs = await client.request('capture-list', 'gpucbf_baseline_correlation_products')
+        assert len(informs) == 1
+        assert informs[0].arguments[2] == b'down'
+
+    async def test_capture_list_no_args(self, client: aiokatcp.Client) -> None:
+        await self._configure_subarray(client, SUBARRAY_PRODUCT)
+        _, informs = await client.request('capture-list')
+        assert len(informs) == 2
+        assert informs[0].arguments == [
+            b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up'
+        ]
+        assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[0].arguments[1])
+        assert informs[1].arguments == [
+            b'gpucbf_baseline_correlation_products', mock.ANY, b'up'
+        ]
+        assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[1].arguments[1])
+
+    async def test_capture_list_explicit_stream(self, client: aiokatcp.Client) -> None:
+        await self._configure_subarray(client, SUBARRAY_PRODUCT)
+        _, informs = await client.request('capture-list', 'gpucbf_antenna_channelised_voltage')
+        assert len(informs) == 1
+        assert informs[0].arguments == [
+            b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up'
+        ]
+        assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[0].arguments[1])
+
+    async def test_capture_list_bad_stream(self, client: aiokatcp.Client) -> None:
+        await self._configure_subarray(client, SUBARRAY_PRODUCT)
+        await assert_request_fails(client, 'capture-list', 'sdp_l0')
 
     def _check_prom(
             self,
