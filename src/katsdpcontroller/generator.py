@@ -569,7 +569,7 @@ def _make_xbgpu(
     g.add_node(xbgpu_group)
 
     dst_multicast = LogicalMulticast(stream.name, stream.n_substreams,
-                                     initial_transmit_state=TransmitState.UP)
+                                     initial_transmit_state=TransmitState.DOWN)
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
