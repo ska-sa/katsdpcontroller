@@ -1738,7 +1738,7 @@ class TestController(BaseTestController):
         ]
         assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[0].arguments[1])
         assert informs[1].arguments == [
-            b'gpucbf_baseline_correlation_products', mock.ANY, b'up'
+            b'gpucbf_baseline_correlation_products', mock.ANY, b'down'
         ]
         assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[1].arguments[1])
 
