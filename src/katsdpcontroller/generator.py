@@ -45,7 +45,7 @@ def normalise_gpu_name(name):
     # alphanumeric or underscore, and lowercase (because Docker doesn't
     # allow uppercase in image names).
     mangled = re.sub('[- ]', '_', name.lower())
-    mangled = re.sub('nvidia ', '', mangled)
+    mangled = re.sub('nvidia_', '', mangled)
     mangled = re.sub('[^a-z0-9_]', '', mangled)
     return mangled
 
