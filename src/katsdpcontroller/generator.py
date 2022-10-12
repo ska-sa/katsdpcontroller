@@ -548,8 +548,8 @@ def _make_fgpu(
 
         # Rename sensors that are relevant to the stream rather than the process
         for j, label in enumerate(input_labels):
-            fgpu.sensor_renames[f"input{j}-eq"] = f"{stream.name}-{label}-eq"
-            fgpu.sensor_renames[f"input{j}-delay"] = f"{stream.name}-{label}-delay"
+            for name in ["eq", "delay", "dig-clip-cnt"]:
+                fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
         # Prepare expected data rate
         fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
