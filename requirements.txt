@@ -23,7 +23,7 @@ ipython-genutils==0.2.0    # via nbformat
 itsdangerous==1.1.0        # via flask
 jinja2
 jsonschema
-jupyter-core==4.4.0        # via nbformat
+jupyter-core==4.11.2       # via nbformat
 katportalclient
 kazoo==2.8.0
 monotonic==1.5             # via prometheus_async
