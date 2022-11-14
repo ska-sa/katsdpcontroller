@@ -1033,7 +1033,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.orig_sensors = SensorSet()
         for sensor in self.sensors.values():
             self.orig_sensors.add(sensor)
-        # Send all logs sent over katcp connection to clients
+        # Send all logs over katcp connection to clients
         logging.getLogger().addHandler(self.LogHandler(self))
 
     async def start(self) -> None:
