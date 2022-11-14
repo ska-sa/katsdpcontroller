@@ -423,7 +423,9 @@ class SubarrayProduct:
         self.resolver = resolver
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
-        self.logical_graph = generator.build_logical_graph(configuration, config_dict)
+        self.logical_graph = generator.build_logical_graph(
+            configuration, config_dict, sdp_controller.sensors
+        )
         self.telstate_endpoint = ""
         self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
         self.capture_blocks: Dict[str, CaptureBlock] = {}  # live capture blocks, indexed by name
