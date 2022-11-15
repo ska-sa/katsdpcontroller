@@ -561,7 +561,8 @@ def _make_fgpu(
 def _make_xbgpu(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
-        stream: product_config.GpucbfBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
+        stream: product_config.GpucbfBaselineCorrelationProductsStream,
+        sync_time: int) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
@@ -722,6 +723,7 @@ def _make_xbgpu(
             '--src-interface', '{interfaces[cbf].name}',
             '--dst-interface', '{interfaces[cbf].name}',
             '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
+            '--sync-epoch', str(sync_time),
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}',
             '--aiomonitor',
@@ -1826,7 +1828,7 @@ def build_logical_graph(configuration: Configuration,
     for stream in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
         _make_fgpu(g, configuration, stream, sync_time)
     for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
-        _make_xbgpu(g, configuration, stream)
+        _make_xbgpu(g, configuration, stream, sync_time)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
