@@ -208,7 +208,7 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.subsystem = 'sdp'
     # redis is nominally single-threaded, but has some helper threads
     # for background tasks so can occasionally exceed 1 CPU.
-    telstate.cpus = 1.2 if not configuration.options.develop else 0.2
+    telstate.cpus = 1.2 if not configuration.options.develop_opts.less_resources else 0.2
     telstate.mem = 2048 + 400 * n_antennas
     telstate.disk = telstate.mem
     telstate.image = 'katsdptelstate'
@@ -271,7 +271,9 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
     meta_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
     # Actual required data rate is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
-    meta_writer.interfaces[0].bandwidth_out = 1e9 if not configuration.options.develop else 10e6
+    meta_writer.interfaces[0].bandwidth_out = (1e9 if not
+                                               configuration.options.develop_opts.less_resources
+                                               else 10e6)
     meta_writer.transitions = {
         CaptureBlockState.BURNDOWN: [
             KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)    # Light dump
@@ -298,7 +300,7 @@ def _make_dsim(
     An antenna has a separate stream per polarisation, so `streams` will
     normally have two elements.
     """
-    ibv = not configuration.options.develop
+    ibv = not configuration.options.develop_opts.disable_ibv
     # dsim assigns digitiser IDs positionally. According to M1000-0001-053,
     # the least significant bit is the polarization ID with 0 = vertical, so
     # sort by reverse of name so that if the streams are, for example,
@@ -337,8 +339,9 @@ def _make_dsim(
     ]
     # Allow dsim task to set a realtime scheduling priority itself
     dsim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "rtprio=1"}]
-    if configuration.options.develop:
-        # In develop mode, scale down reservation for low bandwidths to allow
+    if configuration.options.develop_opts.less_resources:
+        # In develop mode with less_resources option True,
+        # scale down reservation for low bandwidths to allow
         # testing low-bandwidth arrays on a single machine. Use a full core
         # for the maximum sample rate (which is generous - it only needs
         # about 70% for S-band, depending on the CPU).
@@ -377,7 +380,7 @@ def _make_fgpu(
         configuration: Configuration,
         stream: product_config.GpucbfAntennaChannelisedVoltageStream,
         sync_time: int) -> scheduler.LogicalNode:
-    ibv = not configuration.options.develop
+    ibv = not configuration.options.develop_opts.disable_ibv
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
     g.add_node(fgpu_group)
@@ -470,7 +473,7 @@ def _make_fgpu(
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
         fgpu.mem = 1024  # Actual use is currently around 700 MB
-        if not configuration.options.develop:
+        if not configuration.options.develop_opts.less_resources:
             fgpu.cores = ['src0', 'src1', 'dst', 'python']
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ['taskset', '-c', '{cores[python]}']
@@ -511,7 +514,7 @@ def _make_fgpu(
             '--aiomonitor-port', '{ports[aiomonitor]}',
             '--aioconsole-port', '{ports[aioconsole]}'
         ]
-        if not configuration.options.develop:
+        if not configuration.options.develop_opts.less_resources:
             fgpu.command += [
                 '--src-affinity', '{cores[src0]},{cores[src1]}',
                 '--dst-affinity', '{cores[dst]}',
@@ -562,7 +565,7 @@ def _make_xbgpu(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
         stream: product_config.GpucbfBaselineCorrelationProductsStream) -> scheduler.LogicalNode:
-    ibv = not configuration.options.develop
+    ibv = not configuration.options.develop_opts.disable_ibv
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
     n_inputs = len(acv.src_streams)
@@ -674,9 +677,9 @@ def _make_xbgpu(
         xbgpu = ProductLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
         xbgpu.subsystem = 'cbf'
         xbgpu.image = 'katgpucbf'
-        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
+        xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop_opts.less_resources else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
-        if not configuration.options.develop:
+        if not configuration.options.develop_opts.less_resources:
             xbgpu.cores = ['src', 'dst']
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
             taskset = ['taskset', '-c', '{cores[dst]}']
@@ -728,7 +731,7 @@ def _make_xbgpu(
             '--aiomonitor-port', '{ports[aiomonitor]}',
             '--aioconsole-port', '{ports[aioconsole]}'
         ]
-        if not configuration.options.develop:
+        if not configuration.options.develop_opts.less_resources:
             xbgpu.command += [
                 '--src-affinity', '{cores[src]}',
                 '--dst-affinity', '{cores[dst]}'
@@ -783,7 +786,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
         while stream.n_vis / n_sim > _N32_32:
             n_sim *= 2
-    ibv = not configuration.options.develop
+    ibv = not configuration.options.develop_opts.disable_ibv
 
     def make_cbf_simulator_config(task: ProductPhysicalTask,
                                   resolver: 'product_controller.Resolver') -> Dict[str, Any]:
@@ -1047,7 +1050,7 @@ def n_cal_nodes(configuration: Configuration,
     # Use single cal for 4K or less: it doesn't need the performance, and
     # a unified cal report is more convenient (revisit once split cal supports
     # a unified cal report).
-    if configuration.options.develop:
+    if configuration.options.develop_opts.less_resources:
         return 2
     elif stream.vis.n_chans <= 4096:
         return 1
@@ -1085,7 +1088,7 @@ def _adjust_ingest_output_channels(streams: Sequence[product_config.VisStream]) 
 def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                  spectral: Optional[product_config.VisStream],
                  continuum: Optional[product_config.VisStream]) -> scheduler.LogicalNode:
-    develop = configuration.options.develop
+    develop_opts = configuration.options.develop_opts
 
     primary = spectral if spectral is not None else continuum
     if primary is None:
@@ -1111,7 +1114,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         'continuum_factor': continuum.continuum_factor if continuum is not None else 1,
         'sd_continuum_factor': sd_continuum_factor,
         'sd_spead_rate': sd_spead_rate,
-        'cbf_ibv': not develop,
+        'cbf_ibv': not develop_opts.disable_ibv,
         'cbf_name': src.name,
         'servers': n_ingest,
         'antenna_mask': primary.antennas,
@@ -1167,7 +1170,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']
         ingest.gpus = [scheduler.GPURequest()]
-        if not develop:
+        if not develop_opts.any_gpu:
             ingest.gpus[-1].name = defaults.INGEST_GPU_NAME
         # Scale for a full GPU for 32 antennas, 32K channels on one node
         scale = src.n_vis / _N32_32 / n_ingest
@@ -1188,7 +1191,8 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         ingest.mem = 32 * _mb(src.size) / n_ingest + 4096
         ingest.transitions = CAPTURE_TRANSITIONS
         ingest.interfaces = [
-            scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
+            scheduler.InterfaceRequest('cbf', affinity=not develop_opts.disable_ibv,
+                                       infiniband=not develop_opts.disable_ibv),
             scheduler.InterfaceRequest('sdp_10g')]
         ingest.interfaces[0].bandwidth_in = src.data_rate() / n_ingest
         data_rate_out = 0.0
@@ -1242,9 +1246,9 @@ def _make_cal(g: networkx.MultiDiGraph,
     # This scale factor gives 34 total CPUs for 64A, 32K, 4+s integration, which
     # will get clamped down slightly.
     cpus = 2e-6 * effective_vis / effective_int / n_cal
-    # Always (except in development mode) have at least a whole CPU for the
+    # Always (except in development,less_resources = True, mode) have at least a whole CPU for the
     # pipeline.
-    if not configuration.options.develop:
+    if not configuration.options.develop_opts.less_resources:
         cpus = max(cpus, 1)
     # Reserve a separate CPU for the accumulator
     cpus += 1
@@ -1687,7 +1691,7 @@ def _make_beamformer_engineering_pol(
     # regions.
     bf_ingest.interfaces = [
         scheduler.InterfaceRequest('cbf',
-                                   infiniband=not configuration.options.develop,
+                                   infiniband=not configuration.options.develop_opts.disable_ibv,
                                    affinity=timeplot or not ram)
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator
@@ -1711,7 +1715,7 @@ def _make_beamformer_engineering_pol(
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
-            'ibv': not configuration.options.develop,
+            'ibv': not configuration.options.develop_opts.disable_ibv,
             'stream_name': src_stream.name,
             'aiomonitor': True
         }
@@ -1978,14 +1982,14 @@ def build_logical_graph(configuration: Configuration,
 
 
 def _continuum_imager_cpus(configuration: Configuration) -> int:
-    return 24 if not configuration.options.develop else 2
+    return 24 if not configuration.options.develop_opts.less_resources else 2
 
 
 def _spectral_imager_cpus(configuration: Configuration) -> int:
     # Fairly arbitrary number, based on looking at typical usage during a run.
     # In practice the number of spectral imagers per box is limited by GPUs,
     # so the value doesn't make a huge difference.
-    return 3 if not configuration.options.develop else 1
+    return 3 if not configuration.options.develop_opts.less_resources else 1
 
 
 def _stream_url(capture_block_id: str, stream_name: str) -> str:
@@ -2110,7 +2114,7 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
         imager.subsystem = 'sdp'
         imager.cpus = cpus
         # These resources are very rough estimates
-        imager.mem = 50000 if not configuration.options.develop else 8000
+        imager.mem = 50000 if not configuration.options.develop_opts.less_resources else 8000
         imager.disk = _mb(1000 * stream.vis.size + 1000)
         imager.max_run_time = 86400     # 24 hours
         imager.volumes = [DATA_VOL]
