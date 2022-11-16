@@ -159,7 +159,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 class SumSensor(SimpleAggregateSensor[int]):
     """Aggregate which takes the sum of its children.
 
-    It also tracks how many child reading are present, and sets the state to
+    It also tracks how many child readings are present, and sets the state to
     FAILURE if they aren't all present.
     """
 
