@@ -8,7 +8,19 @@ import copy
 import urllib.parse
 import os.path
 from typing import (
-    List, Dict, Tuple, Set, Sequence, Iterable, Type, Union, Optional, Any, TYPE_CHECKING, cast
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Set,
+    Sequence,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Type,
+    TypeVar,
+    Union,
+    cast
 )
 
 import addict
@@ -16,7 +28,7 @@ import networkx
 import numpy as np
 import astropy.units as u
 
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import SimpleAggregateSensor, Reading, Sensor, SensorSampler, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
@@ -38,6 +50,9 @@ from .product_config import (
 # Import just for type annotations, but avoid at runtime due to circular imports
 if TYPE_CHECKING:
     from . import product_controller      # noqa
+
+
+_T = TypeVar("_T")
 
 
 def normalise_gpu_name(name):
@@ -139,6 +154,56 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
             self.ports = {'spead': await resolver.resources.get_port()}
         self._endpoint_sensor.value = str(Endpoint(self.host, self.ports['spead']))
+
+
+class SumSensor(SimpleAggregateSensor[int]):
+    """Aggregate which takes the sum of its children.
+
+    It also tracks how many child readings are present, and sets the state to
+    FAILURE if they aren't all present.
+    """
+
+    def __init__(
+        self, target: SensorSet, sensor_type: Type[int],
+        name: str, description: str, units: str = "",
+        *,
+        auto_strategy: Optional[SensorSampler.Strategy] = None,
+        auto_strategy_parameters: Iterable[Any] = (),
+        name_regex: re.Pattern,
+        children: int
+    ) -> None:
+        self.name_regex = name_regex
+        self.children = children
+        self._total = 0
+        self._known = 0
+        super().__init__(
+            target, sensor_type, name, description, units,
+            auto_strategy=auto_strategy,
+            auto_strategy_parameters=auto_strategy_parameters
+        )
+
+    def filter_aggregate(self, sensor: Sensor) -> bool:
+        return bool(self.name_regex.fullmatch(sensor.name))
+
+    def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        assert isinstance(reading.value, int)
+        if reading.status.valid_value():
+            self._total += reading.value
+            self._known += 1
+            return True
+        return False
+
+    def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        assert isinstance(reading.value, int)
+        if reading.status.valid_value():
+            self._total -= reading.value
+            self._known -= 1
+            return True
+        return False
+
+    def aggregate_compute(self) -> Tuple[Sensor.Status, int]:
+        status = Sensor.Status.NOMINAL if self._known == self.children else Sensor.Status.FAILURE
+        return (status, self._total)
 
 
 class TelstateTask(ProductPhysicalTask):
@@ -388,7 +453,7 @@ def _make_fgpu(
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
     # TODO: this list is not complete, and will need to be updated as the ICD evolves.
-    static_sensors = [
+    stream_sensors = [
         Sensor(float, f"{stream.name}-adc-sample-rate",
                "Sample rate of the ADC",
                "Hz",
@@ -440,8 +505,8 @@ def _make_fgpu(
                "The centre frequency of the digitised band",
                default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL)
     ]
-    for ss in static_sensors:
-        g.graph["static_sensors"].add(ss)
+    for ss in stream_sensors:
+        g.graph["stream_sensors"].add(ss)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     telstate_data = {
@@ -562,7 +627,8 @@ def _make_xbgpu(
         g: networkx.MultiDiGraph,
         configuration: Configuration,
         stream: product_config.GpucbfBaselineCorrelationProductsStream,
-        sync_time: int) -> scheduler.LogicalNode:
+        sync_time: int,
+        sensors: SensorSet) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
@@ -594,7 +660,7 @@ def _make_xbgpu(
                     idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
-    static_sensors = [
+    stream_sensors = [
         Sensor(int, f"{stream.name}-n-xengs",
                "The number of X-engines in the instrument",
                default=n_engines, initial_status=Sensor.Status.NOMINAL),
@@ -622,10 +688,14 @@ def _make_xbgpu(
                default=stream.n_chans, initial_status=Sensor.Status.NOMINAL),
         Sensor(int, f"{stream.name}-n-chans-per-substream",
                "Number of channels in each substream for this x-engine stream",
-               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL)
+               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
+        SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
+                  "Number of visibilities that saturated",
+                  name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
+                  children=stream.n_substreams)
     ]
-    for ss in static_sensors:
-        g.graph["static_sensors"].add(ss)
+    for ss in stream_sensors:
+        g.graph["stream_sensors"].add(ss)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     telstate_data = {
@@ -1758,7 +1828,8 @@ def _make_beamformer_engineering(
 
 
 def build_logical_graph(configuration: Configuration,
-                        config_dict: dict) -> networkx.MultiDiGraph:
+                        config_dict: dict,
+                        sensors: SensorSet) -> networkx.MultiDiGraph:
     # We mutate the configuration to align output channels to requirements.
     configuration = copy.deepcopy(configuration)
 
@@ -1776,15 +1847,15 @@ def build_logical_graph(configuration: Configuration,
         'sdp_config': config_dict
     }
 
-    # Static sensors that are created for individual streams and managed by the
+    # Sensors that are created for individual streams and managed by the
     # product controller.
-    static_sensors = SensorSet()
+    stream_sensors = SensorSet()
 
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
         config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {}),
-        static_sensors=static_sensors
+        stream_sensors=stream_sensors
     )
 
     # Add SPEAD endpoints to the graph.
@@ -1828,7 +1899,7 @@ def build_logical_graph(configuration: Configuration,
     for stream in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
         _make_fgpu(g, configuration, stream, sync_time)
     for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
-        _make_xbgpu(g, configuration, stream, sync_time)
+        _make_xbgpu(g, configuration, stream, sync_time, sensors)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
