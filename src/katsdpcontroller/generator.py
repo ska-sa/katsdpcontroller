@@ -453,7 +453,7 @@ def _make_fgpu(
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
     # TODO: this list is not complete, and will need to be updated as the ICD evolves.
-    static_sensors = [
+    stream_sensors = [
         Sensor(float, f"{stream.name}-adc-sample-rate",
                "Sample rate of the ADC",
                "Hz",
@@ -505,8 +505,8 @@ def _make_fgpu(
                "The centre frequency of the digitised band",
                default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL)
     ]
-    for ss in static_sensors:
-        g.graph["static_sensors"].add(ss)
+    for ss in stream_sensors:
+        g.graph["stream_sensors"].add(ss)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     telstate_data = {
@@ -660,7 +660,7 @@ def _make_xbgpu(
                     idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
-    static_sensors = [
+    stream_sensors = [
         Sensor(int, f"{stream.name}-n-xengs",
                "The number of X-engines in the instrument",
                default=n_engines, initial_status=Sensor.Status.NOMINAL),
@@ -694,8 +694,8 @@ def _make_xbgpu(
                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
                   children=stream.n_substreams)
     ]
-    for ss in static_sensors:
-        g.graph["static_sensors"].add(ss)
+    for ss in stream_sensors:
+        g.graph["stream_sensors"].add(ss)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     telstate_data = {
@@ -1847,15 +1847,15 @@ def build_logical_graph(configuration: Configuration,
         'sdp_config': config_dict
     }
 
-    # Static sensors that are created for individual streams and managed by the
+    # Sensors that are created for individual streams and managed by the
     # product controller.
-    static_sensors = SensorSet()
+    stream_sensors = SensorSet()
 
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
         init_telstate=init_telstate,        # ditto
         config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {}),
-        static_sensors=static_sensors
+        stream_sensors=stream_sensors
     )
 
     # Add SPEAD endpoints to the graph.

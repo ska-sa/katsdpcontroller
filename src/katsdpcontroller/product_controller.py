@@ -782,8 +782,8 @@ class SubarrayProduct:
                 resolver = self.resolver
                 resolver.resources = Resources(self.master_controller, self.subarray_product_id)
 
-                # Register static KATCP sensors.
-                for ss in self.physical_graph.graph["static_sensors"].values():
+                # Register stream-specific KATCP sensors.
+                for ss in self.physical_graph.graph["stream_sensors"].values():
                     self.add_sensor(ss)
 
                 # launch the telescope state for this graph
