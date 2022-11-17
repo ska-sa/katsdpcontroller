@@ -570,6 +570,7 @@ def _make_fgpu(
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
             '--taps', str(stream.pfb_taps),
+            '--w-cutoff', str(stream.w_cutoff),
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}',
             '--aiomonitor',

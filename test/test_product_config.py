@@ -404,6 +404,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.sources(1) == tuple(self.src_streams[2:4])
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
         assert acv.input_labels == self.config['src_streams']
+        assert acv.w_cutoff == 1.0  # Default value
         assert acv.command_line_extra == []
 
     def test_n_chans_not_power_of_two(self) -> None:
@@ -472,6 +473,13 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', self.config, self.src_streams, {}
             )
+
+    def test_w_cutoff(self) -> None:
+        self.config['w_cutoff'] = 0.9
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
+            Options(), 'wide1_acv', self.config, self.src_streams, {}
+        )
+        assert acv.w_cutoff == 0.9
 
     def test_command_line_extra(self) -> None:
         self.config['command_line_extra'] = ['--extra-arg']

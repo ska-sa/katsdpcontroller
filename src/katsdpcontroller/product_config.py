@@ -502,6 +502,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             src_streams: Sequence[Stream], *,
             n_chans: int,
             input_labels: Optional[Iterable[str]] = None,
+            w_cutoff: float = 1.0,
             command_line_extra: Iterable[str] = ()) -> None:
         if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
             raise ValueError('n_chans is not a power of 2')
@@ -557,6 +558,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         self.n_substreams = n_substreams
         self.bits_per_sample = 8
         self.pfb_taps = defaults.PFB_TAPS
+        self.w_cutoff = w_cutoff
         self.command_line_extra = list(command_line_extra)
 
     @property
@@ -597,6 +599,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             name, src_streams,
             n_chans=config['n_chans'],
             input_labels=config.get('input_labels'),
+            w_cutoff=config.get('w_cutoff', 1.0),
             command_line_extra=config.get('command_line_extra', [])
         )
 
