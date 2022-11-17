@@ -40,7 +40,9 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
-from .fake_servers import FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer
+from .fake_servers import (
+    FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer, FakeXbgpuDeviceServer
+)
 from .tasks import (
     ProductLogicalTask, ProductPhysicalTask, ProductFakePhysicalTask,
     LogicalGroup, CaptureBlockState, KatcpTransition)
@@ -746,6 +748,7 @@ def _make_xbgpu(
         xbgpu = ProductLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
         xbgpu.subsystem = 'cbf'
         xbgpu.image = 'katgpucbf'
+        xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
         if not configuration.options.develop:
