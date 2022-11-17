@@ -224,7 +224,7 @@ class DevelopOptions:
 
 class Options:
     def __init__(self, *, develop: bool = False,
-                 develop_opts: Mapping[str, DevelopOptions] = {},
+                 develop_opts: Mapping[str, bool] = {},
                  wrapper: Optional[str] = None,
                  image_tag: Optional[str] = None,
                  image_overrides: Mapping[str, str] = {},
