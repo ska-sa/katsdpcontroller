@@ -205,6 +205,74 @@ class SumSensor(SimpleAggregateSensor[int]):
         status = Sensor.Status.NOMINAL if self._known == self.children else Sensor.Status.FAILURE
         return (status, self._total)
 
+class SyncSensor(SimpleAggregateSensor[bool]):
+    """Aggregate which takes the AND of its children.
+
+    It also tracks which child readings are False/out-of-sync, and sets the
+    state to FAILURE if they are all False/out-of-sync.
+    """
+
+    def __init__(
+        self, target: SensorSet, sensor_type: Type[_T],
+        name: str, description: str, units: str = "",
+        *,
+        auto_strategy: Optional["SensorSampler.Strategy"] = None,
+        auto_strategy_parameters: Iterable[Any] = (),
+        name_regex: re.Pattern,
+        children: int
+    ) -> None:
+        self.target = target
+        self.name_regex = name_regex
+        self.children = children
+        self._known = 0
+        self.synchronised = None
+        self.curr_values = []
+
+        super().__init__(
+            target, sensor_type, name, description, units,
+            auto_strategy=auto_strategy,
+            auto_strategy_parameters=auto_strategy_parameters
+        )
+
+    def filter_aggregate(self, sensor: Sensor) -> bool:
+        return bool(self.name_regex.fullmatch(sensor.name))
+
+    def aggregate_add(self, updated_sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        # Maybe filter on the sensor name first?
+
+        assert isinstance(reading.value, bool)
+        if reading.status.valid_value():
+            self._known += 1
+            return True
+        return False
+
+    def aggregate_remove(self, updated_sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        assert isinstance(reading.value, bool)
+        if reading.status.valid_value():
+            self._known -= 1
+            return True
+        return False
+
+    def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
+        # NOTE: The method we actually need to implement
+        # Add the sensor to the list and update the value according to
+        # reading.value
+        # Update the aggregated sync-status?
+
+        # Also, the target passed in is for *all* sensors
+        # - Use the name_regex to get the ones we need
+        for s in self.target.values():
+            if self.filter_aggregate(s) and s.reading.status.valid_value():
+                self.curr_values.append(s.value)
+
+        if len(self.curr_values) != self._known:
+            return (Sensor.Status.ERROR, False)
+        self.synchronised = min(
+            (value for value in self.curr_values), default=False
+        )
+        status = Sensor.Status.NOMINAL if self.synchronised else Sensor.Status.ERROR
+
+        return (status, self.synchronised)
 
 class TelstateTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph):
@@ -692,6 +760,11 @@ def _make_xbgpu(
         SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
+                  children=stream.n_substreams),
+        SyncSensor(sensors, bool, f"{stream.name}-synchronised",
+                  "For the latest accumulation, was data present from all F-Engines \
+                  for all X-Engines",
+                  name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"),
                   children=stream.n_substreams)
     ]
     for ss in stream_sensors:
