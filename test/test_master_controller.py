@@ -1254,7 +1254,7 @@ class TestParseArgs:
     def open_mock(self, mocker) -> open_file_mock.MockOpen:
         return mocker.patch('builtins.open', new_callable=open_file_mock.MockOpen)
 
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.content1 = '''
             [
                 {

@@ -152,8 +152,9 @@ def get_metric(metric):
 
 
 class TestRedactKeys:
-    def setup(self) -> None:
-        self.s3_config = {
+    @pytest.fixture
+    def s3_config(self) -> dict:
+        return {
             'archive': {
                 'read': {
                     'access_key': 'ACCESS_KEY',
@@ -167,24 +168,29 @@ class TestRedactKeys:
             }
         }
 
-    def test_no_command(self) -> None:
+    def test_no_command(self, s3_config: dict) -> None:
         taskinfo = Dict()
-        result = _redact_keys(taskinfo, self.s3_config)
+        result = _redact_keys(taskinfo, s3_config)
         assert result == taskinfo
 
-    def run_it(self, arguments: List[str]) -> List[str]:
+    @pytest.mark.parametrize(
+        'arguments, expected',
+        [
+            (
+                ['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'],
+                ['--secret=REDACTED', '--key=REDACTED', '--other=safe']
+            ),
+            (
+                ['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'],
+                ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe']
+            )
+        ]
+    )
+    def test(self, arguments: List[str], expected: List[str], s3_config: dict) -> None:
         taskinfo = Dict()
         taskinfo.command.arguments = arguments
-        result = _redact_keys(taskinfo, self.s3_config)
-        return result.command.arguments
-
-    def test_with_equals(self) -> None:
-        result = self.run_it(['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'])
-        assert result == ['--secret=REDACTED', '--key=REDACTED', '--other=safe']
-
-    def test_without_equals(self) -> None:
-        result = self.run_it(['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'])
-        assert result == ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe']
+        result = _redact_keys(taskinfo, s3_config)
+        assert result.command.arguments == expected
 
 
 class TestNormaliseS3Config:
@@ -245,54 +251,55 @@ class TestNormaliseS3Config:
 
 
 class TestRelativeUrl:
-    def setup(self):
-        self.base = yarl.URL('http://test.invalid/foo/bar/')
+    @pytest.fixture
+    def base(self) -> yarl.URL:
+        return yarl.URL('http://test.invalid/foo/bar/')
 
-    def test_success(self):
+    def test_success(self, base: yarl.URL) -> None:
         url = yarl.URL('http://test.invalid/foo/bar/baz')
-        assert _relative_url(self.base, url) == yarl.URL('baz')
+        assert _relative_url(base, url) == yarl.URL('baz')
         url = yarl.URL('http://test.invalid/foo/bar/baz/')
-        assert _relative_url(self.base, url) == yarl.URL('baz/')
-        assert _relative_url(self.base, self.base) == yarl.URL()
+        assert _relative_url(base, url) == yarl.URL('baz/')
+        assert _relative_url(base, base) == yarl.URL()
 
-    def test_root_relative(self):
+    def test_root_relative(self) -> None:
         base = yarl.URL('http://test.invalid/')
         url = yarl.URL('http://test.invalid/foo/bar/')
         assert _relative_url(base, url) == yarl.URL('foo/bar/')
 
-    def test_different_origin(self):
+    def test_different_origin(self, base: yarl.URL) -> None:
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('https://test.invalid/foo/bar/baz'))
+            _relative_url(base, yarl.URL('https://test.invalid/foo/bar/baz'))
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('http://another.test.invalid/foo/bar/baz'))
+            _relative_url(base, yarl.URL('http://another.test.invalid/foo/bar/baz'))
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('http://test.invalid:1234/foo/bar/baz'))
+            _relative_url(base, yarl.URL('http://test.invalid:1234/foo/bar/baz'))
 
-    def test_outside_tree(self):
+    def test_outside_tree(self, base: yarl.URL) -> None:
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('http://test.invalid/foo/bart'))
+            _relative_url(base, yarl.URL('http://test.invalid/foo/bart'))
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('http://test.invalid/'))
+            _relative_url(base, yarl.URL('http://test.invalid/'))
 
-    def test_query_strings(self):
+    def test_query_strings(self, base: yarl.URL) -> None:
         qs = yarl.URL('http://test.invalid/foo/bar/?query=yes')
         with pytest.raises(ValueError):
-            _relative_url(self.base, qs)
+            _relative_url(base, qs)
         with pytest.raises(ValueError):
-            _relative_url(qs, self.base)
+            _relative_url(qs, base)
 
-    def test_fragments(self):
+    def test_fragments(self, base: yarl.URL) -> None:
         frag = yarl.URL('http://test.invalid/foo/bar/#frag')
         with pytest.raises(ValueError):
-            _relative_url(self.base, frag)
+            _relative_url(base, frag)
         with pytest.raises(ValueError):
-            _relative_url(frag, self.base)
+            _relative_url(frag, base)
 
-    def test_not_absolute(self):
+    def test_not_absolute(self, base: yarl.URL) -> None:
         with pytest.raises(ValueError):
-            _relative_url(self.base, yarl.URL('relative/url'))
+            _relative_url(base, yarl.URL('relative/url'))
         with pytest.raises(ValueError):
-            _relative_url(yarl.URL('relative/url'), self.base)
+            _relative_url(yarl.URL('relative/url'), base)
 
 
 class BaseTestController:

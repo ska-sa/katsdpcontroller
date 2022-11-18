@@ -90,7 +90,7 @@ class SimpleTaskStats(scheduler.TaskStats):
 
 class TestScalarResource:
     """Tests for :class:`katsdpcontroller.scheduler.ScalarResource`"""
-    def setup(self):
+    def setup_method(self):
         self.resource = scheduler.ScalarResource('cpus')
         self.parts = [self._make_part('foo', 3.6), self._make_part('*', 2.2)]
 
@@ -167,7 +167,7 @@ class TestScalarResource:
 
 class TestRangeResource:
     """Tests for :class:`katsdpcontroller.scheduler.RangeResource`"""
-    def setup(self):
+    def setup_method(self):
         self.resource = scheduler.RangeResource('ports')
         self.parts = [
             self._make_part('foo', [(5, 6), (20, 22)]),
@@ -691,7 +691,7 @@ class TestAgent:
     def _make_offer(self, resources, attrs=()):
         return _make_offer(self.framework_id, self.agent_id, self.host, resources, attrs)
 
-    def setup(self):
+    def setup_method(self):
         self.agent_id = 'agentid'
         self.host = 'agenthostname'
         self.framework_id = 'framework'
@@ -1094,7 +1094,7 @@ class TestAgent:
 class TestPhysicalTask:
     """Tests for :class:`katsdpcontroller.scheduler.PhysicalTask`"""
 
-    def setup(self):
+    def setup_method(self):
         self.logical_task = scheduler.LogicalTask('task')
         self.logical_task.cpus = 4.0
         self.logical_task.mem = 256.0
@@ -1178,7 +1178,7 @@ class TestDiagnoseInsufficient:
         return _make_offer('frameworkid', 'agentid{}'.format(agent_num),
                            'agenthost{}'.format(agent_num), resources, attrs)
 
-    def setup(self):
+    def setup_method(self):
         # Create a number of agents, each of which has a large quantity of
         # some resource but not much of others. This makes it easier to
         # control which resources are plentiful in the simulated cluster.
@@ -1429,7 +1429,8 @@ class TestDiagnoseInsufficient:
 
 class TestSubgraph:
     """Tests for :func:`katsdpcontroller.scheduler.subgraph`"""
-    def setup(self):
+    @pytest.fixture
+    def g(self) -> networkx.MultiDiGraph:
         g = networkx.MultiDiGraph()
         g.add_nodes_from(['a', 'b', 'c'])
         g.add_edge('a', 'b', key1=True, key2=False)
@@ -1437,21 +1438,21 @@ class TestSubgraph:
         g.add_edge('b', 'c', key1=False)
         g.add_edge('c', 'a', key2=123)
         g.add_edge('c', 'b', key1=True, key2=True)
-        self.g = g
+        return g
 
-    def test_simple(self):
+    def test_simple(self, g: networkx.MultiDiGraph) -> None:
         """Test with string filter and all nodes"""
-        out = scheduler.subgraph(self.g, 'key2')
+        out = scheduler.subgraph(g, 'key2')
         assert set(out.edges()) == {('c', 'a'), ('c', 'b')}
         assert set(out.nodes()) == {'a', 'b', 'c'}
 
-    def test_restrict_nodes(self):
-        out = scheduler.subgraph(self.g, 'key2', {'a', 'c'})
+    def test_restrict_nodes(self, g: networkx.MultiDiGraph) -> None:
+        out = scheduler.subgraph(g, 'key2', {'a', 'c'})
         assert set(out.edges()) == {('c', 'a')}
         assert set(out.nodes()) == {'a', 'c'}
 
-    def test_callable_filter(self):
-        out = scheduler.subgraph(self.g, lambda data: 'key1' in data)
+    def test_callable_filter(self, g: networkx.MultiDiGraph) -> None:
+        out = scheduler.subgraph(g, lambda data: 'key1' in data)
         assert set(out.edges()) == {('a', 'b'), ('b', 'c'), ('c', 'b')}
         assert set(out.nodes()) == {'a', 'b', 'c'}
 

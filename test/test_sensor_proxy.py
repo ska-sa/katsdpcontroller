@@ -172,7 +172,7 @@ class TestSensorProxyClient:
 
 
 class TestPrometheusWatcher:
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         # Create a custom registry, to avoid polluting the global one
         self.registry = CollectorRegistry()
         # Custom metric cache, to avoid polluting the global one
