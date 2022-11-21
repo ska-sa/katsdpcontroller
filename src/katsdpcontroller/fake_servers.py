@@ -50,6 +50,24 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL
                 )
             )
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"input{pol}-dig-clip-cnt",
+                    "Number of digitiser samples that are saturated",
+                    default=0,
+                    initial_status=Sensor.Status.NOMINAL
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"input{pol}-feng-clip-cnt",
+                    "Number of output samples that are saturated",
+                    default=0,
+                    initial_status=Sensor.Status.NOMINAL
+                )
+            )
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
@@ -86,6 +104,29 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 self._gains[pol] = np.full((1,), self.DEFAULT_GAIN, np.complex64)
             else:
                 await self.request_gain(ctx, pol, *values)
+
+
+class FakeXbgpuDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sensors.add(
+            Sensor(
+                bool,
+                "synchronised",
+                "For the latest accumulation, was data present from all F-Engines.",
+                default=True,
+                initial_status=Sensor.Status.NOMINAL
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "xeng-clip-cnt",
+                "Number of visibilities that saturated",
+                default=0,
+                initial_status=Sensor.Status.NOMINAL
+            )
+        )
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):

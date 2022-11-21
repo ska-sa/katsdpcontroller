@@ -40,7 +40,9 @@ from katsdpmodels.band_mask import BandMask, SpectralWindow
 
 from . import scheduler, product_config, defaults
 from .defaults import LOCALHOST
-from .fake_servers import FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer
+from .fake_servers import (
+    FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer, FakeXbgpuDeviceServer
+)
 from .tasks import (
     ProductLogicalTask, ProductPhysicalTask, ProductFakePhysicalTask,
     LogicalGroup, CaptureBlockState, KatcpTransition)
@@ -638,6 +640,7 @@ def _make_fgpu(
             '--channels', str(stream.n_chans),
             '--sync-epoch', str(sync_time),
             '--taps', str(stream.pfb_taps),
+            '--w-cutoff', str(stream.w_cutoff),
             '--katcp-port', '{ports[port]}',
             '--prometheus-port', '{ports[prometheus]}',
             '--aiomonitor',
@@ -681,7 +684,7 @@ def _make_fgpu(
 
         # Rename sensors that are relevant to the stream rather than the process
         for j, label in enumerate(input_labels):
-            for name in ["eq", "delay", "dig-clip-cnt"]:
+            for name in ["eq", "delay", "dig-clip-cnt", "feng-clip-cnt"]:
                 fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
         # Prepare expected data rate
         fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
@@ -818,6 +821,7 @@ def _make_xbgpu(
         xbgpu = ProductLogicalTask(f'xb.{stream.name}.{i}', streams=[stream])
         xbgpu.subsystem = 'cbf'
         xbgpu.image = 'katgpucbf'
+        xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
         if not configuration.options.develop:
