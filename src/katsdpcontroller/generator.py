@@ -207,6 +207,7 @@ class SumSensor(SimpleAggregateSensor[int]):
         status = Sensor.Status.NOMINAL if self._known == self.children else Sensor.Status.FAILURE
         return (status, self._total)
 
+
 class SyncSensor(SimpleAggregateSensor[bool]):
     """Aggregate which takes the AND of its children.
 
@@ -228,7 +229,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         self.children = children
         self._known = 0
         self.synchronised = None
-        self.curr_values = []
+        self.curr_values: List[bool] = []
 
         super().__init__(
             target, sensor_type, name, description, units,
@@ -240,8 +241,6 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         return bool(self.name_regex.fullmatch(sensor.name))
 
     def aggregate_add(self, updated_sensor: Sensor[_T], reading: Reading[_T]) -> bool:
-        # Maybe filter on the sensor name first?
-
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
             self._known += 1
@@ -256,7 +255,6 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        # NOTE: The method we actually need to implement
         # Add the sensor to the list and update the value according to
         # reading.value
         # Update the aggregated sync-status?
@@ -269,12 +267,11 @@ class SyncSensor(SimpleAggregateSensor[bool]):
 
         if len(self.curr_values) != self._known:
             return (Sensor.Status.ERROR, False)
-        self.synchronised = min(
-            (value for value in self.curr_values), default=False
-        )
+        self.synchronised = all(self.curr_values)
         status = Sensor.Status.NOMINAL if self.synchronised else Sensor.Status.ERROR
 
         return (status, self.synchronised)
+
 
 class TelstateTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph):
@@ -765,10 +762,10 @@ def _make_xbgpu(
                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
                   children=stream.n_substreams),
         SyncSensor(sensors, bool, f"{stream.name}-synchronised",
-                  "For the latest accumulation, was data present from all F-Engines \
-                  for all X-Engines",
-                  name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"),
-                  children=stream.n_substreams)
+                   "For the latest accumulation, was data present from all F-Engines \
+                   for all X-Engines",
+                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"),
+                   children=stream.n_substreams)
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
