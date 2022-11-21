@@ -216,7 +216,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     """
 
     def __init__(
-        self, target: SensorSet, sensor_type: Type[_T],
+        self, target: SensorSet, sensor_type: Type[bool],
         name: str, description: str, units: str = "",
         *,
         auto_strategy: Optional["SensorSampler.Strategy"] = None,
@@ -228,7 +228,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         self.name_regex = name_regex
         self.children = children
         self._known = 0
-        self.synchronised = None
+        self.synchronised = False
         self.curr_values: List[bool] = []
 
         super().__init__(
