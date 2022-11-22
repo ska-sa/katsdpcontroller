@@ -255,9 +255,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        # Add the sensor to the list and update the value according to
-        # reading.value
-        # Update the aggregated sync-status?
+        self.curr_values.clear()
 
         # Also, the target passed in is for *all* sensors
         # - Use the name_regex to get the ones we need
