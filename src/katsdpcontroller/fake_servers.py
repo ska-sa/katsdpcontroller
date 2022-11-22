@@ -68,6 +68,35 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL
                 )
             )
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"input{pol}-rx-timestamp",
+                    "The timestamp (in samples) of the last chunk of data received "
+                    "from the digitiser",
+                    default=-1,
+                    initial_status=Sensor.Status.ERROR
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    float,
+                    f"input{pol}-rx-unixtime",
+                    "The timestamp (in UNIX time) of the last chunk of data received "
+                    "from the digitiser",
+                    default=-1.0,
+                    initial_status=Sensor.Status.ERROR
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    float,
+                    f"input{pol}-rx-missing-unixtime",
+                    "The timestamp (in UNIX time) when missing data was last detected",
+                    default=-1.0,
+                    initial_status=Sensor.Status.NOMINAL
+                )
+            )
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
