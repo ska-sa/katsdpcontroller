@@ -221,13 +221,15 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         *,
         auto_strategy: Optional["SensorSampler.Strategy"] = None,
         auto_strategy_parameters: Iterable[Any] = (),
-        name_regex: re.Pattern
+        name_regex: re.Pattern,
+        children: int
     ) -> None:
         self.target = target
         self.name_regex = name_regex
+        self.children = children
         self._known = 0
         self.synchronised = False
-        self.curr_values: List[bool] = []
+        self.curr_values: Dict[str, bool] = {}
 
         super().__init__(
             target, sensor_type, name, description, units,
@@ -241,6 +243,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
+            self.curr_values[sensor.name] = reading.value
             self._known += 1
             return True
         return False
@@ -248,18 +251,15 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
+            del self.curr_values[sensor.name]
             self._known -= 1
             return True
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        self.curr_values.clear()
-        for s in self.target.values():
-            if self.filter_aggregate(s) and s.reading.status.valid_value():
-                self.curr_values.append(s.value)
-        if len(self.curr_values) != self._known:
+        if self._known != self.children:
             return (Sensor.Status.FAILURE, False)
-        self.synchronised = all(self.curr_values)
+        self.synchronised = all(self.curr_values.values())
         status = Sensor.Status.NOMINAL if self.synchronised else Sensor.Status.ERROR
 
         return (status, self.synchronised)
@@ -756,7 +756,8 @@ def _make_xbgpu(
         SyncSensor(sensors, bool, f"{stream.name}-xengs-synchronised",
                    "For the latest accumulation, was data present from all F-Engines \
                    for all X-Engines",
-                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"))
+                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"),
+                   children=stream.n_substreams)
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
