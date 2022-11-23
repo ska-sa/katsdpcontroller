@@ -462,7 +462,10 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             a, b = self.logical_node.data_suspect_range
             assert a <= b
             data_suspect = data_suspect[:a] + "1" * (b - a) + data_suspect[b:]
-            self.logical_node.data_suspect_sensor.set_value(data_suspect, Sensor.Status.WARN)
+            self.logical_node.data_suspect_sensor.set_value(
+                data_suspect,
+                status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR
+            )
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()
