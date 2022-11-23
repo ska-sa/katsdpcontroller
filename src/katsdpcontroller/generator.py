@@ -211,8 +211,8 @@ class SumSensor(SimpleAggregateSensor[int]):
 class SyncSensor(SimpleAggregateSensor[bool]):
     """Aggregate which takes the logical AND of its children.
 
-    It also tracks which child readings are False/out-of-sync, and sets the
-    state to FAILURE if they are all False/out-of-sync.
+    The status computes as ERROR if any of the child readings are False, and
+    FAILURE if they aren't all present.
     """
 
     def __init__(
