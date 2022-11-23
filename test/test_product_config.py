@@ -1002,7 +1002,7 @@ class TestBeamformerStream:
         }
 
     def test_from_config(
-        self, tacv: TiedArrayChannelisedVoltageStream, config: Dict[str, Any]
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         bf = BeamformerStream.from_config(Options(), 'beamformer', config, tacv, {})
         assert bf.name == 'beamformer'
@@ -1011,7 +1011,7 @@ class TestBeamformerStream:
         assert bf.n_chans == 32768
 
     def test_mismatched_sources(
-        self, tacv: TiedArrayChannelisedVoltageStream, config: Dict[str, Any]
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         acv = make_antenna_channelised_voltage(antennas=['m012', 's0013'])
         tacv[1] = make_tied_array_channelised_voltage(
@@ -1043,7 +1043,7 @@ class TestBeamformerEngineeringStream:
         }
 
     def test_from_config(
-        self, tacv: TiedArrayChannelisedVoltageStream, config: Dict[str, Any]
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         bf = BeamformerEngineeringStream.from_config(
             Options(), 'beamformer', config, tacv, {}
@@ -1056,7 +1056,7 @@ class TestBeamformerEngineeringStream:
         assert bf.n_chans == 896
 
     def test_defaults(
-        self, tacv: TiedArrayChannelisedVoltageStream, config: Dict[str, Any]
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         del config['output_channels']
         bf = BeamformerEngineeringStream.from_config(
@@ -1066,7 +1066,7 @@ class TestBeamformerEngineeringStream:
         assert bf.n_chans == 32768
 
     def test_misaligned_channels(
-        self, tacv: TiedArrayChannelisedVoltageStream, config: Dict[str, Any]
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         config['output_channels'] = [1, 2]
         bf = BeamformerEngineeringStream.from_config(
