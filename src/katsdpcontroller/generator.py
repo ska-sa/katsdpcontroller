@@ -455,6 +455,13 @@ def _make_fgpu(
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
     # TODO: this list is not complete, and will need to be updated as the ICD evolves.
+    data_suspect_sensor = Sensor(
+        str, f"{stream.name}-input-data-suspect",
+        "A bitmask of flags indicating for each input whether the data for "
+        "that input should be considered to be garbage. Input order matches "
+        "input labels.",
+        default="0" * len(stream.src_streams),
+        initial_status=Sensor.Status.NOMINAL)
     stream_sensors = [
         Sensor(float, f"{stream.name}-adc-sample-rate",
                "Sample rate of the ADC",
@@ -505,7 +512,8 @@ def _make_fgpu(
         # stream.centre_frequency.
         Sensor(float, f"{stream.name}-center-freq",
                "The centre frequency of the digitised band",
-               default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL)
+               default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL),
+        data_suspect_sensor
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
@@ -600,6 +608,8 @@ def _make_fgpu(
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
         fgpu.katsdpservices_config = False
         fgpu.pass_telstate = False
+        fgpu.data_suspect_sensor = data_suspect_sensor
+        fgpu.data_suspect_range = (2 * i, 2 * i + 2)
         g.add_node(fgpu)
 
         # Wire it up to the multicast streams
@@ -664,6 +674,13 @@ def _make_xbgpu(
                     idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
+    data_suspect_sensor = Sensor(
+        str, f"{stream.name}-channel-data-suspect",
+        "A bitmask of flags indicating whether each channel should be "
+        "considered to be garbage.",
+        default="0" * stream.n_chans,
+        initial_status=Sensor.Status.NOMINAL)
+
     stream_sensors = [
         Sensor(int, f"{stream.name}-n-xengs",
                "The number of X-engines in the instrument",
@@ -696,7 +713,8 @@ def _make_xbgpu(
         SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
-                  children=stream.n_substreams)
+                  children=stream.n_substreams),
+        data_suspect_sensor
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
@@ -826,6 +844,11 @@ def _make_xbgpu(
         # xbgpu doesn't use katsdpservices for configuration, or telstate
         xbgpu.katsdpservices_config = False
         xbgpu.pass_telstate = False
+        xbgpu.data_suspect_sensor = data_suspect_sensor
+        xbgpu.data_suspect_range = (
+            i * stream.n_chans_per_substream,
+            (i + 1) * stream.n_chans_per_substream
+        )
         g.add_node(xbgpu)
 
         # Wire it up to the multicast streams
