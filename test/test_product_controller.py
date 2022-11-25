@@ -641,6 +641,41 @@ class TestControllerInterface(BaseTestController):
         )
         await client.request("product-deconfigure")
 
+    async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        await client.request('product-configure', SUBARRAY_PRODUCT, CONFIG)
+        await assert_sensor_value(
+            client, 'gpucbf_antenna_channelised_voltage-input-data-suspect', b'0000'
+        )
+        # Kill off one of the tasks
+        server.product._nodes['f.gpucbf_antenna_channelised_voltage.1'].kill(None)
+        await assert_sensor_value(
+            client, 'gpucbf_antenna_channelised_voltage-input-data-suspect',
+            b'0011',
+            status=Sensor.Status.WARN
+        )
+        # Kill off the other, to check that the sensor goes into ERROR
+        server.product._nodes['f.gpucbf_antenna_channelised_voltage.0'].kill(None)
+        await assert_sensor_value(
+            client, 'gpucbf_antenna_channelised_voltage-input-data-suspect',
+            b'1111',
+            status=Sensor.Status.ERROR
+        )
+
+    async def test_channel_data_suspect(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
+        await client.request('product-configure', SUBARRAY_PRODUCT, CONFIG)
+        await assert_sensor_value(
+            client, 'gpucbf_baseline_correlation_products-channel-data-suspect', b'0' * 4096
+        )
+        # Kill off one of the tasks
+        server.product._nodes['xb.gpucbf_baseline_correlation_products.1'].kill(None)
+        await assert_sensor_value(
+            client, 'gpucbf_baseline_correlation_products-channel-data-suspect',
+            b'0' * 1024 + b'1' * 1024 + b'0' * 2048,
+            status=Sensor.Status.WARN
+        )
+
 
 class DummyScheduler:
     """Implements some functionality needed to mock a :class:`.Scheduler`.
