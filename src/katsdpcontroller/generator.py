@@ -753,12 +753,12 @@ def _make_xbgpu(
                default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
         SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
-                  name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
+                  name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
                   children=stream.n_substreams),
         SyncSensor(sensors, bool, f"{stream.name}-xengs-synchronised",
                    "For the latest accumulation, was data present from all F-Engines \
                    for all X-Engines",
-                   name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.synchronised"),
+                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
                    children=stream.n_substreams)
     ]
     for ss in stream_sensors:
