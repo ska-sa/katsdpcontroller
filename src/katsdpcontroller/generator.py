@@ -211,8 +211,8 @@ class SumSensor(SimpleAggregateSensor[int]):
 class SyncSensor(SimpleAggregateSensor[bool]):
     """Aggregate which takes the logical AND of its children.
 
-    The status computes as ERROR if any of the child readings are False, and
-    FAILURE if they aren't all present.
+    The status computes as ERROR if any of the child readings are False
+    or absent.
     """
 
     def __init__(
@@ -228,8 +228,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         self.name_regex = name_regex
         self.children = children
         self._known = 0
-        self.synchronised = False
-        self.curr_values: Dict[str, bool] = {}
+        self._total_in_sync = 0
 
         super().__init__(
             target, sensor_type, name, description, units,
@@ -243,7 +242,8 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
-            self.curr_values[sensor.name] = reading.value
+            if reading.value is True:
+                self._total_in_sync += 1
             self._known += 1
             return True
         return False
@@ -251,18 +251,20 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
-            del self.curr_values[sensor.name]
+            if reading.value is True:
+                self._total_in_sync -= 1
             self._known -= 1
             return True
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
         if self._known != self.children:
-            return (Sensor.Status.FAILURE, False)
-        self.synchronised = all(self.curr_values.values())
-        status = Sensor.Status.NOMINAL if self.synchronised else Sensor.Status.ERROR
-
-        return (status, self.synchronised)
+            return (Sensor.Status.ERROR, False)
+        synchronised = self._total_in_sync == self.children
+        status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
+        # Need to zero the _total_in_sync count before the tally is done again
+        self._total_in_sync = 0
+        return (status, synchronised)
 
 
 class TelstateTask(ProductPhysicalTask):
