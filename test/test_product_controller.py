@@ -647,6 +647,7 @@ class TestControllerInterface(BaseTestController):
             client, 'gpucbf_antenna_channelised_voltage-input-data-suspect', b'0000'
         )
         # Kill off one of the tasks
+        assert server.product is not None  # Keeps mypy happy
         server.product._nodes['f.gpucbf_antenna_channelised_voltage.1'].kill(None)
         await assert_sensor_value(
             client, 'gpucbf_antenna_channelised_voltage-input-data-suspect',
@@ -669,6 +670,7 @@ class TestControllerInterface(BaseTestController):
             client, 'gpucbf_baseline_correlation_products-channel-data-suspect', b'0' * 4096
         )
         # Kill off one of the tasks
+        assert server.product is not None
         server.product._nodes['xb.gpucbf_baseline_correlation_products.1'].kill(None)
         await assert_sensor_value(
             client, 'gpucbf_baseline_correlation_products-channel-data-suspect',
