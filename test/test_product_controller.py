@@ -670,6 +670,7 @@ class TestControllerInterface(BaseTestController):
             client, 'gpucbf_baseline_correlation_products-channel-data-suspect', b'0' * 4096
         )
         # Kill off one of the tasks
+        assert server.product is not None
         server.product._nodes['xb.gpucbf_baseline_correlation_products.1'].kill(None)
         await assert_sensor_value(
             client, 'gpucbf_baseline_correlation_products-channel-data-suspect',
