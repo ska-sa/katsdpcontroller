@@ -213,6 +213,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
 
     The status computes as ERROR if any of the child readings are False
     or absent.
+    TODO: Update the comment to indicate the updated logic.
     """
 
     def __init__(
@@ -244,6 +245,8 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         if reading.status.valid_value():
             if reading.value is True:
                 self._total_in_sync += 1
+            else:
+                self._total_in_sync -= 1
             self._known += 1
             return True
         return False
@@ -260,10 +263,10 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
         if self._known != self.children:
             return (Sensor.Status.ERROR, False)
+        # TODO: Maybe change this to MOD?
         synchronised = self._total_in_sync == self.children
         status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
         # Need to zero the _total_in_sync count before the tally is done again
-        self._total_in_sync = 0
         return (status, synchronised)
 
 
