@@ -228,7 +228,6 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         self.target = target
         self.name_regex = name_regex
         self.children = children
-        self._known = 0
         self._total_in_sync = 0
 
         super().__init__(
@@ -243,30 +242,22 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
-            if reading.value is True:
+            if reading.value:
                 self._total_in_sync += 1
-            else:
-                self._total_in_sync -= 1
-            self._known += 1
             return True
         return False
 
     def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
         assert isinstance(reading.value, bool)
         if reading.status.valid_value():
-            if reading.value is True:
+            if reading.value:
                 self._total_in_sync -= 1
-            self._known -= 1
             return True
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        if self._known != self.children:
-            return (Sensor.Status.ERROR, False)
-        # TODO: Maybe change this to MOD?
         synchronised = self._total_in_sync == self.children
         status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
-        # Need to zero the _total_in_sync count before the tally is done again
         return (status, synchronised)
 
 
