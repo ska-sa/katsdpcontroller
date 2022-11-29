@@ -61,6 +61,16 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             )
             self.sensors.add(
                 Sensor(
+                    float,
+                    f"input{pol}-dig-pwr-dbfs",
+                    "Digitiser ADC average power",
+                    units="dBFS",
+                    default=-25.0,
+                    initial_status=Sensor.Status.NOMINAL
+                )
+            )
+            self.sensors.add(
+                Sensor(
                     int,
                     f"input{pol}-feng-clip-cnt",
                     "Number of output samples that are saturated",

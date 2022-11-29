@@ -626,7 +626,7 @@ def _make_fgpu(
 
         # Rename sensors that are relevant to the stream rather than the process
         for j, label in enumerate(input_labels):
-            for name in ["eq", "delay", "dig-clip-cnt", "feng-clip-cnt",
+            for name in ["eq", "delay", "dig-clip-cnt", "dig-pwr-dbfs", "feng-clip-cnt",
                          "rx-timestamp", "rx-unixtime", "rx-missing-unixtime"]:
                 fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
         # Prepare expected data rate
