@@ -209,7 +209,7 @@ class SumSensor(SimpleAggregateSensor[int]):
 
 
 class SyncSensor(SimpleAggregateSensor[bool]):
-    """Aggregate which tracks if its children are synchronised.
+    """Aggregate which tracks whether its children are synchronised.
 
     In this case,
     - a 'synchronised' child has a reading of (True, NOMINAL), and
@@ -754,8 +754,8 @@ def _make_xbgpu(
                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
                   children=stream.n_substreams),
         SyncSensor(sensors, bool, f"{stream.name}-xengs-synchronised",
-                   "For the latest accumulation, was data present from all F-Engines \
-                   for all X-Engines",
+                   "For the latest accumulation, was data present from all F-Engines "
+                   "for all X-Engines",
                    name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
                    children=stream.n_substreams)
     ]
