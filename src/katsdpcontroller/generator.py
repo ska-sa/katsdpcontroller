@@ -214,10 +214,6 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     In this case,
     - a 'synchronised' child has a reading of (True, NOMINAL), and
     - an 'unsynchronised' child has a reading of (False, ERROR).
-
-    This aggregate sensor does not make provision for a FAILURE status
-    as this functionality is considered covered in a dedicated Device
-    Status sensor.
     """
 
     def __init__(
