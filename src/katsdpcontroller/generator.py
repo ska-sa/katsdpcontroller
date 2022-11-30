@@ -208,6 +208,59 @@ class SumSensor(SimpleAggregateSensor[int]):
         return (status, self._total)
 
 
+class SyncSensor(SimpleAggregateSensor[bool]):
+    """Aggregate which tracks whether its children are synchronised.
+
+    In this case,
+    - a 'synchronised' child has a reading of (True, NOMINAL), and
+    - an 'unsynchronised' child has a reading of (False, ERROR).
+    """
+
+    def __init__(
+        self, target: SensorSet, sensor_type: Type[bool],
+        name: str, description: str, units: str = "",
+        *,
+        auto_strategy: Optional["SensorSampler.Strategy"] = None,
+        auto_strategy_parameters: Iterable[Any] = (),
+        name_regex: re.Pattern,
+        children: int
+    ) -> None:
+        self.target = target
+        self.name_regex = name_regex
+        self.children = children
+        self._total_in_sync = 0
+
+        super().__init__(
+            target, sensor_type, name, description, units,
+            auto_strategy=auto_strategy,
+            auto_strategy_parameters=auto_strategy_parameters
+        )
+
+    def filter_aggregate(self, sensor: Sensor) -> bool:
+        return bool(self.name_regex.fullmatch(sensor.name))
+
+    def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        assert isinstance(reading.value, bool)
+        if reading.status.valid_value():
+            if reading.value:
+                self._total_in_sync += 1
+            return True
+        return False
+
+    def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
+        assert isinstance(reading.value, bool)
+        if reading.status.valid_value():
+            if reading.value:
+                self._total_in_sync -= 1
+            return True
+        return False
+
+    def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
+        synchronised = self._total_in_sync == self.children
+        status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
+        return (status, synchronised)
+
+
 class TelstateTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph):
         await super().resolve(resolver, graph)
@@ -712,8 +765,13 @@ def _make_xbgpu(
                default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
         SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
-                  name_regex=re.compile(rf"xb\.{stream.name}\.[0-9]+\.xeng-clip-cnt"),
+                  name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
                   children=stream.n_substreams),
+        SyncSensor(sensors, bool, f"{stream.name}-xengs-synchronised",
+                   "For the latest accumulation, was data present from all F-Engines "
+                   "for all X-Engines",
+                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
+                   children=stream.n_substreams),
         data_suspect_sensor
     ]
     for ss in stream_sensors:
