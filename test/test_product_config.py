@@ -2,7 +2,7 @@
 
 import copy
 from unittest import mock
-from typing import Dict, Optional, Any
+from typing import List, Dict, Optional, Any
 
 import jsonschema
 import yarl
@@ -12,6 +12,7 @@ import pytest
 
 from katsdpcontroller import product_config, defaults
 from katsdpcontroller.product_config import (
+    DigRawAntennaVoltageStreamBase,
     DigRawAntennaVoltageStream,
     SimDigRawAntennaVoltageStream,
     AntennaChannelisedVoltageStream,
@@ -245,8 +246,9 @@ class TestCamHttpStream:
 class TestDigRawAntennaVoltageStream:
     """Test :class:`~.DigRawAntennaVoltageStream`."""
 
-    def setup(self):
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sim.dig.raw_antenna_voltage',
             'url': 'spead://239.0.0.0+7:7148',
             'adc_sample_rate': 1712000000.0,
@@ -255,15 +257,15 @@ class TestDigRawAntennaVoltageStream:
             'antenna': 'm000'
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(self, config: Dict[str, Any]) -> None:
         dig = DigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', self.config, [], {}
+            Options(), 'm000h', config, [], {}
         )
-        assert dig.url == yarl.URL(self.config['url'])
-        assert dig.adc_sample_rate == self.config['adc_sample_rate']
-        assert dig.centre_frequency == self.config['centre_frequency']
-        assert dig.band == self.config['band']
-        assert dig.antenna_name == self.config['antenna']
+        assert dig.url == yarl.URL(config['url'])
+        assert dig.adc_sample_rate == config['adc_sample_rate']
+        assert dig.centre_frequency == config['centre_frequency']
+        assert dig.band == config['band']
+        assert dig.antenna_name == config['antenna']
         assert dig.bits_per_sample == 10
         assert dig.data_rate(1.0, 0) == 1712e7
 
@@ -271,8 +273,9 @@ class TestDigRawAntennaVoltageStream:
 class TestSimDigRawAntennaVoltageStream:
     """Test :class:`~.SimDigRawAntennaVoltageStream`."""
 
-    def setup(self):
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sim.dig.raw_antenna_voltage',
             'adc_sample_rate': 1712000000.0,
             'centre_frequency': 1284000000.0,
@@ -280,32 +283,32 @@ class TestSimDigRawAntennaVoltageStream:
             'antenna': _M000.description
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(self, config: Dict[str, Any]) -> None:
         dig = SimDigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', self.config, [], {}
+            Options(), 'm000h', config, [], {}
         )
-        assert dig.adc_sample_rate == self.config['adc_sample_rate']
-        assert dig.centre_frequency == self.config['centre_frequency']
-        assert dig.band == self.config['band']
+        assert dig.adc_sample_rate == config['adc_sample_rate']
+        assert dig.centre_frequency == config['centre_frequency']
+        assert dig.band == config['band']
         assert dig.antenna == _M000
         assert dig.antenna_name == 'm000'
         assert dig.bits_per_sample == 10
         assert dig.data_rate(1.0, 0) == 1712e7
         assert dig.command_line_extra == []
 
-    def test_bad_antenna_description(self) -> None:
+    def test_bad_antenna_description(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="Invalid antenna description 'bad antenna': "):
-            self.config['antenna'] = 'bad antenna'
+            config['antenna'] = 'bad antenna'
             SimDigRawAntennaVoltageStream.from_config(
-                Options(), 'm000h', self.config, [], {}
+                Options(), 'm000h', config, [], {}
             )
 
-    def test_command_line_extra(self) -> None:
-        self.config['command_line_extra'] = ['--extra-arg']
+    def test_command_line_extra(self, config: Dict[str, Any]) -> None:
+        config['command_line_extra'] = ['--extra-arg']
         dig = SimDigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', self.config, [], {}
+            Options(), 'm000h', config, [], {}
         )
-        assert dig.command_line_extra == self.config['command_line_extra']
+        assert dig.command_line_extra == config['command_line_extra']
 
 
 class TestAntennaChannelisedVoltageStream:
@@ -372,128 +375,155 @@ def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream
 class TestGpucbfAntennaChanneliseVoltageStream:
     """Test :class:`~.GpucbfAntennaChannelisedVoltageStream`."""
 
-    def setup(self) -> None:
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'gpucbf.antenna_channelised_voltage',
             'src_streams': ['m000h', 'm000v', 'm002h', 'm002v'],
             'n_chans': 4096
         }
+
+    @pytest.fixture
+    def src_streams(self, config: Dict[str, Any]) -> List[DigRawAntennaVoltageStreamBase]:
         # Use a real digitiser for one of them, to test mixing
-        self.src_streams = [
+        return [
             (
                 make_sim_dig_raw_antenna_voltage(name)
                 if name != 'm002h'
                 else make_dig_raw_antenna_voltage(name)
             )
-            for name in self.config['src_streams']
+            for name in config['src_streams']
         ]
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
-            Options(), 'wide1_acv', self.config, self.src_streams, {}
+            Options(), 'wide1_acv', config, src_streams, {}
         )
         assert acv.name == 'wide1_acv'
         assert acv.antennas == ['m000', 'm002']
-        assert acv.band == self.src_streams[0].band
-        assert acv.n_chans == self.config['n_chans']
-        assert acv.bandwidth == self.src_streams[0].adc_sample_rate / 2
-        assert acv.centre_frequency == self.src_streams[0].centre_frequency
-        assert acv.adc_sample_rate == self.src_streams[0].adc_sample_rate
-        assert acv.n_samples_between_spectra == 2 * self.config['n_chans']
-        assert acv.sources(0) == tuple(self.src_streams[0:2])
-        assert acv.sources(1) == tuple(self.src_streams[2:4])
+        assert acv.band == src_streams[0].band
+        assert acv.n_chans == config['n_chans']
+        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2
+        assert acv.centre_frequency == src_streams[0].centre_frequency
+        assert acv.adc_sample_rate == src_streams[0].adc_sample_rate
+        assert acv.n_samples_between_spectra == 2 * config['n_chans']
+        assert acv.sources(0) == tuple(src_streams[0:2])
+        assert acv.sources(1) == tuple(src_streams[2:4])
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
-        assert acv.input_labels == self.config['src_streams']
+        assert acv.input_labels == config['src_streams']
         assert acv.w_cutoff == 1.0  # Default value
         assert acv.command_line_extra == []
 
-    def test_n_chans_not_power_of_two(self) -> None:
+    def test_n_chans_not_power_of_two(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         for n_chans in [0, 3, 17]:
             with pytest.raises(ValueError):
-                self.config['n_chans'] = n_chans
+                config['n_chans'] = n_chans
                 GpucbfAntennaChannelisedVoltageStream.from_config(
-                    Options(), 'wide1_acv', self.config, self.src_streams, {}
+                    Options(), 'wide1_acv', config, src_streams, {}
                 )
 
-    def test_too_few_channels(self) -> None:
+    def test_too_few_channels(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         with pytest.raises(ValueError):
-            self.config['n_chans'] = 2
+            config['n_chans'] = 2
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_src_streams_odd(self) -> None:
+    def test_src_streams_odd(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         with pytest.raises(ValueError, match='does not have an even number of elements'):
-            del self.config['src_streams'][-1]
-            del self.src_streams[-1]
+            del config['src_streams'][-1]
+            del src_streams[-1]
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_band_mismatch(self) -> None:
+    def test_band_mismatch(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         with pytest.raises(ValueError, match=r'Inconsistent bands \(both l and u\)'):
-            self.src_streams[1].band = 'u'
+            src_streams[1].band = 'u'
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_adc_sample_rate_mismatch(self) -> None:
+    def test_adc_sample_rate_mismatch(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         with pytest.raises(
                 ValueError,
                 match=r'Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)'):
-            self.src_streams[1].adc_sample_rate = 1.0
+            src_streams[1].adc_sample_rate = 1.0
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_centre_frequency_mismatch(self) -> None:
+    def test_centre_frequency_mismatch(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
         with pytest.raises(
                 ValueError,
                 match=r'Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)'):
-            self.src_streams[-1].centre_frequency = 1.0
+            src_streams[-1].centre_frequency = 1.0
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_input_labels(self) -> None:
-        self.config['input_labels'] = ['m900h', 'm900v', 'm901h', 'm901v']
+    def test_input_labels(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
+        config['input_labels'] = ['m900h', 'm900v', 'm901h', 'm901v']
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
-            Options(), 'wide1_acv', self.config, self.src_streams, {}
+            Options(), 'wide1_acv', config, src_streams, {}
         )
-        assert acv.input_labels == self.config['input_labels']
+        assert acv.input_labels == config['input_labels']
 
-    def test_bad_input_labels(self) -> None:
-        self.config['input_labels'] = ['m900h']
+    def test_bad_input_labels(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
+        config['input_labels'] = ['m900h']
         with pytest.raises(ValueError, match='input_labels has 1 elements, expected 4'):
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
-        self.config['input_labels'] = ['m900h'] * 4
+        config['input_labels'] = ['m900h'] * 4
         with pytest.raises(ValueError, match='are not unique'):
             GpucbfAntennaChannelisedVoltageStream.from_config(
-                Options(), 'wide1_acv', self.config, self.src_streams, {}
+                Options(), 'wide1_acv', config, src_streams, {}
             )
 
-    def test_w_cutoff(self) -> None:
-        self.config['w_cutoff'] = 0.9
+    def test_w_cutoff(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
+        config['w_cutoff'] = 0.9
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
-            Options(), 'wide1_acv', self.config, self.src_streams, {}
+            Options(), 'wide1_acv', config, src_streams, {}
         )
         assert acv.w_cutoff == 0.9
 
-    def test_command_line_extra(self) -> None:
-        self.config['command_line_extra'] = ['--extra-arg']
+    def test_command_line_extra(
+        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+    ) -> None:
+        config['command_line_extra'] = ['--extra-arg']
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
-            Options(), 'wide1_acv', self.config, self.src_streams, {}
+            Options(), 'wide1_acv', config, src_streams, {}
         )
-        assert acv.command_line_extra == self.config['command_line_extra']
+        assert acv.command_line_extra == config['command_line_extra']
 
 
 class TestSimAntennaChannelisedVoltageStream:
     """Test :class:`~.SimAntennaChannelisedVoltageStream`."""
 
-    def setup(self) -> None:
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sim.cbf.antenna_channelised_voltage',
             'antennas': [
                 _M000.description,
@@ -506,9 +536,9 @@ class TestSimAntennaChannelisedVoltageStream:
             'n_chans': 32768
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(self, config: Dict[str, Any]) -> None:
         acv = SimAntennaChannelisedVoltageStream.from_config(
-            Options(), 'narrow1_acv', self.config, [], {}
+            Options(), 'narrow1_acv', config, [], {}
         )
         assert acv.name == 'narrow1_acv'
         assert acv.src_streams == []
@@ -521,18 +551,18 @@ class TestSimAntennaChannelisedVoltageStream:
         assert acv.adc_sample_rate == 1712e6
         assert acv.n_samples_between_spectra == 524288
 
-    def test_bad_bandwidth_ratio(self) -> None:
+    def test_bad_bandwidth_ratio(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match='not a multiple of bandwidth'):
-            self.config['bandwidth'] = 108e6
+            config['bandwidth'] = 108e6
             SimAntennaChannelisedVoltageStream.from_config(
-                Options(), 'narrow1_acv', self.config, [], {}
+                Options(), 'narrow1_acv', config, [], {}
             )
 
-    def test_bad_antenna_description(self) -> None:
+    def test_bad_antenna_description(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="Invalid antenna description 'bad antenna': "):
-            self.config['antennas'][0] = 'bad antenna'
+            config['antennas'][0] = 'bad antenna'
             SimAntennaChannelisedVoltageStream.from_config(
-                Options(), 'narrow1_acv', self.config, [], {}
+                Options(), 'narrow1_acv', config, [], {}
             )
 
 
@@ -579,32 +609,44 @@ def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltage
 class TestBaselineCorrelationProductsStream:
     """Test :class:`~.BaselineCorrelationProductsStream`."""
 
-    def setup(self) -> None:
-        self.acv = make_antenna_channelised_voltage()
-        self.config = {
+    @pytest.fixture
+    def acv(self) -> AntennaChannelisedVoltageStream:
+        return make_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'cbf.baseline_correlation_products',
             'src_streams': ['narrow1_acv'],
             'url': 'spead://239.1.0.0+7:7148',
             'instrument_dev_name': 'narrow2'
         }
-        self.sensors = {
+
+    @pytest.fixture
+    def sensors(self) -> Dict[str, Any]:
+        return {
             'int_time': 0.5,
             'n_bls': 40,
             'xeng_out_bits_per_sample': 32,
             'n_chans_per_substream': 2048
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self,
+        acv: AntennaChannelisedVoltageStream,
+        config: Dict[str, Any],
+        sensors: Dict[str, Any]
+    ) -> None:
         bcp = BaselineCorrelationProductsStream.from_config(
-            Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+            Options(), 'narrow2_bcp', config, [acv], sensors
         )
         assert bcp.name == 'narrow2_bcp'
-        assert bcp.src_streams == [self.acv]
+        assert bcp.src_streams == [acv]
         assert bcp.int_time == 0.5
         assert bcp.n_baselines == 40
         assert bcp.n_vis == 40 * 32768
         assert bcp.size == 40 * 32768 * 8
-        assert bcp.antenna_channelised_voltage is self.acv
+        assert bcp.antenna_channelised_voltage is acv
         assert bcp.antennas == ['m000', 'another_antenna']
         assert bcp.n_chans == 32768
         assert bcp.n_chans_per_endpoint == 4096
@@ -616,21 +658,31 @@ class TestBaselineCorrelationProductsStream:
         assert bcp.n_samples_between_spectra == 524288
         assert bcp.data_rate(1.0, 0) == 40 * 32768 * 8 * 2 * 8
 
-    def test_bad_endpoint_count(self) -> None:
-        self.config['url'] = 'spead://239.1.0.0+8:7148'
+    def test_bad_endpoint_count(
+        self,
+        acv: AntennaChannelisedVoltageStream,
+        config: Dict[str, Any],
+        sensors: Dict[str, Any]
+    ) -> None:
+        config['url'] = 'spead://239.1.0.0+8:7148'
         with pytest.raises(ValueError,
                            match=r'n_chans \(32768\) is not a multiple of endpoints \(9\)'):
             BaselineCorrelationProductsStream.from_config(
-                Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+                Options(), 'narrow2_bcp', config, [acv], sensors
             )
 
-    def test_bad_substream_count(self) -> None:
-        self.config['url'] = 'spead://239.1.0.0+255:7148'
+    def test_bad_substream_count(
+        self,
+        acv: AntennaChannelisedVoltageStream,
+        config: Dict[str, Any],
+        sensors: Dict[str, Any]
+    ) -> None:
+        config['url'] = 'spead://239.1.0.0+255:7148'
         with pytest.raises(ValueError,
                            match=r'channels per endpoint \(128\) is not a multiple of '
                                  r'channels per substream \(2048\)'):
             BaselineCorrelationProductsStream.from_config(
-                Options(), 'narrow2_bcp', self.config, [self.acv], self.sensors
+                Options(), 'narrow2_bcp', config, [acv], sensors
             )
 
 
@@ -641,17 +693,23 @@ class TestGpucbfBaselineCorrelationProductsStream:
     because a lot of those tests are actually testing the common base class.
     """
 
-    def setup(self) -> None:
-        self.acv = make_gpucbf_antenna_channelised_voltage()
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def acv(self) -> GpucbfAntennaChannelisedVoltageStream:
+        return make_gpucbf_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'gpucbf.baseline_correlation_products',
             'src_streams': 'wide1_acv',
             'int_time': 0.5
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
         bcp = GpucbfBaselineCorrelationProductsStream.from_config(
-            Options(), 'wide2_bcp', self.config, [self.acv], {}
+            Options(), 'wide2_bcp', config, [acv], {}
         )
         # Note: the test values will probably need to be updated as the
         # implementation evolves.
@@ -660,12 +718,14 @@ class TestGpucbfBaselineCorrelationProductsStream:
         assert bcp.int_time == 104448 * 4096 / 856e6
         assert bcp.command_line_extra == []
 
-    def test_command_line_extra(self) -> None:
-        self.config['command_line_extra'] = ['--extra-arg']
+    def test_command_line_extra(
+        self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        config['command_line_extra'] = ['--extra-arg']
         bcp = GpucbfBaselineCorrelationProductsStream.from_config(
-            Options(), 'wide2_bcp', self.config, [self.acv], {}
+            Options(), 'wide2_bcp', config, [acv], {}
         )
-        assert bcp.command_line_extra == self.config['command_line_extra']
+        assert bcp.command_line_extra == config['command_line_extra']
 
 
 class TestSimBaselineCorrelationProductsStream:
@@ -675,9 +735,13 @@ class TestSimBaselineCorrelationProductsStream:
     because a lot of those tests are actually testing the common base class.
     """
 
-    def setup(self):
-        self.acv = make_sim_antenna_channelised_voltage()
-        self.config = {
+    @pytest.fixture
+    def acv(self) -> SimAntennaChannelisedVoltageStream:
+        return make_sim_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sim.cbf.baseline_correlation_products',
             'src_streams': ['narrow1_acv'],
             'n_endpoints': 16,
@@ -685,19 +749,23 @@ class TestSimBaselineCorrelationProductsStream:
             'n_chans_per_substream': 8
         }
 
-    def test_from_config(self):
+    def test_from_config(
+        self, acv: SimAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
         bcp = SimBaselineCorrelationProductsStream.from_config(
-            Options(), 'narrow2_bcp', self.config, [self.acv], {}
+            Options(), 'narrow2_bcp', config, [acv], {}
         )
         assert bcp.n_chans_per_substream == 8
         assert bcp.n_substreams == 64
         # Check that int_time is rounded to nearest multiple of 512
         assert bcp.int_time == 1024.0
 
-    def test_defaults(self):
-        del self.config['n_chans_per_substream']
+    def test_defaults(
+        self, acv: SimAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        del config['n_chans_per_substream']
         bcp = SimBaselineCorrelationProductsStream.from_config(
-            Options(), 'narrow2_bcp', self.config, [self.acv], {}
+            Options(), 'narrow2_bcp', config, [acv], {}
         )
         assert bcp.n_chans_per_substream == 32
         assert bcp.n_substreams == 16
@@ -706,23 +774,32 @@ class TestSimBaselineCorrelationProductsStream:
 class TestTiedArrayChannelisedVoltageStream:
     """Test :class:`~.TiedArrayChannelisedVoltageStream`."""
 
-    def setup(self) -> None:
-        self.acv = make_antenna_channelised_voltage()
-        self.config = {
+    @pytest.fixture
+    def acv(self) -> AntennaChannelisedVoltageStream:
+        return make_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'cbf.tied_array_channelised_voltage',
             'src_streams': ['narrow1_acv'],
             'url': 'spead://239.2.0.0+255:7148',
             'instrument_dev_name': 'beam'
         }
-        self.sensors = {
+
+    @pytest.fixture
+    def sensors(self) -> Dict[str, Any]:
+        return {
             'beng_out_bits_per_sample': 16,
             'spectra_per_heap': 256,
             'n_chans_per_substream': 64
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, acv: AntennaChannelisedVoltageStream, config: Dict[str, Any], sensors: Dict[str, Any],
+    ) -> None:
         tacv = TiedArrayChannelisedVoltageStream.from_config(
-            Options(), 'beam_0x', self.config, [self.acv], self.sensors
+            Options(), 'beam_0x', config, [acv], sensors
         )
         assert tacv.name == 'beam_0x'
         assert tacv.bits_per_sample == 16
@@ -730,7 +807,7 @@ class TestTiedArrayChannelisedVoltageStream:
         assert tacv.spectra_per_heap == 256
         assert tacv.instrument_dev_name == 'beam'
         assert tacv.size == 32768 * 256 * 2 * 2
-        assert tacv.antenna_channelised_voltage is self.acv
+        assert tacv.antenna_channelised_voltage is acv
         assert tacv.bandwidth == 107e6
         assert tacv.antennas == ['m000', 'another_antenna']
         assert round(abs(tacv.int_time * 1712e6-524288 * 256), 7) == 0
@@ -739,9 +816,13 @@ class TestTiedArrayChannelisedVoltageStream:
 class TestSimTiedArrayChannelisedVoltageStream:
     """Test :class:`~.SimTiedArrayChannelisedVoltageStream`."""
 
-    def setup(self) -> None:
-        self.acv = make_sim_antenna_channelised_voltage()
-        self.config = {
+    @pytest.fixture
+    def acv(self) -> SimAntennaChannelisedVoltageStream:
+        return make_sim_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sim.cbf.tied_array_channelised_voltage',
             'src_streams': ['narrow1_acv'],
             'n_endpoints': 16,
@@ -749,33 +830,37 @@ class TestSimTiedArrayChannelisedVoltageStream:
             'n_chans_per_substream': 4
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, acv: SimAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
         tacv = SimTiedArrayChannelisedVoltageStream.from_config(
-            Options(), 'beam_0x', self.config, [self.acv], {}
+            Options(), 'beam_0x', config, [acv], {}
         )
         assert tacv.name == 'beam_0x'
         assert tacv.bits_per_sample == 8
         assert tacv.n_chans_per_substream == 4
         assert tacv.spectra_per_heap == 256
         assert tacv.size == 512 * 256 * 2
-        assert tacv.antenna_channelised_voltage is self.acv
+        assert tacv.antenna_channelised_voltage is acv
         assert tacv.bandwidth == 256
         assert tacv.antennas == ['m000', 'm002']
         assert tacv.int_time == 512.0
 
-    def test_defaults(self) -> None:
-        del self.config['spectra_per_heap']
-        del self.config['n_chans_per_substream']
+    def test_defaults(
+        self, acv: SimAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        del config['spectra_per_heap']
+        del config['n_chans_per_substream']
         tacv = SimTiedArrayChannelisedVoltageStream.from_config(
-            Options(), 'beam_0x', self.config, [self.acv], {}
+            Options(), 'beam_0x', config, [acv], {}
         )
         assert tacv.spectra_per_heap == defaults.KATCBFSIM_SPECTRA_PER_HEAP
         assert tacv.n_chans_per_substream == 32
 
 
 def make_baseline_correlation_products(
-        antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None
-        ) -> BaselineCorrelationProductsStream:
+    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None
+) -> BaselineCorrelationProductsStream:
     if antenna_channelised_voltage is None:
         antenna_channelised_voltage = make_antenna_channelised_voltage()
     return BaselineCorrelationProductsStream(
@@ -807,9 +892,13 @@ def make_tied_array_channelised_voltage(
 class TestVisStream:
     """Test :class:`~.VisStream`."""
 
-    def setup(self) -> None:
-        self.bcp = make_baseline_correlation_products()
-        self.config = {
+    @pytest.fixture
+    def bcp(self) -> BaselineCorrelationProductsStream:
+        return make_baseline_correlation_products()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.vis',
             'src_streams': ['narrow1_bcp'],
             'output_int_time': 1.1,
@@ -819,15 +908,17 @@ class TestVisStream:
             'archive': False
         }
 
-    def test_from_config(self) -> None:
-        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+    def test_from_config(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
+        vis = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
         assert vis.int_time == 1.0   # Rounds to nearest multiple of CBF int_time
         assert vis.output_channels == (128, 4096)
         assert vis.continuum_factor == 2
         assert vis.excise is False
         assert vis.archive is False
         assert vis.n_servers == 4
-        assert vis.baseline_correlation_products is self.bcp
+        assert vis.baseline_correlation_products is bcp
         assert vis.n_chans == 1984
         assert vis.n_spectral_chans == 3968
         assert vis.n_spectral_vis == 3968 * 12
@@ -840,124 +931,153 @@ class TestVisStream:
         assert vis.data_rate(1.0, 0) == vis.size / vis.int_time * 8
         assert vis.flag_data_rate(1.0, 0) == vis.flag_size / vis.int_time * 8
 
-    def test_defaults(self) -> None:
-        del self.config['output_channels']
-        del self.config['excise']
-        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+    def test_defaults(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
+        del config['output_channels']
+        del config['excise']
+        vis = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
         assert vis.output_channels == (0, 32768)
         assert vis.excise is True
 
-    def test_bad_continuum_factor(self) -> None:
+    def test_bad_continuum_factor(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
         n_servers = 4
         continuum_factor = 3
         alignment = n_servers * continuum_factor
-        self.config['continuum_factor'] = continuum_factor
+        config['continuum_factor'] = continuum_factor
         with pytest.raises(
                 ValueError,
-                match=fr'n_chans \({self.bcp.n_chans}\) is not a multiple of '
+                match=fr'n_chans \({bcp.n_chans}\) is not a multiple of '
                       fr'required alignment \({alignment}\)'):
-            VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+            VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
 
-    def test_misaligned_output_channels(self):
-        self.config['continuum_factor'] = 2048
-        vis = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+    def test_misaligned_output_channels(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
+        config['continuum_factor'] = 2048
+        vis = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
         assert vis.output_channels == (0, 8192)
 
-    def test_compatible(self) -> None:
-        vis1 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
-        self.config['continuum_factor'] = 1
-        self.config['archive'] = True
-        vis2 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
-        del self.config['output_channels']
-        vis3 = VisStream.from_config(Options(), 'sdp_l0', self.config, [self.bcp], {})
+    def test_compatible(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
+        vis1 = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
+        config['continuum_factor'] = 1
+        config['archive'] = True
+        vis2 = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
+        del config['output_channels']
+        vis3 = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
         assert vis1.compatible(vis1)
         assert vis1.compatible(vis2)
         assert not vis1.compatible(vis3)
 
-    def test_develop(self) -> None:
+    def test_develop(
+        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
+    ) -> None:
         options = Options(develop=True)
-        vis = VisStream.from_config(options, 'sdp_l0', self.config, [self.bcp], {})
+        vis = VisStream.from_config(options, 'sdp_l0', config, [bcp], {})
         assert vis.n_servers == 2
 
 
 class TestBeamformerStream:
     """Test :class:`~.BeamformerStream`."""
 
-    def setup(self) -> None:
-        self.acv = make_antenna_channelised_voltage()
-        self.tacv = [
+    @pytest.fixture
+    def tacv(self) -> List[TiedArrayChannelisedVoltageStream]:
+        acv = make_antenna_channelised_voltage()
+        return [
             make_tied_array_channelised_voltage(
-                self.acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
             make_tied_array_channelised_voltage(
-                self.acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         ]
-        self.config = {
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.beamformer',
             'src_streams': ['beam_0x', 'beam_0y']
         }
 
-    def test_from_config(self) -> None:
-        bf = BeamformerStream.from_config(Options(), 'beamformer', self.config, self.tacv, {})
+    def test_from_config(
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        bf = BeamformerStream.from_config(Options(), 'beamformer', config, tacv, {})
         assert bf.name == 'beamformer'
         assert bf.antenna_channelised_voltage.name == 'narrow1_acv'
-        assert bf.tied_array_channelised_voltage == self.tacv
+        assert bf.tied_array_channelised_voltage == tacv
         assert bf.n_chans == 32768
 
-    def test_mismatched_sources(self) -> None:
+    def test_mismatched_sources(
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
         acv = make_antenna_channelised_voltage(antennas=['m012', 's0013'])
-        self.tacv[1] = make_tied_array_channelised_voltage(
+        tacv[1] = make_tied_array_channelised_voltage(
             acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         with pytest.raises(ValueError,
                            match='Source streams do not come from the same channeliser'):
-            BeamformerStream.from_config(Options(), 'beamformer', self.config, self.tacv, {})
+            BeamformerStream.from_config(Options(), 'beamformer', config, tacv, {})
 
 
 class TestBeamformerEngineeringStream:
-    def setup(self) -> None:
-        self.acv = make_antenna_channelised_voltage()
-        self.tacv = [
+    # TODO: this is duplicated from TestBeamformerStream
+    @pytest.fixture
+    def tacv(self) -> List[TiedArrayChannelisedVoltageStream]:
+        acv = make_antenna_channelised_voltage()
+        return [
             make_tied_array_channelised_voltage(
-                self.acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
             make_tied_array_channelised_voltage(
-                self.acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
         ]
-        self.config = {
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.beamformer_engineering',
             'src_streams': ['beam_0x', 'beam_0y'],
             'output_channels': [128, 1024],
             'store': 'ram'
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
         bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', self.config, self.tacv, {}
+            Options(), 'beamformer', config, tacv, {}
         )
         assert bf.name == 'beamformer'
         assert bf.antenna_channelised_voltage.name == 'narrow1_acv'
-        assert bf.tied_array_channelised_voltage == self.tacv
+        assert bf.tied_array_channelised_voltage == tacv
         assert bf.store == 'ram'
         assert bf.output_channels == (128, 1024)
         assert bf.n_chans == 896
 
-    def test_defaults(self) -> None:
-        del self.config['output_channels']
+    def test_defaults(
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        del config['output_channels']
         bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', self.config, self.tacv, {}
+            Options(), 'beamformer', config, tacv, {}
         )
         assert bf.output_channels == (0, 32768)
         assert bf.n_chans == 32768
 
-    def test_misaligned_channels(self) -> None:
-        self.config['output_channels'] = [1, 2]
+    def test_misaligned_channels(
+        self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        config['output_channels'] = [1, 2]
         bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', self.config, self.tacv, {}
+            Options(), 'beamformer', config, tacv, {}
         )
         assert bf.output_channels == (0, 128)
 
 
 def make_vis(
         baseline_correlation_products: Optional[BaselineCorrelationProductsStream] = None
-        ) -> product_config.VisStream:
+        ) -> VisStream:
     if baseline_correlation_products is None:
         baseline_correlation_products = make_baseline_correlation_products()
     return VisStream(
@@ -970,17 +1090,21 @@ def make_vis(
     )
 
 
-def make_vis_4ant() -> product_config.VisStream:
+def make_vis_4ant() -> VisStream:
     acv = make_antenna_channelised_voltage(['m000', 'm001', 's0002', 'another_antenna'])
     bcp = make_baseline_correlation_products(acv)
     return make_vis(bcp)
 
 
 class TestCalStream:
-    def setup(self) -> None:
+    @pytest.fixture
+    def vis(self) -> VisStream:
         # The default has only 2 antennas, but we need 4 to make it legal
-        self.vis = make_vis_4ant()
-        self.config: Dict[str, Any] = {
+        return make_vis_4ant()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.cal',
             'src_streams': ['sdp_l0'],
             'parameters': {'g_solint': 2.0},
@@ -988,33 +1112,34 @@ class TestCalStream:
             'max_scans': 100
         }
 
-    def test_from_config(self) -> None:
-        cal = CalStream.from_config(Options(), 'cal', self.config, [self.vis], {})
+    def test_from_config(self, vis: VisStream, config: Dict[str, Any]) -> None:
+        cal = CalStream.from_config(Options(), 'cal', config, [vis], {})
         assert cal.name == 'cal'
-        assert cal.vis is self.vis
+        assert cal.vis is vis
         # Make sure it's not referencing the original
-        self.config['parameters'].clear()
+        config['parameters'].clear()
         assert cal.parameters == {'g_solint': 2.0}
         assert cal.buffer_time == 600.0
         assert cal.max_scans == 100
         assert cal.n_antennas == 4
         assert cal.slots == 75
 
-    def test_defaults(self) -> None:
-        del self.config['parameters']
-        del self.config['buffer_time']
-        del self.config['max_scans']
-        cal = CalStream.from_config(Options(), 'cal', self.config, [self.vis], {})
+    def test_defaults(self, vis: VisStream, config: Dict[str, Any]) -> None:
+        del config['parameters']
+        del config['buffer_time']
+        del config['max_scans']
+        cal = CalStream.from_config(Options(), 'cal', config, [vis], {})
         assert cal.parameters == {}
         assert cal.buffer_time == defaults.CAL_BUFFER_TIME
         assert cal.max_scans == defaults.CAL_MAX_SCANS
 
-    def test_too_few_antennas(self) -> None:
+    def test_too_few_antennas(self, config: Dict[str, Any]) -> None:
         vis = make_vis()
         with pytest.raises(ValueError, match='At least 4 antennas required but only 2 found'):
-            CalStream.from_config(Options(), 'cal', self.config, [vis], {})
+            CalStream.from_config(Options(), 'cal', config, [vis], {})
 
 
+@pytest.fixture(name="cal")
 def make_cal(vis: Optional[VisStream] = None) -> CalStream:
     if vis is None:
         vis = make_vis_4ant()
@@ -1029,53 +1154,53 @@ def make_cal(vis: Optional[VisStream] = None) -> CalStream:
 class TestFlagsStream:
     """Test :class:`~.FlagsStream`."""
 
-    def setup(self) -> None:
-        self.cal = make_cal()
-        self.vis = self.cal.vis
-        self.config = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.flags',
             'src_streams': ['sdp_l0', 'cal'],
             'rate_ratio': 10.0,
             'archive': True
         }
 
-    def test_from_config(self) -> None:
-        flags = FlagsStream.from_config(Options(), 'flags', self.config, [self.vis, self.cal], {})
+    def test_from_config(self, cal: CalStream, config: Dict[str, Any]) -> None:
+        vis = cal.vis
+        flags = FlagsStream.from_config(Options(), 'flags', config, [vis, cal], {})
         assert flags.name == 'flags'
-        assert flags.cal == self.cal
-        assert flags.vis == self.vis
-        assert flags.n_chans == self.vis.n_chans
-        assert flags.n_baselines == self.vis.n_baselines
-        assert flags.n_vis == self.vis.n_vis
-        assert flags.size == self.vis.flag_size
-        assert flags.data_rate() == self.vis.flag_data_rate() * 10.0
-        assert flags.int_time == self.vis.int_time
+        assert flags.cal == cal
+        assert flags.vis == vis
+        assert flags.n_chans == vis.n_chans
+        assert flags.n_baselines == vis.n_baselines
+        assert flags.n_vis == vis.n_vis
+        assert flags.size == vis.flag_size
+        assert flags.data_rate() == vis.flag_data_rate() * 10.0
+        assert flags.int_time == vis.int_time
 
-    def test_defaults(self) -> None:
-        del self.config['rate_ratio']
-        flags = FlagsStream.from_config(Options(), 'flags', self.config, [self.vis, self.cal], {})
+    def test_defaults(self, cal: CalStream, config: Dict[str, Any]) -> None:
+        del config['rate_ratio']
+        flags = FlagsStream.from_config(Options(), 'flags', config, [cal.vis, cal], {})
         assert flags.rate_ratio == defaults.FLAGS_RATE_RATIO
 
-    def test_incompatible_vis(self) -> None:
+    def test_incompatible_vis(self, cal: CalStream, config: Dict[str, Any]) -> None:
         vis = make_vis()
         vis.name = 'bad'
         with pytest.raises(ValueError, match='src_streams bad, sdp_l0 are incompatible'):
-            FlagsStream.from_config(Options(), 'flags', self.config, [vis, self.cal], {})
+            FlagsStream.from_config(Options(), 'flags', config, [vis, cal], {})
 
-    def test_bad_continuum_factor(self) -> None:
+    def test_bad_continuum_factor(self, cal: CalStream, config: Dict[str, Any]) -> None:
         vis = make_vis_4ant()
         # Need to have the same source stream to be compatible, not just a copy
-        vis.src_streams = list(self.vis.src_streams)
+        vis.src_streams = list(cal.vis.src_streams)
         vis.name = 'bad'
-        self.vis.continuum_factor = 4
+        cal.vis.continuum_factor = 4
         with pytest.raises(
                 ValueError,
                 match='src_streams bad, sdp_l0 have incompatible continuum factors 1, 4'):
-            FlagsStream.from_config(Options(), 'flags', self.config, [vis, self.cal], {})
+            FlagsStream.from_config(Options(), 'flags', config, [vis, cal], {})
 
 
-def make_flags() -> FlagsStream:
-    cal = make_cal()
+@pytest.fixture(name="flags")
+def make_flags(cal: CalStream) -> FlagsStream:
     cont_vis = VisStream(
         'sdp_l0_continuum', [cal.vis.baseline_correlation_products],
         int_time=cal.vis.int_time,
@@ -1094,9 +1219,9 @@ def make_flags() -> FlagsStream:
 class TestContinuumImageStream:
     """Test :class:`~.ContinuumImageStream`."""
 
-    def setup(self) -> None:
-        self.flags = make_flags()
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.continuum_image',
             'src_streams': ['sdp_l0_continuum_flags'],
             'uvblavg_parameters': {'foo': 'bar'},
@@ -1105,29 +1230,29 @@ class TestContinuumImageStream:
             'min_time': 100.0
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(self, flags: FlagsStream, config: Dict[str, Any]) -> None:
         cont = ContinuumImageStream.from_config(
-            Options(), 'continuum_image', self.config, [self.flags], {}
+            Options(), 'continuum_image', config, [flags], {}
         )
         assert cont.name == 'continuum_image'
         # Make sure that the value is copied
-        self.config['uvblavg_parameters'].clear()
-        self.config['mfimage_parameters'].clear()
+        config['uvblavg_parameters'].clear()
+        config['mfimage_parameters'].clear()
         assert cont.uvblavg_parameters == {'foo': 'bar'}
         assert cont.mfimage_parameters == {'abc': 123}
         assert cont.max_realtime == 10000.0
         assert cont.min_time == 100.0
-        assert cont.flags is self.flags
-        assert cont.cal is self.flags.cal
-        assert cont.vis is self.flags.vis
+        assert cont.flags is flags
+        assert cont.cal is flags.cal
+        assert cont.vis is flags.vis
 
-    def test_defaults(self) -> None:
-        del self.config['uvblavg_parameters']
-        del self.config['mfimage_parameters']
-        del self.config['max_realtime']
-        del self.config['min_time']
+    def test_defaults(self, flags: FlagsStream, config: Dict[str, Any]) -> None:
+        del config['uvblavg_parameters']
+        del config['mfimage_parameters']
+        del config['max_realtime']
+        del config['min_time']
         cont = ContinuumImageStream.from_config(
-            Options(), 'continuum_image', self.config, [self.flags], {}
+            Options(), 'continuum_image', config, [flags], {}
         )
         assert cont.uvblavg_parameters == {}
         assert cont.mfimage_parameters == {}
@@ -1135,9 +1260,8 @@ class TestContinuumImageStream:
         assert cont.min_time == defaults.CONTINUUM_MIN_TIME
 
 
-def make_continuum_image(flags: Optional[FlagsStream] = None) -> ContinuumImageStream:
-    if flags is None:
-        flags = make_flags()
+@pytest.fixture(name="continuum_image")
+def make_continuum_image(flags: FlagsStream) -> ContinuumImageStream:
     return ContinuumImageStream(
         'continuum_image', [flags],
         uvblavg_parameters={},
@@ -1150,10 +1274,9 @@ def make_continuum_image(flags: Optional[FlagsStream] = None) -> ContinuumImageS
 class TestSpectralImageStream:
     """Test :class:`~.SpectralImageStream`."""
 
-    def setup(self) -> None:
-        self.flags = make_flags()
-        self.continuum_image = make_continuum_image()
-        self.config: Dict[str, Any] = {
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
             'type': 'sdp.spectral_image',
             'src_streams': ['sdp_l0_continuum_flags', 'continuum_image'],
             'output_channels': [64, 100],
@@ -1161,390 +1284,403 @@ class TestSpectralImageStream:
             'parameters': {'q_fov': 2.0}
         }
 
-    def test_from_config(self) -> None:
+    def test_from_config(
+        self, flags: FlagsStream, continuum_image: ContinuumImageStream, config: Dict[str, Any]
+    ) -> None:
         spec = SpectralImageStream.from_config(
-            Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
+            Options(), 'spectral_image', config, [flags, continuum_image], {}
         )
         # Check that it gets copied
-        config = copy.deepcopy(self.config)
-        self.config['parameters'].clear()
+        orig_config = copy.deepcopy(config)
+        config['parameters'].clear()
         assert spec.name == 'spectral_image'
-        assert spec.output_channels == tuple(config['output_channels'])
-        assert spec.parameters == config['parameters']
+        assert spec.output_channels == tuple(orig_config['output_channels'])
+        assert spec.parameters == orig_config['parameters']
         assert spec.n_chans == 36
-        assert spec.flags is self.flags
-        assert spec.vis is self.flags.vis
-        assert spec.continuum is self.continuum_image
+        assert spec.flags is flags
+        assert spec.vis is flags.vis
+        assert spec.continuum is continuum_image
 
-    def test_no_continuum(self) -> None:
-        self.config['src_streams'] = ['sdp_l0_continuum_flags']
+    def test_no_continuum(
+        self, flags: FlagsStream, continuum_image: ContinuumImageStream, config: Dict[str, Any]
+    ) -> None:
+        config['src_streams'] = ['sdp_l0_continuum_flags']
         spec = SpectralImageStream.from_config(
-            Options(), 'spectral_image', self.config, [self.flags], {}
+            Options(), 'spectral_image', config, [flags], {}
         )
         assert spec.continuum is None
 
-    def test_defaults(self) -> None:
-        del self.config['parameters']
-        del self.config['output_channels']
-        del self.config['min_time']
+    def test_defaults(
+        self, flags: FlagsStream, continuum_image: ContinuumImageStream, config: Dict[str, Any]
+    ) -> None:
+        del config['parameters']
+        del config['output_channels']
+        del config['min_time']
         spec = SpectralImageStream.from_config(
-            Options(), 'spectral_image', self.config, [self.flags, self.continuum_image], {}
+            Options(), 'spectral_image', config, [flags, continuum_image], {}
         )
         assert spec.output_channels == (0, 1024)
         assert spec.min_time == defaults.SPECTRAL_MIN_TIME
         assert spec.parameters == {}
 
 
-class Fixture:
-    """Base class providing some sample config dicts"""
+@pytest.fixture
+def config() -> Dict[str, Any]:
+    return {
+        "version": "3.1",
+        "inputs": {
+            "camdata": {
+                "type": "cam.http",
+                "url": "http://10.8.67.235/api/client/1"
+            },
+            "i0_antenna_channelised_voltage": {
+                "type": "cbf.antenna_channelised_voltage",
+                "url": "spead://239.2.1.150+15:7148",
+                "antennas": ["m000", "m001", "s0003", "another_antenna"],
+                "instrument_dev_name": "i0"
+            },
+            "i0_baseline_correlation_products": {
+                "type": "cbf.baseline_correlation_products",
+                "url": "spead://239.9.3.1+15:7148",
+                "src_streams": ["i0_antenna_channelised_voltage"],
+                "instrument_dev_name": "i0"
+            },
+            "i0_tied_array_channelised_voltage_0x": {
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.9.3.30+15:7148",
+                "src_streams": ["i0_antenna_channelised_voltage"],
+                "instrument_dev_name": "i0"
+            },
+            "i0_tied_array_channelised_voltage_0y": {
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.9.3.46+7:7148",
+                "src_streams": ["i0_antenna_channelised_voltage"],
+                "instrument_dev_name": "i0"
+            }
+        },
+        "outputs": {
+            "l0": {
+                "type": "sdp.vis",
+                "src_streams": ["i0_baseline_correlation_products"],
+                "output_int_time": 4.0,
+                "output_channels": [0, 4096],
+                "continuum_factor": 1,
+                "archive": True
+            },
+            "beamformer_engineering": {
+                "type": "sdp.beamformer_engineering",
+                "src_streams": [
+                    "i0_tied_array_channelised_voltage_0x",
+                    "i0_tied_array_channelised_voltage_0y"
+                ],
+                "output_channels": [0, 4096],
+                "store": "ssd"
+            },
+            "cal": {
+                "type": "sdp.cal",
+                "src_streams": ["l0"]
+            },
+            "sdp_l1_flags": {
+                "type": "sdp.flags",
+                "src_streams": ["l0", "cal"],
+                "archive": True
+            },
+            "continuum_image": {
+                "type": "sdp.continuum_image",
+                "src_streams": ["sdp_l1_flags"],
+                "uvblavg_parameters": {},
+                "mfimage_parameters": {},
+                "max_realtime": 10000.0,
+                "min_time": 20 * 60
+            },
+            "spectral_image": {
+                "type": "sdp.spectral_image",
+                "src_streams": ["sdp_l1_flags", "continuum_image"],
+                "output_channels": [100, 4000],
+                "min_time": 3600.0
+            }
+        },
+        "config": {}
+    }
 
-    def setup(self):
-        self.config = {
-            "version": "3.1",
-            "inputs": {
-                "camdata": {
-                    "type": "cam.http",
-                    "url": "http://10.8.67.235/api/client/1"
-                },
-                "i0_antenna_channelised_voltage": {
-                    "type": "cbf.antenna_channelised_voltage",
-                    "url": "spead://239.2.1.150+15:7148",
-                    "antennas": ["m000", "m001", "s0003", "another_antenna"],
-                    "instrument_dev_name": "i0"
-                },
-                "i0_baseline_correlation_products": {
-                    "type": "cbf.baseline_correlation_products",
-                    "url": "spead://239.9.3.1+15:7148",
-                    "src_streams": ["i0_antenna_channelised_voltage"],
-                    "instrument_dev_name": "i0"
-                },
-                "i0_tied_array_channelised_voltage_0x": {
-                    "type": "cbf.tied_array_channelised_voltage",
-                    "url": "spead://239.9.3.30+15:7148",
-                    "src_streams": ["i0_antenna_channelised_voltage"],
-                    "instrument_dev_name": "i0"
-                },
-                "i0_tied_array_channelised_voltage_0y": {
-                    "type": "cbf.tied_array_channelised_voltage",
-                    "url": "spead://239.9.3.46+7:7148",
-                    "src_streams": ["i0_antenna_channelised_voltage"],
-                    "instrument_dev_name": "i0"
-                }
+
+@pytest.fixture
+def config_v2() -> Dict[str, Any]:
+    return {
+        "version": "2.6",
+        "inputs": {
+            "camdata": {
+                "type": "cam.http",
+                "url": "http://10.8.67.235/api/client/1"
             },
-            "outputs": {
-                "l0": {
-                    "type": "sdp.vis",
-                    "src_streams": ["i0_baseline_correlation_products"],
-                    "output_int_time": 4.0,
-                    "output_channels": [0, 4096],
-                    "continuum_factor": 1,
-                    "archive": True
-                },
-                "beamformer_engineering": {
-                    "type": "sdp.beamformer_engineering",
-                    "src_streams": [
-                        "i0_tied_array_channelised_voltage_0x",
-                        "i0_tied_array_channelised_voltage_0y"
-                    ],
-                    "output_channels": [0, 4096],
-                    "store": "ssd"
-                },
-                "cal": {
-                    "type": "sdp.cal",
-                    "src_streams": ["l0"]
-                },
-                "sdp_l1_flags": {
-                    "type": "sdp.flags",
-                    "src_streams": ["l0", "cal"],
-                    "archive": True
-                },
-                "continuum_image": {
-                    "type": "sdp.continuum_image",
-                    "src_streams": ["sdp_l1_flags"],
-                    "uvblavg_parameters": {},
-                    "mfimage_parameters": {},
-                    "max_realtime": 10000.0,
-                    "min_time": 20 * 60
-                },
-                "spectral_image": {
-                    "type": "sdp.spectral_image",
-                    "src_streams": ["sdp_l1_flags", "continuum_image"],
-                    "output_channels": [100, 4000],
-                    "min_time": 3600.0
-                }
+            "i0_antenna_channelised_voltage": {
+                "type": "cbf.antenna_channelised_voltage",
+                "url": "spead://239.2.1.150+15:7148",
+                "antennas": ["m000", "m001", "s0003", "another_antenna"],
+                "n_chans": 4096,
+                "n_pols": 2,
+                "adc_sample_rate": 1712000000.0,
+                "bandwidth": 856000000.0,
+                "n_samples_between_spectra": 8192,
+                "instrument_dev_name": "i0"
             },
-            "config": {}
-        }
-        self.config_v2 = {
-            "version": "2.6",
-            "inputs": {
-                "camdata": {
-                    "type": "cam.http",
-                    "url": "http://10.8.67.235/api/client/1"
-                },
-                "i0_antenna_channelised_voltage": {
-                    "type": "cbf.antenna_channelised_voltage",
-                    "url": "spead://239.2.1.150+15:7148",
-                    "antennas": ["m000", "m001", "s0003", "another_antenna"],
-                    "n_chans": 4096,
-                    "n_pols": 2,
-                    "adc_sample_rate": 1712000000.0,
-                    "bandwidth": 856000000.0,
-                    "n_samples_between_spectra": 8192,
-                    "instrument_dev_name": "i0"
-                },
-                "i0_baseline_correlation_products": {
-                    "type": "cbf.baseline_correlation_products",
-                    "url": "spead://239.9.3.1+15:7148",
-                    "src_streams": ["i0_antenna_channelised_voltage"],
-                    "int_time": 0.499,
-                    "n_bls": 40,
-                    "xeng_out_bits_per_sample": 32,
-                    "n_chans_per_substream": 256,
-                    "instrument_dev_name": "i0"
-                },
-                "i0_tied_array_channelised_voltage_0x": {
-                    "beng_out_bits_per_sample": 8,
-                    "instrument_dev_name": "i0",
-                    "n_chans_per_substream": 256,
-                    "simulate": False,
-                    "spectra_per_heap": 256,
-                    "src_streams": [
-                        "i0_antenna_channelised_voltage"
-                    ],
-                    "type": "cbf.tied_array_channelised_voltage",
-                    "url": "spead://239.9.3.30+15:7148"
-                },
-                "i0_tied_array_channelised_voltage_0y": {
-                    "beng_out_bits_per_sample": 8,
-                    "instrument_dev_name": "i0",
-                    "n_chans_per_substream": 256,
-                    "simulate": False,
-                    "spectra_per_heap": 256,
-                    "src_streams": [
-                        "i0_antenna_channelised_voltage"
-                    ],
-                    "type": "cbf.tied_array_channelised_voltage",
-                    "url": "spead://239.9.3.46+7:7148"
-                }
+            "i0_baseline_correlation_products": {
+                "type": "cbf.baseline_correlation_products",
+                "url": "spead://239.9.3.1+15:7148",
+                "src_streams": ["i0_antenna_channelised_voltage"],
+                "int_time": 0.499,
+                "n_bls": 40,
+                "xeng_out_bits_per_sample": 32,
+                "n_chans_per_substream": 256,
+                "instrument_dev_name": "i0"
             },
-            "outputs": {
-                "l0": {
-                    "type": "sdp.vis",
-                    "src_streams": ["i0_baseline_correlation_products"],
-                    "output_int_time": 4.0,
-                    "output_channels": [0, 4096],
-                    "continuum_factor": 1,
-                    "archive": True
-                },
-                "beamformer_engineering": {
-                    "type": "sdp.beamformer_engineering",
-                    "src_streams": [
-                        "i0_tied_array_channelised_voltage_0x",
-                        "i0_tied_array_channelised_voltage_0y"
-                    ],
-                    "output_channels": [0, 4096],
-                    "store": "ssd"
-                },
-                "cal": {
-                    "type": "sdp.cal",
-                    "src_streams": ["l0"]
-                },
-                "sdp_l1_flags": {
-                    "type": "sdp.flags",
-                    "src_streams": ["l0"],
-                    "calibration": ["cal"],
-                    "archive": True
-                },
-                "continuum_image": {
-                    "type": "sdp.continuum_image",
-                    "src_streams": ["sdp_l1_flags"],
-                    "uvblavg_parameters": {},
-                    "mfimage_parameters": {},
-                    "max_realtime": 10000.0,
-                    "min_time": 20 * 60
-                },
-                "spectral_image": {
-                    "type": "sdp.spectral_image",
-                    "src_streams": ["sdp_l1_flags", "continuum_image"],
-                    "output_channels": [100, 4000],
-                    "min_time": 3600.0
-                }
+            "i0_tied_array_channelised_voltage_0x": {
+                "beng_out_bits_per_sample": 8,
+                "instrument_dev_name": "i0",
+                "n_chans_per_substream": 256,
+                "simulate": False,
+                "spectra_per_heap": 256,
+                "src_streams": [
+                    "i0_antenna_channelised_voltage"
+                ],
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.9.3.30+15:7148"
             },
-            "config": {}
-        }
-        self.config_sim: Dict[str, Any] = {
-            'version': '3.1',
-            'outputs': {
-                'acv': {
-                    'type': 'sim.cbf.antenna_channelised_voltage',
-                    'antennas': [
-                        _M000.description,
-                        _M002.description
-                    ],
-                    'band': 'l',
-                    'bandwidth': 856e6,
-                    'centre_frequency': 1284e6,
-                    'adc_sample_rate': 1712e6,
-                    'n_chans': 4096
-                },
-                'vis': {
-                    'type': 'sdp.vis',
-                    'src_streams': ['bcp'],
-                    'output_int_time': 2.0,
-                    'continuum_factor': 1,
-                    'archive': True
-                },
-                # Deliberately list the streams out of order, to check that
-                # they get properly ordered
-                'bcp': {
-                    'type': 'sim.cbf.baseline_correlation_products',
-                    'src_streams': ['acv'],
-                    'n_endpoints': 16,
-                    'int_time': 0.5
-                }
+            "i0_tied_array_channelised_voltage_0y": {
+                "beng_out_bits_per_sample": 8,
+                "instrument_dev_name": "i0",
+                "n_chans_per_substream": 256,
+                "simulate": False,
+                "spectra_per_heap": 256,
+                "src_streams": [
+                    "i0_antenna_channelised_voltage"
+                ],
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.9.3.46+7:7148"
+            }
+        },
+        "outputs": {
+            "l0": {
+                "type": "sdp.vis",
+                "src_streams": ["i0_baseline_correlation_products"],
+                "output_int_time": 4.0,
+                "output_channels": [0, 4096],
+                "continuum_factor": 1,
+                "archive": True
+            },
+            "beamformer_engineering": {
+                "type": "sdp.beamformer_engineering",
+                "src_streams": [
+                    "i0_tied_array_channelised_voltage_0x",
+                    "i0_tied_array_channelised_voltage_0y"
+                ],
+                "output_channels": [0, 4096],
+                "store": "ssd"
+            },
+            "cal": {
+                "type": "sdp.cal",
+                "src_streams": ["l0"]
+            },
+            "sdp_l1_flags": {
+                "type": "sdp.flags",
+                "src_streams": ["l0"],
+                "calibration": ["cal"],
+                "archive": True
+            },
+            "continuum_image": {
+                "type": "sdp.continuum_image",
+                "src_streams": ["sdp_l1_flags"],
+                "uvblavg_parameters": {},
+                "mfimage_parameters": {},
+                "max_realtime": 10000.0,
+                "min_time": 20 * 60
+            },
+            "spectral_image": {
+                "type": "sdp.spectral_image",
+                "src_streams": ["sdp_l1_flags", "continuum_image"],
+                "output_channels": [100, 4000],
+                "min_time": 3600.0
+            }
+        },
+        "config": {}
+    }
+
+
+@pytest.fixture
+def config_sim() -> Dict[str, Any]:
+    return {
+        'version': '3.1',
+        'outputs': {
+            'acv': {
+                'type': 'sim.cbf.antenna_channelised_voltage',
+                'antennas': [
+                    _M000.description,
+                    _M002.description
+                ],
+                'band': 'l',
+                'bandwidth': 856e6,
+                'centre_frequency': 1284e6,
+                'adc_sample_rate': 1712e6,
+                'n_chans': 4096
+            },
+            'vis': {
+                'type': 'sdp.vis',
+                'src_streams': ['bcp'],
+                'output_int_time': 2.0,
+                'continuum_factor': 1,
+                'archive': True
+            },
+            # Deliberately list the streams out of order, to check that
+            # they get properly ordered
+            'bcp': {
+                'type': 'sim.cbf.baseline_correlation_products',
+                'src_streams': ['acv'],
+                'n_endpoints': 16,
+                'int_time': 0.5
             }
         }
+    }
 
 
-class TestValidate(Fixture):
+class TestValidate:
     """Tests for :func:`~katsdpcontroller.product_config._validate`"""
 
-    def test_good(self) -> None:
-        product_config._validate(self.config)
+    def test_good(self, config: Dict[str, Any]) -> None:
+        product_config._validate(config)
 
-    def test_good_v2(self) -> None:
-        product_config._validate(self.config_v2)
+    def test_good_v2(self, config_v2: Dict[str, Any]) -> None:
+        product_config._validate(config_v2)
 
-    def test_good_sim(self) -> None:
-        product_config._validate(self.config_v2)
+    def test_good_sim(self, config_v2: Dict[str, Any]) -> None:
+        product_config._validate(config_v2)
 
-    def test_bad_version(self) -> None:
-        self.config["version"] = "1.10"
+    def test_bad_version(self, config: Dict[str, Any]) -> None:
+        config["version"] = "1.10"
         with pytest.raises(jsonschema.ValidationError):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_input_bad_property(self) -> None:
+    def test_input_bad_property(self, config: Dict[str, Any]) -> None:
         """Test that the error message on an invalid input is sensible"""
-        del self.config["inputs"]["i0_antenna_channelised_voltage"]["instrument_dev_name"]
+        del config["inputs"]["i0_antenna_channelised_voltage"]["instrument_dev_name"]
         with pytest.raises(jsonschema.ValidationError,
                            match="'instrument_dev_name' is a required property"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_output_bad_property(self) -> None:
+    def test_output_bad_property(self, config: Dict[str, Any]) -> None:
         """Test that the error message on an invalid output is sensible"""
-        del self.config["outputs"]["l0"]["continuum_factor"]
+        del config["outputs"]["l0"]["continuum_factor"]
         with pytest.raises(jsonschema.ValidationError,
                            match="'continuum_factor' is a required property"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_input_missing_stream(self) -> None:
+    def test_input_missing_stream(self, config: Dict[str, Any]) -> None:
         """An input whose ``src_streams`` reference does not exist"""
-        self.config["inputs"]["i0_baseline_correlation_products"]["src_streams"] = ["blah"]
+        config["inputs"]["i0_baseline_correlation_products"]["src_streams"] = ["blah"]
         with pytest.raises(ValueError,
                            match="Unknown source blah in i0_baseline_correlation_products"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_output_missing_stream(self) -> None:
+    def test_output_missing_stream(self, config: Dict[str, Any]) -> None:
         """An output whose ``src_streams`` reference does not exist"""
-        del self.config["inputs"]["i0_baseline_correlation_products"]
+        del config["inputs"]["i0_baseline_correlation_products"]
         with pytest.raises(ValueError,
                            match="Unknown source i0_baseline_correlation_products in l0"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_stream_wrong_type(self) -> None:
+    def test_stream_wrong_type(self, config: Dict[str, Any]) -> None:
         """An entry in ``src_streams`` refers to the wrong type"""
-        self.config["outputs"]["l0"]["src_streams"] = ["i0_antenna_channelised_voltage"]
+        config["outputs"]["l0"]["src_streams"] = ["i0_antenna_channelised_voltage"]
         with pytest.raises(ValueError, match="has wrong type"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_stream_name_conflict(self) -> None:
+    def test_stream_name_conflict(self, config: Dict[str, Any]) -> None:
         """An input and an output have the same name"""
-        self.config["outputs"]["i0_antenna_channelised_voltage"] = self.config["outputs"]["l0"]
+        config["outputs"]["i0_antenna_channelised_voltage"] = config["outputs"]["l0"]
         with pytest.raises(ValueError, match="cannot be both an input and an output"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_multiple_cam_http(self) -> None:
-        self.config["inputs"]["camdata2"] = self.config["inputs"]["camdata"]
+    def test_multiple_cam_http(self, config: Dict[str, Any]) -> None:
+        config["inputs"]["camdata2"] = config["inputs"]["camdata"]
         with pytest.raises(ValueError, match="have more than one cam.http"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_missing_cam_http(self) -> None:
-        del self.config["inputs"]["camdata"]
+    def test_missing_cam_http(self, config: Dict[str, Any]) -> None:
+        del config["inputs"]["camdata"]
         with pytest.raises(ValueError, match="cam.http stream is required"):
-            product_config._validate(self.config)
+            product_config._validate(config)
 
-    def test_calibration_does_not_exist(self) -> None:
-        self.config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["bad"]
+    def test_calibration_does_not_exist(self, config_v2: Dict[str, Any]) -> None:
+        config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["bad"]
         with pytest.raises(ValueError, match="does not exist"):
-            product_config._validate(self.config_v2)
+            product_config._validate(config_v2)
 
-    def test_calibration_wrong_type(self) -> None:
-        self.config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["l0"]
+    def test_calibration_wrong_type(self, config_v2: Dict[str, Any]) -> None:
+        config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["l0"]
         with pytest.raises(ValueError, match="has wrong type"):
-            product_config._validate(self.config_v2)
+            product_config._validate(config_v2)
 
-    def test_cal_models(self) -> None:
-        self.config_v2["outputs"]["cal"]["models"] = {"foo": "bar"}
+    def test_cal_models(self, config_v2: Dict[str, Any]) -> None:
+        config_v2["outputs"]["cal"]["models"] = {"foo": "bar"}
         with pytest.raises(ValueError, match="no longer supports models"):
-            product_config._validate(self.config_v2)
+            product_config._validate(config_v2)
 
-    def test_simulate_v2(self) -> None:
-        self.config_v2["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
+    def test_simulate_v2(self, config_v2: Dict[str, Any]) -> None:
+        config_v2["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
         with pytest.raises(ValueError, match="simulation is not supported"):
-            product_config._validate(self.config_v2)
+            product_config._validate(config_v2)
 
 
-class TestUpgrade(Fixture):
+class TestUpgrade:
     """Test :func:`~katsdpcontroller.product_config._upgrade`."""
 
-    def test_simple(self) -> None:
-        upgraded = product_config._upgrade(self.config_v2)
+    def test_simple(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
+        upgraded = product_config._upgrade(config_v2)
         # Uncomment to debug differences
         # import json
         # with open('actual.json', 'w') as f:
         #     json.dump(upgraded, f, indent=2, sort_keys=True)
         # with open('expected.json', 'w') as f:
-        #     json.dump(self.config, f, indent=2, sort_keys=True)
-        assert upgraded == self.config
+        #     json.dump(config, f, indent=2, sort_keys=True)
+        assert upgraded == config
 
-    def test_upgrade_v3(self) -> None:
-        upgraded = product_config._upgrade(self.config)
-        assert upgraded == self.config
+    def test_upgrade_v3(self, config: Dict[str, Any]) -> None:
+        upgraded = product_config._upgrade(config)
+        assert upgraded == config
 
-    def test_few_antennas(self) -> None:
-        del self.config_v2['inputs']['i0_antenna_channelised_voltage']['antennas'][2:]
-        upgraded = product_config._upgrade(self.config_v2)
-        del self.config['inputs']['i0_antenna_channelised_voltage']['antennas'][2:]
-        del self.config['outputs']['cal']
-        del self.config['outputs']['sdp_l1_flags']
-        del self.config['outputs']['continuum_image']
-        del self.config['outputs']['spectral_image']
-        assert upgraded == self.config
+    def test_few_antennas(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
+        del config_v2['inputs']['i0_antenna_channelised_voltage']['antennas'][2:]
+        upgraded = product_config._upgrade(config_v2)
+        del config['inputs']['i0_antenna_channelised_voltage']['antennas'][2:]
+        del config['outputs']['cal']
+        del config['outputs']['sdp_l1_flags']
+        del config['outputs']['continuum_image']
+        del config['outputs']['spectral_image']
+        assert upgraded == config
 
-    def test_unknown_input(self) -> None:
-        self.config_v2['inputs']['xyz'] = {
+    def test_unknown_input(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
+        config_v2['inputs']['xyz'] = {
             'type': 'custom',
             'url': 'http://test.invalid/'
         }
-        upgraded = product_config._upgrade(self.config_v2)
-        assert upgraded == self.config
+        upgraded = product_config._upgrade(config_v2)
+        assert upgraded == config
 
 
-class TestConfiguration(Fixture):
+class TestConfiguration:
     """Test :class:`~.Configuration`."""
 
-    def setup(self) -> None:
-        super().setup()
+    @pytest.fixture
+    def config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         # Needed to make the updated config valid relative to the fake katportalclient
-        del self.config['outputs']['l0']['output_channels']
-        del self.config['outputs']['beamformer_engineering']['output_channels']
-        self.config['outputs']['spectral_image']['output_channels'] = [100, 400]
+        del config['outputs']['l0']['output_channels']
+        del config['outputs']['beamformer_engineering']['output_channels']
+        config['outputs']['spectral_image']['output_channels'] = [100, 400]
+        return config
 
     @pytest.fixture(autouse=True)
     def client(self, mocker) -> fake_katportalclient.KATPortalClient:
         # Create dummy sensors. Some deliberately have different values to
-        # self.config_v2 to ensure that the changes are picked up.
+        # config_v2 to ensure that the changes are picked up.
         client = fake_katportalclient.KATPortalClient(
             components={'cbf': 'cbf_1', 'sub': 'subarray_1'},
             sensors={
@@ -1568,9 +1704,9 @@ class TestConfiguration(Fixture):
         mocker.patch('katportalclient.KATPortalClient', return_value=client)
         return client
 
-    async def test_sim(self) -> None:
+    async def test_sim(self, config_sim: Dict[str, Any]) -> None:
         """Test with no sensors required."""
-        config = await Configuration.from_config(self.config_sim)
+        config = await Configuration.from_config(config_sim)
         streams = sorted(config.streams, key=lambda stream: stream.name)
         assert streams[0].name == 'acv'
         assert isinstance(config.streams[0], SimAntennaChannelisedVoltageStream)
@@ -1581,55 +1717,55 @@ class TestConfiguration(Fixture):
         assert streams[2].src_streams[0] is config.streams[1]
         assert streams[1].src_streams[0] is config.streams[0]
 
-    async def test_cyclic(self) -> None:
-        self.config_sim['outputs']['bcp']['src_streams'] = ['vis']
+    async def test_cyclic(self, config_sim: Dict[str, Any]) -> None:
+        config_sim['outputs']['bcp']['src_streams'] = ['vis']
         with pytest.raises(ValueError):
-            await Configuration.from_config(self.config_sim)
+            await Configuration.from_config(config_sim)
 
-    async def test_bad_stream(self) -> None:
-        self.config['outputs']['l0']['continuum_factor'] = 3
+    async def test_bad_stream(self, config: Dict[str, Any]) -> None:
+        config['outputs']['l0']['continuum_factor'] = 3
         with pytest.raises(ValueError, match='Configuration error for stream l0: '):
-            await Configuration.from_config(self.config)
+            await Configuration.from_config(config)
 
-    async def test_sensors(self) -> None:
+    async def test_sensors(self, config: Dict[str, Any]) -> None:
         """Test which needs to apply sensors."""
-        config = await Configuration.from_config(self.config)
-        bcp = config.by_class(BaselineCorrelationProductsStream)[0]
+        configuration = await Configuration.from_config(config)
+        bcp = configuration.by_class(BaselineCorrelationProductsStream)[0]
         assert bcp.n_chans == 1024
         assert bcp.bandwidth == 544e6
         assert bcp.antenna_channelised_voltage.band == 'u'
         assert bcp.int_time == 0.25
 
-    async def test_connection_failed(self, client) -> None:
+    async def test_connection_failed(self, client, config: Dict[str, Any]) -> None:
         with mock.patch.object(client, 'sensor_subarray_lookup',
                                side_effect=ConnectionRefusedError):
             with pytest.raises(product_config.SensorFailure):
-                await Configuration.from_config(self.config)
+                await Configuration.from_config(config)
 
         with mock.patch.object(client, 'sensor_values',
                                side_effect=ConnectionRefusedError):
             with pytest.raises(product_config.SensorFailure):
-                await Configuration.from_config(self.config)
+                await Configuration.from_config(config)
 
-    async def test_sensor_not_found(self, client):
+    async def test_sensor_not_found(self, client, config: Dict[str, Any]) -> None:
         del client.sensors['cbf_1_i0_baseline_correlation_products_n_bls']
         with pytest.raises(product_config.SensorFailure):
-            await Configuration.from_config(self.config)
+            await Configuration.from_config(config)
 
-    async def test_sensor_bad_status(self, client):
+    async def test_sensor_bad_status(self, client, config: Dict[str, Any]) -> None:
         client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
             katportalclient.SensorSample(1234567890.0, 40, 'unreachable')
         with pytest.raises(product_config.SensorFailure):
-            await Configuration.from_config(self.config)
+            await Configuration.from_config(config)
 
-    async def test_sensor_bad_type(self, client):
+    async def test_sensor_bad_type(self, client, config: Dict[str, Any]) -> None:
         client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
             katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
         with pytest.raises(product_config.SensorFailure):
-            await Configuration.from_config(self.config)
+            await Configuration.from_config(config)
 
-    async def test_mixed_bands(self):
-        self.config['outputs']['l_band_sim'] = {
+    async def test_mixed_bands(self, config: Dict[str, Any]) -> None:
+        config['outputs']['l_band_sim'] = {
             'type': 'sim.cbf.antenna_channelised_voltage',
             'antennas': [
                 _M000.description,
@@ -1642,7 +1778,7 @@ class TestConfiguration(Fixture):
             'n_chans': 32768
         }
         with pytest.raises(ValueError, match="Only a single band is supported, found 'l', 'u'"):
-            await Configuration.from_config(self.config)
+            await Configuration.from_config(config)
 
 
 def test_stream_classes():

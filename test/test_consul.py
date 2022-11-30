@@ -10,7 +10,7 @@ from katsdpcontroller.consul import ConsulService, CONSUL_URL
 
 
 class TestConsulService:
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         self.service_data = {
             'Name': 'product-controller',
             'Tags': ['prometheus-metrics'],

@@ -7,7 +7,16 @@ import os
 import typing
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, AsyncGenerator, List, MutableMapping, Set, Type, Union
+from typing import (
+    AsyncContextManager,
+    AsyncGenerator,
+    List,
+    MutableMapping,
+    Optional,
+    Set,
+    Type,
+    Union
+)
 
 import async_timeout
 import aiokatcp
@@ -163,6 +172,10 @@ class ProductLogicalTask(scheduler.LogicalTask):
         self.batch_data_time = None
         # Tell the product controller to pass extra arguments to the physical_factory.
         self.sdp_physical_factory = True
+        # Optional sensor of 0's/1's that will be updated if the task dies. The bits
+        # in the range given by the tuple data_suspect_range will be set to 0's.
+        self.data_suspect_sensor: Optional[Sensor[str]] = None
+        self.data_suspect_range = (0, 0)
 
 
 class ConfigMixin:
@@ -444,6 +457,15 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.sensors:
             self._remove_sensors()
             need_inform = True
+        if self.logical_node.data_suspect_sensor is not None:
+            data_suspect = self.logical_node.data_suspect_sensor.value
+            a, b = self.logical_node.data_suspect_range
+            assert a <= b
+            data_suspect = data_suspect[:a] + "1" * (b - a) + data_suspect[b:]
+            self.logical_node.data_suspect_sensor.set_value(
+                data_suspect,
+                status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR
+            )
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()
