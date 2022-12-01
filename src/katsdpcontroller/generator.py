@@ -166,20 +166,20 @@ class SumSensor(SimpleAggregateSensor[int]):
     """
 
     def __init__(
-        self, target: SensorSet, sensor_type: Type[int],
-        name: str, description: str, units: str = "",
+        self, target: SensorSet, name: str,
+        description: str, units: str = "",
         *,
         auto_strategy: Optional[SensorSampler.Strategy] = None,
         auto_strategy_parameters: Iterable[Any] = (),
         name_regex: re.Pattern,
-        children: int
+        n_children: int
     ) -> None:
         self.name_regex = name_regex
-        self.children = children
+        self.n_children = n_children
         self._total = 0
         self._known = 0
         super().__init__(
-            target, sensor_type, name, description, units,
+            target, int, name, description, units,
             auto_strategy=auto_strategy,
             auto_strategy_parameters=auto_strategy_parameters
         )
@@ -204,7 +204,7 @@ class SumSensor(SimpleAggregateSensor[int]):
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, int]:
-        status = Sensor.Status.NOMINAL if self._known == self.children else Sensor.Status.FAILURE
+        status = Sensor.Status.NOMINAL if self._known == self.n_children else Sensor.Status.FAILURE
         return (status, self._total)
 
 
@@ -217,21 +217,20 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     """
 
     def __init__(
-        self, target: SensorSet, sensor_type: Type[bool],
-        name: str, description: str, units: str = "",
+        self, target: SensorSet, name: str,
+        description: str, units: str = "",
         *,
         auto_strategy: Optional["SensorSampler.Strategy"] = None,
         auto_strategy_parameters: Iterable[Any] = (),
         name_regex: re.Pattern,
-        children: int
+        n_children: int
     ) -> None:
-        self.target = target
         self.name_regex = name_regex
-        self.children = children
+        self.n_children = n_children
         self._total_in_sync = 0
 
         super().__init__(
-            target, sensor_type, name, description, units,
+            target, bool, name, description, units,
             auto_strategy=auto_strategy,
             auto_strategy_parameters=auto_strategy_parameters
         )
@@ -256,7 +255,7 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         return False
 
     def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        synchronised = self._total_in_sync == self.children
+        synchronised = self._total_in_sync == self.n_children
         status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
         return (status, synchronised)
 
@@ -763,15 +762,15 @@ def _make_xbgpu(
         Sensor(int, f"{stream.name}-n-chans-per-substream",
                "Number of channels in each substream for this x-engine stream",
                default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
-        SumSensor(sensors, int, f"{stream.name}-xeng-clip-cnt",
+        SumSensor(sensors, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
-                  children=stream.n_substreams),
-        SyncSensor(sensors, bool, f"{stream.name}-xengs-synchronised",
+                  n_children=stream.n_substreams),
+        SyncSensor(sensors, f"{stream.name}-xengs-synchronised",
                    "For the latest accumulation, was data present from all F-Engines "
                    "for all X-Engines",
                    name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
-                   children=stream.n_substreams),
+                   n_children=stream.n_substreams),
         data_suspect_sensor
     ]
     for ss in stream_sensors:
