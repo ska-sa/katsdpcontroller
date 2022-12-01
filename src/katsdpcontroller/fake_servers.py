@@ -2,6 +2,7 @@
 
 import json
 import numbers
+from enum import Enum
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -15,6 +16,14 @@ def _format_complex(value: numbers.Complex) -> str:
     This is copied from katgpucbf.
     """
     return f"{value.real}{value.imag:+}j"
+
+
+class DeviceStatus(Enum):
+    """Discrete `device-status` readings."""
+
+    OK = 1
+    DEGRADED = 2
+    FAIL = 3
 
 
 class FakeFgpuDeviceServer(FakeDeviceServer):
@@ -107,6 +116,16 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL
                 )
             )
+
+        self.sensors.add(
+            Sensor(
+                DeviceStatus,
+                "rx.device-status",
+                "The F-engine is receiving a good, clean digitiser stream",
+                default=DeviceStatus.DEGRADED,
+                initial_status=Sensor.Status.WARN,
+            )
+        )
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
