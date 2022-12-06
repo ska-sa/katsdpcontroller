@@ -764,7 +764,7 @@ def _make_xbgpu(
                default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
         Sensor(float, f"{stream.name}.ddc-mix-freq",
                "F-engine DDC mixer frequency, where used. 0 where n/a",
-               default=0, initial_status=Sensor.Status.NOMINAL),
+               units="Hz", default=0.0, initial_status=Sensor.Status.NOMINAL),
         SumSensor(sensors, f"{stream.name}-xeng-clip-cnt",
                   "Number of visibilities that saturated",
                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
