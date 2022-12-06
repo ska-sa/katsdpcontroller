@@ -762,7 +762,7 @@ def _make_xbgpu(
         Sensor(int, f"{stream.name}-n-chans-per-substream",
                "Number of channels in each substream for this x-engine stream",
                default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}.ddc-mix-freq",
+        Sensor(float, f"{stream.name}-ddc-mix-freq",
                "F-engine DDC mixer frequency, where used. 0 where n/a",
                units="Hz", default=0.0, initial_status=Sensor.Status.NOMINAL),
         SumSensor(sensors, f"{stream.name}-xeng-clip-cnt",
