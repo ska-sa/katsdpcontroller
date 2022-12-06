@@ -123,7 +123,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 "rx.device-status",
                 "The F-engine is receiving a good, clean digitiser stream",
                 default=DeviceStatus.DEGRADED,
-                initial_status=Sensor.Status.WARN,
+                initial_status=Sensor.Status.WARN
             )
         )
 
