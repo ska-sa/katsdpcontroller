@@ -32,3 +32,5 @@ GPUCBF_SPECTRA_PER_HEAP = 256
 XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16
+#: Autotune fallback behaviour
+KATSDPSIGPROC_TUNE_MATCH = 'nearest'
