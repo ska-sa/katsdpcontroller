@@ -33,8 +33,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._gains = [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
-        sync_epoch_pos = self.logical_task.command.index("--sync-epoch")
-        self._sync_epoch = float(self.logical_task.command[sync_epoch_pos + 1])
+        self._sync_epoch = self.get_command_value(float, "--sync-epoch")
         self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
         for pol in range(self.N_POLS):
             self.sensors.add(
@@ -167,10 +166,8 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 class FakeXbgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        channel_offset_pos = self.logical_task.command.index("--channel-offset-value")
-        channel_offset = int(self.logical_task.command[channel_offset_pos + 1])
-        channels_per_substream_pos = self.logical_task.command.index("--channels-per-substream")
-        channels_per_substream = int(self.logical_task.command[channels_per_substream_pos + 1])
+        channel_offset = self.get_command_value(int, "--channel-offset-value")
+        channels_per_substream = self.get_command_value(int, "--channels-per-substream")
         self.sensors.add(
             Sensor(
                 bool,

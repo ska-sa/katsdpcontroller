@@ -10,11 +10,13 @@ from contextlib import asynccontextmanager
 from typing import (
     AsyncContextManager,
     AsyncGenerator,
+    Callable,
     List,
     MutableMapping,
     Optional,
     Set,
     Type,
+    TypeVar,
     Union
 )
 
@@ -30,6 +32,7 @@ from . import scheduler, sensor_proxy, product_config
 from .consul import ConsulService, CONSUL_PORT
 from .defaults import LOCALHOST
 
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
@@ -735,6 +738,11 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
         """Respond to any unknown requests with an empty reply."""
         ctx.reply(aiokatcp.core.Message.OK)
         await ctx.drain()
+
+    def get_command_value(self, value_type: Callable[..., _T], parameter_string: str) -> _T:
+        """Return the value passed to the fake device as a cli parameter."""
+        position = self.logical_task.command.index(parameter_string)
+        return value_type(self.logical_task.command[position + 1])
 
 
 @asynccontextmanager
