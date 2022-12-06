@@ -167,6 +167,10 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 class FakeXbgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        channel_offset_pos = self.logical_task.command.index("--channel-offset-value")
+        channel_offset = int(self.logical_task.command[channel_offset_pos + 1])
+        channels_per_substream_pos = self.logical_task.command.index("--channels-per-substream")
+        channels_per_substream = int(self.logical_task.command[channels_per_substream_pos + 1])
         self.sensors.add(
             Sensor(
                 bool,
@@ -182,6 +186,15 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "xeng-clip-cnt",
                 "Number of visibilities that saturated",
                 default=0,
+                initial_status=Sensor.Status.NOMINAL
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                str,
+                "chan-range",
+                "The range of channels processed by this XB-engine, inclusive",
+                default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
                 initial_status=Sensor.Status.NOMINAL
             )
         )
