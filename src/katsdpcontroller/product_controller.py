@@ -220,12 +220,14 @@ class KatcpImageLookup(scheduler.ImageLookup):
     Tunnelling the lookup avoids the need for the product controller to
     have the right CA certificates and credentials for the Docker registry.
     """
+
     def __init__(self, conn: aiokatcp.Client) -> None:
         self._conn = conn
 
-    async def __call__(self, repo: str, tag: str) -> str:
-        reply, informs = await self._conn.request('image-lookup', repo, tag)
-        return reply[0].decode()
+    async def __call__(self, repo: str, tag: str) -> scheduler.Image:
+        reply, informs = await self._conn.request('image-lookup-v2', repo, tag)
+        data = json.loads(aiokatcp.decode(str, reply[0]))
+        return scheduler.Image(**data)
 
 
 class Resolver(scheduler.Resolver):

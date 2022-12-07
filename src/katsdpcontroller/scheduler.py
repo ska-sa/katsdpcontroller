@@ -225,6 +225,7 @@ from abc import abstractmethod, ABC
 from contextlib import AsyncExitStack
 import random
 import typing
+from dataclasses import dataclass, field
 # Note: don't include Dict here, because it conflicts with addict.Dict.
 from typing import (
     AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type)
@@ -955,10 +956,36 @@ def _strip_scheme(image: str) -> str:
     return re.sub(r'^https?://', '', image)
 
 
+@dataclass
+class Image:
+    """Information about a (fully resolved) container image."""
+
+    registry: str
+    repo: str
+    tag: Optional[str] = None
+    digest: Optional[str] = None
+    labels: typing.Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.tag is None and self.digest is None:
+            raise TypeError("at least one of tag and digest must be specified")
+
+    @property
+    def path(self) -> str:
+        """Get image path that can be passed to Docker."""
+        if self.digest is not None:
+            result = f"{self.registry}/{self.repo}@{self.digest}"
+        else:
+            result = f"{self.registry}/{self.repo}:{self.tag}"
+        # Docker doesn't like leading http:// or https://
+        return re.sub(r'^https?://', '', result)
+
+
 class ImageLookup(ABC):
     """Abstract base class to get a full image name from a repo and tag."""
+
     @abstractmethod
-    async def __call__(self, repo: str, tag: str) -> str: pass
+    async def __call__(self, repo: str, tag: str) -> Image: pass
 
 
 class _RegistryImageLookup(ImageLookup):
@@ -983,9 +1010,9 @@ class _RegistryImageLookup(ImageLookup):
 class SimpleImageLookup(_RegistryImageLookup):
     """Resolver that simply concatenates registry, repo and tag."""
 
-    async def __call__(self, repo: str, tag: str) -> str:
+    async def __call__(self, repo: str, tag: str) -> Image:
         registry, repo = self._split_repo_name(repo)
-        return _strip_scheme(f'{registry}/{repo}:{tag}')
+        return Image(registry=registry, repo=repo, tag=tag)
 
 
 class HTTPImageLookup(_RegistryImageLookup):
@@ -996,16 +1023,22 @@ class HTTPImageLookup(_RegistryImageLookup):
         self._authconfig = docker.auth.load_config()
 
     @staticmethod
-    async def _get_digest(
+    async def _get_image(
             session: aiohttp.ClientSession,
-            url: str,
+            registry: str,
+            repo: str,
+            tag: str,
             ssl_context: Optional[ssl.SSLContext],
-            auth_header: Optional[str]) -> str:
-        """Make a single attempt to get the digest.
+            auth_header: Optional[str]) -> Image:
+        """Make a single attempt to get the image information.
 
         This fails if there is an authorization error, leaving the caller to
         obtain a token and try again.
         """
+        if '://' not in registry:
+            # If no scheme is specified, assume https
+            registry = 'https://' + registry
+        manifest_url = '{}/v2/{}/manifests/{}'.format(registry, repo, tag)
         headers = {aiohttp.hdrs.ACCEPT: 'application/vnd.docker.distribution.manifest.v2+json'}
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
@@ -1013,13 +1046,30 @@ class HTTPImageLookup(_RegistryImageLookup):
             # Use a lowish timeout, so that we don't wedge the entire launch if
             # there is a connection problem.
             async with session.head(
-                    url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
+                    manifest_url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
                 response.raise_for_status()
-                return response.headers['Docker-Content-Digest']
+                digest = response.headers['Docker-Content-Digest']
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError('Failed to get digest from {}: {}'.format(url, error)) from error
+            raise ImageError(f'Failed to get digest from {manifest_url}: {error}') from error
         except KeyError:
-            raise ImageError('Docker-Content-Digest header not found for {}'.format(url))
+            raise ImageError(f'Docker-Content-Digest header not found for {manifest_url}')
+
+        image_url = '{}/v2/{}/blobs/{}'.format(registry, repo, digest)
+        headers[aiohttp.hdrs.ACCEPT] = 'application/vnd.docker.container.image.v1+json'
+        try:
+            async with session.get(
+                    image_url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
+                response.raise_for_status()
+                # Docker registry returns Content-Type of
+                # application/octet-stream. Passing content_type=None
+                # here suppresses the content-type check.
+                response_json = await response.json(content_type=None)
+            labels = response_json.get('config', {}).get('Labels', {})
+            if not isinstance(labels, dict):
+                labels = {}
+        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+            raise ImageError('Failed to get labels from {}: {}'.format(image_url, error)) from error
+        return Image(registry=registry, repo=repo, tag=tag, digest=digest, labels=labels)
 
     async def _get_token(
             self,
@@ -1043,7 +1093,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as error:
             raise ImageError(f'Failed to get authentication token from {realm}: {error}') from error
 
-    async def __call__(self, repo: str, tag: str) -> str:
+    async def __call__(self, repo: str, tag: str) -> Image:
         # TODO: see if it's possible to do some connection pooling
         # here. That probably requires the caller to initiate a
         # Session and close it when done.
@@ -1055,10 +1105,6 @@ class HTTPImageLookup(_RegistryImageLookup):
         else:
             auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
 
-        url = '{}/v2/{}/manifests/{}'.format(registry, repo, tag)
-        if not url.startswith('http'):
-            # If no scheme is specified, assume https
-            url = 'https://' + url
         cafile = '/etc/ssl/certs/ca-certificates.crt'
         ssl_context: Optional[ssl.SSLContext]
         if os.path.exists(cafile):
@@ -1068,7 +1114,8 @@ class HTTPImageLookup(_RegistryImageLookup):
         async with aiohttp.ClientSession() as session:
             try:
                 auth_header = auth.encode() if auth else None
-                digest = await self._get_digest(session, url, ssl_context, auth_header)
+                image = await self._get_image(
+                    session, registry, repo, tag, ssl_context, auth_header)
             except ImageError as error:
                 cause = error.__cause__
                 # If it's an authorization error, see if we can get a bearer token
@@ -1087,11 +1134,11 @@ class HTTPImageLookup(_RegistryImageLookup):
                     # trust it, and don't bother checking the realm for CSRF.
                     token = await self._get_token(session, realm, service, scope, auth)
                     auth_header = f'Bearer {token}'
-                    digest = await self._get_digest(session, url, ssl_context, auth_header)
+                    image = await self._get_image(
+                        session, registry, repo, tag, ssl_context, auth_header)
                 else:
                     raise
-
-        return _strip_scheme(f'{registry}/{repo}@{digest}')
+        return image
 
 
 class ImageResolver:
@@ -1117,7 +1164,7 @@ class ImageResolver:
         self._lookup = lookup
         self._tag_file = tag_file
         self._overrides: typing.Dict[str, str] = {}
-        self._cache: typing.Dict[str, str] = {}
+        self._cache: typing.Dict[str, Image] = {}
         if tag is not None:
             self._tag = tag
             self._tag_file = None
@@ -1145,7 +1192,7 @@ class ImageResolver:
     def override(self, name: str, path: str):
         self._overrides[name] = path
 
-    async def __call__(self, name: str) -> str:
+    async def __call__(self, name: str) -> Image:
         if name in self._overrides:
             name = self._overrides[name]
         if name in self._cache:
@@ -2325,7 +2372,7 @@ class PhysicalTask(PhysicalNode):
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
         if image_path is None:
-            image_path = await resolver.image_resolver(self.logical_node.image)
+            image_path = (await resolver.image_resolver(self.logical_node.image)).path
         taskinfo.container.docker.image = image_path
         taskinfo.agent_id.value = self.agent_id
         taskinfo.resources = []

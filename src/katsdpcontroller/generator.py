@@ -287,7 +287,7 @@ class IngestTask(ProductPhysicalTask):
         if image_path is None:
             gpu = self.agent.gpus[self.allocation.gpus[0].index]
             gpu_name = normalise_gpu_name(gpu.name)
-            image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
+            image_path = (await resolver.image_resolver('katsdpingest_' + gpu_name)).path
             if gpu != defaults.INGEST_GPU_NAME:
                 logger.info('Develop mode: using %s for ingest', image_path)
         await super().resolve(resolver, graph, image_path)
