@@ -402,8 +402,9 @@ class TestHTTPImageLookup:
 
     def _prepare_image(self, rmock, url, digest, **kwargs) -> None:
         url = URL(url)
-        # Response headers are modelled on some actual registry responses
-        rmock.head(
+        # Response headers are modelled on some actual registry responses, but
+        # payloads are stripped down to the essentials needed by the test.
+        rmock.get(
             url,
             content_type='application/vnd.docker.distribution.manifest.v2+json',
             headers={
@@ -414,9 +415,15 @@ class TestHTTPImageLookup:
                 'X-Content-Type-Options': 'nosniff',
                 'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
             },
+            payload={
+                'config': {
+                    'mediaType': 'application/vnd.docker.container.image.v1+json',
+                    'digest': 'sha256:cafebeef'
+                }
+            },
             **kwargs
         )
-        blob_url = url.parent.parent / f"blobs/{digest}"
+        blob_url = url.parent.parent / "blobs/sha256:cafebeef"
         # Payload is a very cut down version with just the bits needed
         rmock.get(
             blob_url,
@@ -442,7 +449,7 @@ class TestHTTPImageLookup:
 
     def _prepare_image_auth_required(self, rmock, url, realm, scope, **kwargs) -> None:
         # Response headers are loosely based on Harbor 1.8
-        rmock.head(
+        rmock.get(
             url,
             status=401,
             content_type='application/json; charset=utf-8',
@@ -454,6 +461,7 @@ class TestHTTPImageLookup:
                     f'scope="{scope}"'
                 )
             },
+            payload={},
             **kwargs)
 
     @staticmethod

@@ -1045,17 +1045,28 @@ class HTTPImageLookup(_RegistryImageLookup):
         try:
             # Use a lowish timeout, so that we don't wedge the entire launch if
             # there is a connection problem.
-            async with session.head(
+            async with session.get(
                     manifest_url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
                 response.raise_for_status()
                 digest = response.headers['Docker-Content-Digest']
+                manifest_data = await response.json(content_type=None)
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
             raise ImageError(f'Failed to get digest from {manifest_url}: {error}') from error
         except KeyError:
             raise ImageError(f'Docker-Content-Digest header not found for {manifest_url}')
+        except ValueError:
+            raise ImageError(f'Invalid manifest for {manifest_url}')
 
-        image_url = '{}/v2/{}/blobs/{}'.format(registry, repo, digest)
-        headers[aiohttp.hdrs.ACCEPT] = 'application/vnd.docker.container.image.v1+json'
+        try:
+            content_type = manifest_data['config']['mediaType']
+            if content_type != 'application/vnd.docker.container.image.v1+json':
+                raise ImageError(f'Unknown mediaType {content_type!r} in {manifest_url}')
+            image_blob = manifest_data['config']['digest']
+        except (KeyError, TypeError):
+            raise ImageError(f'Could not find image blob in {manifest_url}')
+
+        image_url = '{}/v2/{}/blobs/{}'.format(registry, repo, image_blob)
+        headers[aiohttp.hdrs.ACCEPT] = content_type
         try:
             async with session.get(
                     image_url, timeout=15, ssl_context=ssl_context, headers=headers) as response:
