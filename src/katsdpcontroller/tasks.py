@@ -704,6 +704,23 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
                 Sensor(str, self.name + '.version', "Image of executing container.", "",
                        default=self.taskinfo.container.docker.image,
                        initial_status=Sensor.Status.NOMINAL))
+            source_sensor = Sensor(
+                str, self.name + '.source', 'Version control source for the container', ''
+            )
+            revision_sensor = Sensor(
+                str, self.name + '.revision', 'Version control revision for the container', ''
+            )
+            # org.label-schema is the deprecated version
+            for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
+                if key in self.image.labels:
+                    source_sensor.value = self.image.labels[key]
+                    break
+            for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
+                if key in self.image.labels:
+                    revision_sensor.value = self.image.labels[key]
+                    break
+            self._add_sensor(source_sensor)
+            self._add_sensor(revision_sensor)
             self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def set_status(self, status):
