@@ -424,7 +424,6 @@ class TestHTTPImageLookup:
             **kwargs
         )
         blob_url = url.parent.parent / "blobs/sha256:cafebeef"
-        # Payload is a very cut down version with just the bits needed
         rmock.get(
             blob_url,
             content_type='application/octet-stream',
