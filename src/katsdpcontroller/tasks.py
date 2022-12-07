@@ -183,8 +183,8 @@ class ConfigMixin:
     def _graph_config(self, resolver, graph):
         return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
-    async def resolve(self, resolver, graph, image_path=None):
-        await super().resolve(resolver, graph, image_path)
+    async def resolve(self, resolver, graph, image=None):
+        await super().resolve(resolver, graph, image)
         if not self.logical_node.katsdpservices_config:
             if self._graph_config(resolver, graph):
                 logger.warning('Graph node %s has explicit config but katsdpservices_config=False',
@@ -490,8 +490,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self._disconnect()
             super().kill(driver, **kwargs)
 
-    async def resolve(self, resolver, graph, image_path=None):
-        await super().resolve(resolver, graph, image_path)
+    async def resolve(self, resolver, graph, image=None):
+        await super().resolve(resolver, graph, image)
 
         self.gui_urls = gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -658,8 +658,8 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             asyncio.get_event_loop().create_task(service.deregister())
         super()._disconnect()
 
-    async def resolve(self, resolver, graph, image_path=None):
-        await super().resolve(resolver, graph, image_path)
+    async def resolve(self, resolver, graph, image=None):
+        await super().resolve(resolver, graph, image)
 
         # Provide info about which container this is for logspout to collect.
         labels = {
@@ -756,8 +756,8 @@ class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTa
         ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
 
-    async def resolve(self, resolver, graph, image_path=None):
-        await super().resolve(resolver, graph, image_path)
+    async def resolve(self, resolver, graph, image=None):
+        await super().resolve(resolver, graph, image)
         if self.logical_node.metadata_katcp_sensors:
             # Notify about the sensors added by the mixin constructor. This is
             # done here rather than in the constructor because

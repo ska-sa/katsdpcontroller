@@ -1969,9 +1969,9 @@ class TestScheduler:
         This is a regression test for SR-1093.
         """
         class SlowResolve(scheduler.PhysicalTask):
-            async def resolve(self, resolver, graph, image_path=None):
+            async def resolve(self, resolver, graph, image=None):
                 await asyncio.sleep(30)
-                await super().resolve(resolver, graph, image_path=None)
+                await super().resolve(resolver, graph, image=None)
 
         for node in fix.logical_graph.nodes():
             if node.name == 'node0':
@@ -2112,7 +2112,7 @@ class TestScheduler:
             await launch
 
     async def test_launch_resolve_raises(self, fix: 'TestScheduler.Fixture') -> None:
-        async def resolve_raise(resolver, graph, image_path=None):
+        async def resolve_raise(resolver, graph, image=None):
             raise ValueError('Testing')
 
         fix.nodes[0].resolve = resolve_raise
