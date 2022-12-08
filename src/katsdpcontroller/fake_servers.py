@@ -2,11 +2,10 @@
 
 import json
 import numbers
-from enum import Enum
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from aiokatcp import Sensor, Timestamp, FailReply
+from aiokatcp import ClockState, DeviceStatus, Sensor, SensorSet, Timestamp, FailReply
 from .tasks import FakeDeviceServer
 
 
@@ -18,12 +17,31 @@ def _format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
-class DeviceStatus(Enum):
-    """Discrete `device-status` readings."""
-
-    OK = 1
-    DEGRADED = 2
-    FAIL = 3
+def _add_time_sync_sensors(sensors: SensorSet) -> None:
+    sensors.add(
+        Sensor(
+            float, "time.esterror", "Estimated time synchronisation error", units="s",
+            default=0.0, initial_status=Sensor.Status.NOMINAL
+        )
+    )
+    sensors.add(
+        Sensor(
+            float, "time.maxerror", "Upper bound on time synchronisation error", units="s",
+            default=0.0, initial_status=Sensor.Status.NOMINAL
+        )
+    )
+    sensors.add(
+        Sensor(
+            ClockState, "time.state", "Kernel clock state",
+            default=ClockState.OK, initial_status=Sensor.Status.NOMINAL
+        )
+    )
+    sensors.add(
+        Sensor(
+            bool, "time.synchronised", "Whether the host clock is synchronised within tolerances",
+            default=True, initial_status=Sensor.Status.NOMINAL
+        )
+    )
 
 
 class FakeFgpuDeviceServer(FakeDeviceServer):
@@ -125,6 +143,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 initial_status=Sensor.Status.WARN
             )
         )
+        _add_time_sync_sensors(self.sensors)
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
@@ -195,6 +214,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 initial_status=Sensor.Status.NOMINAL
             )
         )
+        _add_time_sync_sensors(self.sensors)
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
