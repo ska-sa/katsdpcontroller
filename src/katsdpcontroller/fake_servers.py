@@ -33,8 +33,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._gains = [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
-        sync_epoch_pos = self.logical_task.command.index("--sync-epoch")
-        self._sync_epoch = float(self.logical_task.command[sync_epoch_pos + 1])
+        self._sync_epoch = self.get_command_argument(float, "--sync-epoch")
         self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
         for pol in range(self.N_POLS):
             self.sensors.add(
@@ -167,6 +166,8 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 class FakeXbgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        channel_offset = self.get_command_argument(int, "--channel-offset-value")
+        channels_per_substream = self.get_command_argument(int, "--channels-per-substream")
         self.sensors.add(
             Sensor(
                 bool,
@@ -182,6 +183,15 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "xeng-clip-cnt",
                 "Number of visibilities that saturated",
                 default=0,
+                initial_status=Sensor.Status.NOMINAL
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                str,
+                "chan-range",
+                "The range of channels processed by this XB-engine, inclusive",
+                default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
                 initial_status=Sensor.Status.NOMINAL
             )
         )

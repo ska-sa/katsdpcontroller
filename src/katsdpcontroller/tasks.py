@@ -10,11 +10,13 @@ from contextlib import asynccontextmanager
 from typing import (
     AsyncContextManager,
     AsyncGenerator,
+    Callable,
     List,
     MutableMapping,
     Optional,
     Set,
     Type,
+    TypeVar,
     Union
 )
 
@@ -30,6 +32,7 @@ from . import scheduler, sensor_proxy, product_config
 from .consul import ConsulService, CONSUL_PORT
 from .defaults import LOCALHOST
 
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
@@ -735,6 +738,18 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
         """Respond to any unknown requests with an empty reply."""
         ctx.reply(aiokatcp.core.Message.OK)
         await ctx.drain()
+
+    def get_command_argument(self, value_type: Callable[[str], _T], argument_name: str) -> _T:
+        """Return the value passed to the fake device as a CLI parameter.
+
+        This function is not completely robust, as it assumes that parameters are
+        only passed as separate strings, such as ``--foo bar``, and not using
+        ``--foo=bar`` syntax. The argument name (e.g. ``--foo``) is located in
+        the logical tasks's comamnd list, and it is assumed that the "value"
+        passed is simply the next string in the list.
+        """
+        position = self.logical_task.command.index(argument_name)
+        return value_type(self.logical_task.command[position + 1])
 
 
 @asynccontextmanager
