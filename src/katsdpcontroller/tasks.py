@@ -739,9 +739,16 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
         ctx.reply(aiokatcp.core.Message.OK)
         await ctx.drain()
 
-    def get_command_value(self, value_type: Callable[..., _T], parameter_string: str) -> _T:
-        """Return the value passed to the fake device as a cli parameter."""
-        position = self.logical_task.command.index(parameter_string)
+    def get_command_argument(self, value_type: Callable[[str], _T], argument_name: str) -> _T:
+        """Return the value passed to the fake device as a CLI parameter.
+
+        This function is not completely robust, it assumes that parameters are
+        only passed as separate strings, such as `--foo bar`, and not using
+        `--foo=bar` syntax. The argument name (e.g. `--foo`) is located in
+        the logical tasks's comamnd list, and it is assumed that the "value"
+        passed is simply the string next in the list.
+        """
+        position = self.logical_task.command.index(argument_name)
         return value_type(self.logical_task.command[position + 1])
 
 
