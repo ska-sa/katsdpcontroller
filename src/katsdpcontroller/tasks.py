@@ -350,7 +350,15 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                                     default=self.state,
                                     initial_status=Sensor.Status.NOMINAL)
         self._mesos_state_sensor = Sensor(
-            str, self.name + '.mesos-state', 'Mesos-reported task state', '')
+            str, self.name + '.mesos-state', 'Mesos-reported task state')
+        self._version_sensor = Sensor(
+            str, self.name + '.version', 'Image of executing container')
+        self._source_sensor = Sensor(
+            str, self.name + '.source', 'Version control source for the container')
+        self._revision_sensor = Sensor(
+            str, self.name + '.revision', 'Version control revision for the container')
+        self._host_sensor = Sensor(
+            str, self.name + '.host', 'Host running the task')
         if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
@@ -358,6 +366,10 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             # make all the updates conditional.
             self.subarray_product.add_sensor(self._state_sensor)
             self.subarray_product.add_sensor(self._mesos_state_sensor)
+            self.subarray_product.add_sensor(self._version_sensor)
+            self.subarray_product.add_sensor(self._source_sensor)
+            self.subarray_product.add_sensor(self._revision_sensor)
+            self.subarray_product.add_sensor(self._host_sensor)
 
         self.katcp_connection = None
         self.capture_block_state_observer = None
@@ -492,6 +504,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
 
     async def resolve(self, resolver, graph, image=None):
         await super().resolve(resolver, graph, image)
+        # If metadata_katcp_sensors is true, the constructor adds sensors
+        sensors_added = self.logical_node.metadata_katcp_sensors
 
         self.gui_urls = gui_urls = []
         for entry in self.logical_node.gui_urls:
@@ -505,10 +519,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             gui_urls_sensor = Sensor(str, self.name + '.gui-urls', 'URLs for GUIs')
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
+            sensors_added = True
 
-        host_sensor = Sensor(str, f'{self.name}.host', 'Host running the task')
-        host_sensor.set_value(self.host)
-        self._add_sensor(host_sensor)
+        self._host_sensor.value = self.host
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
                 aiokatcp.Address,
@@ -522,6 +535,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
                                           status=Sensor.Status.FAILURE)
             self._add_sensor(endpoint_sensor)
+            sensors_added = True
+        if sensors_added:
+            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     def set_state(self, state):
         super().set_state(state)
@@ -698,30 +714,17 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             self.logger.warning('Applying overrides to taskinfo of %s', self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
-        # Add some useful sensors
-        if self.logical_node.metadata_katcp_sensors:
-            self._add_sensor(
-                Sensor(str, self.name + '.version', "Image of executing container.", "",
-                       default=self.taskinfo.container.docker.image,
-                       initial_status=Sensor.Status.NOMINAL))
-            source_sensor = Sensor(
-                str, self.name + '.source', 'Version control source for the container', ''
-            )
-            revision_sensor = Sensor(
-                str, self.name + '.revision', 'Version control revision for the container', ''
-            )
-            # org.label-schema is the deprecated version
-            for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
-                if key in self.image.labels:
-                    source_sensor.value = self.image.labels[key]
-                    break
-            for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
-                if key in self.image.labels:
-                    revision_sensor.value = self.image.labels[key]
-                    break
-            self._add_sensor(source_sensor)
-            self._add_sensor(revision_sensor)
-            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+        # Fill in values for version sensors
+        self._version_sensor.value = self.taskinfo.container.docker.image
+        # org.label-schema is the deprecated version
+        for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
+            if key in self.image.labels:
+                self._source_sensor.value = self.image.labels[key]
+                break
+        for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
+            if key in self.image.labels:
+                self._revision_sensor.value = self.image.labels[key]
+                break
 
     def set_status(self, status):
         # Ensure we only count once, even in corner cases like a lost task
@@ -772,14 +775,6 @@ class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTa
         scheduler.FakePhysicalTask.__init__(self, logical_task)
         ProductPhysicalTaskMixin.__init__(
             self, logical_task, sdp_controller, subarray_product, capture_block_id)
-
-    async def resolve(self, resolver, graph, image=None):
-        await super().resolve(resolver, graph, image)
-        if self.logical_node.metadata_katcp_sensors:
-            # Notify about the sensors added by the mixin constructor. This is
-            # done here rather than in the constructor because
-            # ProductPhysicalTask adds further sensors as part of resolve.
-            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
 
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         assert self.host is not None
