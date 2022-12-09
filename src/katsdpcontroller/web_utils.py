@@ -7,7 +7,7 @@ import aiohttp.web_log
 import prometheus_async
 
 
-class _ReplaceLevel(object):
+class _ReplaceLevel:
     """Wraps a logger to replace calls to .info with a chosen level."""
     def __init__(self, logger, level):
         self._logger = logger

@@ -19,7 +19,7 @@ def _make_validator(schema):
     return validator_cls(schema, format_checker=jsonschema.FormatChecker())
 
 
-class MultiVersionValidator(object):
+class MultiVersionValidator:
     """Validation wrapper that supports a versioned schema.
 
     The schema must have a top-level `version` key. It is defined by a Jinja2

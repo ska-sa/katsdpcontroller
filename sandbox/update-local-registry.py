@@ -60,11 +60,11 @@ def expand_special(names: Iterable[str]) -> Set[str]:
         if name == 'all':
             out |= set(IMAGES)
         elif name == 'copy':
-            out |= set(image for image in IMAGES if image_info(image).action == Action.COPY)
+            out |= {image for image in IMAGES if image_info(image).action == Action.COPY}
         elif name == 'build':
-            out |= set(image for image in IMAGES if image_info(image).action == Action.BUILD)
+            out |= {image for image in IMAGES if image_info(image).action == Action.BUILD}
         elif name == 'tune':
-            out |= set(image for image in IMAGES if image_info(image).action == Action.TUNE)
+            out |= {image for image in IMAGES if image_info(image).action == Action.TUNE}
         elif name == 'none':
             pass
         else:

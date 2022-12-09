@@ -222,7 +222,7 @@ class PrometheusObserver:
             if valid and timestamp != self._old_timestamp:
                 self._value_metric.observe(value)
         else:
-            raise TypeError('Expected a Counter, Gauge or Histogram, not {}'.format(metric_type))
+            raise TypeError(f'Expected a Counter, Gauge or Histogram, not {metric_type}')
         if valid:
             self._old_value = value
         self._old_timestamp = timestamp

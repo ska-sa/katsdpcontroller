@@ -1230,8 +1230,8 @@ class TestDiagnoseInsufficient:
     This is split out from TestScheduler to make it easier to set up fixtures.
     """
     def _make_offer(self, resources, agent_num=0, attrs=()):
-        return _make_offer('frameworkid', 'agentid{}'.format(agent_num),
-                           'agenthost{}'.format(agent_num), resources, attrs)
+        return _make_offer('frameworkid', f'agentid{agent_num}',
+                           f'agenthost{agent_num}', resources, attrs)
 
     def setup_method(self):
         # Create a number of agents, each of which has a large quantity of
@@ -1564,7 +1564,7 @@ class TestScheduler:
             node2.wait_ports = []
             batch_nodes = []
             for i in range(2):
-                batch_node = scheduler.LogicalTask('batch{}'.format(i))
+                batch_node = scheduler.LogicalTask(f'batch{i}')
                 batch_node.image = 'batch_image'
                 batch_node.cpus = 0.5
                 batch_node.mem = 256
@@ -1612,8 +1612,8 @@ class TestScheduler:
             self.sched.registered(self.driver, 'framework', mock.sentinel.master_info)
 
         def make_offer(self, resources, agent_num=0, attrs=()):
-            return _make_offer(self.framework_id, 'agentid{}'.format(agent_num),
-                               'agenthost{}'.format(agent_num), resources, attrs)
+            return _make_offer(self.framework_id, f'agentid{agent_num}',
+                               f'agenthost{agent_num}', resources, attrs)
 
         def make_offers(self, ports=None):
             if ports is None:
@@ -1647,13 +1647,13 @@ class TestScheduler:
             self.nodes = []
             for i in range(3):
                 self.nodes.append(next(node for node in self.physical_graph
-                                       if node.name == 'node{}'.format(i)))
+                                       if node.name == f'node{i}'))
             self.nodes[2].host = 'remotehost'
             self.nodes[2].ports['foo'] = 10000
             self.batch_nodes = []
             for i in range(2):
                 self.batch_nodes.append(next(node for node in self.physical_batch_graph
-                                             if node.name == 'batch{}'.format(i)))
+                                             if node.name == f'batch{i}'))
 
         async def wait_request(self, task_id):
             async with aiohttp.ClientSession() as session:
@@ -1774,7 +1774,7 @@ class TestScheduler:
 
     async def test_launch_cycle(self, fix: 'TestScheduler.Fixture') -> None:
         """Launch raises CycleError if there is a cycle of depends_ready edges"""
-        nodes = [scheduler.LogicalExternal('node{}'.format(i)) for i in range(4)]
+        nodes = [scheduler.LogicalExternal(f'node{i}') for i in range(4)]
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
         logical_graph.add_edge(nodes[1], nodes[0], depends_ready=True)
@@ -1789,7 +1789,7 @@ class TestScheduler:
         """Launch raises DependencyError if launching a subset of nodes that
         depends on a node that is outside the set and not running.
         """
-        nodes = [scheduler.LogicalExternal('node{}'.format(i)) for i in range(2)]
+        nodes = [scheduler.LogicalExternal(f'node{i}') for i in range(2)]
         logical_graph = networkx.MultiDiGraph()
         logical_graph.add_nodes_from(nodes)
         logical_graph.add_edge(nodes[1], nodes[0], depends_resources=True)
@@ -1870,7 +1870,7 @@ class TestScheduler:
         expected_taskinfo1.command.uris = [uri]
         expected_taskinfo1.command.value = '/mnt/mesos/sandbox/delay_run.sh'
         expected_taskinfo1.command.arguments = [
-            'http://scheduler/tasks/{}/wait_start'.format(fix.task_ids[1]),
+            f'http://scheduler/tasks/{fix.task_ids[1]}/wait_start',
             'test', '--host=agenthost1', '--remote=agenthost0:30000',
             '--another=remotehost:10000']
         expected_taskinfo1.container.type = 'DOCKER'

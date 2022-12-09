@@ -1688,14 +1688,14 @@ def _validate(config):
                 if version < '3.0':
                     calibration = output['calibration'][0]
                     if calibration not in outputs:
-                        raise ValueError('calibration ({}) does not exist'.format(calibration))
+                        raise ValueError(f'calibration ({calibration}) does not exist')
                     elif outputs[calibration]['type'] != 'sdp.cal':
                         raise ValueError('calibration ({}) has wrong type {}'
                                          .format(calibration,
                                                  outputs[calibration]['type']))
 
         except ValueError as error:
-            raise ValueError('{}: {}'.format(name, error)) from error
+            raise ValueError(f'{name}: {error}') from error
 
 
 def _join_prefix(prefix, name):
@@ -1711,13 +1711,13 @@ def _recursive_diff(a, b, prefix=''):
     references.
     """
     if not isinstance(a, dict) or not isinstance(b, dict):
-        return '{} changed from {} to {}'.format(prefix, a, b)
+        return f'{prefix} changed from {a} to {b}'
     removed = sorted(set(a) - set(b))
     if removed:
-        return '{} removed'.format(_join_prefix(prefix, removed[0]))
+        return f'{_join_prefix(prefix, removed[0])} removed'
     added = sorted(set(b) - set(a))
     if added:
-        return '{} added'.format(_join_prefix(prefix, added[0]))
+        return f'{_join_prefix(prefix, added[0])} added'
     for key in sorted(a.keys()):
         if a[key] != b[key]:
             desc = str(key) if not prefix else prefix + '.' + str(key)

@@ -493,7 +493,7 @@ class SubarrayProduct:
             self.sched.remove_queue(self.batch_queue)
 
     def __repr__(self) -> str:
-        return "Subarray product {} (State: {})".format(self.subarray_product_id, self.state.name)
+        return f"Subarray product {self.subarray_product_id} (State: {self.state.name})"
 
     @property
     def state(self) -> ProductState:
@@ -1125,7 +1125,7 @@ class SubarrayProduct:
             g = networkx.relabel_nodes(g, {node: node.name for node in g})
             g = networkx.drawing.nx_pydot.to_pydot(g)
             filename = os.path.join(output_dir,
-                                    '{}_{}.svg'.format(self.subarray_product_id, name))
+                                    f'{self.subarray_product_id}_{name}.svg')
             try:
                 g.write_svg(filename)
             except OSError as error:

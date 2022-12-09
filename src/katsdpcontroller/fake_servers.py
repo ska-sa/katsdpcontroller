@@ -154,8 +154,8 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         load_time = int((float(start_time) - self._sync_epoch) * self._adc_sample_rate)
         for i, delay_str in enumerate(delays):
             delay_args, phase_args = delay_str.split(':')
-            delay, delay_rate = [float(x) for x in delay_args.split(',')]
-            phase, phase_rate = [float(x) for x in phase_args.split(',')]
+            delay, delay_rate = (float(x) for x in delay_args.split(','))
+            phase, phase_rate = (float(x) for x in phase_args.split(','))
             value = f"({load_time}, {delay}, {delay_rate}, {phase}, {phase_rate})"
             self.sensors[f"input{i}-delay"].value = value
 
