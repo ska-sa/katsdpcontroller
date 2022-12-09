@@ -66,6 +66,7 @@ EXPECTED_REQUEST_LIST = [
     # Internal commands
     'get-multicast-groups',
     'image-lookup',
+    'image-lookup-v2',
     # Standard katcp commands
     'client-list', 'halt', 'help', 'log-level', 'sensor-list',
     'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'

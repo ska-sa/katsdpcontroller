@@ -340,10 +340,30 @@ class TestTaskState:
             TaskState.RUNNING >= 3
 
 
+class TestImage:
+    """Tests for :class:`katsdpcontroller.scheduler.Image`."""
+
+    @pytest.fixture
+    def scheme_image(self) -> scheduler.Image:
+        return scheduler.Image(registry="http://registry.invalid", repo="foo", tag="bar")
+
+    @pytest.fixture
+    def digest_image(self) -> scheduler.Image:
+        return scheduler.Image(registry="registry.invalid", repo="foo", digest="sha256:deadbeef")
+
+    def test_path(self, scheme_image: scheduler.Image, digest_image: scheduler.Image) -> None:
+        assert scheme_image.path == "registry.invalid/foo:bar"
+        assert digest_image.path == "registry.invalid/foo@sha256:deadbeef"
+
+    def test_no_tag_or_digest(self) -> None:
+        with pytest.raises(TypeError):
+            scheduler.Image(registry="registry.invalid", repo="foo")
+
+
 class TestSimpleImageLookup:
     async def test(self) -> None:
         lookup = scheduler.SimpleImageLookup('registry.invalid:5000')
-        assert await lookup('foo', 'latest') == 'registry.invalid:5000/foo:latest'
+        assert (await lookup('foo', 'latest')).path == 'registry.invalid:5000/foo:latest'
 
 
 class TestHTTPImageLookup:
@@ -381,24 +401,54 @@ class TestHTTPImageLookup:
             yield rmock
 
     def _prepare_image(self, rmock, url, digest, **kwargs) -> None:
-        # Response headers are modelled on some actual registry responses
-        rmock.head(
+        url = URL(url)
+        # Response headers are modelled on some actual registry responses, but
+        # payloads are stripped down to the essentials needed by the test.
+        rmock.get(
             url,
             content_type='application/vnd.docker.distribution.manifest.v2+json',
             headers={
                 'Content-Length': '1234',
                 'Docker-Content-Digest': digest,
                 'Docker-Distribution-Api-Version': 'registry/2.0',
-                'Etag': f'"{url}"',
+                'Etag': f'"{digest}"',
                 'X-Content-Type-Options': 'nosniff',
                 'Date': 'Thu, 26 Jan 2017 11:31:22 GMT'
+            },
+            payload={
+                'config': {
+                    'mediaType': 'application/vnd.docker.container.image.v1+json',
+                    'digest': 'sha256:cafebeef'
+                }
+            },
+            **kwargs
+        )
+        blob_url = url.parent.parent / "blobs/sha256:cafebeef"
+        rmock.get(
+            blob_url,
+            content_type='application/octet-stream',
+            headers={
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'max-age=31536000',
+                'Docker-Content-Digest': digest,
+                'Docker-Distribution-Api-Version': 'registry/2.0',
+                'Etag': f'"{digest}"',
+                'X-Content-Type-Options': 'nosniff',
+                'Date': 'Wed, 07 Dec 2022 09:16:26 GMT'
+            },
+            payload={
+                'config': {
+                    'Labels': {
+                        'label1': 'value1'
+                    }
+                }
             },
             **kwargs
         )
 
     def _prepare_image_auth_required(self, rmock, url, realm, scope, **kwargs) -> None:
         # Response headers are loosely based on Harbor 1.8
-        rmock.head(
+        rmock.get(
             url,
             status=401,
             content_type='application/json; charset=utf-8',
@@ -410,6 +460,7 @@ class TestHTTPImageLookup:
                     f'scope="{scope}"'
                 )
             },
+            payload={},
             **kwargs)
 
     @staticmethod
@@ -446,7 +497,8 @@ class TestHTTPImageLookup:
             callback=self._check_basic(self.auth1))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'registry.invalid:5000/myimage@' + self.digest1
+        assert image.path == 'registry.invalid:5000/myimage@' + self.digest1
+        assert image.labels['label1'] == 'value1'
 
     async def test_absolute(self, rmock) -> None:
         """Resolve an image with an explicit registry."""
@@ -457,7 +509,8 @@ class TestHTTPImageLookup:
             callback=self._check_basic(self.auth2))
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('registry2.invalid:5000/anotherimage', 'custom')
-        assert image == 'registry2.invalid:5000/anotherimage@' + self.digest2
+        assert image.path == 'registry2.invalid:5000/anotherimage@' + self.digest2
+        assert image.labels['label1'] == 'value1'
 
     async def test_anonymous(self, rmock) -> None:
         """Resolve an image with a registry having no authentication information."""
@@ -467,7 +520,8 @@ class TestHTTPImageLookup:
             self.digest2)
         lookup = scheduler.HTTPImageLookup('anon.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'anon.invalid:5000/myimage@' + self.digest2
+        assert image.path == 'anon.invalid:5000/myimage@' + self.digest2
+        assert image.labels['label1'] == 'value1'
 
     async def test_token_service(self, rmock) -> None:
         """Test redirection via a token service."""
@@ -496,7 +550,8 @@ class TestHTTPImageLookup:
             callback=self._check_token)
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         image = await lookup('myimage', 'latest')
-        assert image == 'registry.invalid:5000/myimage@' + self.digest1
+        assert image.path == 'registry.invalid:5000/myimage@' + self.digest1
+        assert image.labels['label1'] == 'value1'
 
     async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
@@ -584,10 +639,10 @@ class TestImageResolver:
         resolver = scheduler.ImageResolver(lookup)
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
-        assert await resolver('test1') == 'registry.invalid:5000/test1:latest'
-        assert await resolver('test1:tagged') == 'registry.invalid:5000/test1:tagged'
-        assert await(resolver('foo')) == 'my-registry:5000/bar:custom'
-        assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
+        assert (await resolver('test1')).path == 'registry.invalid:5000/test1:latest'
+        assert (await resolver('test1:tagged')).path == 'registry.invalid:5000/test1:tagged'
+        assert (await resolver('foo')).path == 'my-registry:5000/bar:custom'
+        assert (await resolver('baz')).path == 'registry.invalid:5000/baz:mytag'
 
     async def test_tag_file(
             self,
@@ -598,10 +653,10 @@ class TestImageResolver:
         resolver = scheduler.ImageResolver(lookup, tag_file='tag_file')
         resolver.override('foo', 'my-registry:5000/bar:custom')
         resolver.override('baz', 'baz:mytag')
-        assert await resolver('test1') == 'registry.invalid:5000/test1:tag1'
-        assert await resolver('test1:tagged') == 'registry.invalid:5000/test1:tagged'
-        assert await resolver('foo') == 'my-registry:5000/bar:custom'
-        assert await(resolver('baz')) == 'registry.invalid:5000/baz:mytag'
+        assert (await resolver('test1')).path == 'registry.invalid:5000/test1:tag1'
+        assert (await resolver('test1:tagged')).path == 'registry.invalid:5000/test1:tagged'
+        assert (await resolver('foo')).path == 'my-registry:5000/bar:custom'
+        assert (await resolver('baz')).path == 'registry.invalid:5000/baz:mytag'
 
     async def test_bad_tag_file(
             self,
@@ -615,7 +670,7 @@ class TestImageResolver:
     async def test_tag(self, lookup: scheduler.SimpleImageLookup) -> None:
         """Test with an explicit tag"""
         resolver = scheduler.ImageResolver(lookup, tag_file='tag_file', tag='mytag')
-        assert await resolver('test1') == 'registry.invalid:5000/test1:mytag'
+        assert (await resolver('test1')).path == 'registry.invalid:5000/test1:mytag'
 
 
 class TestTaskIDAllocator:
@@ -1921,9 +1976,9 @@ class TestScheduler:
         This is a regression test for SR-1093.
         """
         class SlowResolve(scheduler.PhysicalTask):
-            async def resolve(self, resolver, graph, image_path=None):
+            async def resolve(self, resolver, graph, image=None):
                 await asyncio.sleep(30)
-                await super().resolve(resolver, graph, image_path=None)
+                await super().resolve(resolver, graph, image=None)
 
         for node in fix.logical_graph.nodes():
             if node.name == 'node0':
@@ -2064,7 +2119,7 @@ class TestScheduler:
             await launch
 
     async def test_launch_resolve_raises(self, fix: 'TestScheduler.Fixture') -> None:
-        async def resolve_raise(resolver, graph, image_path=None):
+        async def resolve_raise(resolver, graph, image=None):
             raise ValueError('Testing')
 
         fix.nodes[0].resolve = resolve_raise

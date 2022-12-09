@@ -281,16 +281,16 @@ class TelstateTask(ProductPhysicalTask):
 
 
 class IngestTask(ProductPhysicalTask):
-    async def resolve(self, resolver, graph, image_path=None):
+    async def resolve(self, resolver, graph, image=None):
         # In develop mode, the GPU can be anything, and we need to pick a
         # matching image.
-        if image_path is None:
+        if image is None:
             gpu = self.agent.gpus[self.allocation.gpus[0].index]
             gpu_name = normalise_gpu_name(gpu.name)
-            image_path = await resolver.image_resolver('katsdpingest_' + gpu_name)
+            image = await resolver.image_resolver('katsdpingest_' + gpu_name)
             if gpu != defaults.INGEST_GPU_NAME:
-                logger.info('Develop mode: using %s for ingest', image_path)
-        await super().resolve(resolver, graph, image_path)
+                logger.info('Develop mode: using %s for ingest', image.path)
+        await super().resolve(resolver, graph, image)
 
 
 def _mb(value):

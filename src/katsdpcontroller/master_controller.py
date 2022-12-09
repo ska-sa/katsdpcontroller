@@ -902,7 +902,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         success = False
         task_id: Optional[str] = None
         try:
-            image = await image_resolver('katsdpcontroller')
+            image = (await image_resolver('katsdpcontroller')).path
             product.image = image
             request_id = await self._ensure_request(name)
             await self._ensure_deploy(name, image)
@@ -1202,7 +1202,28 @@ class DeviceServer(aiokatcp.DeviceServer):
         str
             Full image name
         """
-        return await self._image_lookup(repo, tag)
+        return (await self._image_lookup(repo, tag)).path
+
+    @time_request
+    async def request_image_lookup_v2(self, ctx, repo: str, tag: str) -> str:
+        """Look up information about an image.
+
+        This should only be used by product controllers.
+
+        Parameters
+        ----------
+        repo : str
+            Image repository name
+        tag : str
+            Docker image tag
+
+        Returns
+        -------
+        str
+            JSON serialisation of scheduler.Image class
+        """
+        image = await self._image_lookup(repo, tag)
+        return json.dumps(image.__dict__)
 
     @time_request
     async def request_set_config_override(self, ctx, name: str, override_dict_json: str) -> str:
