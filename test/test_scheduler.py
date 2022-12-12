@@ -359,6 +359,18 @@ class TestImage:
         with pytest.raises(TypeError):
             scheduler.Image(registry="registry.invalid", repo="foo")
 
+    @pytest.mark.parametrize(
+        'path,expected',
+        [
+            ('unqualified', 'unknown/unqualified:latest'),
+            ('registry.invalid/repo:tag', 'registry.invalid/repo:tag'),
+            ('registry.invalid/repo@sha256:deadbeef', 'registry.invalid/repo@sha256:deadbeef'),
+            ('registry.invalid/nested/repo/name', 'registry.invalid/nested/repo/name:latest')
+        ]
+    )
+    def test_from_path(self, path: str, expected: str) -> None:
+        assert scheduler.Image.from_path(path).path == expected
+
 
 class TestSimpleImageLookup:
     async def test(self) -> None:

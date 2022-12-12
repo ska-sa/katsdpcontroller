@@ -756,18 +756,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
-                image = info.get('image')  # Only introduced in version 4
+                image = info['image']
                 if isinstance(image, dict):  # Only became a dict in version 5
                     prod.image = scheduler.Image(**image)
-                try:
-                    prod.start_time = info['start_time']
-                except KeyError:
-                    pass     # Version 1 didn't have start_time
-                try:
-                    ports = info['ports']
-                except KeyError:
-                    # Version 2 only had the katcp port
-                    ports = {'katcp': info['port']}
+                else:
+                    prod.image = scheduler.Image.from_path(image)
+                prod.start_time = info['start_time']
+                ports = info['ports']
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {ipaddress.ip_address(addr)
                                          for addr in info['multicast_groups']}
@@ -779,17 +774,24 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                              ipaddress.IPv4Address(data['next_multicast_group']))
 
     @staticmethod
-    def _serialise_image(image: Optional[scheduler.Image]) -> dict:
-        # It's actually required, and expected to be present on products in
-        # self.products. It's declared optional because there isn't a good
-        # place to put the assertion into the call site.
-        assert image is not None
-        # Strip out optional fields with None in them
-        image_data = dict(image.__dict__)
-        for key, value in list(image_data.items()):
-            if value is None:
-                del image_data[key]
-        return image_data
+    def _serialise_product(product: SingularityProduct) -> dict:
+        data = {
+            'config': product.config,
+            'run_id': product.run_id,
+            'task_id': product.task_id,
+            'host': product.hostname,
+            'ports': product.ports,
+            'multicast_groups': [str(group) for group in product.multicast_groups],
+            'start_time': product.start_time
+        }
+        if product.image is not None:
+            # Strip out optional fields with None in them
+            image_data = dict(product.image.__dict__)
+            for key, value in list(image_data.items()):
+                if value is None:
+                    del image_data[key]
+            data['image'] = image_data
+        return data
 
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
@@ -797,16 +799,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             data = {
                 'version': ZK_STATE_VERSION,
                 'products': {
-                    prod.name: {
-                        'config': prod.config,
-                        'run_id': prod.run_id,
-                        'task_id': prod.task_id,
-                        'image': self._serialise_image(prod.image),
-                        'host': prod.hostname,
-                        'ports': prod.ports,
-                        'multicast_groups': [str(group) for group in prod.multicast_groups],
-                        'start_time': prod.start_time
-                    } for prod in self.products.values()
+                    prod.name: self._serialise_product(prod)
+                    for prod in self.products.values()
                     if prod.task_state == Product.TaskState.ACTIVE
                 },
                 'next_multicast_group': str(self._next_multicast_group),
