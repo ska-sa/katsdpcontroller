@@ -1,57 +1,63 @@
+import copy
 import enum
-import math
 import itertools
 import logging
+import math
+import os.path
 import re
 import time
-import copy
 import urllib.parse
-import os.path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Dict,
     Iterable,
     List,
-    Set,
-    Sequence,
     Optional,
+    Sequence,
+    Set,
     Tuple,
-    TYPE_CHECKING,
     Type,
     TypeVar,
     Union,
-    cast
+    cast,
 )
 
 import addict
-import networkx
-import numpy as np
 import astropy.units as u
-
-from aiokatcp import SimpleAggregateSensor, Reading, Sensor, SensorSampler, SensorSet
 import katdal
 import katdal.datasources
 import katpoint
-import katsdptelstate.aio
-from katsdptelstate.endpoint import Endpoint
 import katsdpmodels.fetch.aiohttp
-from katsdpmodels.rfi_mask import RFIMask
+import katsdptelstate.aio
+import networkx
+import numpy as np
+from aiokatcp import Reading, Sensor, SensorSampler, SensorSet, SimpleAggregateSensor
 from katsdpmodels.band_mask import BandMask, SpectralWindow
+from katsdpmodels.rfi_mask import RFIMask
+from katsdptelstate.endpoint import Endpoint
 
-from . import scheduler, product_config, defaults
+from . import defaults, product_config, scheduler
 from .defaults import LOCALHOST
 from .fake_servers import (
-    FakeCalDeviceServer, FakeFgpuDeviceServer, FakeIngestDeviceServer, FakeXbgpuDeviceServer
+    FakeCalDeviceServer,
+    FakeFgpuDeviceServer,
+    FakeIngestDeviceServer,
+    FakeXbgpuDeviceServer,
 )
+from .product_config import BYTES_PER_FLAG, BYTES_PER_VFW, BYTES_PER_VIS, Configuration, data_rate
 from .tasks import (
-    ProductLogicalTask, ProductPhysicalTask, ProductFakePhysicalTask,
-    LogicalGroup, CaptureBlockState, KatcpTransition)
-from .product_config import (
-    BYTES_PER_VIS, BYTES_PER_FLAG, BYTES_PER_VFW, data_rate,
-    Configuration)
+    CaptureBlockState,
+    KatcpTransition,
+    LogicalGroup,
+    ProductFakePhysicalTask,
+    ProductLogicalTask,
+    ProductPhysicalTask,
+)
+
 # Import just for type annotations, but avoid at runtime due to circular imports
 if TYPE_CHECKING:
-    from . import product_controller      # noqa
+    from . import product_controller  # noqa
 
 
 _T = TypeVar("_T")

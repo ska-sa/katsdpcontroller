@@ -1,27 +1,38 @@
 """Support for manipulating product config dictionaries."""
 
 import collections.abc
-import logging
-import itertools
 import copy
+import itertools
+import logging
 import math
 import re
 from abc import ABC, abstractmethod
 from distutils.version import StrictVersion
 from typing import (
-    Tuple, List, Dict, Mapping, AbstractSet, Sequence, Iterable,
-    Union, ClassVar, Type, TypeVar, Optional, Any, cast, TYPE_CHECKING
+    TYPE_CHECKING,
+    AbstractSet,
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
 )
 
+import katpoint
+import katportalclient
 import networkx
 import yarl
-
-import katpoint
 from katsdptelstate.endpoint import endpoint_list_parser
-import katportalclient
 
-from . import schemas, defaults
-
+from . import defaults, schemas
 
 logger = logging.getLogger(__name__)
 _S = TypeVar('_S', bound='Stream')

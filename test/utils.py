@@ -1,14 +1,23 @@
 """Utilities for unit tests"""
 
 import asyncio
-from unittest import mock
-from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
-                    Type, Any, TypeVar, Generic)
 from types import TracebackType
+from typing import (
+    Any,
+    Awaitable,
+    Coroutine,
+    Generic,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
+from unittest import mock
 
 import aiokatcp
 import pytest
-
 
 _T = TypeVar('_T')
 

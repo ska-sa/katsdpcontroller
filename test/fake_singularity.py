@@ -11,11 +11,10 @@ import asyncio
 import enum
 import uuid
 from collections import deque
-from typing import List, Dict, Deque, Mapping, Callable, Awaitable, Optional, Any, TypeVar
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Mapping, Optional, TypeVar
 
-import aiohttp.web
 import aiohttp.test_utils
-
+import aiohttp.web
 
 _E = TypeVar('_E', bound=enum.Enum)
 Lifecycle = Callable[['Task'], Awaitable[None]]

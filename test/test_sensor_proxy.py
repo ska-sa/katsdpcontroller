@@ -8,20 +8,19 @@ Still TODO:
 - test for cancellation of the update in various cases
 """
 
-import enum
 import asyncio
+import enum
 import functools
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 from unittest import mock
-from typing import Dict, Mapping, Any, Optional, AsyncGenerator
 
 import aiokatcp
-from aiokatcp import Sensor, SensorSet, Address
-from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
-
 import pytest
+from aiokatcp import Address, Sensor, SensorSet
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
-from katsdpcontroller.sensor_proxy import SensorProxyClient, PrometheusInfo, PrometheusWatcher
 from katsdpcontroller.controller import device_server_sockname
+from katsdpcontroller.sensor_proxy import PrometheusInfo, PrometheusWatcher, SensorProxyClient
 
 
 class MyEnum(enum.Enum):

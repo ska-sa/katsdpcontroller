@@ -2,9 +2,9 @@
 
 import logging
 
-from aiohttp import web
 import aiohttp.web_log
 import prometheus_async
+from aiohttp import web
 
 
 class _ReplaceLevel:

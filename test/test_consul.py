@@ -2,11 +2,11 @@
 
 from typing import Generator
 
-import yarl
 import pytest
+import yarl
 from aioresponses import aioresponses
 
-from katsdpcontroller.consul import ConsulService, CONSUL_URL
+from katsdpcontroller.consul import CONSUL_URL, ConsulService
 
 
 class TestConsulService:

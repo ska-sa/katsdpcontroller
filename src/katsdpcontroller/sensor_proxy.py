@@ -1,13 +1,12 @@
 """Class for katcp connections that proxies sensors into a server"""
 
-import logging
 import enum
-from typing import List, Tuple, Dict, Callable, Type, Mapping, Iterable, Sequence, Union, Optional
+import logging
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 import aiokatcp
-import prometheus_client       # noqa: F401
-from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry
-
+import prometheus_client  # noqa: F401
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
 logger = logging.getLogger(__name__)
 _Metric = Union[Gauge, Counter, Histogram]

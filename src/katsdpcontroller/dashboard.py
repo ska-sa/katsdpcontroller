@@ -3,19 +3,18 @@
 import asyncio
 import functools
 import json
-import time
-import threading
 import logging
+import threading
+import time
 from datetime import datetime
 
-import networkx
-import jinja2
-
 import dash
-from dash.dependencies import Input, Output
 import dash_core_components as dcc
 import dash_html_components as html
 import dash_table
+import jinja2
+import networkx
+from dash.dependencies import Input, Output
 from dash_dangerously_set_inner_html import DangerouslySetInnerHTML
 
 from . import scheduler

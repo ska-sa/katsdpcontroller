@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 
-from datetime import datetime, timezone
 import hashlib
 import io
 import json
-from urllib.parse import urlsplit, urljoin
+from datetime import datetime, timezone
+from urllib.parse import urljoin, urlsplit
 
-import numpy as np
-import astropy.units as u
 import astropy.table
+import astropy.units as u
 import botocore.session
-import requests
-
 import katsdpmodels.band_mask
-import katsdpmodels.rfi_mask
 import katsdpmodels.primary_beam
-
+import katsdpmodels.rfi_mask
+import numpy as np
+import requests
 
 BUCKET_POLICY = {
     "Version": "2012-10-17",
