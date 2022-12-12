@@ -775,23 +775,21 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
 
     @staticmethod
     def _serialise_product(product: SingularityProduct) -> dict:
-        data = {
+        # Strip out optional fields with None in them
+        image_data = dict(product.image.__dict__)
+        for key, value in list(image_data.items()):
+            if value is None:
+                del image_data[key]
+        return {
             'config': product.config,
             'run_id': product.run_id,
             'task_id': product.task_id,
+            'image': image_data,
             'host': product.hostname,
             'ports': product.ports,
             'multicast_groups': [str(group) for group in product.multicast_groups],
             'start_time': product.start_time
         }
-        if product.image is not None:
-            # Strip out optional fields with None in them
-            image_data = dict(product.image.__dict__)
-            for key, value in list(image_data.items()):
-                if value is None:
-                    del image_data[key]
-            data['image'] = image_data
-        return data
 
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
