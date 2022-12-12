@@ -254,10 +254,9 @@ class ProductManagerBase(Generic[_P]):
         self._image_resolver_factory = image_resolver_factory
         self._rewrite_gui_urls = rewrite_gui_urls
 
-    @abstractmethod
-    async def start(self) -> None: pass
+    async def start(self) -> None:
+        pass
 
-    @abstractmethod
     async def stop(self) -> None:
         for product in self.products.values():
             await product.close()
@@ -749,7 +748,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                     # Version 2 only had the katcp port
                     ports = {'katcp': info['port']}
                 prod.task_state = Product.TaskState.ACTIVE
-                prod.multicast_groups = {ipaddress.ip_address(addr)
+                prod.multicast_groups = {ipaddress.ip_address(addr)  # type: ignore
                                          for addr in info['multicast_groups']}
                 prod.logger.info('Reconnecting to existing product %s at %s:%d',
                                  prod.name, info['host'], ports['katcp'])
