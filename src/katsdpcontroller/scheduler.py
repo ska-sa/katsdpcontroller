@@ -980,6 +980,22 @@ class Image:
         # Docker doesn't like leading http:// or https://
         return re.sub(r'^https?://', '', result)
 
+    @property
+    def source(self) -> Optional[str]:
+        """Version control source for the image, if available."""
+        for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
+            if key in self.labels:
+                return self.labels[key]
+        return None
+
+    @property
+    def revision(self) -> Optional[str]:
+        """Version control revision for the image, if available."""
+        for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
+            if key in self.labels:
+                return self.labels[key]
+        return None
+
 
 class ImageLookup(ABC):
     """Abstract base class to get a full image name from a repo and tag."""

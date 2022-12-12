@@ -42,7 +42,7 @@ from .controller import (time_request, load_json_dict, log_task_exceptions, devi
                          ProductState, DeviceStatus, device_status_to_sensor_status)
 
 
-ZK_STATE_VERSION = 4
+ZK_STATE_VERSION = 5
 logger = logging.getLogger(__name__)
 _T = TypeVar('_T')
 _P = TypeVar('_P', bound='Product')
@@ -511,7 +511,7 @@ class SingularityProduct(Product):
         super().__init__(name, config, configure_task)
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
-        self._image: Optional[str] = None
+        self._image: Optional[scheduler.Image] = None
         self.sensors.add(Sensor(
             Address, f'{name}.http-address',
             'Address of internal HTTP server (which is NOT the dashboard)'))
@@ -527,19 +527,37 @@ class SingularityProduct(Product):
         self.sensors.add(Sensor(
             str, f'{self.name}.version',
             'Docker image running the product controller'))
+        self.sensors.add(Sensor(
+            str, f'{self.name}.source',
+            'Version control source for the product controller'))
+        self.sensors.add(Sensor(
+            str, f'{self.name}.revision',
+            'Version control revision for the product controller'))
 
     @property
-    def image(self) -> Optional[str]:
+    def image(self) -> Optional[scheduler.Image]:
         return self._image
 
     @image.setter
-    def image(self, value: Optional[str]) -> None:
+    def image(self, value: Optional[scheduler.Image]) -> None:
+        def set_sensor(suffix: str, value: Optional[str]):
+            sensor = self.sensors[f'{self.name}.{suffix}']
+            if value is not None:
+                sensor.value = value
+            else:
+                sensor.set_value('', status=Sensor.Status.UNKNOWN)
+
         self._image = value
-        sensor = self.sensors[f'{self.name}.version']
+        version: Optional[str] = None
+        source: Optional[str] = None
+        revision: Optional[str] = None
         if value is not None:
-            sensor.value = value
-        else:
-            sensor.set_value('', status=Sensor.Status.UNKNOWN)
+            version = value.path
+            source = value.source
+            revision = value.revision
+        set_sensor('version', version)
+        set_sensor('source', source)
+        set_sensor('revision', revision)
 
 
 class SingularityProductManager(ProductManagerBase[SingularityProduct]):
@@ -738,7 +756,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info['config'], None)
                 prod.run_id = info['run_id']
                 prod.task_id = info['task_id']
-                prod.image = info.get('image')  # Only introduced in version 4
+                image = info.get('image')  # Only introduced in version 4
+                if isinstance(image, dict):  # Only became a dict in version 5
+                    prod.image = scheduler.Image(**image)
                 try:
                     prod.start_time = info['start_time']
                 except KeyError:
@@ -758,6 +778,19 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             self._init_state(products, data['next_capture_block_id'],
                              ipaddress.IPv4Address(data['next_multicast_group']))
 
+    @staticmethod
+    def _serialise_image(image: Optional[scheduler.Image]) -> dict:
+        # It's actually required, and expected to be present on products in
+        # self.products. It's declared optional because there isn't a good
+        # place to put the assertion into the call site.
+        assert image is not None
+        # Strip out optional fields with None in them
+        image_data = dict(image.__dict__)
+        for key, value in list(image_data.items()):
+            if value is None:
+                del image_data[key]
+        return image_data
+
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
         async with self._zk_state_lock:
@@ -768,7 +801,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'config': prod.config,
                         'run_id': prod.run_id,
                         'task_id': prod.task_id,
-                        'image': prod.image,
+                        'image': self._serialise_image(prod.image),
                         'host': prod.hostname,
                         'ports': prod.ports,
                         'multicast_groups': [str(group) for group in prod.multicast_groups],
@@ -902,10 +935,10 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         success = False
         task_id: Optional[str] = None
         try:
-            image = (await image_resolver('katsdpcontroller')).path
+            image = await image_resolver('katsdpcontroller')
             product.image = image
             request_id = await self._ensure_request(name)
-            await self._ensure_deploy(name, image)
+            await self._ensure_deploy(name, image.path)
             await self._sing.create_run(request_id, {
                 "runId": product.run_id,
                 "commandLineArgs": args

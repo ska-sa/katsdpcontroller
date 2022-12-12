@@ -719,15 +719,10 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
 
         # Fill in values for version sensors
         self._version_sensor.value = self.taskinfo.container.docker.image
-        # org.label-schema is the deprecated version
-        for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
-            if key in self.image.labels:
-                self._source_sensor.value = self.image.labels[key]
-                break
-        for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
-            if key in self.image.labels:
-                self._revision_sensor.value = self.image.labels[key]
-                break
+        if self.image.source is not None:
+            self._source_sensor.value = self.image.source
+        if self.image.revision is not None:
+            self._revision_sensor.value = self.image.revision
 
     def set_status(self, status):
         # Ensure we only count once, even in corner cases like a lost task

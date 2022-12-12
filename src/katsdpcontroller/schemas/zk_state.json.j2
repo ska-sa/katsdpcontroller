@@ -7,7 +7,7 @@
         "version": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 4
+            "maximum": 5
         }
     }
 }
@@ -65,8 +65,24 @@
 {% endif %}
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},
-{% if version >= 4 %}
+{% if version == 4 %}
                     "image": {"type": "string"},
+{% endif %}
+{% if version >= 5 %}
+                    "image": {
+                        "type": "object",
+                        "properties": {
+                            "registry": {"type": "string"},
+                            "repo": {"type": "string"},
+                            "tag": {"type": "string"},
+                            "digest": {"type": "string"},
+                            "labels": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"}
+                            }
+                        },
+                        "required": ["registry", "repo"]
+                    },
 {% endif %}
                     "host": {"type": "string"},
                     "config": {"type": "object"},
