@@ -124,7 +124,7 @@ class DummyHaproxyProcess:
         self.returncode: Optional[int] = None
 
     def _update_config(self) -> None:
-        with open(self.args.config_file, 'r') as f:
+        with open(self.args.config_file) as f:
             self.config = f.read()
 
     def _check_proc(self) -> None:

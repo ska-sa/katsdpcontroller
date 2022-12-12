@@ -988,7 +988,7 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
     init_telstate[('sub', 'band')] = stream.antenna_channelised_voltage.band
 
     for i in range(n_sim):
-        sim = ProductLogicalTask('sim.{}.{}'.format(stream.name, i + 1), streams=[stream])
+        sim = ProductLogicalTask(f'sim.{stream.name}.{i + 1}', streams=[stream])
         sim.subsystem = 'sdp'
         sim.image = 'katcbfsim'
         # create-*-stream is passed on the command-line instead of telstate
@@ -1075,7 +1075,7 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
     timeplot.volumes = [CONFIG_VOL]
     timeplot.gui_urls = [{
         'title': 'Signal Display',
-        'description': 'Signal displays for {0.subarray_product_id} %s' % (description,),
+        'description': f'Signal displays for {{0.subarray_product_id}} {description}',
         'href': 'http://{0.host}:{0.ports[html_port]}/',
         'category': 'Plot'
     }]
@@ -1315,7 +1315,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
 
     for i in range(1, n_ingest + 1):
-        ingest = ProductLogicalTask('ingest.{}.{}'.format(name, i), streams=streams)
+        ingest = ProductLogicalTask(f'ingest.{name}.{i}', streams=streams)
         ingest.subsystem = 'sdp'
         if configuration.options.interface_mode:
             ingest.physical_factory = ProductFakePhysicalTask
@@ -1487,7 +1487,7 @@ def _make_cal(g: networkx.MultiDiGraph,
 
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
-        cal = ProductLogicalTask('{}.{}'.format(stream.name, i),
+        cal = ProductLogicalTask(f'{stream.name}.{i}',
                                  streams=(stream,) + tuple(flags_streams))
         cal.subsystem = 'sdp'
         cal.fake_katcp_server_cls = FakeCalDeviceServer
@@ -1893,7 +1893,7 @@ def _make_beamformer_engineering_pol(
                depends_resolve=True, depends_init=True, depends_ready=True,
                config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
     if timeplot:
-        stats_multicast = LogicalMulticast('timeplot.{}'.format(src_stream.name), 1)
+        stats_multicast = LogicalMulticast(f'timeplot.{src_stream.name}', 1)
         g.add_edge(bf_ingest, stats_multicast, port='spead',
                    depends_resolve=True,
                    config=lambda task, resolver, endpoint: {'stats': str(endpoint)})
@@ -1911,7 +1911,7 @@ def _make_beamformer_engineering(
     for i, src in enumerate(stream.tied_array_channelised_voltage):
         nodes.append(_make_beamformer_engineering_pol(
             g, configuration, stream, src,
-            'bf_ingest.{}.{}'.format(stream.name, i + 1), ram, i))
+            f'bf_ingest.{stream.name}.{i + 1}', ram, i))
     return nodes
 
 
@@ -2084,9 +2084,9 @@ def build_logical_graph(configuration: Configuration,
     seen = set()
     for node in g:
         if isinstance(node, ProductLogicalTask):
-            assert node.name not in seen, "{} appears twice in graph".format(node.name)
+            assert node.name not in seen, f"{node.name} appears twice in graph"
             seen.add(node.name)
-            assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
+            assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
             if telstate is not None and node is not telstate:
                 if node.pass_telstate:
@@ -2151,16 +2151,16 @@ def _spectral_imager_cpus(configuration: Configuration) -> int:
 
 def _stream_url(capture_block_id: str, stream_name: str) -> str:
     url = 'redis://{endpoints[telstate_telstate]}/'
-    url += '?capture_block_id={}'.format(escape_format(urllib.parse.quote_plus(capture_block_id)))
-    url += '&stream_name={}'.format(escape_format(urllib.parse.quote_plus(stream_name)))
+    url += f'?capture_block_id={escape_format(urllib.parse.quote_plus(capture_block_id))}'
+    url += f'&stream_name={escape_format(urllib.parse.quote_plus(stream_name))}'
     return url
 
 
 def _sky_model_url(data_url: str, continuum_name: str, target: katpoint.Target) -> str:
     # data_url must have been returned by stream_url
     url = data_url
-    url += '&continuum={}'.format(escape_format(urllib.parse.quote_plus(continuum_name)))
-    url += '&target={}'.format(escape_format(urllib.parse.quote_plus(target.description)))
+    url += f'&continuum={escape_format(urllib.parse.quote_plus(continuum_name))}'
+    url += f'&target={escape_format(urllib.parse.quote_plus(target.description))}'
     url += '&format=katdal'
     return url
 
@@ -2185,9 +2185,9 @@ class TargetMapper:
         name = re.sub(r'[^-A-Za-z0-9_]', '_', target.name)
         if name in self._used:
             i = 1
-            while '{}_{}'.format(name, i) in self._used:
+            while f'{name}_{i}' in self._used:
                 i += 1
-            name = '{}_{}'.format(name, i)
+            name = f'{name}_{i}'
         self._used.add(name)
         self._cache[target] = name
         return name
@@ -2249,7 +2249,7 @@ def _render_continuum_parameters(parameters: Dict[str, Any]) -> str:
 
     The keys must be valid Python identifiers.
     """
-    return '; '.join('{}={!r}'.format(key, value) for key, value in parameters.items())
+    return '; '.join(f'{key}={value!r}' for key, value in parameters.items())
 
 
 async def _make_continuum_imager(g: networkx.MultiDiGraph,
@@ -2396,7 +2396,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
             imager.command = [
                 'run-and-cleanup', '--create', '--tmp', '/mnt/mesos/sandbox/tmp', '--',
                 'imager-mkat-pipeline.py',
-                '-i', escape_format('target={}'.format(target.description)),
+                '-i', escape_format(f'target={target.description}'),
                 '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
                 '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
                 '-i', 'rfi-mask=fixed',
@@ -2408,7 +2408,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
                 '--channel-batch', str(defaults.SPECTRAL_OBJECT_CHANNELS),
                 data_url,
                 escape_format(DATA_VOL.container_path),
-                escape_format('{}_{}_{}'.format(capture_block_id, stream.name, target_name)),
+                escape_format(f'{capture_block_id}_{stream.name}_{target_name}'),
                 escape_format(stream.name)
             ]
             if stream.continuum is not None:
@@ -2503,9 +2503,9 @@ async def build_postprocess_logical_graph(
     for node in g:
         if isinstance(node, ProductLogicalTask):
             # TODO: most of this code is shared by _build_logical_graph
-            assert node.name not in seen, "{} appears twice in graph".format(node.name)
+            assert node.name not in seen, f"{node.name} appears twice in graph"
             seen.add(node.name)
-            assert node.image in IMAGES, "{} missing from IMAGES".format(node.image)
+            assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
             g.add_edge(node, telstate_node, port='telstate',
                        depends_ready=True, depends_kill=True)

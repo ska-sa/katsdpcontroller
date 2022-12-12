@@ -59,7 +59,7 @@ class ProductFailed(Exception):
 
 
 def _load_s3_config(filename: str) -> dict:
-    with open(filename, 'r') as f:
+    with open(filename) as f:
         config = json.load(f)
     return config
 
@@ -423,7 +423,7 @@ class ProductManagerBase(Generic[_P]):
                     product.multicast_groups.add(start + i)
                 ans = str(start)
                 if n_addresses > 1:
-                    ans += '+{}'.format(n_addresses - 1)
+                    ans += f'+{n_addresses - 1}'
                 await self._save_state()
                 return ans
 
@@ -1671,11 +1671,11 @@ def _load_gui_urls_file(filename: str) -> List[Dict[str, str]]:
         with open(filename) as gui_urls_file:
             gui_urls = json.load(gui_urls_file)
     except OSError as error:
-        raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(filename, error))
+        raise _InvalidGuiUrlsError(f'Cannot read {filename}: {error}')
     except ValueError as error:
-        raise _InvalidGuiUrlsError('Invalid JSON in {}: {}'.format(filename, error))
+        raise _InvalidGuiUrlsError(f'Invalid JSON in {filename}: {error}')
     if not isinstance(gui_urls, list):
-        raise _InvalidGuiUrlsError('{} does not contain a list'.format(filename))
+        raise _InvalidGuiUrlsError(f'{filename} does not contain a list')
     return gui_urls
 
 
@@ -1687,7 +1687,7 @@ def _load_gui_urls_dir(dirname: str) -> List[Dict[str, str]]:
             if filename.endswith('.json') and os.path.isfile(filename):
                 gui_urls.extend(_load_gui_urls_file(filename))
     except OSError as error:
-        raise _InvalidGuiUrlsError('Cannot read {}: {}'.format(dirname, error))
+        raise _InvalidGuiUrlsError(f'Cannot read {dirname}: {error}')
     return gui_urls
 
 

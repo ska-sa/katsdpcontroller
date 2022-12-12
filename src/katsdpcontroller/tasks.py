@@ -105,7 +105,7 @@ class CaptureBlockState(scheduler.OrderedEnum):
     DEAD = 4                 # fully complete
 
 
-class KatcpTransition(object):
+class KatcpTransition:
     """A katcp request to issue on a state transition
 
     Parameters
@@ -134,7 +134,7 @@ class KatcpTransition(object):
         return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
     def __repr__(self):
-        args = ['{!r}'.format(arg) for arg in (self.name,) + self.args]
+        args = [f'{arg!r}' for arg in (self.name,) + self.args]
         return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
 
 
@@ -403,7 +403,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self.logger.info("Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
-            msg = "Failed to issue req {} to node {}. {}".format(req, self.name, error)
+            msg = f"Failed to issue req {req} to node {self.name}. {error}"
             self.logger.warning('%s', msg)
             raise FailReply(msg) from error
 
@@ -528,7 +528,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
                 aiokatcp.Address,
-                '{}.{}'.format(self.name, key), 'IP endpoint for {}'.format(key))
+                f'{self.name}.{key}', f'IP endpoint for {key}')
             try:
                 addrinfo = await asyncio.get_event_loop().getaddrinfo(self.host, value)
                 host, port = addrinfo[0][4][:2]
@@ -690,7 +690,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         if self.capture_block_id is not None:
             labels['capture_block_id'] = self.capture_block_id
         self.taskinfo.container.docker.setdefault('parameters', []).extend([
-            {'key': 'label', 'value': 'za.ac.kat.sdp.katsdpcontroller.{}={}'.format(key, value)}
+            {'key': 'label', 'value': f'za.ac.kat.sdp.katsdpcontroller.{key}={value}'}
             for (key, value) in labels.items()])
 
         # Set extra fields for katsdpservices-using services to log to logstash

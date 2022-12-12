@@ -473,7 +473,7 @@ class Resource:
     def add(self, resource):
         """Add a Mesos resource message to the internal resource list"""
         if resource.name != self.name:
-            raise ValueError('Name mismatch {} != {}'.format(self.name, resource.name))
+            raise ValueError(f'Name mismatch {self.name} != {resource.name}')
         # Keeps the most specifically reserved resources at the end
         # so that they're used first before unreserved resources.
         pos = 0
@@ -574,7 +574,7 @@ class ScalarResource(Resource):
 
     def _transform(self, resource):
         if resource.type != 'SCALAR':
-            raise TypeError('Expected SCALAR resource, got {}'.format(resource.type))
+            raise TypeError(f'Expected SCALAR resource, got {resource.type}')
         resource = copy.deepcopy(resource)
         resource.scalar.value = _as_decimal(resource.scalar.value)
         return resource
@@ -617,7 +617,7 @@ class RangeResource(Resource):
 
     def _transform(self, resource):
         if resource.type != 'RANGES':
-            raise TypeError('Expected RANGES resource, got {}'.format(resource.type))
+            raise TypeError(f'Expected RANGES resource, got {resource.type}')
         resource = copy.deepcopy(resource)
         # Ensures we take resources from the first range first
         resource.ranges.range.reverse()
@@ -633,7 +633,7 @@ class RangeResource(Resource):
         return total
 
     def _value_str(self, resource):
-        return '[' + ','.join('{}-{}'.format(r.begin, r.end) for r in resource.ranges.range) + ']'
+        return '[' + ','.join(f'{r.begin}-{r.end}' for r in resource.ranges.range) + ']'
 
     def _allocate(self, resource, amount, *, use_random=False):
         out = copy.deepcopy(resource)
@@ -754,11 +754,11 @@ class ResourceRequestsContainer(metaclass=ResourceRequestsContainerMeta):
         self.requests = {name: cls.empty_request() for name, cls in self.RESOURCE_REQUESTS.items()}
 
     def format_requests(self):
-        return ''.join(' {}={}'.format(name, request.amount)
+        return ''.join(f' {name}={request.amount}'
                        for name, request in self.requests.items() if request.amount)
 
     def __repr__(self):
-        return '<{}{}>'.format(self.__class__.__name__, self.format_requests())
+        return f'<{self.__class__.__name__}{self.format_requests()}>'
 
 
 GLOBAL_RESOURCES = {'cpus': ScalarResource, 'mem': ScalarResource, 'disk': ScalarResource,
@@ -910,7 +910,7 @@ class GPUResources:
     """
     def __init__(self, index):
         self.index = index
-        prefix = 'katsdpcontroller.gpu.{}.'.format(index)
+        prefix = f'katsdpcontroller.gpu.{index}.'
         self.resources = {name: cls(prefix + name) for name, cls in GPU_RESOURCES.items()}
 
 
@@ -926,7 +926,7 @@ class InterfaceResources:
     """
     def __init__(self, index):
         self.index = index
-        prefix = 'katsdpcontroller.interface.{}.'.format(index)
+        prefix = f'katsdpcontroller.interface.{index}.'
         self.resources = {name: cls(prefix + name) for name, cls in INTERFACE_RESOURCES.items()}
         self.infiniband_multicast_out = set()
         self.multicast_in = set()
@@ -1038,7 +1038,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         if '://' not in registry:
             # If no scheme is specified, assume https
             registry = 'https://' + registry
-        manifest_url = '{}/v2/{}/manifests/{}'.format(registry, repo, tag)
+        manifest_url = f'{registry}/v2/{repo}/manifests/{tag}'
         headers = {aiohttp.hdrs.ACCEPT: 'application/vnd.docker.distribution.manifest.v2+json'}
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
@@ -1065,7 +1065,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         except (KeyError, TypeError):
             raise ImageError(f'Could not find image blob in {manifest_url}')
 
-        image_url = '{}/v2/{}/blobs/{}'.format(registry, repo, image_blob)
+        image_url = f'{registry}/v2/{repo}/blobs/{image_blob}'
         headers[aiohttp.hdrs.ACCEPT] = content_type
         try:
             async with session.get(
@@ -1079,7 +1079,7 @@ class HTTPImageLookup(_RegistryImageLookup):
             if not isinstance(labels, dict):
                 labels = {}
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError('Failed to get labels from {}: {}'.format(image_url, error)) from error
+            raise ImageError(f'Failed to get labels from {image_url}: {error}') from error
         return Image(registry=registry, repo=repo, tag=tag, digest=digest, labels=labels)
 
     async def _get_token(
@@ -1182,7 +1182,7 @@ class ImageResolver:
         elif self._tag_file is None:
             self._tag = 'latest'
         else:
-            with open(self._tag_file, 'r') as f:
+            with open(self._tag_file) as f:
                 self._tag = f.read().strip()
                 # This is a regex that appeared in older versions of Docker
                 # (see https://github.com/docker/docker/pull/8447/files).
@@ -1190,7 +1190,7 @@ class ImageResolver:
                 # whitespace, / and other nonsense, even if Docker itself no
                 # longer enforces it.
                 if not re.match(r'^[\w][\w.-]{0,127}$', self._tag):
-                    raise ValueError('Invalid tag {} in {}'.format(repr(self._tag), self._tag_file))
+                    raise ValueError(f'Invalid tag {repr(self._tag)} in {self._tag_file}')
 
     @property
     def tag(self) -> str:
@@ -1273,7 +1273,7 @@ class TaskIDAllocator:
         try:
             return TaskIDAllocator._by_prefix[prefix]
         except KeyError:
-            alloc = super(TaskIDAllocator, cls).__new__(cls)
+            alloc = super().__new__(cls)
             alloc._prefix = prefix
             alloc._next_id = 0
             TaskIDAllocator._by_prefix[prefix] = alloc
@@ -1484,7 +1484,7 @@ class TaskError(RuntimeError):
     """A batch job failed."""
     def __init__(self, node, msg=None):
         if msg is None:
-            msg = "Node {} failed with status {}".format(node.name, node.status.state)
+            msg = f"Node {node.name} failed with status {node.status.state}"
             if hasattr(node.status, "reason"):
                 msg += f"/{node.status.reason}"
             if hasattr(node.status, "message"):
@@ -1497,7 +1497,7 @@ class TaskSkipped(TaskError):
     """A batch job was skipped because a dependency failed"""
     def __init__(self, node, msg=None):
         if msg is None:
-            msg = "Node {} was skipped because a dependency failed".format(node.name)
+            msg = f"Node {node.name} was skipped because a dependency failed"
         super().__init__(node, msg)
 
 
@@ -1522,7 +1522,7 @@ class LogicalNode:
         self.physical_factory = PhysicalNode
 
     def __repr__(self):
-        return '<{} {!r}>'.format(self.__class__.__name__, self.name)
+        return f'<{self.__class__.__name__} {self.name!r}>'
 
 
 class LogicalExternal(LogicalNode):
@@ -1645,15 +1645,15 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
 
     def __repr__(self):
         s = io.StringIO()
-        s.write('<{} {!r}{}'.format(self.__class__.__name__, self.name, self.format_requests()))
+        s.write(f'<{self.__class__.__name__} {self.name!r}{self.format_requests()}')
         if self.gpus:
-            s.write(' gpus={}'.format(self.gpus))
+            s.write(f' gpus={self.gpus}')
         if self.interfaces:
-            s.write(' interfaces={}'.format(self.interfaces))
+            s.write(f' interfaces={self.interfaces}')
         if self.volumes:
-            s.write(' volumes={}'.format(self.volumes))
+            s.write(f' volumes={self.volumes}')
         if self.host:
-            s.write(' host={!r}'.format(self.host))
+            s.write(f' host={self.host!r}')
         s.write('>')
         return s.getvalue()
 
@@ -1907,10 +1907,10 @@ class Agent:
         for request in logical_task.volumes:
             if not any(request.matches(volume, numa_node) for volume in self.volumes):
                 if not any(request.matches(volume, None) for volume in self.volumes):
-                    raise InsufficientResourcesError('Volume {} not present'.format(request.name))
+                    raise InsufficientResourcesError(f'Volume {request.name} not present')
                 else:
                     raise InsufficientResourcesError(
-                        'Volume {} not present on NUMA node {}'.format(request.name, numa_node))
+                        f'Volume {request.name} not present on NUMA node {numa_node}')
         # Match GPU requests to GPUs
         gpu_map = self._match_children(numa_node, logical_task.gpus, self.gpus, 'GPU')
 
@@ -1974,7 +1974,7 @@ class Agent:
             have = self.resources[name].available
             if have < need:
                 raise InsufficientResourcesError(
-                    'Not enough {} ({} < {})'.format(name, have, need))
+                    f'Not enough {name} ({have} < {need})')
 
         if logical_task.requests['cores'].amount:
             # For tasks requesting cores we activate NUMA awareness
@@ -2349,7 +2349,7 @@ class PhysicalTask(PhysicalNode):
         for _src, trg, attr in graph.out_edges([self], data=True):
             if 'port' in attr:
                 port = attr['port']
-                endpoint_name = '{}_{}'.format(trg.logical_node.name, port)
+                endpoint_name = f'{trg.logical_node.name}_{port}'
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
         docker_devices = set()
@@ -2379,7 +2379,7 @@ class PhysicalTask(PhysicalNode):
             command = ['/mnt/mesos/sandbox/delay_run.sh',
                        urllib.parse.urljoin(
                            resolver.http_url,
-                           'tasks/{}/wait_start'.format(taskinfo.task_id.value))] + command
+                           f'tasks/{taskinfo.task_id.value}/wait_start')] + command
         if command:
             taskinfo.command.value = command[0]
             taskinfo.command.arguments = command[1:]
@@ -2774,7 +2774,7 @@ async def wait_start_handler(request):
     task_id = request.match_info['id']
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        raise aiohttp.web.HTTPNotFound(text='Task ID {} not active\n'.format(task_id))
+        raise aiohttp.web.HTTPNotFound(text=f'Task ID {task_id} not active\n')
     else:
         try:
             for dep in task.depends_ready:
@@ -2788,7 +2788,7 @@ async def wait_start_handler(request):
         except Exception as error:
             logger.exception('Exception while waiting for dependencies')
             raise aiohttp.web.HTTPInternalServerError(
-                text='Exception while waiting for dependencies:\n{}\n'.format(error))
+                text=f'Exception while waiting for dependencies:\n{error}\n')
         else:
             return aiohttp.web.Response(body='')
 
@@ -3220,7 +3220,7 @@ class SchedulerBase:
             # Order by deadline, to give some degree of fairness
             candidates.sort(key=lambda x: x[1].deadline)
         # Revive/suppress to match the necessary roles
-        roles = set(queue.role for (queue, group) in candidates)
+        roles = {queue.role for (queue, group) in candidates}
         self._update_roles(roles)
         # See comment at the bottom
         useful_agents = set()
@@ -3688,7 +3688,7 @@ class SchedulerBase:
                             if len(node_set) == 1:
                                 desc = node.name
                             else:
-                                desc = node.name + ' (and {} others)'.format(len(node_set) - 1)
+                                desc = node.name + f' (and {len(node_set) - 1} others)'
                             if critical:
                                 logger.info('Skipping %s because %s failed', desc, dep.name)
                                 self.task_stats.batch_tasks_skipped(len(node_set))

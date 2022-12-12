@@ -99,7 +99,7 @@ class DummyMasterController(aiokatcp.DeviceServer):
         """Dummy docstring"""
         ans = str(self._next)
         if n_addresses > 1:
-            ans += '+{}'.format(n_addresses - 1)
+            ans += f'+{n_addresses - 1}'
         self._next += n_addresses
         return ans
 
