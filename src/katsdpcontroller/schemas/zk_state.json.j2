@@ -67,7 +67,7 @@
                             }
                         },
                         "required": ["registry", "repo"],
-                        "oneOf": [
+                        "anyOf": [
                             {"required": ["tag"]},
                             {"required": ["digest"]}
                         ]
