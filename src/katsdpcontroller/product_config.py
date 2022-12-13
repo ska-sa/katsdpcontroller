@@ -570,11 +570,11 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         return defaults.GPUCBF_SPECTRA_PER_HEAP  # TODO: should maybe make this a tunable?
 
     def sources(self, feng_id: int) \
-            -> Tuple[SimDigRawAntennaVoltageStream, SimDigRawAntennaVoltageStream]:
+            -> Tuple[DigRawAntennaVoltageStreamBase, DigRawAntennaVoltageStreamBase]:
         """Get the two source streams for a specific F-engine."""
         return (
-            cast(SimDigRawAntennaVoltageStream, self.src_streams[2 * feng_id]),
-            cast(SimDigRawAntennaVoltageStream, self.src_streams[2 * feng_id + 1])
+            cast(DigRawAntennaVoltageStreamBase, self.src_streams[2 * feng_id]),
+            cast(DigRawAntennaVoltageStreamBase, self.src_streams[2 * feng_id + 1])
         )
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:

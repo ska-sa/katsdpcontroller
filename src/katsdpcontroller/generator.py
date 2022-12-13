@@ -514,7 +514,18 @@ def _make_fgpu(
         "input labels.",
         default="0" * len(stream.src_streams),
         initial_status=Sensor.Status.NOMINAL)
+
+    # Safety check that we don't have conflicting values for the adc-bits
+    # sensor, as it is not scoped to a stream. Currently MeerKAT+ only
+    # supports one value, so that shouldn't be an issue.
+    adc_bits = stream.sources(0)[0].bits_per_sample
+    if "adc-bits" in g.graph["stream_sensors"]:
+        assert g.graph["stream_sensors"]["adc-bits"].value == adc_bits
+
     stream_sensors = [
+        Sensor(int, "adc-bits",
+               "ADC sample bitwidth",
+               default=adc_bits, initial_status=Sensor.Status.NOMINAL),
         Sensor(float, f"{stream.name}-adc-sample-rate",
                "Sample rate of the ADC",
                "Hz",
@@ -734,6 +745,14 @@ def _make_xbgpu(
         initial_status=Sensor.Status.NOMINAL)
 
     stream_sensors = [
+        Sensor(float, f"{stream.name}-sync-time",
+               "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+               "s",
+               default=float(sync_time), initial_status=Sensor.Status.NOMINAL),
+        Sensor(float, f"{stream.name}-bandwidth",
+               "The analogue bandwidth of the digitised band",
+               "Hz",
+               default=acv.bandwidth, initial_status=Sensor.Status.NOMINAL),
         Sensor(int, f"{stream.name}-n-xengs",
                "The number of X-engines in the instrument",
                default=n_engines, initial_status=Sensor.Status.NOMINAL),
