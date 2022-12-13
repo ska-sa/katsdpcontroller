@@ -1,11 +1,11 @@
 """Wrappers for Hubspot Singularity"""
 
 import json
-from typing import Union, Sequence
 import logging
+from typing import Sequence, Union
 
-import yarl
 import aiohttp
+import yarl
 
 
 class SingularityError(Exception):

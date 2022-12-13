@@ -5,7 +5,8 @@ import numbers
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from aiokatcp import ClockState, DeviceStatus, Sensor, SensorSet, Timestamp, FailReply
+from aiokatcp import ClockState, DeviceStatus, FailReply, Sensor, SensorSet, Timestamp
+
 from .tasks import FakeDeviceServer
 
 

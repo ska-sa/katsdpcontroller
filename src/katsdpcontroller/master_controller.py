@@ -6,41 +6,65 @@
 #   handling new katcp requests.
 # - possibly add wait_connected to _katcp_request
 
-import asyncio
-import logging
 import argparse
+import asyncio
 import enum
-import uuid
 import ipaddress
-import json
 import itertools
-import re
-import time
-from datetime import datetime
+import json
+import logging
 import os
+import re
 import socket
+import time
+import uuid
 from abc import abstractmethod
-from typing import (Type, TypeVar, Generic, Dict, Tuple, Set, List, Union,
-                    Iterable, Mapping, Sequence, Optional, Callable, Awaitable, Any)
+from datetime import datetime
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Generic,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
-import aiozk
+import aiohttp
 import aiokatcp
-from aiokatcp import FailReply, Sensor, SensorSet, Address
+import aiozk
 import async_timeout
 import jsonschema
-import yarl
-import aiohttp
 import katsdpservices
+import yarl
+from aiokatcp import Address, FailReply, Sensor, SensorSet
 
 import katsdpcontroller
-from . import singularity, product_config, product_controller, scheduler, sensor_proxy
+
+from . import product_config, product_controller, scheduler, sensor_proxy, singularity
+from .controller import (
+    DeviceStatus,
+    ProductState,
+    add_shared_options,
+    device_server_sockname,
+    device_status_to_sensor_status,
+    extract_shared_options,
+    load_json_dict,
+    log_task_exceptions,
+    make_image_resolver_factory,
+    time_request,
+)
 from .defaults import LOCALHOST
 from .scheduler import decode_json_base64
-from .schemas import ZK_STATE, SUBSYSTEMS       # type: ignore
-from .controller import (time_request, load_json_dict, log_task_exceptions, device_server_sockname,
-                         add_shared_options, extract_shared_options, make_image_resolver_factory,
-                         ProductState, DeviceStatus, device_status_to_sensor_status)
-
+from .schemas import SUBSYSTEMS, ZK_STATE  # type: ignore
 
 ZK_STATE_VERSION = 4
 logger = logging.getLogger(__name__)

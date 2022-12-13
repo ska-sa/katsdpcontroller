@@ -1,9 +1,9 @@
-import logging
-import json
 import asyncio
-import socket
 import ipaddress
+import json
+import logging
 import os
+import socket
 import typing
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -17,19 +17,19 @@ from typing import (
     Set,
     Type,
     TypeVar,
-    Union
+    Union,
 )
 
-import async_timeout
 import aiokatcp
+import async_timeout
 import yarl
 from addict import Dict
 from aiokatcp import FailReply, InvalidReply, Sensor
-from prometheus_client import Histogram
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+from prometheus_client import Histogram
 
-from . import scheduler, sensor_proxy, product_config
-from .consul import ConsulService, CONSUL_PORT
+from . import product_config, scheduler, sensor_proxy
+from .consul import CONSUL_PORT, ConsulService
 from .defaults import LOCALHOST
 
 _T = TypeVar("_T")

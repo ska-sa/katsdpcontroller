@@ -1,17 +1,16 @@
 """Code that is common to master and product controllers"""
 
-import asyncio
 import argparse
-import logging
+import asyncio
 import functools
 import json
-from typing import List, Tuple, Callable, Union, Optional, AnyStr
+import logging
+from typing import AnyStr, Callable, List, Optional, Tuple, Union
 
 import aiokatcp
 from prometheus_client import Histogram
 
 from . import scheduler
-
 
 REQUEST_TIME = Histogram(
     'katsdpcontroller_request_time_seconds', 'Time to process katcp requests', ['request'],

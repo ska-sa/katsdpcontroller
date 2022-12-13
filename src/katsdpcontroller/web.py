@@ -12,26 +12,25 @@ is turned into a canonical form.
 """
 
 import asyncio
-import re
+import functools
 import json
 import logging
-import tempfile
-import signal
 import os
-import weakref
-import functools
+import re
 import shutil
-from typing import Dict, List, Set, Tuple, Optional, Any
+import signal
+import tempfile
+import weakref
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-import pkg_resources
-from aiokatcp import Sensor, Reading
-import yarl
-from aiohttp import web, WSMsgType
 import aiohttp_jinja2
 import jinja2
+import pkg_resources
+import yarl
+from aiohttp import WSMsgType, web
+from aiokatcp import Reading, Sensor
 
 from . import master_controller, web_utils
-
 
 logger = logging.getLogger(__name__)
 GUI_URLS_RE = re.compile(r'^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$')

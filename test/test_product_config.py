@@ -1,44 +1,44 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import copy
+from typing import Any, Dict, List, Optional
 from unittest import mock
-from typing import List, Dict, Optional, Any
 
 import jsonschema
-import yarl
 import katpoint
 import katportalclient
 import pytest
+import yarl
 
-from katsdpcontroller import product_config, defaults
+from katsdpcontroller import defaults, product_config
 from katsdpcontroller.product_config import (
-    DigRawAntennaVoltageStreamBase,
-    DigRawAntennaVoltageStream,
-    SimDigRawAntennaVoltageStream,
+    STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
-    GpucbfAntennaChannelisedVoltageStream,
-    SimAntennaChannelisedVoltageStream,
     BaselineCorrelationProductsStream,
-    GpucbfBaselineCorrelationProductsStream,
-    SimBaselineCorrelationProductsStream,
-    TiedArrayChannelisedVoltageStream,
-    SimTiedArrayChannelisedVoltageStream,
-    CamHttpStream,
-    VisStream,
-    BeamformerStream,
     BeamformerEngineeringStream,
+    BeamformerStream,
     CalStream,
-    FlagsStream,
-    ContinuumImageStream,
-    SpectralImageStream,
-    ServiceOverride,
-    Options,
-    Simulation,
+    CamHttpStream,
     Configuration,
-    STREAM_CLASSES
+    ContinuumImageStream,
+    DigRawAntennaVoltageStream,
+    DigRawAntennaVoltageStreamBase,
+    FlagsStream,
+    GpucbfAntennaChannelisedVoltageStream,
+    GpucbfBaselineCorrelationProductsStream,
+    Options,
+    ServiceOverride,
+    SimAntennaChannelisedVoltageStream,
+    SimBaselineCorrelationProductsStream,
+    SimDigRawAntennaVoltageStream,
+    SimTiedArrayChannelisedVoltageStream,
+    Simulation,
+    SpectralImageStream,
+    TiedArrayChannelisedVoltageStream,
+    VisStream,
 )
-from . import fake_katportalclient
 
+from . import fake_katportalclient
 
 _M000 = katpoint.Antenna('m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14')   # noqa: E501
 _M002 = katpoint.Antenna('m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14')            # noqa: E501

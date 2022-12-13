@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
-import enum
-import csv
-import subprocess
 import argparse
-import tempfile
-import shutil
-import os
-import sys
+import csv
+import enum
 import logging
-from typing import List, Set, Dict, Iterable, Optional
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Dict, Iterable, List, Optional, Set
 
 import katsdpcontroller.generator
 

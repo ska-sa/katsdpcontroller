@@ -2,40 +2,57 @@
 
 import argparse
 import asyncio
-import logging
-import json
 import functools
 import ipaddress
+import json
+import logging
 import os
 import socket
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Set, Tuple
 from unittest import mock
-from typing import AsyncGenerator, Dict, Generator, Tuple, Set, List, Optional, Any
 
-import aiokatcp
-from aiokatcp import Sensor, Client
-import async_solipsism
 import aiohttp.client
-import open_file_mock
+import aiokatcp
 import aioresponses
-import yarl
+import async_solipsism
+import open_file_mock
 import pytest
+import yarl
+from aiokatcp import Client, Sensor
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.controller import (
-    DeviceStatus, ProductState, device_server_sockname,
-    make_image_resolver_factory, device_status_to_sensor_status
+    DeviceStatus,
+    ProductState,
+    device_server_sockname,
+    device_status_to_sensor_status,
+    make_image_resolver_factory,
 )
 from katsdpcontroller.master_controller import (
-    ProductFailed, Product, SingularityProduct,
-    ProductManagerBase, SingularityProductManager, NoAddressesError,
-    DeviceServer, parse_args
+    DeviceServer,
+    NoAddressesError,
+    Product,
+    ProductFailed,
+    ProductManagerBase,
+    SingularityProduct,
+    SingularityProductManager,
+    parse_args,
 )
-from . import fake_zk, fake_singularity
-from .utils import (assert_request_fails, assert_sensors, assert_sensor_value,
-                    DelayedManager, Background, exhaust_callbacks,
-                    CONFIG, CONFIG_CBF_ONLY, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
-                    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
 
+from . import fake_singularity, fake_zk
+from .utils import (
+    CONFIG,
+    CONFIG_CBF_ONLY,
+    EXPECTED_INTERFACE_SENSOR_LIST,
+    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
+    S3_CONFIG,
+    Background,
+    DelayedManager,
+    assert_request_fails,
+    assert_sensor_value,
+    assert_sensors,
+    exhaust_callbacks,
+)
 
 EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),

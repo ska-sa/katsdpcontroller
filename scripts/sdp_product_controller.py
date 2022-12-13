@@ -5,30 +5,33 @@
    Copyright (c) 2013 SKA/KAT. All Rights Reserved.
 """
 
+import argparse
+import asyncio
+import json
+import logging
 import os
 import os.path
 import signal
-import argparse
-import logging
-import asyncio
 import socket
-import json
 import urllib.parse
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import addict
-import jsonschema
-import yarl
-import pymesos
 import aiokatcp
 import aiomonitor
+import jsonschema
 import katsdpservices
+import pymesos
+import yarl
 from katsdptelstate.endpoint import endpoint_parser
-from katsdpcontroller.dashboard import Dashboard
 
-from katsdpcontroller import scheduler, schemas, product_controller, web_utils
+from katsdpcontroller import product_controller, scheduler, schemas, web_utils
 from katsdpcontroller.controller import (
-    add_shared_options, load_json_dict, make_image_resolver_factory)
+    add_shared_options,
+    load_json_dict,
+    make_image_resolver_factory,
+)
+from katsdpcontroller.dashboard import Dashboard
 
 
 def on_shutdown(loop, server):

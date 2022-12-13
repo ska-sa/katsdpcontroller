@@ -4,14 +4,14 @@
 
 import argparse
 import asyncio
+import functools
 import logging
 import signal
-import functools
 import sys
-from typing import List, Callable, Optional
+from typing import Callable, List, Optional
 
-import aiokatcp
 import aiohttp.web
+import aiokatcp
 import katsdpservices
 
 from katsdpcontroller import master_controller, web, web_utils

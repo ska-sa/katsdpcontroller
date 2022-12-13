@@ -2,8 +2,8 @@
 
 import re
 
-import tornado.gen
 import katportalclient
+import tornado.gen
 
 
 def _make_sample(value):

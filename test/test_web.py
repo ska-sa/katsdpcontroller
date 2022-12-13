@@ -1,25 +1,24 @@
 """Tests for :mod:`katsdpcontroller.web."""
 
-import asyncio
 import argparse
+import asyncio
 import copy
-import json
 import functools
+import json
 import logging
 import signal
 import socket
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from unittest import mock
-from typing import AsyncGenerator, List, Dict, Tuple, Any, Optional
 
-import yarl
-from aiokatcp import Sensor, SensorSet
-from aiohttp.test_utils import TestClient, TestServer
-from aiohttp.web import Application
 import async_solipsism
 import pytest
+import yarl
+from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.web import Application
+from aiokatcp import Sensor, SensorSet
 
 from katsdpcontroller import web
-
 
 EXTERNAL_URL = yarl.URL('http://proxy.invalid:1234')
 ROOT_GUI_URLS: List[Dict[str, Any]] = [

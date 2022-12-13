@@ -1,28 +1,29 @@
-import json
-import base64
-import socket
-import logging
-import uuid
 import asyncio
+import base64
 import ipaddress
-from unittest import mock
+import json
+import logging
+import socket
 import time
-from decimal import Decimal
+import uuid
 from collections import Counter
-from typing import AsyncGenerator, Optional, Callable, Generator, Any
+from decimal import Decimal
+from typing import Any, AsyncGenerator, Callable, Generator, Optional
+from unittest import mock
 
-import networkx
-import pymesos
-from addict import Dict
-import aioresponses
-import open_file_mock
 import aiohttp
-import pytest
+import aioresponses
 import async_solipsism
+import networkx
+import open_file_mock
+import pymesos
+import pytest
+from addict import Dict
 from yarl import URL
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.scheduler import TaskState
+
 from .utils import exhaust_callbacks, future_return
 
 

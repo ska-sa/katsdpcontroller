@@ -1,40 +1,60 @@
 """Control of a single subarray product"""
 
 import asyncio
-import logging
-import json
-import time
-import os
-import re
 import copy
 import functools
 import itertools
+import json
+import logging
+import os
+import re
+import time
 from typing import (
-    Dict, Generator, Set, List, Tuple, Callable, Sequence, Iterable, Optional, Mapping)
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import addict
-import jsonschema
-import networkx
 import aiokatcp
-from aiokatcp import FailReply, Sensor
-from prometheus_client import Gauge, Counter, Histogram, CollectorRegistry, REGISTRY
-import yarl
+import jsonschema
+import katsdpmodels.fetch.aiohttp
 import katsdptelstate.aio.memory
 import katsdptelstate.aio.redis
+import networkx
+import yarl
+from aiokatcp import FailReply, Sensor
 from katsdptelstate.endpoint import Endpoint
-import katsdpmodels.fetch.aiohttp
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, Histogram
 
 import katsdpcontroller
-from . import scheduler, product_config, generator, tasks, sensor_proxy
+
+from . import generator, product_config, scheduler, sensor_proxy, tasks
 from .consul import ConsulService
-from .controller import (load_json_dict, log_task_exceptions,
-                         DeviceStatus, device_status_to_sensor_status, ProductState)
+from .controller import (
+    DeviceStatus,
+    ProductState,
+    device_status_to_sensor_status,
+    load_json_dict,
+    log_task_exceptions,
+)
 from .defaults import LOCALHOST
 from .generator import TransmitState
-from .tasks import (CaptureBlockState, KatcpTransition, DEPENDS_INIT,
-                    POSTPROCESSING_TIME_BUCKETS, POSTPROCESSING_REL_BUCKETS)
 from .product_config import Configuration
-
+from .tasks import (
+    DEPENDS_INIT,
+    POSTPROCESSING_REL_BUCKETS,
+    POSTPROCESSING_TIME_BUCKETS,
+    CaptureBlockState,
+    KatcpTransition,
+)
 
 BATCH_PRIORITY = 1        #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400   # A week

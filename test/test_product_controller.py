@@ -1,52 +1,67 @@
 """Tests for :mod:`katsdpcontroller.product_controller."""
 
-from unittest import mock
+import asyncio
 import copy
 import functools
+import io
+import ipaddress
 import itertools
 import json
-import asyncio
-import io
 import re
+import typing
+
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
-import ipaddress
-import typing
-from typing import List, Tuple, Set, Callable, Sequence, Mapping, Any, Generator, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable, Generator, List, Mapping, Sequence, Set, Tuple
+from unittest import mock
 
-from aioresponses import aioresponses
+import aiokatcp
 import astropy.table
 import astropy.units as u
-import numpy as np
-from addict import Dict
-import aiokatcp
-from aiokatcp import Message, FailReply, Sensor
-from prometheus_client import CollectorRegistry
-import pymesos
-import networkx
-import netifaces
-import katsdptelstate.aio.memory
-from katsdptelstate.endpoint import Endpoint
-import katpoint
 import katdal
+import katpoint
 import katsdpmodels.band_mask
-import katsdpmodels.rfi_mask
 import katsdpmodels.primary_beam
+import katsdpmodels.rfi_mask
+import katsdptelstate.aio.memory
+import netifaces
+import networkx
+import numpy as np
+import pymesos
 import pytest
 import yarl
+from addict import Dict
+from aiokatcp import FailReply, Message, Sensor
+from aioresponses import aioresponses
+from katsdptelstate.endpoint import Endpoint
+from prometheus_client import CollectorRegistry
 
+from katsdpcontroller import scheduler, sensor_proxy
 from katsdpcontroller.consul import ConsulService
 from katsdpcontroller.controller import device_server_sockname
 from katsdpcontroller.product_controller import (
-    DeviceServer, SubarrayProduct, Resources,
-    ProductState, DeviceStatus, _redact_keys, _normalise_s3_config, _relative_url)
-from katsdpcontroller import scheduler, sensor_proxy
-from . import fake_katportalclient
-from .utils import (assert_request_fails, assert_sensor_value,
-                    assert_sensors, exhaust_callbacks, DelayedManager,
-                    CONFIG, S3_CONFIG, EXPECTED_INTERFACE_SENSOR_LIST,
-                    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST)
+    DeviceServer,
+    DeviceStatus,
+    ProductState,
+    Resources,
+    SubarrayProduct,
+    _normalise_s3_config,
+    _redact_keys,
+    _relative_url,
+)
 
+from . import fake_katportalclient
+from .utils import (
+    CONFIG,
+    EXPECTED_INTERFACE_SENSOR_LIST,
+    EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
+    S3_CONFIG,
+    DelayedManager,
+    assert_request_fails,
+    assert_sensor_value,
+    assert_sensors,
+    exhaust_callbacks,
+)
 
 ANTENNAS = ['m000', 'm001', 'm062', 'm063']
 SUBARRAY_PRODUCT = 'array_1_0'

@@ -202,49 +202,47 @@ changing resources or attributes and restarting.
 .. _recovery: http://mesos.apache.org/documentation/latest/agent-recovery/
 """
 
-import os.path
-import logging
-import json
-import re
+import asyncio
 import base64
-import socket
 import contextlib
 import copy
-from collections import namedtuple, deque, defaultdict
-from enum import Enum
-import math
-import asyncio
-import urllib
-import ssl
-import ipaddress
 import decimal
-from decimal import Decimal
-import time
 import io
-from abc import abstractmethod, ABC
-from contextlib import AsyncExitStack
+import ipaddress
+import json
+import logging
+import math
+import os.path
 import random
+import re
+import socket
+import ssl
+import time
 import typing
+import urllib
+from abc import ABC, abstractmethod
+from collections import defaultdict, deque, namedtuple
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-# Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import (
-    AsyncContextManager, List, Tuple, Optional, Mapping, Union, ClassVar, Type)
+from decimal import Decimal
+from enum import Enum
 
-import pkg_resources
+# Note: don't include Dict here, because it conflicts with addict.Dict.
+from typing import AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple, Type, Union
+
+import aiohttp.web
 import docker
-import networkx
 import jsonschema
-from decorator import decorator
-from addict import Dict
+import networkx
+import pkg_resources
 import pymesos
 import www_authenticate
-import aiohttp.web
-
+from addict import Dict
+from decorator import decorator
 from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
 from .defaults import LOCALHOST
-
 
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)

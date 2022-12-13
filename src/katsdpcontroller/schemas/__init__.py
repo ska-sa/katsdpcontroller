@@ -1,13 +1,12 @@
 """Makes packaged JSON schemas available."""
 
-import json
 import codecs
+import json
 from distutils.version import StrictVersion
 
-import pkg_resources
-import jsonschema
 import jinja2
-
+import jsonschema
+import pkg_resources
 
 _env = jinja2.Environment(loader=jinja2.PackageLoader(__name__, '.'))
 

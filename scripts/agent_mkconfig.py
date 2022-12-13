@@ -6,21 +6,22 @@ See :mod:`katsdpcontroller.scheduler` for details.
 """
 
 import argparse
-import subprocess
+import base64
 import contextlib
+import glob
+import json
 import math
+import numbers
 import os
 import os.path
+import subprocess
 import sys
-import glob
-import base64
-import json
-import numbers
-from collections import OrderedDict
 import xml.etree.ElementTree
+from collections import OrderedDict
 
 import netifaces
 import psutil
+
 try:
     import py3nvml.py3nvml as pynvml
     import pycuda.driver
