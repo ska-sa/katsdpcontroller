@@ -129,20 +129,20 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             )
             self.sensors.add(
                 Sensor(
-                    float,
+                    Timestamp,
                     f"input{pol}-rx-unixtime",
                     "The timestamp (in UNIX time) of the last chunk of data received "
                     "from the digitiser",
-                    default=-1.0,
+                    default=Timestamp(-1.0),
                     initial_status=Sensor.Status.ERROR
                 )
             )
             self.sensors.add(
                 Sensor(
-                    float,
+                    Timestamp,
                     f"input{pol}-rx-missing-unixtime",
                     "The timestamp (in UNIX time) when missing data was last detected",
-                    default=-1.0,
+                    default=Timestamp(-1.0),
                     initial_status=Sensor.Status.NOMINAL
                 )
             )
@@ -225,6 +225,35 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "chan-range",
                 "The range of channels processed by this XB-engine, inclusive",
                 default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                initial_status=Sensor.Status.NOMINAL
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "input-rx-timestamp",
+                "The timestamp (in samples) of the last chunk of data received "
+                "from an F-engine",
+                default=-1,
+                initial_status=Sensor.Status.ERROR
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "input-rx-unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received "
+                "from an F-engine",
+                default=Timestamp(-1.0),
+                initial_status=Sensor.Status.ERROR
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "input-rx-missing-unixtime",
+                "The timestamp (in UNIX time) when missing data was last detected",
+                default=Timestamp(-1.0),
                 initial_status=Sensor.Status.NOMINAL
             )
         )
