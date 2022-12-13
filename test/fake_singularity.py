@@ -21,12 +21,12 @@ Lifecycle = Callable[['Task'], Awaitable[None]]
 
 
 class TaskState(enum.Enum):
-    NOT_CREATED = 'notCreated'    # To model Singularity taking time to create the task
+    NOT_CREATED = 'notCreated'  # To model Singularity taking time to create the task
     PENDING = 'pending'
     NOT_YET_HEALTHY = 'notYetHealthy'
     HEALTHY = 'healthy'
     CLEANING = 'cleaning'
-    DEAD = 'dead'                 # Not reported by Singularity, but a useful internal state
+    DEAD = 'dead'  # Not reported by Singularity, but a useful internal state
 
 
 def _next_enum(x: _E) -> _E:
@@ -40,14 +40,14 @@ class _Request:
         self.config = config
         self.active_deploy: Optional['_Deploy'] = None
         self.deploys: Dict[str, '_Deploy'] = {}
-        self.tasks: Dict[str, 'Task'] = {}    # Indexed by run_id
+        self.tasks: Dict[str, 'Task'] = {}  # Indexed by run_id
 
     def task_ids(self) -> Dict[str, List[Dict[str, Any]]]:
         ans: Dict[str, List[Dict[str, Any]]] = {
             "notYetHealthy": [],
             "cleaning": [],
             "pending": [],
-            "healthy": []
+            "healthy": [],
         }
         for task in self.tasks.values():
             if task.state.value in ans:
@@ -55,10 +55,7 @@ class _Request:
         return ans
 
     def info(self) -> Dict[str, Any]:
-        ans = {
-            "taskIds": self.task_ids(),
-            "request": self.config
-        }
+        ans = {"taskIds": self.task_ids(), "request": self.config}
         if self.active_deploy is not None:
             ans["activeDeploy"] = self.active_deploy.config
         return ans
@@ -97,16 +94,16 @@ class Task:
 
     def short_info(self) -> Dict[str, Any]:
         if self.state in {TaskState.NOT_CREATED, TaskState.DEAD}:
-            return {}                   # Generally shouldn't be called
+            return {}  # Generally shouldn't be called
         elif self.state == TaskState.PENDING:
-            return {}   # TODO
+            return {}  # TODO
         else:
             self.task_id_known.set()
             return {
                 "id": self.task_id,
                 "requestId": self.deploy.request.request_id,
                 "deployId": self.deploy.deploy_id,
-                "host": "fakehost"
+                "host": "fakehost",
             }
 
     def environment(self) -> Dict[str, str]:
@@ -122,27 +119,27 @@ class Task:
 
     def info(self) -> Dict[str, Any]:
         if self.state in {TaskState.NOT_CREATED, TaskState.DEAD}:
-            return {}                   # Generally shouldn't be called
+            return {}  # Generally shouldn't be called
         elif self.state == TaskState.PENDING:
-            return {}   # TODO
+            return {}  # TODO
         else:
             return {
                 "taskId": self.short_info(),
                 "taskRequest": {
                     "request": self.deploy.request.config,
-                    "pendingTask": {
-                        "runId": self.run_id
-                    }
+                    "pendingTask": {"runId": self.run_id},
                 },
                 "mesosTask": {
                     "command": {
                         "environment": {
-                            "variables": [{'name': key, 'value': value}
-                                          for (key, value) in self.environment().items()]
+                            "variables": [
+                                {'name': key, 'value': value}
+                                for (key, value) in self.environment().items()
+                            ]
                         }
                     },
-                    "arguments": self.arguments()
-                }
+                    "arguments": self.arguments(),
+                },
             }
 
     def kill(self, force: bool = False) -> None:
@@ -151,8 +148,9 @@ class Task:
             self.force_killed.set()
 
 
-async def default_lifecycle(task: Task,
-                            times: Optional[Mapping[TaskState, Optional[float]]] = None) -> None:
+async def default_lifecycle(
+    task: Task, times: Optional[Mapping[TaskState, Optional[float]]] = None
+) -> None:
     """Runs task through the full lifecycle, pausing for some time in each state.
 
     Parameters
@@ -193,23 +191,25 @@ async def default_lifecycle(task: Task,
 class SingularityServer:
     def __init__(self, *, aiohttp_server_kwargs: Mapping = {}) -> None:
         app = aiohttp.web.Application()
-        app.add_routes([
-            aiohttp.web.get('/api/requests/request/{request_id}', self._get_request),
-            aiohttp.web.get('/api/requests', self._get_requests),
-            aiohttp.web.post('/api/requests', self._create_request),
-            aiohttp.web.post('/api/deploys', self._create_deploy),
-            aiohttp.web.post('/api/requests/request/{request_id}/run', self._create_run),
-            aiohttp.web.get('/api/tasks/task/{task_id}', self._get_task),
-            aiohttp.web.delete('/api/tasks/task/{task_id}', self._delete_task),
-            aiohttp.web.get('/api/tasks/ids/request/{request_id}', self._get_request_tasks),
-            aiohttp.web.get('/api/track/run/{request_id}/{run_id}', self._track_run)
-        ])
+        app.add_routes(
+            [
+                aiohttp.web.get('/api/requests/request/{request_id}', self._get_request),
+                aiohttp.web.get('/api/requests', self._get_requests),
+                aiohttp.web.post('/api/requests', self._create_request),
+                aiohttp.web.post('/api/deploys', self._create_deploy),
+                aiohttp.web.post('/api/requests/request/{request_id}/run', self._create_run),
+                aiohttp.web.get('/api/tasks/task/{task_id}', self._get_task),
+                aiohttp.web.delete('/api/tasks/task/{task_id}', self._delete_task),
+                aiohttp.web.get('/api/tasks/ids/request/{request_id}', self._get_request_tasks),
+                aiohttp.web.get('/api/track/run/{request_id}/{run_id}', self._track_run),
+            ]
+        )
         self.server = aiohttp.test_utils.TestServer(app, **aiohttp_server_kwargs)
         # Each time a task is created, the next class is taken from this deque and
         # used to construct it's lifecycle controller.
         self.lifecycles: Deque[Lifecycle] = deque()
         self.requests: Dict[str, _Request] = {}
-        self.tasks: Dict[str, Task] = {}    # Indexed by task ID
+        self.tasks: Dict[str, Task] = {}  # Indexed by task ID
 
     async def _get_request(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:
         request_id = http_request.match_info['request_id']
@@ -240,7 +240,8 @@ class SingularityServer:
             raise aiohttp.web.HTTPNotFound
         if deploy_id in request.deploys:
             raise aiohttp.web.HTTPBadRequest(
-                text='Can not deploy a deploy that has already been deployed')
+                text='Can not deploy a deploy that has already been deployed'
+            )
         request.deploys[deploy_id] = request.active_deploy = _Deploy(request, config)
         return aiohttp.web.json_response({})
 
@@ -293,17 +294,14 @@ class SingularityServer:
         if task.visible:
             data = {
                 "taskId": {"id": task.task_id},
-                "currentState":
-                    "TASK_CLEANING" if task.state == TaskState.CLEANING else "TASK_RUNNING",
-                "pending": False
+                "currentState": (
+                    "TASK_CLEANING" if task.state == TaskState.CLEANING else "TASK_RUNNING"
+                ),
+                "pending": False,
             }
             task.task_id_known.set()
         elif task.state == TaskState.DEAD:
-            data = {
-                "taskId": {"id": task.task_id},
-                "currentState": "TASK_KILLED",
-                "pending": False
-            }
+            data = {"taskId": {"id": task.task_id}, "currentState": "TASK_KILLED", "pending": False}
             task.task_id_known.set()
         elif task.state == TaskState.PENDING:
             data = {
@@ -313,11 +311,11 @@ class SingularityServer:
                     "id": task.pending_task_id,
                     "deployId": task.deploy.deploy_id,
                     "requestId": task.deploy.request.request_id,
-                    "pendingType": "ONEOFF"
-                }
+                    "pendingType": "ONEOFF",
+                },
             }
         else:
-            data = {}    # TODO
+            data = {}  # TODO
         return aiohttp.web.json_response(data)
 
     async def _delete_task(self, http_request: aiohttp.web.Request) -> aiohttp.web.Response:

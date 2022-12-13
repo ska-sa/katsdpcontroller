@@ -14,10 +14,10 @@ class TestConsulService:
         self.service_data = {
             'Name': 'product-controller',
             'Tags': ['prometheus-metrics'],
-            'Port': 12345
+            'Port': 12345,
         }
-        self.register_url = (
-            (CONSUL_URL / 'v1/agent/service/register').with_query({'replace-existing-checks': 1})
+        self.register_url = (CONSUL_URL / 'v1/agent/service/register').with_query(
+            {'replace-existing-checks': 1}
         )
 
     @pytest.fixture
@@ -55,8 +55,8 @@ class TestConsulService:
 
     async def test_external_host(self, m) -> None:
         base_url = yarl.URL('http://foo.invalid:8500')
-        register_url = (
-            (base_url / 'v1/agent/service/register').with_query({'replace-existing-checks': 1})
+        register_url = (base_url / 'v1/agent/service/register').with_query(
+            {'replace-existing-checks': 1}
         )
         m.put(register_url)
         service = await ConsulService.register(self.service_data, base_url)

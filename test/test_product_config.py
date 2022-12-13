@@ -40,8 +40,12 @@ from katsdpcontroller.product_config import (
 
 from . import fake_katportalclient
 
-_M000 = katpoint.Antenna('m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14')   # noqa: E501
-_M002 = katpoint.Antenna('m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14')            # noqa: E501
+_M000 = katpoint.Antenna(
+    'm000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14'  # noqa: E501
+)
+_M002 = katpoint.Antenna(
+    'm002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14'  # noqa: E501
+)
 
 
 class TestRecursiveDiff:
@@ -134,11 +138,13 @@ class TestNormaliseOutputChannels:
             product_config._normalise_output_channels(100, (60, 50))
 
     def test_overflow(self) -> None:
-        with pytest.raises(ValueError,
-                           match=r'output_channels \(0:101\) overflows valid range 0:100'):
+        with pytest.raises(
+            ValueError, match=r'output_channels \(0:101\) overflows valid range 0:100'
+        ):
             product_config._normalise_output_channels(100, (0, 101))
-        with pytest.raises(ValueError,
-                           match=r'output_channels \(-1:1\) overflows valid range 0:100'):
+        with pytest.raises(
+            ValueError, match=r'output_channels \(-1:1\) overflows valid range 0:100'
+        ):
             product_config._normalise_output_channels(100, (-1, 1))
 
     def test_align(self) -> None:
@@ -147,8 +153,8 @@ class TestNormaliseOutputChannels:
 
     def test_misalign(self) -> None:
         with pytest.raises(
-                ValueError,
-                match=r'n_chans \(789\) is not a multiple of required alignment \(100\)'):
+            ValueError, match=r'n_chans \(789\) is not a multiple of required alignment \(100\)'
+        ):
             product_config._normalise_output_channels(789, (100, 200), 100)
 
 
@@ -159,7 +165,7 @@ class TestServiceOverride:
         config = {
             'config': {'hello': 'world'},
             'taskinfo': {'image': 'test'},
-            'host': 'test.invalid'
+            'host': 'test.invalid',
         }
         override = ServiceOverride.from_config(config)
         assert override.config == config['config']
@@ -180,11 +186,7 @@ class TestOptions:
         config = {
             'develop': True,
             'wrapper': 'http://test.invalid/wrapper.sh',
-            'service_overrides': {
-                'service1': {
-                    'host': 'testhost'
-                }
-            }
+            'service_overrides': {'service1': {'host': 'testhost'}},
         }
         options = Options.from_config(config)
         assert options.develop == config['develop']
@@ -206,10 +208,10 @@ class TestSimulation:
         config = {
             'sources': [
                 'PKS 1934-63, radec, 19:39:25.03, -63:42:45.7, (200.0 12000.0 -11.11 7.777 -1.231)',
-                'PKS 0408-65, radec, 4:08:20.38, -65:45:09.1, (800.0 8400.0 -3.708 3.807 -0.7202)'
+                'PKS 0408-65, radec, 4:08:20.38, -65:45:09.1, (800.0 8400.0 -3.708 3.807 -0.7202)',
             ],
             'start_time': 1234567890.0,
-            'clock_ratio': 2.0
+            'clock_ratio': 2.0,
         }
         sim = Simulation.from_config(config)
         assert sim.start_time == 1234567890.0
@@ -233,10 +235,7 @@ class TestCamHttpStream:
     """Test :class:`~.CamHttpStream`."""
 
     def test_from_config(self) -> None:
-        config = {
-            'type': 'cam.http',
-            'url': 'http://test.invalid'
-        }
+        config = {'type': 'cam.http', 'url': 'http://test.invalid'}
         cam_http = CamHttpStream.from_config(Options(), 'cam_data', config, [], {})
         assert cam_http.name == 'cam_data'
         assert cam_http.src_streams == []
@@ -254,13 +253,11 @@ class TestDigRawAntennaVoltageStream:
             'adc_sample_rate': 1712000000.0,
             'centre_frequency': 1284000000.0,
             'band': 'l',
-            'antenna': 'm000'
+            'antenna': 'm000',
         }
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
-        dig = DigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', config, [], {}
-        )
+        dig = DigRawAntennaVoltageStream.from_config(Options(), 'm000h', config, [], {})
         assert dig.url == yarl.URL(config['url'])
         assert dig.adc_sample_rate == config['adc_sample_rate']
         assert dig.centre_frequency == config['centre_frequency']
@@ -280,13 +277,11 @@ class TestSimDigRawAntennaVoltageStream:
             'adc_sample_rate': 1712000000.0,
             'centre_frequency': 1284000000.0,
             'band': 'l',
-            'antenna': _M000.description
+            'antenna': _M000.description,
         }
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
-        dig = SimDigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', config, [], {}
-        )
+        dig = SimDigRawAntennaVoltageStream.from_config(Options(), 'm000h', config, [], {})
         assert dig.adc_sample_rate == config['adc_sample_rate']
         assert dig.centre_frequency == config['centre_frequency']
         assert dig.band == config['band']
@@ -299,15 +294,11 @@ class TestSimDigRawAntennaVoltageStream:
     def test_bad_antenna_description(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="Invalid antenna description 'bad antenna': "):
             config['antenna'] = 'bad antenna'
-            SimDigRawAntennaVoltageStream.from_config(
-                Options(), 'm000h', config, [], {}
-            )
+            SimDigRawAntennaVoltageStream.from_config(Options(), 'm000h', config, [], {})
 
     def test_command_line_extra(self, config: Dict[str, Any]) -> None:
         config['command_line_extra'] = ['--extra-arg']
-        dig = SimDigRawAntennaVoltageStream.from_config(
-            Options(), 'm000h', config, [], {}
-        )
+        dig = SimDigRawAntennaVoltageStream.from_config(Options(), 'm000h', config, [], {})
         assert dig.command_line_extra == config['command_line_extra']
 
 
@@ -319,7 +310,7 @@ class TestAntennaChannelisedVoltageStream:
             'type': 'cbf.antenna_channelised_voltage',
             'url': 'spead://239.0.0.0+7:7148',
             'antennas': ['m000', 'another_antenna'],
-            'instrument_dev_name': 'narrow1'
+            'instrument_dev_name': 'narrow1',
         }
         sensors = {
             'band': 'l',
@@ -327,7 +318,7 @@ class TestAntennaChannelisedVoltageStream:
             'n_chans': 32768,
             'bandwidth': 107e6,
             'centre_frequency': 1284e6,
-            'n_samples_between_spectra': 524288
+            'n_samples_between_spectra': 524288,
         }
         acv = AntennaChannelisedVoltageStream.from_config(
             Options(), 'narrow1_acv', config, [], sensors
@@ -350,25 +341,27 @@ def make_dig_raw_antenna_voltage(name: str) -> DigRawAntennaVoltageStream:
         'm000h': 'spead2://239.1.2.0+7:7148',
         'm000v': 'spead2://239.1.2.8+7:7148',
         'm002h': 'spead2://239.1.2.16+7:7148',
-        'm002v': 'spead2://239.1.2.24+7:7148'
+        'm002v': 'spead2://239.1.2.24+7:7148',
     }
     return DigRawAntennaVoltageStream(
-        name, [],
+        name,
+        [],
         url=yarl.URL(urls[name]),
         adc_sample_rate=1712000000.0,
         centre_frequency=1284000000.0,
         band='l',
-        antenna_name=name[:-1]
+        antenna_name=name[:-1],
     )
 
 
 def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream:
     return SimDigRawAntennaVoltageStream(
-        name, [],
+        name,
+        [],
         adc_sample_rate=1712000000.0,
         centre_frequency=1284000000.0,
         band='l',
-        antenna=_M000 if name.startswith('m000') else _M002
+        antenna=_M000 if name.startswith('m000') else _M002,
     )
 
 
@@ -380,7 +373,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         return {
             'type': 'gpucbf.antenna_channelised_voltage',
             'src_streams': ['m000h', 'm000v', 'm002h', 'm002v'],
-            'n_chans': 4096
+            'n_chans': 4096,
         }
 
     @pytest.fixture
@@ -458,8 +451,8 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
     ) -> None:
         with pytest.raises(
-                ValueError,
-                match=r'Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)'):
+            ValueError, match=r'Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)'
+        ):
             src_streams[1].adc_sample_rate = 1.0
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', config, src_streams, {}
@@ -469,8 +462,8 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
     ) -> None:
         with pytest.raises(
-                ValueError,
-                match=r'Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)'):
+            ValueError, match=r'Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)'
+        ):
             src_streams[-1].centre_frequency = 1.0
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), 'wide1_acv', config, src_streams, {}
@@ -525,15 +518,12 @@ class TestSimAntennaChannelisedVoltageStream:
     def config(self) -> Dict[str, Any]:
         return {
             'type': 'sim.cbf.antenna_channelised_voltage',
-            'antennas': [
-                _M000.description,
-                _M002.description
-            ],
+            'antennas': [_M000.description, _M002.description],
             'band': 'l',
             'centre_frequency': 1284e6,
             'bandwidth': 107e6,
             'adc_sample_rate': 1712e6,
-            'n_chans': 32768
+            'n_chans': 32768,
         }
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
@@ -554,22 +544,20 @@ class TestSimAntennaChannelisedVoltageStream:
     def test_bad_bandwidth_ratio(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match='not a multiple of bandwidth'):
             config['bandwidth'] = 108e6
-            SimAntennaChannelisedVoltageStream.from_config(
-                Options(), 'narrow1_acv', config, [], {}
-            )
+            SimAntennaChannelisedVoltageStream.from_config(Options(), 'narrow1_acv', config, [], {})
 
     def test_bad_antenna_description(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="Invalid antenna description 'bad antenna': "):
             config['antennas'][0] = 'bad antenna'
-            SimAntennaChannelisedVoltageStream.from_config(
-                Options(), 'narrow1_acv', config, [], {}
-            )
+            SimAntennaChannelisedVoltageStream.from_config(Options(), 'narrow1_acv', config, [], {})
 
 
 def make_antenna_channelised_voltage(
-        antennas=('m000', 'another_antenna')) -> AntennaChannelisedVoltageStream:
+    antennas=('m000', 'another_antenna')
+) -> AntennaChannelisedVoltageStream:
     return AntennaChannelisedVoltageStream(
-        'narrow1_acv', [],
+        'narrow1_acv',
+        [],
         url=yarl.URL('spead2://239.0.0.0+7:7148'),
         antennas=antennas,
         band='l',
@@ -578,32 +566,29 @@ def make_antenna_channelised_voltage(
         adc_sample_rate=1712e6,
         centre_frequency=1284e6,
         n_samples_between_spectra=524288,
-        instrument_dev_name='narrow1'
+        instrument_dev_name='narrow1',
     )
 
 
 def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream:
     # Uses powers of two so that integration time can be computed exactly
     return SimAntennaChannelisedVoltageStream(
-        'narrow1_acv', [],
+        'narrow1_acv',
+        [],
         antennas=[_M000, _M002],
         band='l',
         centre_frequency=1284,
         bandwidth=256,
         adc_sample_rate=1024,
-        n_chans=512
+        n_chans=512,
     )
 
 
 def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
-        make_sim_dig_raw_antenna_voltage(name)
-        for name in ['m000h', 'm000v', 'm001h', 'm001v']
+        make_sim_dig_raw_antenna_voltage(name) for name in ['m000h', 'm000v', 'm001h', 'm001v']
     ]
-    return GpucbfAntennaChannelisedVoltageStream(
-        'wide1_acv', src_streams,
-        n_chans=4096
-    )
+    return GpucbfAntennaChannelisedVoltageStream('wide1_acv', src_streams, n_chans=4096)
 
 
 class TestBaselineCorrelationProductsStream:
@@ -619,7 +604,7 @@ class TestBaselineCorrelationProductsStream:
             'type': 'cbf.baseline_correlation_products',
             'src_streams': ['narrow1_acv'],
             'url': 'spead://239.1.0.0+7:7148',
-            'instrument_dev_name': 'narrow2'
+            'instrument_dev_name': 'narrow2',
         }
 
     @pytest.fixture
@@ -628,14 +613,11 @@ class TestBaselineCorrelationProductsStream:
             'int_time': 0.5,
             'n_bls': 40,
             'xeng_out_bits_per_sample': 32,
-            'n_chans_per_substream': 2048
+            'n_chans_per_substream': 2048,
         }
 
     def test_from_config(
-        self,
-        acv: AntennaChannelisedVoltageStream,
-        config: Dict[str, Any],
-        sensors: Dict[str, Any]
+        self, acv: AntennaChannelisedVoltageStream, config: Dict[str, Any], sensors: Dict[str, Any]
     ) -> None:
         bcp = BaselineCorrelationProductsStream.from_config(
             Options(), 'narrow2_bcp', config, [acv], sensors
@@ -659,28 +641,25 @@ class TestBaselineCorrelationProductsStream:
         assert bcp.data_rate(1.0, 0) == 40 * 32768 * 8 * 2 * 8
 
     def test_bad_endpoint_count(
-        self,
-        acv: AntennaChannelisedVoltageStream,
-        config: Dict[str, Any],
-        sensors: Dict[str, Any]
+        self, acv: AntennaChannelisedVoltageStream, config: Dict[str, Any], sensors: Dict[str, Any]
     ) -> None:
         config['url'] = 'spead://239.1.0.0+8:7148'
-        with pytest.raises(ValueError,
-                           match=r'n_chans \(32768\) is not a multiple of endpoints \(9\)'):
+        with pytest.raises(
+            ValueError, match=r'n_chans \(32768\) is not a multiple of endpoints \(9\)'
+        ):
             BaselineCorrelationProductsStream.from_config(
                 Options(), 'narrow2_bcp', config, [acv], sensors
             )
 
     def test_bad_substream_count(
-        self,
-        acv: AntennaChannelisedVoltageStream,
-        config: Dict[str, Any],
-        sensors: Dict[str, Any]
+        self, acv: AntennaChannelisedVoltageStream, config: Dict[str, Any], sensors: Dict[str, Any]
     ) -> None:
         config['url'] = 'spead://239.1.0.0+255:7148'
-        with pytest.raises(ValueError,
-                           match=r'channels per endpoint \(128\) is not a multiple of '
-                                 r'channels per substream \(2048\)'):
+        with pytest.raises(
+            ValueError,
+            match=r'channels per endpoint \(128\) is not a multiple of '
+            r'channels per substream \(2048\)',
+        ):
             BaselineCorrelationProductsStream.from_config(
                 Options(), 'narrow2_bcp', config, [acv], sensors
             )
@@ -702,7 +681,7 @@ class TestGpucbfBaselineCorrelationProductsStream:
         return {
             'type': 'gpucbf.baseline_correlation_products',
             'src_streams': 'wide1_acv',
-            'int_time': 0.5
+            'int_time': 0.5,
         }
 
     def test_from_config(
@@ -746,7 +725,7 @@ class TestSimBaselineCorrelationProductsStream:
             'src_streams': ['narrow1_acv'],
             'n_endpoints': 16,
             'int_time': 800,
-            'n_chans_per_substream': 8
+            'n_chans_per_substream': 8,
         }
 
     def test_from_config(
@@ -784,7 +763,7 @@ class TestTiedArrayChannelisedVoltageStream:
             'type': 'cbf.tied_array_channelised_voltage',
             'src_streams': ['narrow1_acv'],
             'url': 'spead://239.2.0.0+255:7148',
-            'instrument_dev_name': 'beam'
+            'instrument_dev_name': 'beam',
         }
 
     @pytest.fixture
@@ -792,11 +771,14 @@ class TestTiedArrayChannelisedVoltageStream:
         return {
             'beng_out_bits_per_sample': 16,
             'spectra_per_heap': 256,
-            'n_chans_per_substream': 64
+            'n_chans_per_substream': 64,
         }
 
     def test_from_config(
-        self, acv: AntennaChannelisedVoltageStream, config: Dict[str, Any], sensors: Dict[str, Any],
+        self,
+        acv: AntennaChannelisedVoltageStream,
+        config: Dict[str, Any],
+        sensors: Dict[str, Any],
     ) -> None:
         tacv = TiedArrayChannelisedVoltageStream.from_config(
             Options(), 'beam_0x', config, [acv], sensors
@@ -810,7 +792,7 @@ class TestTiedArrayChannelisedVoltageStream:
         assert tacv.antenna_channelised_voltage is acv
         assert tacv.bandwidth == 107e6
         assert tacv.antennas == ['m000', 'another_antenna']
-        assert round(abs(tacv.int_time * 1712e6-524288 * 256), 7) == 0
+        assert round(abs(tacv.int_time * 1712e6 - 524288 * 256), 7) == 0
 
 
 class TestSimTiedArrayChannelisedVoltageStream:
@@ -827,7 +809,7 @@ class TestSimTiedArrayChannelisedVoltageStream:
             'src_streams': ['narrow1_acv'],
             'n_endpoints': 16,
             'spectra_per_heap': 256,
-            'n_chans_per_substream': 4
+            'n_chans_per_substream': 4,
         }
 
     def test_from_config(
@@ -859,33 +841,35 @@ class TestSimTiedArrayChannelisedVoltageStream:
 
 
 def make_baseline_correlation_products(
-    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None
+    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None,
 ) -> BaselineCorrelationProductsStream:
     if antenna_channelised_voltage is None:
         antenna_channelised_voltage = make_antenna_channelised_voltage()
     return BaselineCorrelationProductsStream(
-        'narrow1_bcp', [antenna_channelised_voltage],
+        'narrow1_bcp',
+        [antenna_channelised_voltage],
         url=yarl.URL('spead://239.2.0.0+63:7148'),
         int_time=0.5,
         n_chans_per_substream=512,
         n_baselines=40,
         bits_per_sample=32,
-        instrument_dev_name='narrow1'
+        instrument_dev_name='narrow1',
     )
 
 
 def make_tied_array_channelised_voltage(
-        antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream],
-        name: str, url: yarl.URL) -> TiedArrayChannelisedVoltageStream:
+    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream], name: str, url: yarl.URL
+) -> TiedArrayChannelisedVoltageStream:
     if antenna_channelised_voltage is None:
         antenna_channelised_voltage = make_antenna_channelised_voltage()
     return TiedArrayChannelisedVoltageStream(
-        name, [antenna_channelised_voltage],
+        name,
+        [antenna_channelised_voltage],
         url=url,
         n_chans_per_substream=128,
         spectra_per_heap=256,
         bits_per_sample=8,
-        instrument_dev_name='beam'
+        instrument_dev_name='beam',
     )
 
 
@@ -905,14 +889,14 @@ class TestVisStream:
             'output_channels': [128, 4096],
             'continuum_factor': 2,
             'excise': False,
-            'archive': False
+            'archive': False,
         }
 
     def test_from_config(
         self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
     ) -> None:
         vis = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
-        assert vis.int_time == 1.0   # Rounds to nearest multiple of CBF int_time
+        assert vis.int_time == 1.0  # Rounds to nearest multiple of CBF int_time
         assert vis.output_channels == (128, 4096)
         assert vis.continuum_factor == 2
         assert vis.excise is False
@@ -931,9 +915,7 @@ class TestVisStream:
         assert vis.data_rate(1.0, 0) == vis.size / vis.int_time * 8
         assert vis.flag_data_rate(1.0, 0) == vis.flag_size / vis.int_time * 8
 
-    def test_defaults(
-        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
-    ) -> None:
+    def test_defaults(self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]) -> None:
         del config['output_channels']
         del config['excise']
         vis = VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
@@ -948,9 +930,10 @@ class TestVisStream:
         alignment = n_servers * continuum_factor
         config['continuum_factor'] = continuum_factor
         with pytest.raises(
-                ValueError,
-                match=fr'n_chans \({bcp.n_chans}\) is not a multiple of '
-                      fr'required alignment \({alignment}\)'):
+            ValueError,
+            match=fr'n_chans \({bcp.n_chans}\) is not a multiple of '
+            fr'required alignment \({alignment}\)',
+        ):
             VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
 
     def test_misaligned_output_channels(
@@ -973,9 +956,7 @@ class TestVisStream:
         assert vis1.compatible(vis2)
         assert not vis1.compatible(vis3)
 
-    def test_develop(
-        self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]
-    ) -> None:
+    def test_develop(self, bcp: BaselineCorrelationProductsStream, config: Dict[str, Any]) -> None:
         options = Options(develop=True)
         vis = VisStream.from_config(options, 'sdp_l0', config, [bcp], {})
         assert vis.n_servers == 2
@@ -989,17 +970,16 @@ class TestBeamformerStream:
         acv = make_antenna_channelised_voltage()
         return [
             make_tied_array_channelised_voltage(
-                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')
+            ),
             make_tied_array_channelised_voltage(
-                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148')
+            ),
         ]
 
     @pytest.fixture
     def config(self) -> Dict[str, Any]:
-        return {
-            'type': 'sdp.beamformer',
-            'src_streams': ['beam_0x', 'beam_0y']
-        }
+        return {'type': 'sdp.beamformer', 'src_streams': ['beam_0x', 'beam_0y']}
 
     def test_from_config(
         self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
@@ -1015,9 +995,11 @@ class TestBeamformerStream:
     ) -> None:
         acv = make_antenna_channelised_voltage(antennas=['m012', 's0013'])
         tacv[1] = make_tied_array_channelised_voltage(
-            acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
-        with pytest.raises(ValueError,
-                           match='Source streams do not come from the same channeliser'):
+            acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148')
+        )
+        with pytest.raises(
+            ValueError, match='Source streams do not come from the same channeliser'
+        ):
             BeamformerStream.from_config(Options(), 'beamformer', config, tacv, {})
 
 
@@ -1028,9 +1010,11 @@ class TestBeamformerEngineeringStream:
         acv = make_antenna_channelised_voltage()
         return [
             make_tied_array_channelised_voltage(
-                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')),
+                acv, 'beam_0x', yarl.URL('spead://239.10.0.0+255:7148')
+            ),
             make_tied_array_channelised_voltage(
-                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148'))
+                acv, 'beam_0y', yarl.URL('spead://239.10.1.0+255:7148')
+            ),
         ]
 
     @pytest.fixture
@@ -1039,15 +1023,13 @@ class TestBeamformerEngineeringStream:
             'type': 'sdp.beamformer_engineering',
             'src_streams': ['beam_0x', 'beam_0y'],
             'output_channels': [128, 1024],
-            'store': 'ram'
+            'store': 'ram',
         }
 
     def test_from_config(
         self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
-        bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', config, tacv, {}
-        )
+        bf = BeamformerEngineeringStream.from_config(Options(), 'beamformer', config, tacv, {})
         assert bf.name == 'beamformer'
         assert bf.antenna_channelised_voltage.name == 'narrow1_acv'
         assert bf.tied_array_channelised_voltage == tacv
@@ -1059,9 +1041,7 @@ class TestBeamformerEngineeringStream:
         self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         del config['output_channels']
-        bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', config, tacv, {}
-        )
+        bf = BeamformerEngineeringStream.from_config(Options(), 'beamformer', config, tacv, {})
         assert bf.output_channels == (0, 32768)
         assert bf.n_chans == 32768
 
@@ -1069,24 +1049,23 @@ class TestBeamformerEngineeringStream:
         self, tacv: List[TiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         config['output_channels'] = [1, 2]
-        bf = BeamformerEngineeringStream.from_config(
-            Options(), 'beamformer', config, tacv, {}
-        )
+        bf = BeamformerEngineeringStream.from_config(Options(), 'beamformer', config, tacv, {})
         assert bf.output_channels == (0, 128)
 
 
 def make_vis(
-        baseline_correlation_products: Optional[BaselineCorrelationProductsStream] = None
-        ) -> VisStream:
+    baseline_correlation_products: Optional[BaselineCorrelationProductsStream] = None,
+) -> VisStream:
     if baseline_correlation_products is None:
         baseline_correlation_products = make_baseline_correlation_products()
     return VisStream(
-        'sdp_l0', [baseline_correlation_products],
+        'sdp_l0',
+        [baseline_correlation_products],
         int_time=8.0,
         continuum_factor=1,
         excise=True,
         archive=True,
-        n_servers=4
+        n_servers=4,
     )
 
 
@@ -1109,7 +1088,7 @@ class TestCalStream:
             'src_streams': ['sdp_l0'],
             'parameters': {'g_solint': 2.0},
             'buffer_time': 600.0,
-            'max_scans': 100
+            'max_scans': 100,
         }
 
     def test_from_config(self, vis: VisStream, config: Dict[str, Any]) -> None:
@@ -1144,10 +1123,11 @@ def make_cal(vis: Optional[VisStream] = None) -> CalStream:
     if vis is None:
         vis = make_vis_4ant()
     return CalStream(
-        'cal', [vis],
+        'cal',
+        [vis],
         parameters={},
         buffer_time=defaults.CAL_BUFFER_TIME,
-        max_scans=defaults.CAL_MAX_SCANS
+        max_scans=defaults.CAL_MAX_SCANS,
     )
 
 
@@ -1160,7 +1140,7 @@ class TestFlagsStream:
             'type': 'sdp.flags',
             'src_streams': ['sdp_l0', 'cal'],
             'rate_ratio': 10.0,
-            'archive': True
+            'archive': True,
         }
 
     def test_from_config(self, cal: CalStream, config: Dict[str, Any]) -> None:
@@ -1194,26 +1174,23 @@ class TestFlagsStream:
         vis.name = 'bad'
         cal.vis.continuum_factor = 4
         with pytest.raises(
-                ValueError,
-                match='src_streams bad, sdp_l0 have incompatible continuum factors 1, 4'):
+            ValueError, match='src_streams bad, sdp_l0 have incompatible continuum factors 1, 4'
+        ):
             FlagsStream.from_config(Options(), 'flags', config, [vis, cal], {})
 
 
 @pytest.fixture(name="flags")
 def make_flags(cal: CalStream) -> FlagsStream:
     cont_vis = VisStream(
-        'sdp_l0_continuum', [cal.vis.baseline_correlation_products],
+        'sdp_l0_continuum',
+        [cal.vis.baseline_correlation_products],
         int_time=cal.vis.int_time,
         continuum_factor=32,
         excise=cal.vis.excise,
         archive=False,
-        n_servers=cal.vis.n_servers
+        n_servers=cal.vis.n_servers,
     )
-    return FlagsStream(
-        'sdp_l0_continuum_flags', [cont_vis, cal],
-        rate_ratio=8.0,
-        archive=False
-    )
+    return FlagsStream('sdp_l0_continuum_flags', [cont_vis, cal], rate_ratio=8.0, archive=False)
 
 
 class TestContinuumImageStream:
@@ -1227,13 +1204,11 @@ class TestContinuumImageStream:
             'uvblavg_parameters': {'foo': 'bar'},
             'mfimage_parameters': {'abc': 123},
             'max_realtime': 10000.0,
-            'min_time': 100.0
+            'min_time': 100.0,
         }
 
     def test_from_config(self, flags: FlagsStream, config: Dict[str, Any]) -> None:
-        cont = ContinuumImageStream.from_config(
-            Options(), 'continuum_image', config, [flags], {}
-        )
+        cont = ContinuumImageStream.from_config(Options(), 'continuum_image', config, [flags], {})
         assert cont.name == 'continuum_image'
         # Make sure that the value is copied
         config['uvblavg_parameters'].clear()
@@ -1251,9 +1226,7 @@ class TestContinuumImageStream:
         del config['mfimage_parameters']
         del config['max_realtime']
         del config['min_time']
-        cont = ContinuumImageStream.from_config(
-            Options(), 'continuum_image', config, [flags], {}
-        )
+        cont = ContinuumImageStream.from_config(Options(), 'continuum_image', config, [flags], {})
         assert cont.uvblavg_parameters == {}
         assert cont.mfimage_parameters == {}
         assert cont.max_realtime is None
@@ -1263,11 +1236,12 @@ class TestContinuumImageStream:
 @pytest.fixture(name="continuum_image")
 def make_continuum_image(flags: FlagsStream) -> ContinuumImageStream:
     return ContinuumImageStream(
-        'continuum_image', [flags],
+        'continuum_image',
+        [flags],
         uvblavg_parameters={},
         mfimage_parameters={},
         max_realtime=10000.0,
-        min_time=100.0
+        min_time=100.0,
     )
 
 
@@ -1281,7 +1255,7 @@ class TestSpectralImageStream:
             'src_streams': ['sdp_l0_continuum_flags', 'continuum_image'],
             'output_channels': [64, 100],
             'min_time': 200.0,
-            'parameters': {'q_fov': 2.0}
+            'parameters': {'q_fov': 2.0},
         }
 
     def test_from_config(
@@ -1305,9 +1279,7 @@ class TestSpectralImageStream:
         self, flags: FlagsStream, continuum_image: ContinuumImageStream, config: Dict[str, Any]
     ) -> None:
         config['src_streams'] = ['sdp_l0_continuum_flags']
-        spec = SpectralImageStream.from_config(
-            Options(), 'spectral_image', config, [flags], {}
-        )
+        spec = SpectralImageStream.from_config(Options(), 'spectral_image', config, [flags], {})
         assert spec.continuum is None
 
     def test_defaults(
@@ -1329,34 +1301,31 @@ def config() -> Dict[str, Any]:
     return {
         "version": "3.1",
         "inputs": {
-            "camdata": {
-                "type": "cam.http",
-                "url": "http://10.8.67.235/api/client/1"
-            },
+            "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
                 "type": "cbf.antenna_channelised_voltage",
                 "url": "spead://239.2.1.150+15:7148",
                 "antennas": ["m000", "m001", "s0003", "another_antenna"],
-                "instrument_dev_name": "i0"
+                "instrument_dev_name": "i0",
             },
             "i0_baseline_correlation_products": {
                 "type": "cbf.baseline_correlation_products",
                 "url": "spead://239.9.3.1+15:7148",
                 "src_streams": ["i0_antenna_channelised_voltage"],
-                "instrument_dev_name": "i0"
+                "instrument_dev_name": "i0",
             },
             "i0_tied_array_channelised_voltage_0x": {
                 "type": "cbf.tied_array_channelised_voltage",
                 "url": "spead://239.9.3.30+15:7148",
                 "src_streams": ["i0_antenna_channelised_voltage"],
-                "instrument_dev_name": "i0"
+                "instrument_dev_name": "i0",
             },
             "i0_tied_array_channelised_voltage_0y": {
                 "type": "cbf.tied_array_channelised_voltage",
                 "url": "spead://239.9.3.46+7:7148",
                 "src_streams": ["i0_antenna_channelised_voltage"],
-                "instrument_dev_name": "i0"
-            }
+                "instrument_dev_name": "i0",
+            },
         },
         "outputs": {
             "l0": {
@@ -1365,42 +1334,35 @@ def config() -> Dict[str, Any]:
                 "output_int_time": 4.0,
                 "output_channels": [0, 4096],
                 "continuum_factor": 1,
-                "archive": True
+                "archive": True,
             },
             "beamformer_engineering": {
                 "type": "sdp.beamformer_engineering",
                 "src_streams": [
                     "i0_tied_array_channelised_voltage_0x",
-                    "i0_tied_array_channelised_voltage_0y"
+                    "i0_tied_array_channelised_voltage_0y",
                 ],
                 "output_channels": [0, 4096],
-                "store": "ssd"
+                "store": "ssd",
             },
-            "cal": {
-                "type": "sdp.cal",
-                "src_streams": ["l0"]
-            },
-            "sdp_l1_flags": {
-                "type": "sdp.flags",
-                "src_streams": ["l0", "cal"],
-                "archive": True
-            },
+            "cal": {"type": "sdp.cal", "src_streams": ["l0"]},
+            "sdp_l1_flags": {"type": "sdp.flags", "src_streams": ["l0", "cal"], "archive": True},
             "continuum_image": {
                 "type": "sdp.continuum_image",
                 "src_streams": ["sdp_l1_flags"],
                 "uvblavg_parameters": {},
                 "mfimage_parameters": {},
                 "max_realtime": 10000.0,
-                "min_time": 20 * 60
+                "min_time": 20 * 60,
             },
             "spectral_image": {
                 "type": "sdp.spectral_image",
                 "src_streams": ["sdp_l1_flags", "continuum_image"],
                 "output_channels": [100, 4000],
-                "min_time": 3600.0
-            }
+                "min_time": 3600.0,
+            },
         },
-        "config": {}
+        "config": {},
     }
 
 
@@ -1409,10 +1371,7 @@ def config_v2() -> Dict[str, Any]:
     return {
         "version": "2.6",
         "inputs": {
-            "camdata": {
-                "type": "cam.http",
-                "url": "http://10.8.67.235/api/client/1"
-            },
+            "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
                 "type": "cbf.antenna_channelised_voltage",
                 "url": "spead://239.2.1.150+15:7148",
@@ -1422,7 +1381,7 @@ def config_v2() -> Dict[str, Any]:
                 "adc_sample_rate": 1712000000.0,
                 "bandwidth": 856000000.0,
                 "n_samples_between_spectra": 8192,
-                "instrument_dev_name": "i0"
+                "instrument_dev_name": "i0",
             },
             "i0_baseline_correlation_products": {
                 "type": "cbf.baseline_correlation_products",
@@ -1432,7 +1391,7 @@ def config_v2() -> Dict[str, Any]:
                 "n_bls": 40,
                 "xeng_out_bits_per_sample": 32,
                 "n_chans_per_substream": 256,
-                "instrument_dev_name": "i0"
+                "instrument_dev_name": "i0",
             },
             "i0_tied_array_channelised_voltage_0x": {
                 "beng_out_bits_per_sample": 8,
@@ -1440,11 +1399,9 @@ def config_v2() -> Dict[str, Any]:
                 "n_chans_per_substream": 256,
                 "simulate": False,
                 "spectra_per_heap": 256,
-                "src_streams": [
-                    "i0_antenna_channelised_voltage"
-                ],
+                "src_streams": ["i0_antenna_channelised_voltage"],
                 "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.30+15:7148"
+                "url": "spead://239.9.3.30+15:7148",
             },
             "i0_tied_array_channelised_voltage_0y": {
                 "beng_out_bits_per_sample": 8,
@@ -1452,12 +1409,10 @@ def config_v2() -> Dict[str, Any]:
                 "n_chans_per_substream": 256,
                 "simulate": False,
                 "spectra_per_heap": 256,
-                "src_streams": [
-                    "i0_antenna_channelised_voltage"
-                ],
+                "src_streams": ["i0_antenna_channelised_voltage"],
                 "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.46+7:7148"
-            }
+                "url": "spead://239.9.3.46+7:7148",
+            },
         },
         "outputs": {
             "l0": {
@@ -1466,26 +1421,23 @@ def config_v2() -> Dict[str, Any]:
                 "output_int_time": 4.0,
                 "output_channels": [0, 4096],
                 "continuum_factor": 1,
-                "archive": True
+                "archive": True,
             },
             "beamformer_engineering": {
                 "type": "sdp.beamformer_engineering",
                 "src_streams": [
                     "i0_tied_array_channelised_voltage_0x",
-                    "i0_tied_array_channelised_voltage_0y"
+                    "i0_tied_array_channelised_voltage_0y",
                 ],
                 "output_channels": [0, 4096],
-                "store": "ssd"
+                "store": "ssd",
             },
-            "cal": {
-                "type": "sdp.cal",
-                "src_streams": ["l0"]
-            },
+            "cal": {"type": "sdp.cal", "src_streams": ["l0"]},
             "sdp_l1_flags": {
                 "type": "sdp.flags",
                 "src_streams": ["l0"],
                 "calibration": ["cal"],
-                "archive": True
+                "archive": True,
             },
             "continuum_image": {
                 "type": "sdp.continuum_image",
@@ -1493,16 +1445,16 @@ def config_v2() -> Dict[str, Any]:
                 "uvblavg_parameters": {},
                 "mfimage_parameters": {},
                 "max_realtime": 10000.0,
-                "min_time": 20 * 60
+                "min_time": 20 * 60,
             },
             "spectral_image": {
                 "type": "sdp.spectral_image",
                 "src_streams": ["sdp_l1_flags", "continuum_image"],
                 "output_channels": [100, 4000],
-                "min_time": 3600.0
-            }
+                "min_time": 3600.0,
+            },
         },
-        "config": {}
+        "config": {},
     }
 
 
@@ -1513,22 +1465,19 @@ def config_sim() -> Dict[str, Any]:
         'outputs': {
             'acv': {
                 'type': 'sim.cbf.antenna_channelised_voltage',
-                'antennas': [
-                    _M000.description,
-                    _M002.description
-                ],
+                'antennas': [_M000.description, _M002.description],
                 'band': 'l',
                 'bandwidth': 856e6,
                 'centre_frequency': 1284e6,
                 'adc_sample_rate': 1712e6,
-                'n_chans': 4096
+                'n_chans': 4096,
             },
             'vis': {
                 'type': 'sdp.vis',
                 'src_streams': ['bcp'],
                 'output_int_time': 2.0,
                 'continuum_factor': 1,
-                'archive': True
+                'archive': True,
             },
             # Deliberately list the streams out of order, to check that
             # they get properly ordered
@@ -1536,9 +1485,9 @@ def config_sim() -> Dict[str, Any]:
                 'type': 'sim.cbf.baseline_correlation_products',
                 'src_streams': ['acv'],
                 'n_endpoints': 16,
-                'int_time': 0.5
-            }
-        }
+                'int_time': 0.5,
+            },
+        },
     }
 
 
@@ -1562,29 +1511,33 @@ class TestValidate:
     def test_input_bad_property(self, config: Dict[str, Any]) -> None:
         """Test that the error message on an invalid input is sensible"""
         del config["inputs"]["i0_antenna_channelised_voltage"]["instrument_dev_name"]
-        with pytest.raises(jsonschema.ValidationError,
-                           match="'instrument_dev_name' is a required property"):
+        with pytest.raises(
+            jsonschema.ValidationError, match="'instrument_dev_name' is a required property"
+        ):
             product_config._validate(config)
 
     def test_output_bad_property(self, config: Dict[str, Any]) -> None:
         """Test that the error message on an invalid output is sensible"""
         del config["outputs"]["l0"]["continuum_factor"]
-        with pytest.raises(jsonschema.ValidationError,
-                           match="'continuum_factor' is a required property"):
+        with pytest.raises(
+            jsonschema.ValidationError, match="'continuum_factor' is a required property"
+        ):
             product_config._validate(config)
 
     def test_input_missing_stream(self, config: Dict[str, Any]) -> None:
         """An input whose ``src_streams`` reference does not exist"""
         config["inputs"]["i0_baseline_correlation_products"]["src_streams"] = ["blah"]
-        with pytest.raises(ValueError,
-                           match="Unknown source blah in i0_baseline_correlation_products"):
+        with pytest.raises(
+            ValueError, match="Unknown source blah in i0_baseline_correlation_products"
+        ):
             product_config._validate(config)
 
     def test_output_missing_stream(self, config: Dict[str, Any]) -> None:
         """An output whose ``src_streams`` reference does not exist"""
         del config["inputs"]["i0_baseline_correlation_products"]
-        with pytest.raises(ValueError,
-                           match="Unknown source i0_baseline_correlation_products in l0"):
+        with pytest.raises(
+            ValueError, match="Unknown source i0_baseline_correlation_products in l0"
+        ):
             product_config._validate(config)
 
     def test_stream_wrong_type(self, config: Dict[str, Any]) -> None:
@@ -1658,10 +1611,7 @@ class TestUpgrade:
         assert upgraded == config
 
     def test_unknown_input(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
-        config_v2['inputs']['xyz'] = {
-            'type': 'custom',
-            'url': 'http://test.invalid/'
-        }
+        config_v2['inputs']['xyz'] = {'type': 'custom', 'url': 'http://test.invalid/'}
         upgraded = product_config._upgrade(config_v2)
         assert upgraded == config
 
@@ -1699,8 +1649,9 @@ class TestConfiguration:
                 'cbf_1_i0_tied_array_channelised_voltage_0x_beng_out_bits_per_sample': 8,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap': 256,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 64,
-                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
-            })
+                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8,
+            },
+        )
         mocker.patch('katportalclient.KATPortalClient', return_value=client)
         return client
 
@@ -1737,13 +1688,13 @@ class TestConfiguration:
         assert bcp.int_time == 0.25
 
     async def test_connection_failed(self, client, config: Dict[str, Any]) -> None:
-        with mock.patch.object(client, 'sensor_subarray_lookup',
-                               side_effect=ConnectionRefusedError):
+        with mock.patch.object(
+            client, 'sensor_subarray_lookup', side_effect=ConnectionRefusedError
+        ):
             with pytest.raises(product_config.SensorFailure):
                 await Configuration.from_config(config)
 
-        with mock.patch.object(client, 'sensor_values',
-                               side_effect=ConnectionRefusedError):
+        with mock.patch.object(client, 'sensor_values', side_effect=ConnectionRefusedError):
             with pytest.raises(product_config.SensorFailure):
                 await Configuration.from_config(config)
 
@@ -1753,29 +1704,28 @@ class TestConfiguration:
             await Configuration.from_config(config)
 
     async def test_sensor_bad_status(self, client, config: Dict[str, Any]) -> None:
-        client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
-            katportalclient.SensorSample(1234567890.0, 40, 'unreachable')
+        client.sensors[
+            'cbf_1_i0_baseline_correlation_products_n_bls'
+        ] = katportalclient.SensorSample(1234567890.0, 40, 'unreachable')
         with pytest.raises(product_config.SensorFailure):
             await Configuration.from_config(config)
 
     async def test_sensor_bad_type(self, client, config: Dict[str, Any]) -> None:
-        client.sensors['cbf_1_i0_baseline_correlation_products_n_bls'] = \
-            katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
+        client.sensors[
+            'cbf_1_i0_baseline_correlation_products_n_bls'
+        ] = katportalclient.SensorSample(1234567890.0, 'not a number', 'nominal')
         with pytest.raises(product_config.SensorFailure):
             await Configuration.from_config(config)
 
     async def test_mixed_bands(self, config: Dict[str, Any]) -> None:
         config['outputs']['l_band_sim'] = {
             'type': 'sim.cbf.antenna_channelised_voltage',
-            'antennas': [
-                _M000.description,
-                _M002.description
-            ],
+            'antennas': [_M000.description, _M002.description],
             'band': 'l',
             'centre_frequency': 1284e6,
             'bandwidth': 107e6,
             'adc_sample_rate': 1712e6,
-            'n_chans': 32768
+            'n_chans': 32768,
         }
         with pytest.raises(ValueError, match="Only a single band is supported, found 'l', 'u'"):
             await Configuration.from_config(config)

@@ -95,8 +95,15 @@ EXPECTED_REQUEST_LIST = [
     'product-deconfigure',
     'telstate-endpoint',
     # Standard katcp commands
-    'client-list', 'halt', 'help', 'log-level', 'sensor-list',
-    'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'
+    'client-list',
+    'halt',
+    'help',
+    'log-level',
+    'sensor-list',
+    'sensor-sampling',
+    'sensor-value',
+    'watchdog',
+    'version-list',
 ]
 
 
@@ -109,8 +116,9 @@ class DummyMasterController(aiokatcp.DeviceServer):
         self._network = ipaddress.IPv4Network('239.192.0.0/18')
         self._next = self._network.network_address + 1
 
-    async def request_get_multicast_groups(self, ctx: aiokatcp.RequestContext,
-                                           subarray_product_id: str, n_addresses: int) -> str:
+    async def request_get_multicast_groups(
+        self, ctx: aiokatcp.RequestContext, subarray_product_id: str, n_addresses: int
+    ) -> str:
         """Dummy docstring"""
         ans = str(self._next)
         if n_addresses > 1:
@@ -152,7 +160,7 @@ class DummyDataSet:
                 target_index.append(i)
         self.sensor = {
             'Observation/scan_state': np.array(scan_state),
-            'Observation/target_index': np.array(target_index)
+            'Observation/target_index': np.array(target_index),
         }
         self.spw = 0
         self.spectral_windows = [
@@ -171,15 +179,9 @@ class TestRedactKeys:
     def s3_config(self) -> dict:
         return {
             'archive': {
-                'read': {
-                    'access_key': 'ACCESS_KEY',
-                    'secret_key': 'tellno1'
-                },
-                'write': {
-                    'access_key': 's3cr3t',
-                    'secret_key': 'mores3cr3t'
-                },
-                'url': 'http://invalid/'
+                'read': {'access_key': 'ACCESS_KEY', 'secret_key': 'tellno1'},
+                'write': {'access_key': 's3cr3t', 'secret_key': 'mores3cr3t'},
+                'url': 'http://invalid/',
             }
         }
 
@@ -193,13 +195,13 @@ class TestRedactKeys:
         [
             (
                 ['--secret=mores3cr3t', '--key=ACCESS_KEY', '--other=safe'],
-                ['--secret=REDACTED', '--key=REDACTED', '--other=safe']
+                ['--secret=REDACTED', '--key=REDACTED', '--other=safe'],
             ),
             (
                 ['--secret', 's3cr3t', '--key', 'tellno1', '--other', 'safe'],
-                ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe']
-            )
-        ]
+                ['--secret', 'REDACTED', '--key', 'REDACTED', '--other', 'safe'],
+            ),
+        ],
     )
     def test(self, arguments: List[str], expected: List[str], s3_config: dict) -> None:
         taskinfo = Dict()
@@ -212,15 +214,9 @@ class TestNormaliseS3Config:
     def test_single_url(self) -> None:
         s3_config = {
             'archive': {
-                'read': {
-                    'access_key': 'ACCESS_KEY',
-                    'secret_key': 'tellno1'
-                },
-                'write': {
-                    'access_key': 's3cr3t',
-                    'secret_key': 'mores3cr3t'
-                },
-                'url': 'http://invalid/'
+                'read': {'access_key': 'ACCESS_KEY', 'secret_key': 'tellno1'},
+                'write': {'access_key': 's3cr3t', 'secret_key': 'mores3cr3t'},
+                'url': 'http://invalid/',
             }
         }
         expected = {
@@ -228,13 +224,13 @@ class TestNormaliseS3Config:
                 'read': {
                     'access_key': 'ACCESS_KEY',
                     'secret_key': 'tellno1',
-                    'url': 'http://invalid/'
+                    'url': 'http://invalid/',
                 },
                 'write': {
                     'access_key': 's3cr3t',
                     'secret_key': 'mores3cr3t',
-                    'url': 'http://invalid/'
-                }
+                    'url': 'http://invalid/',
+                },
             }
         }
         result = _normalise_s3_config(s3_config)
@@ -251,12 +247,12 @@ class TestNormaliseS3Config:
                 'read': {
                     'access_key': 'ACCESS_KEY',
                     'secret_key': 'tellno1',
-                    'url': 'http://read.invalid/'
+                    'url': 'http://read.invalid/',
                 },
                 'write': {
                     'access_key': 's3cr3t',
                     'secret_key': 'mores3cr3t',
-                    'url': 'http://write.invalid/'
+                    'url': 'http://write.invalid/',
                 },
             }
         }
@@ -321,29 +317,30 @@ class BaseTestController:
     """Utilities for test classes"""
 
     @pytest.fixture
-    def setup_model(self, mock_aioresponses: aioresponses) -> \
-            Callable[[katsdpmodels.models.Model, str, str, str], None]:
-        def _setup_model(model: katsdpmodels.models.Model,
-                         current_path: str,
-                         config_path: str,
-                         fixed_path: str) -> None:
+    def setup_model(
+        self, mock_aioresponses: aioresponses
+    ) -> Callable[[katsdpmodels.models.Model, str, str, str], None]:
+        def _setup_model(
+            model: katsdpmodels.models.Model, current_path: str, config_path: str, fixed_path: str
+        ) -> None:
             fh = io.BytesIO()
             model.to_file(fh, content_type='application/x-hdf5')
             mock_aioresponses.get(
                 f'https://models.s3.invalid{current_path}',
                 content_type='text/plain',
-                body=f'{config_path}\n'
+                body=f'{config_path}\n',
             )
             mock_aioresponses.get(
                 f'https://models.s3.invalid{config_path}',
                 content_type='text/plain',
-                body=f'{fixed_path}\n'
+                body=f'{fixed_path}\n',
             )
             mock_aioresponses.get(
                 f'https://models.s3.invalid{fixed_path}',
                 content_type='application/x-hdf5',
-                body=fh.getvalue()
+                body=fh.getvalue(),
             )
+
         return _setup_model
 
     @pytest.fixture(autouse=True)
@@ -351,24 +348,23 @@ class BaseTestController:
         model = katsdpmodels.rfi_mask.RFIMaskRanges(
             astropy.table.Table(
                 [[0.0] * u.Hz, [0.0] * u.Hz, [0.0] * u.m],
-                names=('min_frequency', 'max_frequency', 'max_baseline')
+                names=('min_frequency', 'max_frequency', 'max_baseline'),
             ),
-            False
+            False,
         )
         model.version = 1
         setup_model(
             model,
             '/models/rfi_mask/current.alias',
             '/models/rfi_mask/config/2020-06-15.alias',
-            '/models/rfi_mask/fixed/test.h5'
+            '/models/rfi_mask/fixed/test.h5',
         )
 
     @pytest.fixture(autouse=True)
     def _setup_band_mask_model(self, setup_model) -> None:
         model = katsdpmodels.band_mask.BandMaskRanges(
             astropy.table.Table(
-                rows=[[0.0, 0.05], [0.95, 1.0]],
-                names=('min_fraction', 'max_fraction')
+                rows=[[0.0, 0.05], [0.95, 1.0]], names=('min_fraction', 'max_fraction')
             )
         )
         model.version = 1
@@ -376,18 +372,21 @@ class BaseTestController:
             model,
             '/models/band_mask/current/l/nb_ratio=1.alias',
             '/models/band_mask/config/l/nb_ratio=1/2020-06-22.alias',
-            '/models/band_mask/fixed/test.h5'
+            '/models/band_mask/fixed/test.h5',
         )
 
     @pytest.fixture(autouse=True)
     def _setup_primary_beam_model(self, setup_model) -> None:
         # Model is not used for anything, so do a minimal amount to get it working.
         model = katsdpmodels.primary_beam.PrimaryBeamAperturePlane(
-            -1 * u.m, -1 * u.m,
-            1 * u.m, 1 * u.m,
+            -1 * u.m,
+            -1 * u.m,
+            1 * u.m,
+            1 * u.m,
             [1, 2] * u.GHz,
             np.zeros((2, 2, 2, 8, 8), np.complex64),
-            band='l')
+            band='l',
+        )
         model.version = 1
         for antenna in ANTENNAS:
             for group in ['individual', 'cohort']:
@@ -395,7 +394,7 @@ class BaseTestController:
                     model,
                     f'/models/primary_beam/current/{group}/{antenna}/l.alias',
                     '/models/primary_beam/config/cohort/meerkat/l/v1.alias',
-                    '/models/primary_beam/fixed/test.h5'
+                    '/models/primary_beam/fixed/test.h5',
                 )
 
     @pytest.fixture
@@ -424,7 +423,7 @@ class BaseTestController:
         mocker.patch(
             'katsdpcontroller.consul.ConsulService.register',
             return_value=ConsulService(),
-            autospec=True
+            autospec=True,
         )
 
     @pytest.fixture
@@ -433,8 +432,8 @@ class BaseTestController:
 
     @pytest.fixture
     async def server(
-            self, mc_client, mc_server, mock_aioresponses, mock_consul,
-            registry, server_kwargs) -> AsyncGenerator[DeviceServer, None]:
+        self, mc_client, mc_server, mock_aioresponses, mock_consul, registry, server_kwargs
+    ) -> AsyncGenerator[DeviceServer, None]:
         # The mock_* fixtures are autouse but are listed explicitly in the
         # parameter list to ensure they're ordered before this fixture.
         if 'sched' not in server_kwargs:
@@ -444,7 +443,8 @@ class BaseTestController:
             subarray_product_id=SUBARRAY_PRODUCT,
             prometheus_registry=registry,
             shutdown_delay=0.0,
-            **server_kwargs)
+            **server_kwargs,
+        )
         await server.start()
         yield server
         await server.stop()
@@ -475,8 +475,9 @@ class BaseTestController:
                 'cbf_1_i0_tied_array_channelised_voltage_0x_beng_out_bits_per_sample': 8,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap': 256,
                 'cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream': 256,
-                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8
-            })
+                'cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample': 8,
+            },
+        )
         mocker.patch('katportalclient.KATPortalClient', return_value=dummy_client)
 
 
@@ -487,12 +488,15 @@ class TestControllerInterface(BaseTestController):
     @pytest.fixture
     def server_kwargs(self) -> dict:
         image_resolver_factory = scheduler.ImageResolverFactory(scheduler.SimpleImageLookup('sdp'))
-        return dict(host='127.0.0.1', port=0,
-                    batch_role='batch',
-                    interface_mode=True,
-                    localhost=True,
-                    image_resolver_factory=image_resolver_factory,
-                    s3_config={})
+        return dict(
+            host='127.0.0.1',
+            port=0,
+            batch_role='batch',
+            interface_mode=True,
+            localhost=True,
+            image_resolver_factory=image_resolver_factory,
+            s3_config={},
+        )
 
     @pytest.fixture(autouse=True)
     def mock_time(self, mocker) -> None:
@@ -516,7 +520,8 @@ class TestControllerInterface(BaseTestController):
         await assert_sensors(
             client,
             EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST + EXPECTED_INTERFACE_SENSOR_LIST,
-            subset=True)
+            subset=True,
+        )
 
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
@@ -563,12 +568,11 @@ class TestControllerInterface(BaseTestController):
         """Test gain with a single gain to apply to all channels."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         reply, _ = await client.request(
-            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1+2j')
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1+2j'
+        )
         assert reply == [b'1.0+2.0j']
         await assert_sensor_value(
-            client,
-            'gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq',
-            '[1.0+2.0j]'
+            client, 'gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq', '[1.0+2.0j]'
         )
         await client.request("product-deconfigure")
 
@@ -577,25 +581,23 @@ class TestControllerInterface(BaseTestController):
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         gains = [b'%d.0+2.0j' % i for i in range(4096)]
         reply, _ = await client.request(
-            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains)
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains
+        )
         assert reply == gains
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq',
-            '[' + ', '.join(g.decode() for g in gains) + ']'
+            '[' + ', '.join(g.decode() for g in gains) + ']',
         )
         await client.request("product-deconfigure")
 
     async def test_gain_all_single(self, client: aiokatcp.Client) -> None:
         """Test gain-all with a single gain to apply to all channels."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', '1.0+2.0j')
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', '1.0+2.0j')
         for name in ['gpucbf_m900v', 'gpucbf_m900h', 'gpucbf_m901v', 'gpucbf_m901h']:
             await assert_sensor_value(
-                client,
-                f'gpucbf_antenna_channelised_voltage-{name}-eq',
-                '[1.0+2.0j]'
+                client, f'gpucbf_antenna_channelised_voltage-{name}-eq', '[1.0+2.0j]'
             )
         await client.request("product-deconfigure")
 
@@ -603,26 +605,22 @@ class TestControllerInterface(BaseTestController):
         """Test gain-all with a different gain for each channel."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         gains = [b'%d.0+2.0j' % i for i in range(4096)]
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
         for name in ['gpucbf_m900v', 'gpucbf_m900h', 'gpucbf_m901v', 'gpucbf_m901h']:
             await assert_sensor_value(
                 client,
                 f'gpucbf_antenna_channelised_voltage-{name}-eq',
-                '[' + ', '.join(g.decode() for g in gains) + ']'
+                '[' + ', '.join(g.decode() for g in gains) + ']',
             )
         await client.request("product-deconfigure")
 
     async def test_gain_all_default(self, client: aiokatcp.Client) -> None:
         """Test setting gains to default with gain-all."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
         for name in ['gpucbf_m900v', 'gpucbf_m900h', 'gpucbf_m901v', 'gpucbf_m901h']:
             await assert_sensor_value(
-                client,
-                f'gpucbf_antenna_channelised_voltage-{name}-eq',
-                '[1.0+0.0j]'
+                client, f'gpucbf_antenna_channelised_voltage-{name}-eq', '[1.0+0.0j]'
             )
         await client.request("product-deconfigure")
 
@@ -632,34 +630,36 @@ class TestControllerInterface(BaseTestController):
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-sync-time',
-            123456789.0   # Just to detect any change in sync time logic in generator.py
+            123456789.0,  # Just to detect any change in sync time logic in generator.py
         )
         await client.request(
-            'delays', 'gpucbf_antenna_channelised_voltage', '123456791.5',
+            'delays',
+            'gpucbf_antenna_channelised_voltage',
+            '123456791.5',
             '0.5,0.0:0.0,0.0',
             '0.0,0.125:0.0,0.0',
             '0.0,0.0:0.25,0.0',
-            '0.0,0.0:0.0,1.0'
+            '0.0,0.0:0.0,1.0',
         )
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m900v-delay',
-            '(4280000000, 0.5, 0.0, 0.0, 0.0)'
+            '(4280000000, 0.5, 0.0, 0.0, 0.0)',
         )
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m900h-delay',
-            '(4280000000, 0.0, 0.125, 0.0, 0.0)'
+            '(4280000000, 0.0, 0.125, 0.0, 0.0)',
         )
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m901v-delay',
-            '(4280000000, 0.0, 0.0, 0.25, 0.0)'
+            '(4280000000, 0.0, 0.0, 0.25, 0.0)',
         )
         await assert_sensor_value(
             client,
             'gpucbf_antenna_channelised_voltage-gpucbf_m901h-delay',
-            '(4280000000, 0.0, 0.0, 0.0, 1.0)'
+            '(4280000000, 0.0, 0.0, 0.0, 1.0)',
         )
         await client.request("product-deconfigure")
 
@@ -672,16 +672,18 @@ class TestControllerInterface(BaseTestController):
         assert server.product is not None  # Keeps mypy happy
         server.product._nodes['f.gpucbf_antenna_channelised_voltage.1'].kill(None)
         await assert_sensor_value(
-            client, 'gpucbf_antenna_channelised_voltage-input-data-suspect',
+            client,
+            'gpucbf_antenna_channelised_voltage-input-data-suspect',
             b'0011',
-            status=Sensor.Status.WARN
+            status=Sensor.Status.WARN,
         )
         # Kill off the other, to check that the sensor goes into ERROR
         server.product._nodes['f.gpucbf_antenna_channelised_voltage.0'].kill(None)
         await assert_sensor_value(
-            client, 'gpucbf_antenna_channelised_voltage-input-data-suspect',
+            client,
+            'gpucbf_antenna_channelised_voltage-input-data-suspect',
             b'1111',
-            status=Sensor.Status.ERROR
+            status=Sensor.Status.ERROR,
         )
 
     async def test_channel_data_suspect(
@@ -695,9 +697,10 @@ class TestControllerInterface(BaseTestController):
         assert server.product is not None
         server.product._nodes['xb.gpucbf_baseline_correlation_products.1'].kill(None)
         await assert_sensor_value(
-            client, 'gpucbf_baseline_correlation_products-channel-data-suspect',
+            client,
+            'gpucbf_baseline_correlation_products-channel-data-suspect',
             b'0' * 1024 + b'1' * 1024 + b'0' * 2048,
-            status=Sensor.Status.WARN
+            status=Sensor.Status.WARN,
         )
 
 
@@ -715,11 +718,15 @@ class DummyScheduler:
         # Dict mapping task name to Mesos task status string
         self.fail_launches: typing.Dict[str, str] = {}
 
-    async def launch(self, graph: networkx.MultiDiGraph,
-                     resolver: scheduler.Resolver,
-                     nodes: Sequence[scheduler.PhysicalNode] = None, *,
-                     queue: scheduler.LaunchQueue = None,
-                     resources_timeout: float = None) -> None:
+    async def launch(
+        self,
+        graph: networkx.MultiDiGraph,
+        resolver: scheduler.Resolver,
+        nodes: Sequence[scheduler.PhysicalNode] = None,
+        *,
+        queue: scheduler.LaunchQueue = None,
+        resources_timeout: float = None,
+    ) -> None:
         """Mock implementation of Scheduler.launch."""
         if nodes is None:
             nodes = graph.nodes()
@@ -738,7 +745,7 @@ class DummyScheduler:
                     core_num = 0
                     for core in node.logical_node.cores:
                         if core is not None:
-                            node.cores[core] = core_num   # type: ignore
+                            node.cores[core] = core_num  # type: ignore
                             core_num += 1
                 if isinstance(node.logical_node, scheduler.LogicalTask):
                     assert isinstance(node, scheduler.PhysicalTask)
@@ -766,12 +773,16 @@ class DummyScheduler:
             futures.append(node.ready_event.wait())
         await asyncio.gather(*futures)
 
-    async def batch_run(self, graph: networkx.MultiDiGraph,
-                        resolver: scheduler.Resolver,
-                        nodes: Sequence[scheduler.PhysicalNode] = None, *,
-                        queue: scheduler.LaunchQueue = None,
-                        resources_timeout: float = None,
-                        attempts: int = 1) -> None:
+    async def batch_run(
+        self,
+        graph: networkx.MultiDiGraph,
+        resolver: scheduler.Resolver,
+        nodes: Sequence[scheduler.PhysicalNode] = None,
+        *,
+        queue: scheduler.LaunchQueue = None,
+        resources_timeout: float = None,
+        attempts: int = 1,
+    ) -> None:
         """Mock implementation of Scheduler.batch_run.
 
         For now this is a much lighter-weight emulation than :meth:`_launch`,
@@ -788,9 +799,9 @@ class DummyScheduler:
             node.set_state(scheduler.TaskState.DEAD)
         self.n_batch_tasks += len(nodes)
 
-    async def kill(self, graph: networkx.MultiDiGraph,
-                   nodes: Sequence[scheduler.PhysicalNode] = None,
-                   **kwargs) -> None:
+    async def kill(
+        self, graph: networkx.MultiDiGraph, nodes: Sequence[scheduler.PhysicalNode] = None, **kwargs
+    ) -> None:
         """Mock implementation of Scheduler.kill."""
         if nodes is not None:
             kill_graph = graph.subgraph(nodes)
@@ -821,8 +832,9 @@ class DummyClient:
         # Return values for katcp requests
         self.katcp_replies: typing.Dict[str, Tuple[List[bytes], List[Message]]] = {}
 
-    async def request(self, msg: str, *args: Any, **kwargs: Any) \
-            -> Tuple[List[bytes], List[Message]]:
+    async def request(
+        self, msg: str, *args: Any, **kwargs: Any
+    ) -> Tuple[List[bytes], List[Message]]:
         """Mock implementation of aiokatcp.Client.request"""
         if msg in self.fail_requests:
             raise FailReply('dummy failure')
@@ -834,8 +846,9 @@ class DummyClient:
 class TestController(BaseTestController):
     """Test :class:`katsdpcontroller.product_controller.DeviceServer` by mocking the scheduler."""
 
-    def _request_slow(self, client: aiokatcp.Client, name: str, *args: Any,
-                      cancelled: bool = False) -> DelayedManager:
+    def _request_slow(
+        self, client: aiokatcp.Client, name: str, *args: Any, cancelled: bool = False
+    ) -> DelayedManager:
         """Asynchronous context manager that runs its block with a request in progress.
 
         The request must operate by issuing requests to the tasks, as this is
@@ -844,28 +857,29 @@ class TestController(BaseTestController):
         # grab the mock
         sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # type: ignore
         return DelayedManager(
-            client.request(name, *args),
-            sensor_proxy_client.request,
-            ([], []),
-            cancelled)
+            client.request(name, *args), sensor_proxy_client.request, ([], []), cancelled
+        )
 
-    def _capture_init_slow(self, client: aiokatcp.Client, capture_block: str,
-                           cancelled: bool = False) -> DelayedManager:
+    def _capture_init_slow(
+        self, client: aiokatcp.Client, capture_block: str, cancelled: bool = False
+    ) -> DelayedManager:
         """Asynchronous context manager that runs its block with a capture-init
         in progress. The subarray product must already be configured.
         """
         return self._request_slow(client, 'capture-init', capture_block, cancelled=cancelled)
 
-    def _capture_done_slow(self, client: aiokatcp.Client,
-                           cancelled: bool = False) -> DelayedManager:
+    def _capture_done_slow(
+        self, client: aiokatcp.Client, cancelled: bool = False
+    ) -> DelayedManager:
         """Asynchronous context manager that runs its block with a capture-done
         in progress. The subarray product must already be configured and
         capturing.
         """
         return self._request_slow(client, 'capture-done', cancelled=cancelled)
 
-    def _product_configure_slow(self, client: aiokatcp.Client, subarray_product: str,
-                                cancelled: bool = False) -> DelayedManager:
+    def _product_configure_slow(
+        self, client: aiokatcp.Client, subarray_product: str, cancelled: bool = False
+    ) -> DelayedManager:
         """Asynchronous context manager that runs its block with a
         product-configure in progress.
         """
@@ -874,7 +888,9 @@ class TestController(BaseTestController):
         return DelayedManager(
             client.request(*self._configure_args(subarray_product)),
             sensor_proxy_client.wait_synced,
-            None, cancelled)
+            None,
+            cancelled,
+        )
 
     # The return annotation is deliberately vague because typeshed changed
     # its annotation at some point and so any more specific annotation will
@@ -912,7 +928,8 @@ class TestController(BaseTestController):
         done_future.set_result(None)
 
         sensor_proxy_client_class = mocker.patch(
-            'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True)
+            'katsdpcontroller.sensor_proxy.SensorProxyClient', autospec=True
+        )
         sensor_proxy_client = sensor_proxy_client_class.return_value
         sensor_proxy_client.wait_connected.return_value = done_future
         sensor_proxy_client.wait_synced.return_value = done_future
@@ -923,13 +940,17 @@ class TestController(BaseTestController):
     @pytest.fixture
     def server_kwargs(self, sched: mock.MagicMock) -> dict:
         return dict(
-            host='127.0.0.1', port=0, sched=sched,
+            host='127.0.0.1',
+            port=0,
+            sched=sched,
             s3_config=json.loads(S3_CONFIG),
             image_resolver_factory=scheduler.ImageResolverFactory(
-                scheduler.SimpleImageLookup('sdp')),
+                scheduler.SimpleImageLookup('sdp')
+            ),
             interface_mode=False,
             localhost=True,
-            batch_role='batch')
+            batch_role='batch',
+        )
 
     @pytest.fixture
     def telstate(self) -> katsdptelstate.aio.TelescopeState:
@@ -937,11 +958,14 @@ class TestController(BaseTestController):
 
     @pytest.fixture(autouse=True)
     def backend_from_url_mock(
-            self, telstate: katsdptelstate.aio.TelescopeState, mocker) -> mock.MagicMock:
+        self, telstate: katsdptelstate.aio.TelescopeState, mocker
+    ) -> mock.MagicMock:
         # Mock RedisBackend to create an in-memory telstate instead
         return mocker.patch(
             'katsdptelstate.aio.redis.RedisBackend.from_url',
-            return_value=telstate.backend, autospec=True)
+            return_value=telstate.backend,
+            autospec=True,
+        )
 
     @pytest.fixture(autouse=True)
     async def setup_fixture(self, server, backend_from_url_mock, mocker) -> None:
@@ -958,23 +982,37 @@ class TestController(BaseTestController):
         def _dependency_abort(task: scheduler.PhysicalTask) -> None:
             orig_dependency_abort(task)
             asyncio.get_event_loop().call_soon(task.set_state, scheduler.TaskState.DEAD)
-        mocker.patch('katsdpcontroller.scheduler.PhysicalTask.dependency_abort',
-                     side_effect=_dependency_abort, autospec=True)
 
         mocker.patch(
-            'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future)
+            'katsdpcontroller.scheduler.PhysicalTask.dependency_abort',
+            side_effect=_dependency_abort,
+            autospec=True,
+        )
+
+        mocker.patch(
+            'katsdpcontroller.scheduler.poll_ports', autospec=True, return_value=done_future
+        )
         mocker.patch('netifaces.interfaces', autospec=True, return_value=['lo', 'em1'])
         mocker.patch('netifaces.ifaddresses', autospec=True, side_effect=self._ifaddresses)
         # Creating the sensor here isn't quite accurate (it is a dynamic sensor
         # created on subarray activation), but it shouldn't matter.
-        server.sensors.add(Sensor(
-            bytes, 'cal.1.capture-block-state',
-            'Dummy implementation of sensor', default=b'{}',
-            initial_status=Sensor.Status.NOMINAL))
-        server.sensors.add(Sensor(
-            DeviceStatus, 'ingest.sdp_l0.1.device-status',
-            'Dummy implementation of sensor',
-            initial_status=Sensor.Status.NOMINAL))
+        server.sensors.add(
+            Sensor(
+                bytes,
+                'cal.1.capture-block-state',
+                'Dummy implementation of sensor',
+                default=b'{}',
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        server.sensors.add(
+            Sensor(
+                DeviceStatus,
+                'ingest.sdp_l0.1.device-status',
+                'Dummy implementation of sensor',
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
 
         # Mock out use of katdal to get the targets
         mocker.patch('katdal.open', return_value=DummyDataSet())
@@ -982,15 +1020,18 @@ class TestController(BaseTestController):
     def _ifaddresses(self, interface: str) -> Mapping[int, Sequence[Mapping[str, str]]]:
         if interface == 'lo':
             return {
-                netifaces.AF_INET: [{
-                    'addr': '127.0.0.1', 'netmask': '255.0.0.0', 'peer': '127.0.0.1'}],
-                netifaces.AF_INET6: [{
-                    'addr': '::1', 'netmask': 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128'}],
+                netifaces.AF_INET: [
+                    {'addr': '127.0.0.1', 'netmask': '255.0.0.0', 'peer': '127.0.0.1'}
+                ],
+                netifaces.AF_INET6: [
+                    {'addr': '::1', 'netmask': 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128'}
+                ],
             }
         elif interface == 'em1':
             return {
-                netifaces.AF_INET: [{
-                    'addr': '10.0.0.2', 'broadcast': '10.255.255.255', 'netmask': '255.0.0.0'}],
+                netifaces.AF_INET: [
+                    {'addr': '10.0.0.2', 'broadcast': '10.255.255.255', 'netmask': '255.0.0.0'}
+                ],
             }
         else:
             raise ValueError('You must specify a valid interface name')
@@ -1002,8 +1043,12 @@ class TestController(BaseTestController):
         reply, informs = await client.request(*self._configure_args(subarray_product))
 
     async def assert_immutable(
-            self, telstate: katsdptelstate.aio.TelescopeState, key: str, value: Any,
-            key_type: katsdptelstate.KeyType = katsdptelstate.KeyType.IMMUTABLE) -> None:
+        self,
+        telstate: katsdptelstate.aio.TelescopeState,
+        key: str,
+        value: Any,
+        key_type: katsdptelstate.KeyType = katsdptelstate.KeyType.IMMUTABLE,
+    ) -> None:
         """Check the value of a telstate key and also that it is immutable"""
         assert telstate is not None
         # Uncomment for debugging
@@ -1016,18 +1061,17 @@ class TestController(BaseTestController):
         assert await telstate.key_type(key) == key_type
 
     async def test_product_configure_success(
-            self,
-            client: aiokatcp.Client,
-            server: DeviceServer,
-            telstate: katsdptelstate.aio.TelescopeState,
-            backend_from_url_mock) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        telstate: katsdptelstate.aio.TelescopeState,
+        backend_from_url_mock,
+    ) -> None:
         """A ?product-configure request must wait for the tasks to come up,
         then indicate success.
         """
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        backend_from_url_mock.assert_called_once_with(
-            'redis://host.telstate:20000'
-        )
+        backend_from_url_mock.assert_called_once_with('redis://host.telstate:20000')
 
         # Verify the telescope state.
         # This is not a complete list of calls. It checks that each category of stuff
@@ -1035,81 +1079,89 @@ class TestController(BaseTestController):
         assert telstate is not None
         await self.assert_immutable(telstate, 'subarray_product_id', SUBARRAY_PRODUCT)
         await self.assert_immutable(
-            telstate, 'sdp_model_base_url', 'https://models.s3.invalid/models/')
+            telstate, 'sdp_model_base_url', 'https://models.s3.invalid/models/'
+        )
         await self.assert_immutable(
             telstate,
             telstate.join('model', 'rfi_mask', 'config'),
-            'rfi_mask/config/2020-06-15.alias')
+            'rfi_mask/config/2020-06-15.alias',
+        )
         await self.assert_immutable(
-            telstate,
-            telstate.join('model', 'rfi_mask', 'fixed'),
-            'rfi_mask/fixed/test.h5')
+            telstate, telstate.join('model', 'rfi_mask', 'fixed'), 'rfi_mask/fixed/test.h5'
+        )
         await self.assert_immutable(
             telstate,
             telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'config'),
-            'band_mask/config/l/nb_ratio=1/2020-06-22.alias')
+            'band_mask/config/l/nb_ratio=1/2020-06-22.alias',
+        )
         await self.assert_immutable(
             telstate,
             telstate.join('i0_antenna_channelised_voltage', 'model', 'band_mask', 'fixed'),
-            'band_mask/fixed/test.h5')
-        await self.assert_immutable(
-            telstate,
-            telstate.join(
-                'i0_antenna_channelised_voltage', 'model',
-                'primary_beam', 'cohort', 'config'),
-            {
-                ant: 'primary_beam/config/cohort/meerkat/l/v1.alias'
-                for ant in ANTENNAS
-            },
-            key_type=katsdptelstate.KeyType.INDEXED
+            'band_mask/fixed/test.h5',
         )
         await self.assert_immutable(
             telstate,
             telstate.join(
-                'i0_antenna_channelised_voltage', 'model',
-                'primary_beam', 'individual', 'fixed'),
+                'i0_antenna_channelised_voltage', 'model', 'primary_beam', 'cohort', 'config'
+            ),
+            {ant: 'primary_beam/config/cohort/meerkat/l/v1.alias' for ant in ANTENNAS},
+            key_type=katsdptelstate.KeyType.INDEXED,
+        )
+        await self.assert_immutable(
+            telstate,
+            telstate.join(
+                'i0_antenna_channelised_voltage', 'model', 'primary_beam', 'individual', 'fixed'
+            ),
             {ant: 'primary_beam/fixed/test.h5' for ant in ['m000', 'm001', 'm062', 'm063']},
-            key_type=katsdptelstate.KeyType.INDEXED
+            key_type=katsdptelstate.KeyType.INDEXED,
         )
-        await self.assert_immutable(telstate, 'config.vis_writer.sdp_l0', {
-            'external_hostname': 'host.vis_writer.sdp_l0',
-            'npy_path': '/var/kat/data',
-            'obj_size_mb': mock.ANY,
-            'port': 20000,
-            'aiomonitor_port': 20001,
-            'aioconsole_port': 20002,
-            'aiomonitor': True,
-            'l0_spead': mock.ANY,
-            'l0_interface': 'em1',
-            'l0_name': 'sdp_l0',
-            's3_endpoint_url': 'http://archive.s3.invalid/',
-            's3_expiry_days': None,
-            'workers': mock.ANY,
-            'buffer_dumps': mock.ANY,
-            'obj_max_dumps': mock.ANY,
-            'direct_write': True
-        })
+        await self.assert_immutable(
+            telstate,
+            'config.vis_writer.sdp_l0',
+            {
+                'external_hostname': 'host.vis_writer.sdp_l0',
+                'npy_path': '/var/kat/data',
+                'obj_size_mb': mock.ANY,
+                'port': 20000,
+                'aiomonitor_port': 20001,
+                'aioconsole_port': 20002,
+                'aiomonitor': True,
+                'l0_spead': mock.ANY,
+                'l0_interface': 'em1',
+                'l0_name': 'sdp_l0',
+                's3_endpoint_url': 'http://archive.s3.invalid/',
+                's3_expiry_days': None,
+                'workers': mock.ANY,
+                'buffer_dumps': mock.ANY,
+                'obj_max_dumps': mock.ANY,
+                'direct_write': True,
+            },
+        )
         # Test that the output channel rounding was done correctly
-        await self.assert_immutable(telstate, 'config.ingest.sdp_l0_continuum_only', {
-            'antenna_mask': mock.ANY,
-            'cbf_spead': mock.ANY,
-            'cbf_ibv': True,
-            'cbf_name': 'i0_baseline_correlation_products',
-            'continuum_factor': 16,
-            'l0_continuum_spead': mock.ANY,
-            'l0_continuum_name': 'sdp_l0_continuum_only',
-            'sd_continuum_factor': 16,
-            'sd_spead_rate': mock.ANY,
-            'sd_output_channels': '64:3520',
-            'sd_int_time': mock.ANY,
-            'output_int_time': mock.ANY,
-            'output_channels': '64:3520',
-            'servers': 4,
-            'clock_ratio': 1.0,
-            'use_data_suspect': True,
-            'excise': False,
-            'aiomonitor': True
-        })
+        await self.assert_immutable(
+            telstate,
+            'config.ingest.sdp_l0_continuum_only',
+            {
+                'antenna_mask': mock.ANY,
+                'cbf_spead': mock.ANY,
+                'cbf_ibv': True,
+                'cbf_name': 'i0_baseline_correlation_products',
+                'continuum_factor': 16,
+                'l0_continuum_spead': mock.ANY,
+                'l0_continuum_name': 'sdp_l0_continuum_only',
+                'sd_continuum_factor': 16,
+                'sd_spead_rate': mock.ANY,
+                'sd_output_channels': '64:3520',
+                'sd_int_time': mock.ANY,
+                'output_int_time': mock.ANY,
+                'output_channels': '64:3520',
+                'servers': 4,
+                'clock_ratio': 1.0,
+                'use_data_suspect': True,
+                'excise': False,
+                'aiomonitor': True,
+            },
+        )
 
         # Verify the state of the subarray
         product = server.product
@@ -1123,66 +1175,30 @@ class TestController(BaseTestController):
         n_xengs = 4  # Update if sizing logic changes
         # antenna-channelised-voltage sensors
         await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-adc-sample-rate",
-            1712e6
+            client, "gpucbf_antenna_channelised_voltage-adc-sample-rate", 1712e6
         )
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-bandwidth", 856e6)
         await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-bandwidth",
-            856e6
+            client, "gpucbf_antenna_channelised_voltage-scale-factor-timestamp", 1712e6
         )
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-ants", 2)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-inputs", 4)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-fengs", 2)
         await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-scale-factor-timestamp",
-            1712e6
+            client, "gpucbf_antenna_channelised_voltage-feng-out-bits-per-sample", 8
         )
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-chans", 4096)
         await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-n-ants",
-            2
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-n-inputs",
-            4
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-n-fengs",
-            2
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-feng-out-bits-per-sample",
-            8
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-n-chans",
-            4096
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_antenna_channelised_voltage-n-chans-per-substream",
-            4096 // n_xengs
+            client, "gpucbf_antenna_channelised_voltage-n-chans-per-substream", 4096 // n_xengs
         )
 
         # baseline-correlation-products sensors
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-accs", 408 * 256)
         await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-n-accs",
-            408 * 256
+            client, "gpucbf_baseline_correlation_products-int-time", 408 * 256 * 4096 / 856e6
         )
         await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-int-time",
-            408 * 256 * 4096 / 856e6
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-xeng-out-bits-per-sample",
-            32
+            client, "gpucbf_baseline_correlation_products-xeng-out-bits-per-sample", 32
         )
         expected_bls_ordering = (
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
@@ -1199,41 +1215,28 @@ class TestController(BaseTestController):
             "('gpucbf_m901h', 'gpucbf_m901h')]"
         )
         await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-bls-ordering",
-            expected_bls_ordering
+            client, "gpucbf_baseline_correlation_products-bls-ordering", expected_bls_ordering
         )
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-bls", 12)
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-chans", 4096)
         await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-n-bls",
-            12
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-n-chans",
-            4096
-        )
-        await assert_sensor_value(
-            client,
-            "gpucbf_baseline_correlation_products-n-chans-per-substream",
-            4096 // n_xengs
+            client, "gpucbf_baseline_correlation_products-n-chans-per-substream", 4096 // n_xengs
         )
         # Test a multicast stream destination sensor
         stream_name = 'gpucbf_baseline_correlation_products'
         node = product._nodes[f'multicast.{stream_name}']
         await assert_sensor_value(
-            client,
-            f'{stream_name}-destination',
-            str(Endpoint(node.host, node.ports['spead']))
+            client, f'{stream_name}-destination', str(Endpoint(node.host, node.ports['spead']))
         )
 
     async def test_product_configure_telstate_fail(
-            self,
-            client: aiokatcp.Client,
-            server: DeviceServer,
-            sched,
-            dummy_sched: DummyScheduler,
-            backend_from_url_mock) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        sched,
+        dummy_sched: DummyScheduler,
+        backend_from_url_mock,
+    ) -> None:
         """If the telstate task fails, product-configure must fail"""
         dummy_sched.fail_launches['telstate'] = 'TASK_FAILED'
         backend_from_url_mock.side_effect = ConnectionError
@@ -1244,25 +1247,25 @@ class TestController(BaseTestController):
         assert server.product is None
 
     async def test_product_configure_task_fail(
-            self,
-            client: aiokatcp.Client,
-            server: DeviceServer,
-            sched,
-            dummy_sched: DummyScheduler,
-            backend_from_url_mock) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        sched,
+        dummy_sched: DummyScheduler,
+        backend_from_url_mock,
+    ) -> None:
         """If a task other than telstate fails, product-configure must fail"""
         dummy_sched.fail_launches['ingest.sdp_l0.1'] = 'TASK_FAILED'
         await assert_request_fails(client, *self._configure_args(SUBARRAY_PRODUCT))
-        backend_from_url_mock.assert_called_once_with(
-            'redis://host.telstate:20000'
-        )
+        backend_from_url_mock.assert_called_once_with('redis://host.telstate:20000')
         sched.launch.assert_called_with(mock.ANY, mock.ANY)
         sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
         # Must not have created the subarray product internally
         assert server.product is None
 
     async def test_product_deconfigure(
-            self, client: aiokatcp.Client, sched, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, sched, server: DeviceServer
+    ) -> None:
         """Checks success path of product-deconfigure"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("product-deconfigure")
@@ -1278,7 +1281,8 @@ class TestController(BaseTestController):
         await assert_request_fails(client, "product-deconfigure")
 
     async def test_product_deconfigure_capturing_force(
-            self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         """forced product-deconfigure must succeed while capturing"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-init", CAPTURE_BLOCK)
@@ -1287,7 +1291,8 @@ class TestController(BaseTestController):
         await server.join()
 
     async def test_product_deconfigure_busy(
-            self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         """product-deconfigure cannot happen concurrently with capture-init"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         async with self._capture_init_slow(client, CAPTURE_BLOCK):
@@ -1299,7 +1304,8 @@ class TestController(BaseTestController):
         assert product.state == ProductState.CAPTURING
 
     async def test_product_deconfigure_busy_force(
-            self, client: aiokatcp.Client, server: DeviceServer, sched) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sched
+    ) -> None:
         """forced product-deconfigure must succeed while in capture-init"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         async with self._capture_init_slow(client, CAPTURE_BLOCK, cancelled=True):
@@ -1310,7 +1316,8 @@ class TestController(BaseTestController):
         await server.join()
 
     async def test_product_deconfigure_while_configuring_force(
-            self, client: aiokatcp.Client, server: DeviceServer, sched) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sched
+    ) -> None:
         """forced product-deconfigure must succeed while in product-configure"""
         async with self._product_configure_slow(client, SUBARRAY_PRODUCT, cancelled=True):
             await client.request("product-deconfigure", True)
@@ -1320,7 +1327,8 @@ class TestController(BaseTestController):
         assert server.product is None
 
     async def test_capture_init(
-            self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+    ) -> None:
         """Checks that capture-init succeeds and sets appropriate state"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-init", CAPTURE_BLOCK)
@@ -1334,14 +1342,13 @@ class TestController(BaseTestController):
         # We thus collapse them into groups of equal calls and don't worry
         # about the number, which would otherwise make the test fragile.
         katcp_client = sensor_proxy_client
-        sorted_calls = sorted(katcp_client.request.mock_calls,
-                              key=lambda call: call[1])
+        sorted_calls = sorted(katcp_client.request.mock_calls, key=lambda call: call[1])
         grouped_calls = [k for k, g in itertools.groupby(sorted_calls)]
         expected_calls = [
             mock.call('capture-init', CAPTURE_BLOCK),
             mock.call('capture-start', 'i0_baseline_correlation_products', mock.ANY),
             mock.call('capture-start', 'i0_tied_array_channelised_voltage_0x', mock.ANY),
-            mock.call('capture-start', 'i0_tied_array_channelised_voltage_0y', mock.ANY)
+            mock.call('capture-start', 'i0_tied_array_channelised_voltage_0y', mock.ANY),
         ]
         assert grouped_calls == expected_calls
 
@@ -1362,12 +1369,14 @@ class TestController(BaseTestController):
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         with pytest.raises(FailReply):
             await client.request(
-                "capture-init", CAPTURE_BLOCK,
-                '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}')
+                "capture-init",
+                CAPTURE_BLOCK,
+                '{"inputs": {"camdata": {"url": "http://127.0.0.1:8888"}}}',
+            )
 
     async def test_capture_init_failed_req(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            dummy_client: DummyClient) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, dummy_client: DummyClient
+    ) -> None:
         """Capture-init fails on some task"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         dummy_client.fail_requests.add('capture-init')
@@ -1392,8 +1401,12 @@ class TestController(BaseTestController):
         assert product.state == ProductState.DEAD
 
     async def test_capture_done_failed_req(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            dummy_client: DummyClient, sensor_proxy_client) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        dummy_client: DummyClient,
+        sensor_proxy_client,
+    ) -> None:
         """Capture-done fails on some task"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         dummy_client.fail_requests.add('capture-done')
@@ -1438,13 +1451,15 @@ class TestController(BaseTestController):
             raise ValueError('Could not find ingest node')
 
     def _ingest_bad_device_status(
-            self, server: DeviceServer, subarray_product: SubarrayProduct) -> None:
+        self, server: DeviceServer, subarray_product: SubarrayProduct
+    ) -> None:
         """Mark an ingest process as having bad status"""
         sensor = server.sensors['ingest.sdp_l0.1.device-status']
         sensor.set_value(DeviceStatus.FAIL, Sensor.Status.ERROR)
 
     async def test_capture_init_dead_process(
-            self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         """Capture-init fails if a child process is dead."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         product = server.product
@@ -1469,8 +1484,12 @@ class TestController(BaseTestController):
         assert product.capture_blocks == {}
 
     async def test_capture_done(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            sensor_proxy_client, dummy_sched: DummyScheduler) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        sensor_proxy_client,
+        dummy_sched: DummyScheduler,
+    ) -> None:
         """Checks that capture-done succeeds and sets appropriate state"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-init", CAPTURE_BLOCK)
@@ -1494,29 +1513,32 @@ class TestController(BaseTestController):
 
         # Check that postprocessing ran and didn't fail
         assert product.capture_blocks == {}
-        assert dummy_sched.n_batch_tasks == 11    # 4 continuum, 3x2 spectral, 1 report
+        assert dummy_sched.n_batch_tasks == 11  # 4 continuum, 3x2 spectral, 1 report
 
     async def test_capture_done_disable_batch(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            dummy_sched: DummyScheduler) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, dummy_sched: DummyScheduler
+    ) -> None:
         """Checks that capture-init with override takes effect"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await client.request(
-            "capture-init", CAPTURE_BLOCK, '{"outputs": {"spectral_image": null}}')
+        await client.request("capture-init", CAPTURE_BLOCK, '{"outputs": {"spectral_image": null}}')
         cal_sensor = server.sensors['cal.1.capture-block-state']
         cal_sensor.value = b'{"1122334455": "capturing"}'
         await client.request("capture-done")
         cal_sensor.value = b'{}'
         await exhaust_callbacks()
-        assert dummy_sched.n_batch_tasks == 4    # 4 continuum, no spectral
+        assert dummy_sched.n_batch_tasks == 4  # 4 continuum, no spectral
 
     async def test_capture_done_busy(self, client: aiokatcp.Client):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy(client, "capture-done")
 
     async def _test_failure_while_capturing(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            sensor_proxy_client, failfunc: Callable[[SubarrayProduct], None]) -> None:
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        sensor_proxy_client,
+        failfunc: Callable[[SubarrayProduct], None],
+    ) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await client.request("capture-init", CAPTURE_BLOCK)
         product = server.product
@@ -1532,19 +1554,25 @@ class TestController(BaseTestController):
         katcp_client.request.assert_called_with('write-meta', CAPTURE_BLOCK, False)
 
     async def test_process_dies_while_capturing(
-            self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+    ) -> None:
         await self._test_failure_while_capturing(
-            client, server, sensor_proxy_client, self._ingest_died)
+            client, server, sensor_proxy_client, self._ingest_died
+        )
 
     async def test_bad_device_status_while_capturing(
-            self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+    ) -> None:
         await self._test_failure_while_capturing(
-            client, server, sensor_proxy_client,
-            functools.partial(self._ingest_bad_device_status, server))
+            client,
+            server,
+            sensor_proxy_client,
+            functools.partial(self._ingest_bad_device_status, server),
+        )
 
     async def test_capture_done_process_dies(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+    ) -> None:
         """Capture-done fails if a child dies half-way through."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await client.request("capture-init", CAPTURE_BLOCK)
@@ -1564,9 +1592,8 @@ class TestController(BaseTestController):
         assert product.capture_blocks == {}
 
     async def test_deconfigure_on_stop(
-            self, client: aiokatcp.Client, server: DeviceServer,
-            sensor_proxy_client,
-            sched) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client, sched
+    ) -> None:
         """Calling stop will force-deconfigure existing subarrays, even if capturing."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request('capture-init', CAPTURE_BLOCK)
@@ -1578,7 +1605,8 @@ class TestController(BaseTestController):
         sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
 
     async def test_deconfigure_on_stop_busy(
-            self, client: aiokatcp.Client, server: DeviceServer, sched) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sched
+    ) -> None:
         """Calling deconfigure_on_exit while a capture-init or capture-done is busy
         kills off the graph anyway.
         """
@@ -1588,7 +1616,8 @@ class TestController(BaseTestController):
         sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
 
     async def test_deconfigure_on_stop_cancel(
-            self, client: aiokatcp.Client, server: DeviceServer, sched) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, sched
+    ) -> None:
         """Calling deconfigure_on_exit while a configure is in process cancels
         that configure and kills off the graph."""
         async with self._product_configure_slow(client, SUBARRAY_PRODUCT, cancelled=True):
@@ -1621,42 +1650,50 @@ class TestController(BaseTestController):
     async def test_gain_wrong_stream_type(self, client: aiokatcp.Client) -> None:
         """Test gain with a stream that is of the wrong type."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, 'gain', 'i0_antenna_channelised_voltage', 'm000h', '1')
+        await assert_request_fails(client, 'gain', 'i0_antenna_channelised_voltage', 'm000h', '1')
 
     async def test_gain_wrong_length(self, client: aiokatcp.Client) -> None:
         """Test gain with the wrong number of channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h', '1', '0.5')
+            client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h', '1', '0.5'
+        )
 
     async def test_gain_bad_format(self, client: aiokatcp.Client) -> None:
         """Test gain with badly-formatted gains."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m900h',
-            'not a complex number')
+            client,
+            'gain',
+            'gpucbf_antenna_channelised_voltage',
+            'gpucbf_m900h',
+            'not a complex number',
+        )
 
     async def test_gain_single(
-            self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
+    ) -> None:
         """Test gain with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         dummy_client.katcp_replies['gain'] = ([b'1.0+2.0j'], [])
         reply, _ = await client.request(
-            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1.0+2.0j')
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', '1.0+2.0j'
+        )
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call('gain', 1, '1.0+2.0j')
         assert reply == [b'1.0+2.0j']
 
     async def test_gain_multi(
-            self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client) -> None:
+        self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
+    ) -> None:
         """Test gain with a different gain for each channel."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         gains = [b'%d.0+2.0j' % i for i in range(4096)]
         dummy_client.katcp_replies['gain'] = (gains, [])
         reply, _ = await client.request(
-            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains)
+            'gain', 'gpucbf_antenna_channelised_voltage', 'gpucbf_m901h', *gains
+        )
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call('gain', 1, *[g.decode() for g in gains])
@@ -1670,27 +1707,26 @@ class TestController(BaseTestController):
     async def test_gain_all_wrong_stream_type(self, client: aiokatcp.Client) -> None:
         """Test gain-all with a stream that is of the wrong type."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, 'gain-all', 'i0_antenna_channelised_voltage', '1')
+        await assert_request_fails(client, 'gain-all', 'i0_antenna_channelised_voltage', '1')
 
     async def test_gain_all_wrong_length(self, client: aiokatcp.Client) -> None:
         """Test gain-all with the wrong number of channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'gain-all', 'gpucbf_antenna_channelised_voltage', '1', '0.5')
+            client, 'gain-all', 'gpucbf_antenna_channelised_voltage', '1', '0.5'
+        )
 
     async def test_gain_all_bad_format(self, client: aiokatcp.Client) -> None:
         """Test gain-all with badly-formatted gains."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'gain-all', 'gpucbf_antenna_channelised_voltage',
-            'not a complex number')
+            client, 'gain-all', 'gpucbf_antenna_channelised_voltage', 'not a complex number'
+        )
 
     async def test_gain_all_single(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test gain-all with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', '1+2j')
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', '1+2j')
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call('gain-all', '1+2j')
@@ -1699,8 +1735,7 @@ class TestController(BaseTestController):
         """Test gain-all with a different gain for each channel."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         gains = [b'%d+2j' % i for i in range(4096)]
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', *gains)
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call('gain-all', *[g.decode() for g in gains])
@@ -1708,8 +1743,7 @@ class TestController(BaseTestController):
     async def test_gain_all_default(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test setting gains to default with gain-all."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await client.request(
-            'gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
+        await client.request('gain-all', 'gpucbf_antenna_channelised_voltage', 'default')
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call('gain-all', 'default')
@@ -1723,32 +1757,61 @@ class TestController(BaseTestController):
         """Test delays with a stream that is of the wrong type."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'delays', 'i0_antenna_channelised_voltage', 1234567890.0, '0,0:0,0')
+            client, 'delays', 'i0_antenna_channelised_voltage', 1234567890.0, '0,0:0,0'
+        )
 
     async def test_delays_wrong_length(self, client: aiokatcp.Client) -> None:
         """Test delays with the wrong number of arguments."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0, '0,0:0,0')
+            client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0, '0,0:0,0'
+        )
 
     async def test_delays_bad_format(self, client: aiokatcp.Client) -> None:
         """Test delays with a badly-formatted coefficient set."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await assert_request_fails(
-            client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
-            '0,0:0,0:extra', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+            client,
+            'delays',
+            'gpucbf_antenna_channelised_voltage',
+            1234567890.0,
+            '0,0:0,0:extra',
+            '0,0:0,0',
+            '0,0:0,0',
+            '0,0:0,0',
+        )
         await assert_request_fails(
-            client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
-            '0,0:0,0,extra', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+            client,
+            'delays',
+            'gpucbf_antenna_channelised_voltage',
+            1234567890.0,
+            '0,0:0,0,extra',
+            '0,0:0,0',
+            '0,0:0,0',
+            '0,0:0,0',
+        )
         await assert_request_fails(
-            client, 'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
-            'a,0:0,0', '0,0:0,0', '0,0:0,0', '0,0:0,0')
+            client,
+            'delays',
+            'gpucbf_antenna_channelised_voltage',
+            1234567890.0,
+            'a,0:0,0',
+            '0,0:0,0',
+            '0,0:0,0',
+            '0,0:0,0',
+        )
 
     async def test_delays_success(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request(
-            'delays', 'gpucbf_antenna_channelised_voltage', 1234567890.0,
-            '0,0:0,0', '0,0:0,1', '0,1:0,0', '0,1:0,1')
+            'delays',
+            'gpucbf_antenna_channelised_voltage',
+            1234567890.0,
+            '0,0:0,0',
+            '0,0:0,1',
+            '0,1:0,0',
+            '0,1:0,1',
+        )
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
@@ -1758,8 +1821,7 @@ class TestController(BaseTestController):
     async def test_capture_start(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test capture-start in the success case."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await client.request(
-            'capture-start', 'gpucbf_baseline_correlation_products')
+        await client.request('capture-start', 'gpucbf_baseline_correlation_products')
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
@@ -1771,8 +1833,7 @@ class TestController(BaseTestController):
 
     async def test_capture_start_wrong_stream_type(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, 'capture-start', 'gpucbf_antenna_channelised_voltage')
+        await assert_request_fails(client, 'capture-start', 'gpucbf_antenna_channelised_voltage')
 
     async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         # Note: most of the code for capture-stop is shared with capture-start,
@@ -1792,22 +1853,16 @@ class TestController(BaseTestController):
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         _, informs = await client.request('capture-list')
         assert len(informs) == 2
-        assert informs[0].arguments == [
-            b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up'
-        ]
+        assert informs[0].arguments == [b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up']
         assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[0].arguments[1])
-        assert informs[1].arguments == [
-            b'gpucbf_baseline_correlation_products', mock.ANY, b'down'
-        ]
+        assert informs[1].arguments == [b'gpucbf_baseline_correlation_products', mock.ANY, b'down']
         assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[1].arguments[1])
 
     async def test_capture_list_explicit_stream(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         _, informs = await client.request('capture-list', 'gpucbf_antenna_channelised_voltage')
         assert len(informs) == 1
-        assert informs[0].arguments == [
-            b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up'
-        ]
+        assert informs[0].arguments == [b'gpucbf_antenna_channelised_voltage', mock.ANY, b'up']
         assert re.fullmatch(br'239\.192\.\d+\.\d+\+3:7148', informs[0].arguments[1])
 
     async def test_capture_list_bad_stream(self, client: aiokatcp.Client) -> None:
@@ -1815,14 +1870,15 @@ class TestController(BaseTestController):
         await assert_request_fails(client, 'capture-list', 'sdp_l0')
 
     def _check_prom(
-            self,
-            registry: CollectorRegistry,
-            name: str,
-            service: str,
-            type: str,
-            value: float,
-            sample_name: str = None,
-            extra_labels: Mapping[str, str] = None) -> None:
+        self,
+        registry: CollectorRegistry,
+        name: str,
+        service: str,
+        type: str,
+        value: float,
+        sample_name: str = None,
+        extra_labels: Mapping[str, str] = None,
+    ) -> None:
         name = 'katsdpcontroller_' + name
         for metric in registry.collect():
             if metric.name == name:
@@ -1841,19 +1897,34 @@ class TestController(BaseTestController):
 
     async def test_prom_sensors(self, registry: CollectorRegistry, server: DeviceServer) -> None:
         """Test that sensors are mirrored into Prometheus."""
-        server.sensors.add(aiokatcp.Sensor(
-            float, 'foo.gauge', '(prometheus: gauge)', default=1.5,
-            initial_status=Sensor.Status.NOMINAL))
-        server.sensors.add(aiokatcp.Sensor(
-            float, 'foo.cheese.labelled-gauge', '(prometheus: gauge labels: type)', default=1,
-            initial_status=Sensor.Status.NOMINAL))
-        server.sensors.add(aiokatcp.Sensor(
-            int, 'foo.histogram', '(prometheus: histogram(1, 10, 100))'))
+        server.sensors.add(
+            aiokatcp.Sensor(
+                float,
+                'foo.gauge',
+                '(prometheus: gauge)',
+                default=1.5,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        server.sensors.add(
+            aiokatcp.Sensor(
+                float,
+                'foo.cheese.labelled-gauge',
+                '(prometheus: gauge labels: type)',
+                default=1,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        server.sensors.add(
+            aiokatcp.Sensor(int, 'foo.histogram', '(prometheus: histogram(1, 10, 100))')
+        )
         self._check_prom(registry, 'gauge', 'foo', 'gauge', 1.5)
         self._check_prom(
-            registry, 'labelled_gauge', 'foo', 'gauge', 1, extra_labels={'type': 'cheese'})
+            registry, 'labelled_gauge', 'foo', 'gauge', 1, extra_labels={'type': 'cheese'}
+        )
         self._check_prom(
-            registry, 'histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'})
+            registry, 'histogram', 'foo', 'histogram', 0, 'histogram_bucket', {'le': '10.0'}
+        )
 
 
 class TestResources:

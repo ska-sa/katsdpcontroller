@@ -60,7 +60,7 @@ EXPECTED_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b'products', b'', b'string'),
     (b'cbf-resources-total', b'', b'integer'),
     (b'cbf-resources-maintenance', b'', b'integer'),
-    (b'cbf-resources-free', b'', b'integer')
+    (b'cbf-resources-free', b'', b'integer'),
 ]
 
 # Sensors created per-product by the master controller
@@ -85,8 +85,15 @@ EXPECTED_REQUEST_LIST = [
     'image-lookup',
     'image-lookup-v2',
     # Standard katcp commands
-    'client-list', 'halt', 'help', 'log-level', 'sensor-list',
-    'sensor-sampling', 'sensor-value', 'watchdog', 'version-list'
+    'client-list',
+    'halt',
+    'help',
+    'log-level',
+    'sensor-list',
+    'sensor-sampling',
+    'sensor-value',
+    'watchdog',
+    'version-list',
 ]
 
 # Adapted from an actual query to consul
@@ -96,22 +103,14 @@ CONSUL_POWEROFF_SERVERS = [
         "Node": "testhost",
         "Address": "127.0.0.42",
         "Datacenter": "dc1",
-        "TaggedAddresses": {
-            "lan": "127.0.0.43",
-            "wan": "127.0.0.44"
-        },
-        "NodeMeta": {
-            "consul-network-segment": ""
-        },
+        "TaggedAddresses": {"lan": "127.0.0.43", "wan": "127.0.0.44"},
+        "NodeMeta": {"consul-network-segment": ""},
         "ServiceKind": "",
         "ServiceID": "poweroff",
         "ServiceName": "poweroff",
         "ServiceTags": [],
         "ServiceAddress": "",
-        "ServiceWeights": {
-            "Passing": 1,
-            "Warning": 1
-        },
+        "ServiceWeights": {"Passing": 1, "Warning": 1},
         "ServiceMeta": {},
         "ServicePort": 9118,
         "ServiceEnableTagOverride": False,
@@ -119,29 +118,21 @@ CONSUL_POWEROFF_SERVERS = [
         "ServiceProxy": {},
         "ServiceConnect": {},
         "CreateIndex": 7,
-        "ModifyIndex": 7
+        "ModifyIndex": 7,
     },
     {
         "ID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "Node": "testhost2",
         "Address": "127.0.0.142",
         "Datacenter": "dc1",
-        "TaggedAddresses": {
-            "lan": "127.0.0.143",
-            "wan": "127.0.0.144"
-        },
-        "NodeMeta": {
-            "consul-network-segment": ""
-        },
+        "TaggedAddresses": {"lan": "127.0.0.143", "wan": "127.0.0.144"},
+        "NodeMeta": {"consul-network-segment": ""},
         "ServiceKind": "",
         "ServiceID": "poweroff",
         "ServiceName": "poweroff",
         "ServiceTags": [],
         "ServiceAddress": "127.0.0.144",
-        "ServiceWeights": {
-            "Passing": 1,
-            "Warning": 1
-        },
+        "ServiceWeights": {"Passing": 1, "Warning": 1},
         "ServiceMeta": {},
         "ServicePort": 9118,
         "ServiceEnableTagOverride": False,
@@ -149,8 +140,8 @@ CONSUL_POWEROFF_SERVERS = [
         "ServiceProxy": {},
         "ServiceConnect": {},
         "CreateIndex": 7,
-        "ModifyIndex": 7
-    }
+        "ModifyIndex": 7,
+    },
 ]
 CONSUL_POWEROFF_URL = 'http://127.0.0.1:8500/v1/catalog/service/poweroff?near=_agent'
 
@@ -161,12 +152,24 @@ class DummyServer(aiokatcp.DeviceServer):
 
     def __init__(self, host: str, port: int) -> None:
         super().__init__(host, port)
-        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
-                                default="[]", initial_status=Sensor.Status.NOMINAL))
-        self.sensors.add(Sensor(DeviceStatus, "device-status",
-                                "Devices status of the Master Controller",
-                                default=DeviceStatus.OK,
-                                status_func=device_status_to_sensor_status))
+        self.sensors.add(
+            Sensor(
+                str,
+                "products",
+                "JSON list of subarray products",
+                default="[]",
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                DeviceStatus,
+                "device-status",
+                "Devices status of the Master Controller",
+                default=DeviceStatus.OK,
+                status_func=device_status_to_sensor_status,
+            )
+        )
 
 
 class DummyProductController(aiokatcp.DeviceServer):
@@ -175,11 +178,15 @@ class DummyProductController(aiokatcp.DeviceServer):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.sensors.add(aiokatcp.Sensor(
-            int, 'ingest.sdp_l0.1.input-bytes-total',
-            'Total input bytes',
-            default=42,
-            initial_status=aiokatcp.Sensor.Status.NOMINAL))
+        self.sensors.add(
+            aiokatcp.Sensor(
+                int,
+                'ingest.sdp_l0.1.input-bytes-total',
+                'Total input bytes',
+                default=42,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
         self.requests: List[aiokatcp.Message] = []
 
     async def unhandled_request(self, ctx: aiokatcp.RequestContext, req: aiokatcp.Message) -> None:
@@ -210,13 +217,15 @@ async def death_after_task_id_lifecycle(init_wait: float, task: fake_singularity
 async def spontaneous_death_lifecycle(task: fake_singularity.Task) -> None:
     """Task dies after 1000s of life"""
     await fake_singularity.default_lifecycle(
-        task, times={fake_singularity.TaskState.HEALTHY: 1000.0})
+        task, times={fake_singularity.TaskState.HEALTHY: 1000.0}
+    )
 
 
 async def long_pending_lifecycle(task: fake_singularity.Task) -> None:
     """Task takes longer than the timeout to make it out of pending state"""
     await fake_singularity.default_lifecycle(
-        task, times={fake_singularity.TaskState.PENDING: 1000.0})
+        task, times={fake_singularity.TaskState.PENDING: 1000.0}
+    )
 
 
 async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
@@ -233,9 +242,7 @@ async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
 @pytest.fixture(autouse=True)
 def mock_getaddrinfo(mocker, event_loop) -> None:
     """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
-    return_value = [
-        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('192.0.2.0', 0))
-    ]
+    return_value = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('192.0.2.0', 0))]
     mocker.patch('socket.getaddrinfo', return_value=return_value)
     mocker.patch.object(event_loop, 'getaddrinfo', return_value=return_value)
 
@@ -245,10 +252,11 @@ class TestSingularityProductManager:
         """Handles starting and stopping a :class:`SingularityProductManager`."""
 
         def __init__(
-                self,
-                args: argparse.Namespace,
-                server: DummyServer,
-                singularity_server: fake_singularity.SingularityServer) -> None:
+            self,
+            args: argparse.Namespace,
+            server: DummyServer,
+            singularity_server: fake_singularity.SingularityServer,
+        ) -> None:
             self.args = args
             self.server = server
             self.singularity_server = singularity_server
@@ -256,7 +264,8 @@ class TestSingularityProductManager:
             self.image_resolver_factory = make_image_resolver_factory(image_lookup, args)
             with mock.patch('aiozk.ZKClient', fake_zk.ZKClient):
                 self.manager = SingularityProductManager(
-                    self.args, self.server, self.image_resolver_factory)
+                    self.args, self.server, self.image_resolver_factory
+                )
 
         async def start(self) -> None:
             await self.manager.start()
@@ -272,7 +281,8 @@ class TestSingularityProductManager:
             await zk.delete('/running')
             with mock.patch('aiozk.ZKClient', return_value=zk):
                 self.manager = SingularityProductManager(
-                    self.args, self.server, self.image_resolver_factory)
+                    self.args, self.server, self.image_resolver_factory
+                )
             await self.manager.start()
 
         async def get_zk_state(self) -> dict:
@@ -280,9 +290,8 @@ class TestSingularityProductManager:
             return json.loads(payload)
 
         async def start_product(
-                self,
-                name: str = 'foo',
-                lifecycle: fake_singularity.Lifecycle = None) -> SingularityProduct:
+            self, name: str = 'foo', lifecycle: fake_singularity.Lifecycle = None
+        ) -> SingularityProduct:
             if lifecycle:
                 self.singularity_server.lifecycles.append(lifecycle)
             product = await self.manager.create_product(name, {})
@@ -302,7 +311,8 @@ class TestSingularityProductManager:
             return async_solipsism.ListenSocket((host, port))
 
         singularity_server = fake_singularity.SingularityServer(
-            aiohttp_server_kwargs=dict(socket_factory=socket_factory, port=80))
+            aiohttp_server_kwargs=dict(socket_factory=socket_factory, port=80)
+        )
         await singularity_server.start()
         yield singularity_server
         await singularity_server.close()
@@ -330,41 +340,53 @@ class TestSingularityProductManager:
 
     @pytest.fixture
     def args(self, server, singularity_server) -> argparse.Namespace:
-        return parse_args([
-            '--host', '127.0.0.1',
-            '--port', str(device_server_sockname(server)[1]),
-            '--name', 'sdpmc_test',
-            '--image-tag-file', 'sdp_image_tag',
-            '--image-override', 'katsdptelstate:branch',
-            '--external-hostname', 'me.invalid',
-            '--s3-config-file', 's3_config.json',
-            '--safe-multicast-cidr', '239.192.0.0/24',
-            'zk.invalid:2181', singularity_server.root_url
-        ])
+        return parse_args(
+            [
+                '--host',
+                '127.0.0.1',
+                '--port',
+                str(device_server_sockname(server)[1]),
+                '--name',
+                'sdpmc_test',
+                '--image-tag-file',
+                'sdp_image_tag',
+                '--image-override',
+                'katsdptelstate:branch',
+                '--external-hostname',
+                'me.invalid',
+                '--s3-config-file',
+                's3_config.json',
+                '--safe-multicast-cidr',
+                '239.192.0.0/24',
+                'zk.invalid:2181',
+                singularity_server.root_url,
+            ]
+        )
 
     # Note: needs to be an async method just so that the event loop is running.
     @pytest.fixture
     async def fix_unstarted(
-            self,
-            args: argparse.Namespace,
-            server: DummyServer,
-            singularity_server: fake_singularity.SingularityServer) \
-            -> 'TestSingularityProductManager.Fixture':
+        self,
+        args: argparse.Namespace,
+        server: DummyServer,
+        singularity_server: fake_singularity.SingularityServer,
+    ) -> 'TestSingularityProductManager.Fixture':
         return self.Fixture(args, server, singularity_server)
 
     @pytest.fixture
     async def fix(
-            self, fix_unstarted: 'TestSingularityProductManager.Fixture') \
-            -> AsyncGenerator['TestSingularityProductManager.Fixture', None]:
+        self, fix_unstarted: 'TestSingularityProductManager.Fixture'
+    ) -> AsyncGenerator['TestSingularityProductManager.Fixture', None]:
         await fix_unstarted.start()
         yield fix_unstarted
         await fix_unstarted.stop()
 
     async def test_start_clean(self, fix: 'TestSingularityProductManager.Fixture') -> None:
-        await asyncio.sleep(30)     # Runs reconciliation a few times
+        await asyncio.sleep(30)  # Runs reconciliation a few times
 
     async def test_create_product(
-            self, fix: 'TestSingularityProductManager.Fixture', client_mock) -> None:
+        self, fix: 'TestSingularityProductManager.Fixture', client_mock
+    ) -> None:
         product = await fix.manager.create_product('foo', {})
         assert product.task_state == Product.TaskState.STARTING
         assert product.host == ipaddress.ip_address('192.0.2.0')
@@ -391,9 +413,7 @@ class TestSingularityProductManager:
 
     async def test_config_tag_override(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Image tag in the config dict overrides tag file."""
-        config = {
-            'config': {'image_tag': 'custom_tag'}
-        }
+        config = {'config': {'image_tag': 'custom_tag'}}
         product = await fix.manager.create_product('foo', config)
         await fix.manager.product_active(product)
         task = list(fix.singularity_server.tasks.values())[0]
@@ -409,7 +429,8 @@ class TestSingularityProductManager:
         assert '--image-tag=custom_tag' in arguments
 
     async def test_config_image_override(
-            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         """Image override in the config dict overrides the product controller image."""
         config = {
             'config': {'image_overrides': {'katsdpcontroller': 'katsdpcontroller:custom_tag'}}
@@ -424,7 +445,8 @@ class TestSingularityProductManager:
         )
 
     async def test_create_product_dies_fast(
-            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         """Task dies before we observe it running"""
         fix.singularity_server.lifecycles.append(quick_death_lifecycle)
         with pytest.raises(ProductFailed):
@@ -432,10 +454,12 @@ class TestSingularityProductManager:
         assert fix.manager.products == {}
 
     async def test_create_product_parallel(
-            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         """Can configure two subarray products at the same time"""
-        with Background(fix.manager.create_product('product1', {})) as cm1, \
-                Background(fix.manager.create_product('product2', {})) as cm2:
+        with Background(fix.manager.create_product('product1', {})) as cm1, Background(
+            fix.manager.create_product('product2', {})
+        ) as cm2:
             await asyncio.sleep(100)
         product1 = cm1.result
         product2 = cm2.result
@@ -450,25 +474,28 @@ class TestSingularityProductManager:
             # Task dies immediately after we learn its task ID during reconciliation
             SingularityProductManager.reconciliation_interval,
             # Task dies immediately after we learn its task ID during polling
-            SingularityProductManager.new_task_poll_interval
-        ]
+            SingularityProductManager.new_task_poll_interval,
+        ],
     )
     async def test_create_product_dies_after_task_id(
-            self, init_wait: float, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, init_wait: float, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         """Task dies immediately after we learn its task ID.
 
         This test is parametrised so that we can control whether the task ID is
         learnt during polling for the new task or during task reconciliation.
         """
         fix.singularity_server.lifecycles.append(
-            functools.partial(death_after_task_id_lifecycle, init_wait))
+            functools.partial(death_after_task_id_lifecycle, init_wait)
+        )
         with pytest.raises(ProductFailed):
             await fix.manager.create_product('foo', {})
         assert fix.manager.products == {}
 
     async def test_singularity_down(self, fix: 'TestSingularityProductManager.Fixture') -> None:
-        with mock.patch('aiohttp.ClientSession._request',
-                        side_effect=aiohttp.client.ClientConnectionError):
+        with mock.patch(
+            'aiohttp.ClientSession._request', side_effect=aiohttp.client.ClientConnectionError
+        ):
             with pytest.raises(ProductFailed):
                 await fix.manager.create_product('foo', {})
         # Product must be cleared
@@ -489,7 +516,7 @@ class TestSingularityProductManager:
         assert product.ports == product2.ports
         assert product.start_time == product2.start_time
         assert product2.katcp_conn is not None
-        assert product is not product2   # Must be reconstituted from state
+        assert product is not product2  # Must be reconstituted from state
 
     async def test_spontaneous_death(self, fix: 'TestSingularityProductManager.Fixture') -> None:
         """Product must be cleaned up if it dies on its own"""
@@ -497,7 +524,7 @@ class TestSingularityProductManager:
         # Check that Zookeeper initially knows about the product
         assert (await fix.get_zk_state())['products'] == {'foo': mock.ANY}
 
-        await asyncio.sleep(1100)   # Task will die during this time
+        await asyncio.sleep(1100)  # Task will die during this time
         assert product.task_state == Product.TaskState.DEAD
         assert fix.manager.products == {}
         # Check that Zookeeper was updated
@@ -561,14 +588,12 @@ class TestSingularityProductManager:
             # Data in Zookeeper is not valid UTF-8
             b'\xff',
             # Data in Zookeeper does not conform to schema
-            json.dumps({"version": 1}).encode()
-        ]
+            json.dumps({"version": 1}).encode(),
+        ],
     )
     async def test_bad_zk(
-            self,
-            payload: bytes,
-            fix_unstarted: 'TestSingularityProductManager.Fixture',
-            caplog) -> None:
+        self, payload: bytes, fix_unstarted: 'TestSingularityProductManager.Fixture', caplog
+    ) -> None:
         """Existing state data in Zookeeper is not valid"""
         await fix_unstarted.manager._zk.create('/state', payload)
         with caplog.at_level(logging.WARNING):
@@ -576,18 +601,13 @@ class TestSingularityProductManager:
         assert 'Could not load existing state' in caplog.records[0].message
         await fix_unstarted.stop()
 
-    @pytest.mark.parametrize(
-        'content',
-        [
-            'I am not JSON',
-            None
-        ]
-    )
+    @pytest.mark.parametrize('content', ['I am not JSON', None])
     async def test_bad_s3_config(
-            self,
-            content: Optional[str],
-            fix: 'TestSingularityProductManager.Fixture',
-            open_mock: open_file_mock.MockOpen) -> None:
+        self,
+        content: Optional[str],
+        fix: 'TestSingularityProductManager.Fixture',
+        open_mock: open_file_mock.MockOpen,
+    ) -> None:
         open_mock.unregister_path('s3_config.json')
         if content is not None:
             open_mock.set_read_data_for('s3_config.json', content)
@@ -605,7 +625,7 @@ class TestSingularityProductManager:
         assert await fix.manager.get_multicast_groups(product2, 128) == '239.192.0.6+127'
         # Now product1 owns .1-.5, product2 owns .6-.133.
         await fix.manager.kill_product(product2)
-        await asyncio.sleep(100)   # Give it time to clean up
+        await asyncio.sleep(100)  # Give it time to clean up
 
         # Allocations should continue from where they left off, then cycle
         # around to reuse the space freed by product2.
@@ -613,7 +633,8 @@ class TestSingularityProductManager:
         assert await fix.manager.get_multicast_groups(product1, 100) == '239.192.0.6+99'
 
     async def test_get_multicast_groups_persist(
-            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         await self.test_get_multicast_groups(fix)
         await fix.reset()
         product1 = fix.manager.products['product1']
@@ -626,7 +647,8 @@ class TestSingularityProductManager:
         assert fix.manager._next_multicast_group == ipaddress.IPv4Address('239.192.0.106')
 
     async def test_multicast_group_out_of_range(
-            self, fix: 'TestSingularityProductManager.Fixture', caplog) -> None:
+        self, fix: 'TestSingularityProductManager.Fixture', caplog
+    ) -> None:
         await self.test_get_multicast_groups(fix)
         fix.args.safe_multicast_cidr = '225.101.0.0/24'
         with caplog.at_level(logging.WARNING, 'katsdpcontroller.master_controller'):
@@ -636,12 +658,13 @@ class TestSingularityProductManager:
                 'katsdpcontroller.master_controller',
                 logging.WARNING,
                 "Product 'product1' contains multicast group(s) outside the "
-                "defined range 225.101.0.0/24"
+                "defined range 225.101.0.0/24",
             )
         ]
 
     async def test_get_multicast_groups_negative(
-            self, fix: 'TestSingularityProductManager.Fixture') -> None:
+        self, fix: 'TestSingularityProductManager.Fixture'
+    ) -> None:
         product = await fix.start_product()
         with pytest.raises(ValueError):
             await fix.manager.get_multicast_groups(product, -1)
@@ -649,7 +672,8 @@ class TestSingularityProductManager:
             await fix.manager.get_multicast_groups(product, 0)
 
     async def test_capture_block_id(
-            self, fix: 'TestSingularityProductManager.Fixture', mocker) -> None:
+        self, fix: 'TestSingularityProductManager.Fixture', mocker
+    ) -> None:
         mock_time = mocker.patch('time.time')
         mock_time.return_value = 1122334455.123
         assert await fix.manager.get_capture_block_id() == '1122334455'
@@ -712,15 +736,22 @@ class TestDeviceServer:
 
     @pytest.fixture
     async def server(self) -> AsyncGenerator[DeviceServer, None]:
-        args = parse_args([
-            '--localhost',
-            '--interface-mode',
-            '--port', '7147',
-            '--name', 'sdpmc_test',
-            '--registry', 'registry.invalid:5000',
-            '--safe-multicast-cidr', '239.192.0.0/24',
-            'unused argument (zk)', 'unused argument (Singularity)'
-        ])
+        args = parse_args(
+            [
+                '--localhost',
+                '--interface-mode',
+                '--port',
+                '7147',
+                '--name',
+                'sdpmc_test',
+                '--registry',
+                'registry.invalid:5000',
+                '--safe-multicast-cidr',
+                '239.192.0.0/24',
+                'unused argument (zk)',
+                'unused argument (Singularity)',
+            ]
+        )
         server = DeviceServer(args)
         await server.start()
         yield server
@@ -776,17 +807,19 @@ class TestDeviceServer:
         # Prepend the subarray product ID to the names
         expected_product_sensors = [
             (b'product.' + s[0],) + s[1:]
-            for s in (EXPECTED_INTERFACE_SENSOR_LIST
-                      + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
-                      + EXPECTED_PRODUCT_SENSOR_LIST)]
-        await assert_sensors(client, EXPECTED_SENSOR_LIST + expected_product_sensors,
-                             subset=True)
+            for s in (
+                EXPECTED_INTERFACE_SENSOR_LIST
+                + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
+                + EXPECTED_PRODUCT_SENSOR_LIST
+            )
+        ]
+        await assert_sensors(client, EXPECTED_SENSOR_LIST + expected_product_sensors, subset=True)
         await assert_sensor_value(client, 'products', '["product"]')
         product = server._manager.products['product']
         await assert_sensor_value(
-            client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}')
-        await assert_sensor_value(
-            client, 'product.host', '127.0.0.1')
+            client, 'product.katcp-address', f'127.0.0.1:{product.ports["katcp"]}'
+        )
+        await assert_sensor_value(client, 'product.host', '127.0.0.1')
 
         # Change the product's device-status to FAIL and check that the top-level sensor
         # is updated.
@@ -834,6 +867,7 @@ class TestDeviceServer:
 
     async def test_product_configure_generate_names(self, client: aiokatcp.Client) -> None:
         """Name with trailing * must generate lowest-numbered name"""
+
         async def product_configure():
             return (await client.request('product-configure', 'prefix_*', CONFIG))[0][0]
 
@@ -847,18 +881,19 @@ class TestDeviceServer:
         assert b'prefix_0' == await product_configure()
 
     def _product_configure_slow(
-            self,
-            client: aiokatcp.Client,
-            mocker,
-            subarray_product: str,
-            cancelled: bool = False) -> DelayedManager:
-        mocker.patch('aiokatcp.Client.wait_connected',
-                     side_effect=aiokatcp.Client.wait_connected,
-                     autospec=True)
+        self, client: aiokatcp.Client, mocker, subarray_product: str, cancelled: bool = False
+    ) -> DelayedManager:
+        mocker.patch(
+            'aiokatcp.Client.wait_connected',
+            side_effect=aiokatcp.Client.wait_connected,
+            autospec=True,
+        )
         return DelayedManager(
             client.request('product-configure', subarray_product, CONFIG),
-            aiokatcp.Client.wait_connected,         # type: ignore
-            None, cancelled)
+            aiokatcp.Client.wait_connected,  # type: ignore
+            None,
+            cancelled,
+        )
 
     async def test_product_deconfigure(self, client: aiokatcp.Client) -> None:
         await assert_request_fails(client, "product-configure", "product")
@@ -867,14 +902,12 @@ class TestDeviceServer:
         # should not be able to deconfigure when not in idle state
         await assert_request_fails(client, "product-deconfigure", "product")
         await client.request("capture-done", "product")
-        await asyncio.sleep(1)    # interface mode has some sleeps in capture-done
+        await asyncio.sleep(1)  # interface mode has some sleeps in capture-done
         await client.request("product-deconfigure", "product")
 
     async def test_product_deconfigure_while_configuring_force(
-            self,
-            client: aiokatcp.Client,
-            server: DeviceServer,
-            mocker) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer, mocker
+    ) -> None:
         """Forced product-deconfigure must succeed while in product-configure"""
         async with self._product_configure_slow(client, mocker, 'product', cancelled=True):
             await client.request("product-deconfigure", 'product', True)
@@ -895,7 +928,8 @@ class TestDeviceServer:
         await assert_request_fails(client, "product-reconfigure", "product")
 
     async def test_product_reconfigure_override(
-            self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         """?product-reconfigure must pick up config overrides"""
         await client.request("product-configure", "product", CONFIG)
         await client.request("set-config-override", "product", '{"config": {"develop": true}}')
@@ -904,17 +938,21 @@ class TestDeviceServer:
         assert config['config'].get('develop') is True
 
     async def test_product_reconfigure_configure_busy(
-            self, client: aiokatcp.Client, mocker) -> None:
+        self, client: aiokatcp.Client, mocker
+    ) -> None:
         """Can run product-reconfigure concurrently with another product-configure"""
         await client.request('product-configure', 'product1', CONFIG)
         async with self._product_configure_slow(client, mocker, 'product2'):
             await client.request('product-reconfigure', 'product1')
 
     async def test_product_reconfigure_configure_fails(
-            self, client: aiokatcp.Client, server: DeviceServer) -> None:
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         """Tests product-reconfigure when the new graph fails"""
-        async def request(self, name: str,
-                          *args: Any) -> Tuple[List[bytes], List[aiokatcp.Message]]:
+
+        async def request(
+            self, name: str, *args: Any
+        ) -> Tuple[List[bytes], List[aiokatcp.Message]]:
             # Mock implementation of request that fails product-configure
             if name == 'product-configure':
                 raise aiokatcp.FailReply('Fault injected into product-configure')
@@ -947,10 +985,7 @@ class TestDeviceServer:
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert inform_args == [
-            (b'product1', b''),
-            (b'product2', b'')
-        ]
+        assert inform_args == [(b'product1', b''), (b'product2', b'')]
 
     async def test_telstate_endpoint_one(self, client: aiokatcp.Client) -> None:
         """Test telstate-endpoint with a subarray_product_id argument"""
@@ -971,10 +1006,7 @@ class TestDeviceServer:
         assert reply == [b'2']
         # Need to compare just arguments, because the message objects have message IDs
         inform_args = [tuple(msg.arguments) for msg in informs]
-        assert inform_args == [
-            (b'product1', b'idle'),
-            (b'product2', b'capturing')
-        ]
+        assert inform_args == [(b'product1', b'idle'), (b'product2', b'capturing')]
 
     async def test_capture_status_one(self, client: aiokatcp.Client) -> None:
         """Test capture-status with a subarray_product_id argument"""
@@ -1006,7 +1038,7 @@ class TestDeviceServer:
         inform_args = [tuple(msg.arguments) for msg in informs]
         assert inform_args == [
             (b'product1', b'idle, started at 2005-07-25T23:34:15Z'),
-            (b'product2', b'idle, started at 2009-02-13T23:31:30Z')
+            (b'product2', b'idle, started at 2009-02-13T23:31:30Z'),
         ]
 
     async def test_product_list_one(self, client: aiokatcp.Client, mocker) -> None:
@@ -1041,13 +1073,14 @@ class TestDeviceServer:
         assert reply == [b'registry.invalid:5000/foo:tag']
 
     async def test_sdp_shutdown(
-            self,
-            rmock: aioresponses.aioresponses,
-            client: aiokatcp.Client,
-            server: DeviceServer) -> None:
+        self, rmock: aioresponses.aioresponses, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
-        poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
-            status=202, payload={"stdout": "", "stderr": ""}))
+        poweroff_mock = mock.MagicMock(
+            return_value=aioresponses.CallbackResult(
+                status=202, payload={"stdout": "", "stderr": ""}
+            )
+        )
         url1 = yarl.URL('http://127.0.0.42:9118/poweroff')
         url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
         rmock.post(url1, callback=poweroff_mock)
@@ -1057,45 +1090,49 @@ class TestDeviceServer:
         reply, informs = await client.request('sdp-shutdown')
         assert reply[0] == b'127.0.0.144,127.0.0.42'
         poweroff_mock.assert_any_call(
-            url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
+            url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None
+        )
         poweroff_mock.assert_any_call(
-            url2, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
+            url2, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None
+        )
         # The product should have been forcibly deconfigured
         assert server._manager.products == {}
 
     async def test_sdp_shutdown_no_consul(
-            self,
-            rmock: aioresponses.aioresponses,
-            client: aiokatcp.Client,
-            server: DeviceServer) -> None:
+        self, rmock: aioresponses.aioresponses, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         await client.request('product-configure', 'product', CONFIG)
         await client.request('capture-init', 'product')
-        with pytest.raises(aiokatcp.FailReply,
-                           match='Could not retrieve list of nodes running poweroff service'):
+        with pytest.raises(
+            aiokatcp.FailReply, match='Could not retrieve list of nodes running poweroff service'
+        ):
             await client.request('sdp-shutdown')
         # The product should still have been forcibly deconfigured
         assert server._manager.products == {}
 
     async def test_sdp_shutdown_failure(
-            self,
-            rmock: aioresponses.aioresponses,
-            client: aiokatcp.Client,
-            server: DeviceServer) -> None:
+        self, rmock: aioresponses.aioresponses, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         rmock.get(CONSUL_POWEROFF_URL, payload=CONSUL_POWEROFF_SERVERS)
-        poweroff_mock = mock.MagicMock(return_value=aioresponses.CallbackResult(
-            status=202, payload={"stdout": "", "stderr": ""}))
+        poweroff_mock = mock.MagicMock(
+            return_value=aioresponses.CallbackResult(
+                status=202, payload={"stdout": "", "stderr": ""}
+            )
+        )
         url1 = yarl.URL('http://127.0.0.42:9118/poweroff')
         url2 = yarl.URL('http://127.0.0.144:9118/poweroff')
         rmock.post(url1, callback=poweroff_mock)
         rmock.post(url2, status=500, payload={"stdout": "", "stderr": "Simulated failure"})
         await client.request('product-configure', 'product', CONFIG)
         await client.request('capture-init', 'product')
-        with pytest.raises(aiokatcp.FailReply,
-                           match=r'^Success: 127\.0\.0\.42 Failed: 127.0.0.144$'):
+        with pytest.raises(
+            aiokatcp.FailReply, match=r'^Success: 127\.0\.0\.42 Failed: 127.0.0.144$'
+        ):
             await client.request('sdp-shutdown')
         # Other machine must still have been powered off
         poweroff_mock.assert_any_call(
-            url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None)
+            url1, headers={'X-Poweroff-Server': '1'}, allow_redirects=True, data=None
+        )
         # The product should have been forcibly deconfigured
         assert server._manager.products == {}
 
@@ -1133,6 +1170,7 @@ class TestDeviceServerReal:
         as they are created, keyed by the `chroot` they pass to the
         constructor.
         """
+
         def zkclient(server: str, chroot: str = None, *args, **kwargs) -> fake_zk.ZKClient:
             client = fake_zk.ZKClient(server, chroot, *args, **kwargs)
             clients[chroot] = client
@@ -1145,15 +1183,23 @@ class TestDeviceServerReal:
     @pytest.fixture
     async def server(self, mocker, rmock, mock_zk) -> AsyncGenerator[DeviceServer, None]:
         # rmock and mock_zk are listed just for ordering
-        args = parse_args([
-            '--localhost',
-            '--port', '7147',
-            '--name', 'sdpmc_test',
-            '--s3-config-file', 's3config.json',
-            '--registry', 'registry.invalid:5000',
-            '--safe-multicast-cidr', '239.192.0.0/24',
-            'zk.invalid:2181', 'http://singularity.invalid:7099/singularity'
-        ])
+        args = parse_args(
+            [
+                '--localhost',
+                '--port',
+                '7147',
+                '--name',
+                'sdpmc_test',
+                '--s3-config-file',
+                's3config.json',
+                '--registry',
+                'registry.invalid:5000',
+                '--safe-multicast-cidr',
+                '239.192.0.0/24',
+                'zk.invalid:2181',
+                'http://singularity.invalid:7099/singularity',
+            ]
+        )
         mocker.patch('katsdpcontroller.master_controller.SingularityProductManager', autospec=True)
         server = DeviceServer(args)
         await server.start()
@@ -1161,10 +1207,11 @@ class TestDeviceServerReal:
         await server.stop()
 
     async def test_cbf_resource_sensors(
-            self,
-            server: DeviceServer,
-            rmock: aioresponses.aioresponses,
-            mock_zk: Dict[Optional[str], fake_zk.ZKClient]) -> None:
+        self,
+        server: DeviceServer,
+        rmock: aioresponses.aioresponses,
+        mock_zk: Dict[Optional[str], fake_zk.ZKClient],
+    ) -> None:
         # Let the loop run once. It should fail to populate the sensors because
         # it won't be able to find a Mesos master in zookeeper.
         await asyncio.sleep(1)
@@ -1181,70 +1228,56 @@ class TestDeviceServerReal:
             b'"capabilities":[{"type":"AGENT_UPDATE"},{"type":"AGENT_DRAINING"},'
             b'{"type":"QUOTA_V2"}],"hostname":"leader.invalid",'
             b'"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","ip":592513034,'
-            b'"pid":"master@1.1.1.1:5050","port":5050,"version":"1.12.0"}'
+            b'"pid":"master@1.1.1.1:5050","port":5050,"version":"1.12.0"}',
         )
 
-        rmock.get('http://1.1.1.1:5050/master/maintenance/status', payload={
-            "down_machines": [
-                {
-                    "hostname": "machine1",
-                    "ip": "10.0.0.1"
-                }
-            ],
-            "draining_machines": [
-                {
-                    "id": {
-                        "hostname": "machine2",
-                        "ip": "10.0.0.2"
-                    }
-                }
-            ]
-        })
+        rmock.get(
+            'http://1.1.1.1:5050/master/maintenance/status',
+            payload={
+                "down_machines": [{"hostname": "machine1", "ip": "10.0.0.1"}],
+                "draining_machines": [{"id": {"hostname": "machine2", "ip": "10.0.0.2"}}],
+            },
+        )
         # This is only a tiny subset of what is returned, sufficient for
         # what the code expects to find.
-        rmock.get('http://1.1.1.1:5050/master/slaves', payload={
-            "slaves": [
-                {
-                    # Draining machine
-                    "attributes": {
-                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+        rmock.get(
+            'http://1.1.1.1:5050/master/slaves',
+            payload={
+                "slaves": [
+                    {
+                        # Draining machine
+                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        "hostname": "machine2",
+                        "used_resources": {"cpus": 0},
                     },
-                    "hostname": "machine2",
-                    "used_resources": {"cpus": 0}
-                },
-                {
-                    # Machine that's not marked for CBF
-                    "attributes": {
-                        "katsdpcontroller.subsystems": "WyJzZHAiXSAg"  # {"sdp"}
+                    {
+                        # Machine that's not marked for CBF
+                        "attributes": {"katsdpcontroller.subsystems": "WyJzZHAiXSAg"},  # {"sdp"}
+                        "hostname": "machine3",
+                        "used_resources": {"cpus": 0},
                     },
-                    "hostname": "machine3",
-                    "used_resources": {"cpus": 0}
-                },
-                {
-                    # No subsystems specified. Not counted as it's assumed to
-                    # not contain the hardware needed for CBF-specific tasks.
-                    "attributes": {},
-                    "hostname": "machine4",
-                    "used_resources": {"cpus": 0}
-                },
-                {
-                    # Machine that's usable but unused
-                    "attributes": {
-                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+                    {
+                        # No subsystems specified. Not counted as it's assumed to
+                        # not contain the hardware needed for CBF-specific tasks.
+                        "attributes": {},
+                        "hostname": "machine4",
+                        "used_resources": {"cpus": 0},
                     },
-                    "hostname": "machine5",
-                    "used_resources": {"cpus": 0}
-                },
-                {
-                    # Machine that's usable and at least partly used
-                    "attributes": {
-                        "katsdpcontroller.subsystems": "WyJjYmYiXSAg"  # {"cbf"}
+                    {
+                        # Machine that's usable but unused
+                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        "hostname": "machine5",
+                        "used_resources": {"cpus": 0},
                     },
-                    "hostname": "machine6",
-                    "used_resources": {"cpus": 16}
-                }
-            ]
-        })
+                    {
+                        # Machine that's usable and at least partly used
+                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        "hostname": "machine6",
+                        "used_resources": {"cpus": 16},
+                    },
+                ]
+            },
+        )
 
         await asyncio.sleep(5)  # Give the polling loop time to run
         assert server.sensors['cbf-resources-total'].value == 3
@@ -1324,8 +1357,9 @@ class TestParseArgs:
         open_mock.set_read_data_for('./file2.json', self.content2)
         # This is a bit fragile, because open_file_mock doesn't emulate all
         # the os functions to simulate a filesystem.
-        with mock.patch('os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']), \
-                mock.patch('os.path.isfile', return_value=True):
+        with mock.patch(
+            'os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']
+        ), mock.patch('os.path.isfile', return_value=True):
             args = parse_args(['--gui-urls=.', '--interface-mode', '', ''])
         assert args.gui_urls == json.loads(self.content1) + json.loads(self.content2)
 
