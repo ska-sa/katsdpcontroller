@@ -179,7 +179,7 @@ def collapse_ranges(values):
         if stop == pos + 1:
             out.append(str(values[pos]))
         else:
-            out.append("{}-{}".format(values[pos], values[stop - 1]))
+            out.append(f"{values[pos]}-{values[stop - 1]}")
         pos = stop
     return "[" + ",".join(out) + "]"
 
@@ -256,9 +256,7 @@ def attributes_resources(args):
                 # anyway.
                 speed = 40e9
             else:
-                raise RuntimeError(
-                    "Could not determine speed of interface {}: {}".format(interface, error)
-                )
+                raise RuntimeError(f"Could not determine speed of interface {interface}: {error}")
         speed = min(speed, max_speed)
         resources[f"katsdpcontroller.interface.{i}.bandwidth_in"] = speed
         resources[f"katsdpcontroller.interface.{i}.bandwidth_out"] = speed
@@ -277,7 +275,7 @@ def attributes_resources(args):
                 numa_node = None
         except (ValueError, IndexError):
             raise RuntimeError(
-                "Error: --volume argument {} does not have the format NAME:PATH".format(volume_spec)
+                f"Error: --volume argument {volume_spec} does not have the format NAME:PATH"
             )
         if not os.path.exists(path):
             raise RuntimeError(f"Path {path} does not exist")
