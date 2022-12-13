@@ -457,10 +457,9 @@ class TestSingularityProductManager:
         self, fix: 'TestSingularityProductManager.Fixture'
     ) -> None:
         """Can configure two subarray products at the same time"""
-        with Background(fix.manager.create_product('product1', {})) as cm1, Background(
-            fix.manager.create_product('product2', {})
-        ) as cm2:
-            await asyncio.sleep(100)
+        with Background(fix.manager.create_product('product1', {})) as cm1:
+            with Background(fix.manager.create_product('product2', {})) as cm2:
+                await asyncio.sleep(100)
         product1 = cm1.result
         product2 = cm2.result
         assert product1.name == 'product1'
@@ -1357,10 +1356,9 @@ class TestParseArgs:
         open_mock.set_read_data_for('./file2.json', self.content2)
         # This is a bit fragile, because open_file_mock doesn't emulate all
         # the os functions to simulate a filesystem.
-        with mock.patch(
-            'os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']
-        ), mock.patch('os.path.isfile', return_value=True):
-            args = parse_args(['--gui-urls=.', '--interface-mode', '', ''])
+        with mock.patch('os.listdir', return_value=['file1.json', 'file2.json', 'notjson.txt']):
+            with mock.patch('os.path.isfile', return_value=True):
+                args = parse_args(['--gui-urls=.', '--interface-mode', '', ''])
         assert args.gui_urls == json.loads(self.content1) + json.loads(self.content2)
 
     def test_gui_urls_bad_dir(self) -> None:

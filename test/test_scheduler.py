@@ -564,8 +564,8 @@ class TestHTTPImageLookup:
             rmock,
             'https://registry.invalid:5000/v2/myimage/manifests/latest',
             self.digest1,
-            status=403,
-        )  # unauthorized
+            status=403,  # unauthorized
+        )
         lookup = scheduler.HTTPImageLookup('registry.invalid:5000')
         with pytest.raises(scheduler.ImageError):
             await lookup('myimage', 'latest')

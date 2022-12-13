@@ -1,6 +1,7 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import copy
+import re
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -657,8 +658,9 @@ class TestBaselineCorrelationProductsStream:
         config['url'] = 'spead://239.1.0.0+255:7148'
         with pytest.raises(
             ValueError,
-            match=r'channels per endpoint \(128\) is not a multiple of '
-            r'channels per substream \(2048\)',
+            match=re.escape(
+                r'channels per endpoint (128) is not a multiple of channels per substream (2048)'
+            ),
         ):
             BaselineCorrelationProductsStream.from_config(
                 Options(), 'narrow2_bcp', config, [acv], sensors
@@ -931,8 +933,9 @@ class TestVisStream:
         config['continuum_factor'] = continuum_factor
         with pytest.raises(
             ValueError,
-            match=fr'n_chans \({bcp.n_chans}\) is not a multiple of '
-            fr'required alignment \({alignment}\)',
+            match=re.escape(
+                fr'n_chans ({bcp.n_chans}) is not a multiple of required alignment ({alignment})'
+            ),
         ):
             VisStream.from_config(Options(), 'sdp_l0', config, [bcp], {})
 
