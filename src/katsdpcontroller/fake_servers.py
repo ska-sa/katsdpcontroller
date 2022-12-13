@@ -18,6 +18,18 @@ def _format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
+def _add_device_status_sensor(sensors: SensorSet) -> None:
+    sensors.add(
+        Sensor(
+            DeviceStatus,
+            "device-status",
+            "Overall engine health",
+            default=DeviceStatus.DEGRADED,
+            initial_status=Sensor.Status.WARN
+        )
+    )
+
+
 def _add_time_sync_sensors(sensors: SensorSet) -> None:
     sensors.add(
         Sensor(
@@ -145,6 +157,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             )
         )
         _add_time_sync_sensors(self.sensors)
+        _add_device_status_sensor(self.sensors)
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
@@ -216,6 +229,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
             )
         )
         _add_time_sync_sensors(self.sensors)
+        _add_device_status_sensor(self.sensors)
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
