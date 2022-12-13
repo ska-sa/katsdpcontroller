@@ -26,21 +26,21 @@ ROOT_GUI_URLS: List[Dict[str, Any]] = [
         "title": "Test GUI 1",
         "description": "First GUI",
         "href": "http://gui1.invalid/foo",
-        "category": "Link"
+        "category": "Link",
     },
     {
         "title": "Test GUI 2",
         "description": "Second GUI",
         "href": "http://gui2.invalid/foo",
-        "category": "Dashboard"
-    }
+        "category": "Dashboard",
+    },
 ]
 PRODUCT1_GUI_URLS: List[Dict[str, Any]] = [
     {
         "title": "Dashboard",
         "description": "Product dashboard",
         "href": "http://dashboard.product1.invalid:31000/",
-        "category": "Dashboard"
+        "category": "Dashboard",
     }
 ]
 PRODUCT1_GUI_URLS_OUT: List[Dict[str, Any]] = [
@@ -51,7 +51,7 @@ PRODUCT1_GUI_URLS_OUT: List[Dict[str, Any]] = [
         "orig_href": yarl.URL("http://dashboard.product1.invalid:31000/"),
         "category": "Dashboard",
         "label": "dashboard",
-        "service": ""
+        "service": "",
     }
 ]
 PRODUCT2_CAL_GUI_URLS: List[Dict[str, str]] = [
@@ -59,7 +59,7 @@ PRODUCT2_CAL_GUI_URLS: List[Dict[str, str]] = [
         "title": "Cal diagnostics",
         "description": "Dask diagnostics for cal.1",
         "href": "http://product2.invalid:31001/gui/product2/cal.1/cal-diagnostics/status",
-        "category": "Plot"
+        "category": "Plot",
     }
 ]
 PRODUCT2_GUI_URLS_OUT: List[Dict[str, Any]] = [
@@ -67,17 +67,19 @@ PRODUCT2_GUI_URLS_OUT: List[Dict[str, Any]] = [
         "title": "Cal diagnostics",
         "description": "Dask diagnostics for cal.1",
         "href": yarl.URL("http://proxy.invalid:1234/gui/product2/cal.1/cal-diagnostics/status"),
-        "orig_href":
-            yarl.URL("http://product2.invalid:31001/gui/product2/cal.1/cal-diagnostics/status"),
+        "orig_href": yarl.URL(
+            "http://product2.invalid:31001/gui/product2/cal.1/cal-diagnostics/status"
+        ),
         "category": "Plot",
         "service": "cal.1",
-        "label": "cal-diagnostics"
+        "label": "cal-diagnostics",
     }
 ]
 
 
-def expected_gui_urls(gui_urls: List[Dict[str, Any]],
-                      haproxy: bool, yarl: bool) -> List[Dict[str, Any]]:
+def expected_gui_urls(
+    gui_urls: List[Dict[str, Any]], haproxy: bool, yarl: bool
+) -> List[Dict[str, Any]]:
     """Get the expected value of a gui-url list for a single product.
 
     The implementation transforms the list in slightly different ways depending
@@ -109,6 +111,7 @@ class DummyHaproxyProcess:
     It is very specific to the way haproxy is run, and is not a
     general-purposes process mock.
     """
+
     def __init__(self, *argv: str) -> None:
         parser = argparse.ArgumentParser()
         parser.add_argument('-W', dest='master_worker', action='store_true')
@@ -153,7 +156,7 @@ class DummyHaproxyProcess:
 
     async def wait(self) -> int:
         await self._dead.wait()
-        assert self.returncode is not None     # to keep mypy happy
+        assert self.returncode is not None  # to keep mypy happy
         return self.returncode
 
 
@@ -188,21 +191,51 @@ class TestWeb:
         mc_server.orig_sensors = SensorSet()
 
         mc_server.sensors.add(
-            Sensor(str, 'products', '', default='["product1", "product2"]',
-                   initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                str,
+                'products',
+                '',
+                default='["product1", "product2"]',
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
         mc_server.sensors.add(
-            Sensor(str, 'gui-urls', '', default=json.dumps(ROOT_GUI_URLS),
-                   initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                str,
+                'gui-urls',
+                '',
+                default=json.dumps(ROOT_GUI_URLS),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
 
         mc_server.orig_sensors.add(
-            Sensor(str, 'product1.gui-urls', '', default=json.dumps(PRODUCT1_GUI_URLS),
-                   initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                str,
+                'product1.gui-urls',
+                '',
+                default=json.dumps(PRODUCT1_GUI_URLS),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
         mc_server.orig_sensors.add(
-            Sensor(str, 'product2.cal.1.gui-urls', '', default=json.dumps(PRODUCT2_CAL_GUI_URLS),
-                   initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                str,
+                'product2.cal.1.gui-urls',
+                '',
+                default=json.dumps(PRODUCT2_CAL_GUI_URLS),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
         mc_server.orig_sensors.add(
-            Sensor(str, 'product2.ingest.1.gui-urls', '', default=json.dumps(PRODUCT2_CAL_GUI_URLS),
-                   initial_status=Sensor.Status.UNKNOWN))
+            Sensor(
+                str,
+                'product2.ingest.1.gui-urls',
+                '',
+                default=json.dumps(PRODUCT2_CAL_GUI_URLS),
+                initial_status=Sensor.Status.UNKNOWN,
+            )
+        )
         for sensor in mc_server.orig_sensors.values():
             if use_haproxy and sensor.name.endswith('.gui-urls'):
                 new_value = web.rewrite_gui_urls(EXTERNAL_URL, sensor)
@@ -243,8 +276,8 @@ class TestWeb:
             "general": ROOT_GUI_URLS,
             "products": {
                 "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, use_haproxy, True),
-                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, True)
-            }
+                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, True),
+            },
         }
         assert guis == expected
 
@@ -253,10 +286,7 @@ class TestWeb:
             sensor = mc_server.sensors[name]
             sensor.set_value(sensor.value, status=Sensor.Status.ERROR)
         guis = web._get_guis(mc_server)
-        expected = {
-            "general": [],
-            "products": {"product1": [], "product2": []}
-        }
+        expected = {"general": [], "products": {"product1": [], "product2": []}}
         assert guis == expected
 
     async def test_update_bad_gui_sensor(self, mc_server, caplog) -> None:
@@ -296,14 +326,15 @@ class TestWeb:
                 assert resp.status == 404
                 assert 'product3' in text
 
-    async def test_websocket(self, client: TestClient, mc_server,
-                             dirty_set, use_haproxy: bool) -> None:
+    async def test_websocket(
+        self, client: TestClient, mc_server, dirty_set, use_haproxy: bool
+    ) -> None:
         expected = {
             "general": ROOT_GUI_URLS,
             "products": {
                 "product1": expected_gui_urls(PRODUCT1_GUI_URLS_OUT, use_haproxy, False),
-                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, False)
-            }
+                "product2": expected_gui_urls(PRODUCT2_GUI_URLS_OUT, use_haproxy, False),
+            },
         }
         async with client.ws_connect('/ws') as ws:
             await ws.send_str('guis')
@@ -312,7 +343,7 @@ class TestWeb:
             # Updating should trigger an unsolicited update
             sensor = mc_server.sensors['products']
             sensor.value = '["product1"]'
-            del expected["products"]["product2"]    # type: ignore
+            del expected["products"]["product2"]  # type: ignore
             dirty_set()
             await asyncio.sleep(1)
             guis = await ws.receive_json()
@@ -366,9 +397,5 @@ class TestWebHaproxy(TestWeb):
             app['updater']._haproxy._process.died(-9)
             await client.close()
         assert caplog.record_tuples == [
-            (
-                'katsdpcontroller.web',
-                logging.WARNING,
-                'haproxy exited with non-zero exit status -9'
-            )
+            ('katsdpcontroller.web', logging.WARNING, 'haproxy exited with non-zero exit status -9')
         ]

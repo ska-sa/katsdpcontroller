@@ -31,11 +31,17 @@ class MyEnum(enum.Enum):
 
 def _add_sensors(sensors: SensorSet) -> None:
     sensors.add(Sensor(int, 'int-sensor', 'Integer sensor', 'frogs'))
-    sensors.add(Sensor(float, 'float-sensor', 'Float sensor',
-                       default=3.0, initial_status=Sensor.Status.NOMINAL))
+    sensors.add(
+        Sensor(
+            float, 'float-sensor', 'Float sensor', default=3.0, initial_status=Sensor.Status.NOMINAL
+        )
+    )
     sensors.add(Sensor(float, 'histogram-sensor', 'Float sensor used for histogram'))
-    sensors.add(Sensor(str, 'str-sensor', 'String sensor',
-                       default='hello', initial_status=Sensor.Status.ERROR))
+    sensors.add(
+        Sensor(
+            str, 'str-sensor', 'String sensor', default='hello', initial_status=Sensor.Status.ERROR
+        )
+    )
     sensors.add(Sensor(bytes, 'bytes-sensor', 'Raw bytes sensor'))
     sensors.add(Sensor(bool, 'bool-sensor', 'Boolean sensor'))
     sensors.add(Sensor(Address, 'address-sensor', 'Address sensor'))
@@ -89,8 +95,12 @@ class TestSensorProxyClient:
     async def client(self, mirror, server: DummyServer) -> AsyncGenerator[SensorProxyClient, None]:
         port = device_server_sockname(server)[1]
         client = SensorProxyClient(
-            mirror, 'prefix-', renames={'bytes-sensor': 'custom-bytes-sensor'},
-            host='127.0.0.1', port=port)
+            mirror,
+            'prefix-',
+            renames={'bytes-sensor': 'custom-bytes-sensor'},
+            host='127.0.0.1',
+            port=port,
+        )
         await client.wait_synced()
         yield client
 
@@ -146,7 +156,8 @@ class TestSensorProxyClient:
         self._check_sensors(mirror, server)
 
     async def test_remove_sensor(
-            self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
+        self, mirror, server: DummyServer, client: SensorProxyClient
+    ) -> None:
         del server.sensors['int-sensor']
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
         client.handle_inform(changed)
@@ -154,7 +165,8 @@ class TestSensorProxyClient:
         self._check_sensors(mirror, server)
 
     async def test_replace_sensor(
-            self, mirror, server: DummyServer, client: SensorProxyClient) -> None:
+        self, mirror, server: DummyServer, client: SensorProxyClient
+    ) -> None:
         server.sensors.add(Sensor(bool, 'int-sensor', 'Replaced by bool'))
         changed = aiokatcp.Message.inform('interface-changed', b'sensor-list')
         client.handle_inform(changed)
@@ -183,30 +195,45 @@ class TestPrometheusWatcher:
             elif sensor.name == 'float-sensor':
                 return PrometheusInfo(Gauge, 'test_float_sensor', 'A gauge', {}, self.registry)
             elif sensor.name == 'bool-sensor':
-                return PrometheusInfo(Gauge, 'test_bool_sensor', 'A boolean gauge with labels',
-                                      {'label2': 'labelvalue2'}, self.registry)
+                return PrometheusInfo(
+                    Gauge,
+                    'test_bool_sensor',
+                    'A boolean gauge with labels',
+                    {'label2': 'labelvalue2'},
+                    self.registry,
+                )
             elif sensor.name == 'histogram-sensor':
-                return PrometheusInfo(functools.partial(Histogram, buckets=(1, 10)),
-                                      'test_histogram_sensor', 'A histogram', {}, self.registry)
+                return PrometheusInfo(
+                    functools.partial(Histogram, buckets=(1, 10)),
+                    'test_histogram_sensor',
+                    'A histogram',
+                    {},
+                    self.registry,
+                )
             elif sensor.name == 'enum-sensor':
-                return PrometheusInfo(Gauge, 'test_enum_sensor', 'An enum gauge',
-                                      {}, self.registry)
+                return PrometheusInfo(Gauge, 'test_enum_sensor', 'An enum gauge', {}, self.registry)
             elif sensor.name == 'dynamic-sensor':
-                return PrometheusInfo(Gauge, 'test_dynamic_sensor', 'Dynamic sensor',
-                                      {}, self.registry)
+                return PrometheusInfo(
+                    Gauge, 'test_dynamic_sensor', 'Dynamic sensor', {}, self.registry
+                )
             else:
                 return None
 
         self.sensors = SensorSet()
         _add_sensors(self.sensors)
-        self.watcher = PrometheusWatcher(self.sensors, {'label1': 'labelvalue1'}, prom_factory,
-                                         prom_metrics)
+        self.watcher = PrometheusWatcher(
+            self.sensors, {'label1': 'labelvalue1'}, prom_factory, prom_metrics
+        )
 
-    def _check_prom(self, name: str, value: Optional[float],
-                    status: Optional[Sensor.Status] = Sensor.Status.NOMINAL,
-                    suffix: str = '',
-                    extra_labels: Mapping[str, str] = None,
-                    extra_value_labels: Mapping[str, str] = None):
+    def _check_prom(
+        self,
+        name: str,
+        value: Optional[float],
+        status: Optional[Sensor.Status] = Sensor.Status.NOMINAL,
+        suffix: str = '',
+        extra_labels: Mapping[str, str] = None,
+        extra_value_labels: Mapping[str, str] = None,
+    ):
         labels = {'label1': 'labelvalue1'}
         if extra_labels is not None:
             labels.update(extra_labels)
@@ -238,20 +265,29 @@ class TestPrometheusWatcher:
         sensor.value = 5.0
         sensor.value = 0.5
         sensor.set_value(100.0, timestamp=12345)
-        self._check_prom('test_histogram_sensor', 1,
-                         suffix='_bucket', extra_value_labels={'le': '1.0'})
-        self._check_prom('test_histogram_sensor', 3,
-                         suffix='_bucket', extra_value_labels={'le': '10.0'})
-        self._check_prom('test_histogram_sensor', 4,
-                         suffix='_bucket', extra_value_labels={'le': '+Inf'})
+        self._check_prom(
+            'test_histogram_sensor', 1, suffix='_bucket', extra_value_labels={'le': '1.0'}
+        )
+        self._check_prom(
+            'test_histogram_sensor', 3, suffix='_bucket', extra_value_labels={'le': '10.0'}
+        )
+        self._check_prom(
+            'test_histogram_sensor', 4, suffix='_bucket', extra_value_labels={'le': '+Inf'}
+        )
         # Set same value and timestamp (spurious update)
         sensor.set_value(100.0, timestamp=12345)
-        self._check_prom('test_histogram_sensor', 4,
-                         suffix='_bucket', extra_value_labels={'le': '+Inf'})
+        self._check_prom(
+            'test_histogram_sensor', 4, suffix='_bucket', extra_value_labels={'le': '+Inf'}
+        )
         # Set invalid value
         sensor.set_value(6.0, status=Sensor.Status.FAILURE)
-        self._check_prom('test_histogram_sensor', 4, Sensor.Status.FAILURE,
-                         suffix='_bucket', extra_value_labels={'le': '+Inf'})
+        self._check_prom(
+            'test_histogram_sensor',
+            4,
+            Sensor.Status.FAILURE,
+            suffix='_bucket',
+            extra_value_labels={'le': '+Inf'},
+        )
 
     def test_counter(self) -> None:
         sensor = self.sensors['int-sensor']

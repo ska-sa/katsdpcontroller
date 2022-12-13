@@ -35,7 +35,8 @@ class _Node:
             ephemeral_owner=0,
             data_length=len(self.content),
             num_children=0,
-            last_modified_children=0)
+            last_modified_children=0,
+        )
 
 
 class ZKClient:
