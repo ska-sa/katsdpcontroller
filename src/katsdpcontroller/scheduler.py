@@ -344,14 +344,12 @@ async def poll_ports(host, ports):
     loop = asyncio.get_event_loop()
     while True:
         try:
-            addrs = await (
-                loop.getaddrinfo(
-                    host=host,
-                    port=None,
-                    type=socket.SOCK_STREAM,
-                    proto=socket.IPPROTO_TCP,
-                    flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
-                )
+            addrs = await loop.getaddrinfo(
+                host=host,
+                port=None,
+                type=socket.SOCK_STREAM,
+                proto=socket.IPPROTO_TCP,
+                flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
             )
         except socket.gaierror as error:
             logger.error(
@@ -507,9 +505,8 @@ class Resource:
             available = sum((self._available(part, **kwargs) for part in self.parts), self.ZERO)
         if amount > available:
             raise ValueError(
-                "Requested amount {} of {} is more than available {} (kwargs={})".format(
-                    amount, self.name, available, kwargs
-                )
+                f"Requested amount {amount} of {self.name} "
+                f"is more than available {available} (kwargs={kwargs})"
             )
         out = type(self)(self.name)
         pos = len(self.parts) - 1
@@ -1019,7 +1016,7 @@ class ImageLookup(ABC):
 
     @abstractmethod
     async def __call__(self, repo: str, tag: str) -> Image:
-        pass
+        pass  # pragma: nocover
 
 
 class _RegistryImageLookup(ImageLookup):
@@ -1967,9 +1964,7 @@ class Agent:
                     use = j
                     break
             if use is None:
-                raise InsufficientResourcesError(
-                    "No suitable {} found for request {}".format(msg, i)
-                )
+                raise InsufficientResourcesError(f"No suitable {msg} found for request {i}")
             assign[use] = i
         return assign
 
@@ -1987,7 +1982,7 @@ class Agent:
         have = cores.available
         if need > have:
             raise InsufficientResourcesError(
-                "not enough cores on node {} ({} < {})".format(numa_node, have, need)
+                f"not enough cores on node {numa_node} ({have} < {need})"
             )
 
         # Match network requests to interfaces
