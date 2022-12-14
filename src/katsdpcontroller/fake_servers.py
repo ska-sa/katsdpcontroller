@@ -30,6 +30,18 @@ def _add_device_status_sensor(sensors: SensorSet) -> None:
     )
 
 
+def _add_rx_device_status_sensor(sensors: SensorSet, description: str) -> None:
+    sensors.add(
+        Sensor(
+            DeviceStatus,
+            "rx.device-status",
+            description,
+            default=DeviceStatus.DEGRADED,
+            initial_status=Sensor.Status.WARN
+        )
+    )
+
+
 def _add_time_sync_sensors(sensors: SensorSet) -> None:
     sensors.add(
         Sensor(
@@ -147,17 +159,12 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 )
             )
 
-        self.sensors.add(
-            Sensor(
-                DeviceStatus,
-                "rx.device-status",
-                "The F-engine is receiving a good, clean digitiser stream",
-                default=DeviceStatus.DEGRADED,
-                initial_status=Sensor.Status.WARN
-            )
-        )
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
+        _add_rx_device_status_sensor(
+            self.sensors,
+            "The F-engine is receiving a good, clean digitiser stream"
+        )
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
@@ -257,8 +264,13 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 initial_status=Sensor.Status.NOMINAL
             )
         )
+
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
+        _add_rx_device_status_sensor(
+            self.sensors,
+            "The XB-engine is receiving a good, clean F-engine stream"
+        )
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
