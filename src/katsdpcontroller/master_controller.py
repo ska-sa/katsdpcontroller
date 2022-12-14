@@ -66,7 +66,7 @@ from .defaults import LOCALHOST
 from .scheduler import decode_json_base64
 from .schemas import SUBSYSTEMS, ZK_STATE  # type: ignore
 
-ZK_STATE_VERSION = 4
+ZK_STATE_VERSION = 5
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 _P = TypeVar("_P", bound="Product")
@@ -587,7 +587,7 @@ class SingularityProduct(Product):
         super().__init__(name, config, configure_task)
         self.run_id = name + "-" + uuid.uuid4().hex
         self.task_id: Optional[str] = None
-        self._image: Optional[str] = None
+        self._image: Optional[scheduler.Image] = None
         self.sensors.add(
             Sensor(
                 Address,
@@ -615,19 +615,39 @@ class SingularityProduct(Product):
         self.sensors.add(
             Sensor(str, f"{self.name}.version", "Docker image running the product controller")
         )
+        self.sensors.add(
+            Sensor(str, f"{self.name}.source", "Version control source for the product controller")
+        )
+        self.sensors.add(
+            Sensor(
+                str, f"{self.name}.revision", "Version control revision for the product controller"
+            )
+        )
 
     @property
-    def image(self) -> Optional[str]:
+    def image(self) -> Optional[scheduler.Image]:
         return self._image
 
     @image.setter
-    def image(self, value: Optional[str]) -> None:
+    def image(self, value: Optional[scheduler.Image]) -> None:
+        def set_sensor(suffix: str, value: Optional[str]):
+            sensor = self.sensors[f"{self.name}.{suffix}"]
+            if value is not None:
+                sensor.value = value
+            else:
+                sensor.set_value("", status=Sensor.Status.UNKNOWN)
+
         self._image = value
-        sensor = self.sensors[f"{self.name}.version"]
+        version: Optional[str] = None
+        source: Optional[str] = None
+        revision: Optional[str] = None
         if value is not None:
-            sensor.value = value
-        else:
-            sensor.set_value("", status=Sensor.Status.UNKNOWN)
+            version = value.path
+            source = value.source
+            revision = value.revision
+        set_sensor("version", version)
+        set_sensor("source", source)
+        set_sensor("revision", revision)
 
 
 class SingularityProductManager(ProductManagerBase[SingularityProduct]):
@@ -830,16 +850,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 prod = SingularityProduct(name, info["config"], None)
                 prod.run_id = info["run_id"]
                 prod.task_id = info["task_id"]
-                prod.image = info.get("image")  # Only introduced in version 4
-                try:
-                    prod.start_time = info["start_time"]
-                except KeyError:
-                    pass  # Version 1 didn't have start_time
-                try:
-                    ports = info["ports"]
-                except KeyError:
-                    # Version 2 only had the katcp port
-                    ports = {"katcp": info["port"]}
+                image = info["image"]
+                if isinstance(image, dict):  # Only became a dict in version 5
+                    prod.image = scheduler.Image(**image)
+                else:
+                    prod.image = scheduler.Image.from_path(image)
+                prod.start_time = info["start_time"]
+                ports = info["ports"]
                 prod.task_state = Product.TaskState.ACTIVE
                 prod.multicast_groups = {
                     ipaddress.ip_address(addr) for addr in info["multicast_groups"]  # type: ignore
@@ -858,22 +875,31 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 ipaddress.IPv4Address(data["next_multicast_group"]),
             )
 
+    @staticmethod
+    def _serialise_product(product: SingularityProduct) -> dict:
+        # Strip out optional fields with None in them
+        image_data = dict(product.image.__dict__)
+        for key, value in list(image_data.items()):
+            if value is None:
+                del image_data[key]
+        return {
+            "config": product.config,
+            "run_id": product.run_id,
+            "task_id": product.task_id,
+            "image": image_data,
+            "host": product.hostname,
+            "ports": product.ports,
+            "multicast_groups": [str(group) for group in product.multicast_groups],
+            "start_time": product.start_time,
+        }
+
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
         async with self._zk_state_lock:
             data = {
                 "version": ZK_STATE_VERSION,
                 "products": {
-                    prod.name: {
-                        "config": prod.config,
-                        "run_id": prod.run_id,
-                        "task_id": prod.task_id,
-                        "image": prod.image,
-                        "host": prod.hostname,
-                        "ports": prod.ports,
-                        "multicast_groups": [str(group) for group in prod.multicast_groups],
-                        "start_time": prod.start_time,
-                    }
+                    prod.name: self._serialise_product(prod)
                     for prod in self.products.values()
                     if prod.task_state == Product.TaskState.ACTIVE
                 },
@@ -1009,10 +1035,10 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         success = False
         task_id: Optional[str] = None
         try:
-            image = (await image_resolver("katsdpcontroller")).path
+            image = await image_resolver("katsdpcontroller")
             product.image = image
             request_id = await self._ensure_request(name)
-            await self._ensure_deploy(name, image)
+            await self._ensure_deploy(name, image.path)
             await self._sing.create_run(
                 request_id, {"runId": product.run_id, "commandLineArgs": args}
             )

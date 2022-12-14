@@ -1000,6 +1000,31 @@ class Image:
         if self.tag is None and self.digest is None:
             raise TypeError("at least one of tag and digest must be specified")
 
+    @classmethod
+    def from_path(cls: Type["Image"], path: str) -> "Image":
+        """Construct an Image from a path.
+
+        This is not particularly robust, and does not infer a registry from an
+        incomplete path. It is intended only for use where backwards
+        compatibility is required. In most cases, ImageLookup subclasses are a
+        better choice.
+        """
+        parts = path.split("/", 1)
+        if len(parts) == 1:
+            registry = "unknown"
+            repo = path
+        else:
+            registry, repo = parts
+        tag = None
+        digest = None
+        if "@" in repo:
+            repo, digest = repo.split("@", 1)
+        elif ":" in repo:
+            repo, tag = repo.split(":", 1)
+        else:
+            tag = "latest"
+        return cls(registry=registry, repo=repo, tag=tag, digest=digest)
+
     @property
     def path(self) -> str:
         """Get image path that can be passed to Docker."""
@@ -1009,6 +1034,22 @@ class Image:
             result = f"{self.registry}/{self.repo}:{self.tag}"
         # Docker doesn't like leading http:// or https://
         return re.sub(r"^https?://", "", result)
+
+    @property
+    def source(self) -> Optional[str]:
+        """Version control source for the image, if available."""
+        for key in ["org.opencontainers.image.source", "org.label-schema.vcs-url"]:
+            if key in self.labels:
+                return self.labels[key]
+        return None
+
+    @property
+    def revision(self) -> Optional[str]:
+        """Version control revision for the image, if available."""
+        for key in ["org.opencontainers.image.revision", "org.label-schema.vcs-ref"]:
+            if key in self.labels:
+                return self.labels[key]
+        return None
 
 
 class ImageLookup(ABC):
