@@ -154,7 +154,7 @@ def _normalise_output_channels(
     """
     if n_chans % alignment != 0:
         raise ValueError(
-            f"n_chans ({n_chans}) " f"is not a multiple of required alignment ({alignment})"
+            f"n_chans ({n_chans}) is not a multiple of required alignment ({alignment})"
         )
     c = output_channels  # Just for less typing
     if c is None:
@@ -611,9 +611,8 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         # processes to run. The minimum is 4 since SDP expects to run 4 ingest
         # processes.
         n_substreams = 4
-        while n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE < first.adc_sample_rate * len(
-            src_streams
-        ):
+        total_rate = first.adc_sample_rate * len(src_streams)
+        while n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE < total_rate:
             n_substreams *= 2
         if n_chans % n_substreams != 0:
             raise ValueError("Number of channels is too low")
@@ -759,7 +758,7 @@ class CbfPerChannelStream(Stream):
 
         if self.n_chans % self.n_endpoints != 0:
             raise ValueError(
-                f"n_chans ({self.n_chans}) is not " f"a multiple of endpoints ({self.n_endpoints})"
+                f"n_chans ({self.n_chans}) is not a multiple of endpoints ({self.n_endpoints})"
             )
         if self.n_chans_per_endpoint % self.n_chans_per_substream != 0:
             raise ValueError(

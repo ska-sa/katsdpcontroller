@@ -587,8 +587,8 @@ class SubarrayProduct:
         """Raise a FailReply if there is an asynchronous operation in progress."""
         if self.async_busy:
             raise FailReply(
-                "Subarray product {} is busy with an operation. "
-                "Please wait for it to complete first.".format(self.subarray_product_id)
+                f"Subarray product {self.subarray_product_id} is busy with an operation. "
+                "Please wait for it to complete first."
             )
 
     def _fail_if_no_telstate(self) -> None:
@@ -885,7 +885,7 @@ class SubarrayProduct:
                 if not alive:
                     fail_list = ", ".join(node.logical_node.name for node in died) or "Some nodes"
                     ret_msg = (
-                        f"{fail_list} failed to start. " "Check the error log for specific details."
+                        f"{fail_list} failed to start. Check the error log for specific details."
                     )
                     logger.error(ret_msg)
                     raise FailReply(ret_msg)
@@ -910,7 +910,7 @@ class SubarrayProduct:
                 raise exc
         except scheduler.InsufficientResourcesError as error:
             raise FailReply(
-                "Insufficient resources to launch {}: {}".format(self.subarray_product_id, error)
+                f"Insufficient resources to launch {self.subarray_product_id}: {error}"
             ) from error
         except scheduler.ImageError as error:
             raise FailReply(str(error)) from error
@@ -1070,9 +1070,7 @@ class SubarrayProduct:
         log_task_exceptions(
             capture_block.postprocess_task,
             logger,
-            "Exception in postprocessing for {}/{}".format(
-                self.subarray_product_id, capture_block.name
-            ),
+            f"Exception in postprocessing for {self.subarray_product_id}/{capture_block.name}",
         )
 
         def done_callback(task: asyncio.Future, capture_block=capture_block) -> None:
@@ -1154,7 +1152,7 @@ class SubarrayProduct:
                 self._fail_if_busy()
             else:
                 logger.warning(
-                    "Subarray product %s is busy with an operation, " "but deconfiguring anyway",
+                    "Subarray product %s is busy with an operation, but deconfiguring anyway",
                     self.subarray_product_id,
                 )
 
@@ -1190,8 +1188,8 @@ class SubarrayProduct:
         self._fail_if_busy()
         if self.state != ProductState.IDLE:
             raise FailReply(
-                "Subarray product {} is currently in state {}, not IDLE as expected. "
-                "Cannot be inited.".format(self.subarray_product_id, self.state.name)
+                f"Subarray product {self.subarray_product_id} is currently in state "
+                f"{self.state.name}, not IDLE as expected. Cannot be inited."
             )
         self._fail_if_no_telstate()
         logger.info("Using capture block ID %s", capture_block_id)
@@ -1214,8 +1212,8 @@ class SubarrayProduct:
         self._fail_if_busy()
         if self.state != ProductState.CAPTURING:
             raise FailReply(
-                "Subarray product is currently in state {}, not CAPTURING as expected. "
-                "Cannot be stopped.".format(self.state.name)
+                f"Subarray product is currently in state {self.state.name}, "
+                "not CAPTURING as expected. Cannot be stopped."
             )
         assert self.current_capture_block is not None
         capture_block_id = self.current_capture_block.name
@@ -1371,9 +1369,8 @@ class SubarrayProduct:
 
         init_telstate = copy.deepcopy(self.physical_graph.graph.get("init_telstate", {}))
         init_telstate["subarray_product_id"] = self.subarray_product_id
-        init_telstate["config"] = self.physical_graph.graph.get("config", lambda resolver: {})(
-            self.resolver
-        )
+        config_func = self.physical_graph.graph.get("config", lambda resolver: {})
+        init_telstate["config"] = config_func(self.resolver)
         # Provide attributes to describe the relationships between CBF streams
         # and instruments. This could be extracted from sdp_config, but these
         # specific sensors are easier to mock.

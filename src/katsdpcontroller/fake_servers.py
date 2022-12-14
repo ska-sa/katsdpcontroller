@@ -252,7 +252,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
             Sensor(
                 int,
                 "input-rx-timestamp",
-                "The timestamp (in samples) of the last chunk of data received " "from an F-engine",
+                "The timestamp (in samples) of the last chunk of data received from an F-engine",
                 default=-1,
                 initial_status=Sensor.Status.ERROR,
             )

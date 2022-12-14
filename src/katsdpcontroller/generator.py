@@ -881,7 +881,7 @@ def _make_xbgpu(
     data_suspect_sensor = Sensor(
         str,
         f"{stream.name}-channel-data-suspect",
-        "A bitmask of flags indicating whether each channel should be " "considered to be garbage.",
+        "A bitmask of flags indicating whether each channel should be considered to be garbage.",
         default="0" * stream.n_chans,
         initial_status=Sensor.Status.NOMINAL,
     )
@@ -981,7 +981,7 @@ def _make_xbgpu(
         SyncSensor(
             sensors,
             f"{stream.name}-xengs-synchronised",
-            "For the latest accumulation, was data present from all F-Engines " "for all X-Engines",
+            "For the latest accumulation, was data present from all F-Engines for all X-Engines",
             name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
             n_children=stream.n_substreams,
         ),
@@ -1035,13 +1035,7 @@ def _make_xbgpu(
 
     # Compute how much memory to provide for output
     vis_size = (
-        n_inputs
-        * (n_inputs + 1)
-        // 2
-        * stream.n_chans_per_substream
-        * stream.bits_per_sample
-        // 8
-        * COMPLEX
+        stream.n_baselines * stream.n_chans_per_substream * stream.bits_per_sample // 8 * COMPLEX
     )
     # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
     mid_vis_size = batches_per_chunk * vis_size * 2

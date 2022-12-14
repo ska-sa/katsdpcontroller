@@ -1746,7 +1746,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         for name, result in zip(names, results):
             if isinstance(result, BaseException):
                 logger.warning(
-                    "Failed to deconfigure product %s during sdp-shutdown. " "Forging ahead...",
+                    "Failed to deconfigure product %s during sdp-shutdown. Forging ahead...",
                     name,
                     exc_info=result,
                     extra=dict(subarray_product_id=name),
@@ -1924,7 +1924,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--s3-config-file",
         metavar="FILE",
-        help="configuration for connecting services to S3 " "(loaded on each configure)",
+        help="configuration for connecting services to S3 (loaded on each configure)",
     )
     parser.add_argument(
         "--safe-multicast-cidr",
