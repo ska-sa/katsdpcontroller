@@ -3,9 +3,12 @@
 aioresponses==0.7.1
 async-solipsism==0.5
 coverage
+mypy
 open-mock-file==1.0.2
 pytest
 pytest-asyncio==0.18.3
 pytest-cov
 pytest-mock==3.7.0
 pytest-timeout==2.1.0
+types-decorator==5.1.8.1    # for mypy
+types-setuptools==65.6.0.2  # for mypy

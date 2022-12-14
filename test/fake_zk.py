@@ -16,7 +16,7 @@ def _now_ms() -> int:
 
 
 class _Node:
-    def __init__(self, content: bytes = b'', version: int = 1) -> None:
+    def __init__(self, content: bytes = b"", version: int = 1) -> None:
         self.content = content
         self.version = version
         self.ctime = self.mtime = _now_ms()
@@ -35,21 +35,22 @@ class _Node:
             ephemeral_owner=0,
             data_length=len(self.content),
             num_children=0,
-            last_modified_children=0)
+            last_modified_children=0,
+        )
 
 
 class ZKClient:
     def __init__(self, server: str, chroot: str = None, *args, **kwargs) -> None:
-        self._nodes: Dict[str, _Node] = {'/': _Node()}
+        self._nodes: Dict[str, _Node] = {"/": _Node()}
 
     def normalize_path(self, path: str) -> str:
-        return '/' + '/'.join(name for name in path.split('/') if name)
+        return "/" + "/".join(name for name in path.split("/") if name)
 
     def _parent(self, path: str) -> str:
-        return self.normalize_path(path.rsplit('/', 1)[0])
+        return self.normalize_path(path.rsplit("/", 1)[0])
 
     def _parts(self, path: str) -> List[str]:
-        return [name for name in path.split('/') if name]
+        return [name for name in path.split("/") if name]
 
     async def start(self) -> None:
         pass
@@ -63,7 +64,7 @@ class ZKClient:
             raise aiozk.exc.NodeExists
         if self._parent(path) not in self._nodes:
             raise aiozk.exc.NoNode
-        content = data if data is not None else b''
+        content = data if data is not None else b""
         self._nodes[path] = _Node(content)
 
     async def set(self, path: str, data: bytes, version: int) -> aiozk.protocol.stat.Stat:
@@ -94,7 +95,7 @@ class ZKClient:
 
     async def ensure_path(self, path: str) -> None:
         path = self.normalize_path(path)
-        if path != '/':
+        if path != "/":
             await self.ensure_path(self._parent(path))
         if path not in self._nodes:
             self._nodes[path] = _Node()

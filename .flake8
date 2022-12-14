@@ -1,2 +1,5 @@
 [flake8]
 max-line-length = 100
+# See https://black.readthedocs.io/en/stable/faq.html#why-are-flake8-s-e203-and-w503-violated
+extend-ignore = E203, W503
+extend-select = W504
