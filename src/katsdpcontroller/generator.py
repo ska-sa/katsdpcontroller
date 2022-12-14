@@ -82,27 +82,27 @@ CAPTURE_TRANSITIONS = {
     CaptureBlockState.CAPTURING: [
         KatcpTransition('capture-init', '{capture_block_id}', timeout=30)
     ],
-    CaptureBlockState.BURNDOWN: [
-        KatcpTransition('capture-done', timeout=240)
-    ]
+    CaptureBlockState.BURNDOWN: [KatcpTransition('capture-done', timeout=240)],
 }
 #: Docker images that may appear in the logical graph (used set to Docker image metadata)
-IMAGES = frozenset([
-    'katcbfsim',
-    'katgpucbf',
-    'katsdpbfingest',
-    'katsdpcal',
-    'katsdpcam2telstate',
-    'katsdpcontim',
-    'katsdpdisp',
-    'katsdpimager',
-    'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME),
-    'katsdpdatawriter',
-    'katsdpmetawriter',
-    'katsdptelstate'
-])
+IMAGES = frozenset(
+    [
+        'katcbfsim',
+        'katgpucbf',
+        'katsdpbfingest',
+        'katsdpcal',
+        'katsdpcam2telstate',
+        'katsdpcontim',
+        'katsdpdisp',
+        'katsdpimager',
+        'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME),
+        'katsdpdatawriter',
+        'katsdpmetawriter',
+        'katsdptelstate',
+    ]
+)
 #: Number of bytes used by spectral imager per visibility
-BYTES_PER_VFW_SPECTRAL = 14.5       # 58 bytes for 4 polarisation products
+BYTES_PER_VFW_SPECTRAL = 14.5  # 58 bytes for 4 polarisation products
 #: Number of visibilities in a 32 antenna 32K channel dump, for scaling.
 _N32_32 = 32 * 33 * 2 * 32768
 #: Number of visibilities in a 16 antenna 32K channel dump, for scaling.
@@ -128,8 +128,13 @@ class TransmitState(enum.Enum):
 
 
 class LogicalMulticast(scheduler.LogicalExternal):
-    def __init__(self, stream_name, n_addresses=None, endpoint=None,
-                 initial_transmit_state=TransmitState.UNKNOWN):
+    def __init__(
+        self,
+        stream_name,
+        n_addresses=None,
+        endpoint=None,
+        initial_transmit_state=TransmitState.UNKNOWN,
+    ):
         super().__init__('multicast.' + stream_name)
         self.stream_name = stream_name
         self.physical_factory = PhysicalMulticast
@@ -149,7 +154,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         self._endpoint_sensor = Sensor(
             str,
             f'{stream_name}-destination',
-            f'The IP address, range and port to which data for stream {stream_name} is sent'
+            f'The IP address, range and port to which data for stream {stream_name} is sent',
         )
         subarray_product.add_sensor(self._endpoint_sensor)
 
@@ -172,22 +177,29 @@ class SumSensor(SimpleAggregateSensor[int]):
     """
 
     def __init__(
-        self, target: SensorSet, name: str,
-        description: str, units: str = "",
+        self,
+        target: SensorSet,
+        name: str,
+        description: str,
+        units: str = "",
         *,
         auto_strategy: Optional[SensorSampler.Strategy] = None,
         auto_strategy_parameters: Iterable[Any] = (),
         name_regex: re.Pattern,
-        n_children: int
+        n_children: int,
     ) -> None:
         self.name_regex = name_regex
         self.n_children = n_children
         self._total = 0
         self._known = 0
         super().__init__(
-            target, int, name, description, units,
+            target,
+            int,
+            name,
+            description,
+            units,
             auto_strategy=auto_strategy,
-            auto_strategy_parameters=auto_strategy_parameters
+            auto_strategy_parameters=auto_strategy_parameters,
         )
 
     def filter_aggregate(self, sensor: Sensor) -> bool:
@@ -223,22 +235,29 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     """
 
     def __init__(
-        self, target: SensorSet, name: str,
-        description: str, units: str = "",
+        self,
+        target: SensorSet,
+        name: str,
+        description: str,
+        units: str = "",
         *,
         auto_strategy: Optional["SensorSampler.Strategy"] = None,
         auto_strategy_parameters: Iterable[Any] = (),
         name_regex: re.Pattern,
-        n_children: int
+        n_children: int,
     ) -> None:
         self.name_regex = name_regex
         self.n_children = n_children
         self._total_in_sync = 0
 
         super().__init__(
-            target, bool, name, description, units,
+            target,
+            bool,
+            name,
+            description,
+            units,
             auto_strategy=auto_strategy,
-            auto_strategy_parameters=auto_strategy_parameters
+            auto_strategy_parameters=auto_strategy_parameters,
         )
 
     def filter_aggregate(self, sensor: Sensor) -> bool:
@@ -319,8 +338,7 @@ def find_node(g: networkx.MultiDiGraph, name: str) -> scheduler.LogicalNode:
     raise KeyError('no node called ' + name)
 
 
-def _make_telstate(g: networkx.MultiDiGraph,
-                   configuration: Configuration) -> scheduler.LogicalNode:
+def _make_telstate(g: networkx.MultiDiGraph, configuration: Configuration) -> scheduler.LogicalNode:
     # Pointing sensors can account for substantial memory per antennas over a
     # long-lived subarray.
     n_antennas = 0
@@ -340,7 +358,8 @@ def _make_telstate(g: networkx.MultiDiGraph,
     telstate.ports = ['telstate']
     # Run it in /mnt/mesos/sandbox so that the dump.rdb ends up there.
     telstate.taskinfo.container.docker.setdefault('parameters', []).append(
-        {'key': 'workdir', 'value': '/mnt/mesos/sandbox'})
+        {'key': 'workdir', 'value': '/mnt/mesos/sandbox'}
+    )
     telstate.command = ['redis-server', '/usr/local/etc/redis/redis.conf']
     if configuration.options.interface_mode:
         telstate.physical_factory = ProductFakePhysicalTask
@@ -354,9 +373,9 @@ def _make_telstate(g: networkx.MultiDiGraph,
     return telstate
 
 
-def _make_cam2telstate(g: networkx.MultiDiGraph,
-                       configuration: Configuration,
-                       stream: product_config.CamHttpStream) -> scheduler.LogicalNode:
+def _make_cam2telstate(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.CamHttpStream
+) -> scheduler.LogicalNode:
     cam2telstate = ProductLogicalTask('cam2telstate')
     cam2telstate.subsystem = 'sdp'
     cam2telstate.image = 'katsdpcam2telstate'
@@ -369,16 +388,20 @@ def _make_cam2telstate(g: networkx.MultiDiGraph,
     antennas = set()
     for input_ in configuration.by_class(product_config.AntennaChannelisedVoltageStream):
         antennas.update(input_.antennas)
-    g.add_node(cam2telstate, config=lambda task, resolver: {
-        'url': str(url),
-        'aiomonitor': True,
-        'receptors': ','.join(sorted(antennas))
-    })
+    g.add_node(
+        cam2telstate,
+        config=lambda task, resolver: {
+            'url': str(url),
+            'aiomonitor': True,
+            'receptors': ','.join(sorted(antennas)),
+        },
+    )
     return cam2telstate
 
 
-def _make_meta_writer(g: networkx.MultiDiGraph,
-                      configuration: Configuration) -> scheduler.LogicalNode:
+def _make_meta_writer(
+    g: networkx.MultiDiGraph, configuration: Configuration
+) -> scheduler.LogicalNode:
     meta_writer = ProductLogicalTask('meta_writer')
     meta_writer.subsystem = 'sdp'
     meta_writer.image = 'katsdpmetawriter'
@@ -399,25 +422,24 @@ def _make_meta_writer(g: networkx.MultiDiGraph,
     meta_writer.interfaces[0].bandwidth_out = 1e9 if not configuration.options.develop else 10e6
     meta_writer.transitions = {
         CaptureBlockState.BURNDOWN: [
-            KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)    # Light dump
+            KatcpTransition('write-meta', '{capture_block_id}', True, timeout=120)  # Light dump
         ],
         CaptureBlockState.DEAD: [
-            KatcpTransition('write-meta', '{capture_block_id}', False, timeout=300)   # Full dump
-        ]
+            KatcpTransition('write-meta', '{capture_block_id}', False, timeout=300)  # Full dump
+        ],
     }
     meta_writer.final_state = CaptureBlockState.DEAD
 
-    g.add_node(meta_writer, config=lambda task, resolver: {
-        'rdb_path': OBJ_DATA_VOL.container_path
-    })
+    g.add_node(meta_writer, config=lambda task, resolver: {'rdb_path': OBJ_DATA_VOL.container_path})
     return meta_writer
 
 
 def _make_dsim(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
-        sync_time: int) -> scheduler.LogicalNode:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
+    sync_time: int,
+) -> scheduler.LogicalNode:
     """Create the dsim process for a single antenna.
 
     An antenna has a separate stream per polarisation, so `streams` will
@@ -433,9 +455,7 @@ def _make_dsim(
     n_endpoints = 8  # Matches MeerKAT digitisers
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
-    telstate_data = {
-        'observer': streams[0].antenna.description
-    }
+    telstate_data = {'observer': streams[0].antenna.description}
     for key, value in telstate_data.items():
         init_telstate[(streams[0].antenna.name, key)] = value
 
@@ -447,18 +467,26 @@ def _make_dsim(
     dsim.image = 'katgpucbf'
     dsim.mem = 4096
     dsim.ports = ['port', 'prometheus']
-    dsim.interfaces = [scheduler.InterfaceRequest(
-        'cbf', infiniband=ibv, multicast_out={stream.name for stream in streams}
-    )]
+    dsim.interfaces = [
+        scheduler.InterfaceRequest(
+            'cbf', infiniband=ibv, multicast_out={stream.name for stream in streams}
+        )
+    ]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         'dsim',
-        '--interface', '{interfaces[cbf].name}',
-        '--adc-sample-rate', str(streams[0].adc_sample_rate),
-        '--ttl', '4',
-        '--sync-time', str(sync_time),
-        '--katcp-port', '{ports[port]}',
-        '--prometheus-port', '{ports[prometheus]}'
+        '--interface',
+        '{interfaces[cbf].name}',
+        '--adc-sample-rate',
+        str(streams[0].adc_sample_rate),
+        '--ttl',
+        '4',
+        '--sync-time',
+        str(sync_time),
+        '--katcp-port',
+        '{ports[port]}',
+        '--prometheus-port',
+        '{ports[prometheus]}',
     ]
     # Allow dsim task to set a realtime scheduling priority itself
     dsim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "rtprio=1"}]
@@ -475,8 +503,10 @@ def _make_dsim(
         # of signals.
         dsim.cores = ['main', 'send', None, None]
         dsim.command = dsim.command + [
-            '--affinity', '{cores[send]}',
-            '--main-affinity', '{cores[main]}'
+            '--affinity',
+            '{cores[send]}',
+            '--main-affinity',
+            '{cores[main]}',
         ]
     if ibv:
         dsim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
@@ -498,28 +528,32 @@ def _make_dsim(
 
 
 def _make_fgpu(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        stream: product_config.GpucbfAntennaChannelisedVoltageStream,
-        sync_time: int) -> scheduler.LogicalNode:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+    sync_time: int,
+) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f'fgpu.{stream.name}')
     g.add_node(fgpu_group)
 
-    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams,
-                                     initial_transmit_state=TransmitState.UP)
+    dst_multicast = LogicalMulticast(
+        stream.name, stream.n_substreams, initial_transmit_state=TransmitState.UP
+    )
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
 
     # TODO: this list is not complete, and will need to be updated as the ICD evolves.
     data_suspect_sensor = Sensor(
-        str, f"{stream.name}-input-data-suspect",
+        str,
+        f"{stream.name}-input-data-suspect",
         "A bitmask of flags indicating for each input whether the data for "
         "that input should be considered to be garbage. Input order matches "
         "input labels.",
         default="0" * len(stream.src_streams),
-        initial_status=Sensor.Status.NOMINAL)
+        initial_status=Sensor.Status.NOMINAL,
+    )
 
     # Safety check that we don't have conflicting values for the adc-bits
     # sensor, as it is not scoped to a stream. Currently MeerKAT+ only
@@ -529,67 +563,127 @@ def _make_fgpu(
         assert g.graph["stream_sensors"]["adc-bits"].value == adc_bits
 
     stream_sensors = [
-        Sensor(int, "adc-bits",
-               "ADC sample bitwidth",
-               default=adc_bits, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-adc-sample-rate",
-               "Sample rate of the ADC",
-               "Hz",
-               default=stream.adc_sample_rate, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-bandwidth",
-               "The analogue bandwidth of the digitised band",
-               "Hz",
-               default=stream.bandwidth, initial_status=Sensor.Status.NOMINAL),
+        Sensor(
+            int,
+            "adc-bits",
+            "ADC sample bitwidth",
+            default=adc_bits,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-adc-sample-rate",
+            "Sample rate of the ADC",
+            "Hz",
+            default=stream.adc_sample_rate,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-bandwidth",
+            "The analogue bandwidth of the digitised band",
+            "Hz",
+            default=stream.bandwidth,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
         # The timestamps are simply ADC sample counts
-        Sensor(float, f"{stream.name}-scale-factor-timestamp",
-               "Factor by which to divide instrument timestamps to convert to unix seconds",
-               "Hz",
-               default=stream.adc_sample_rate, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-sync-time",
-               "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-               "s",
-               default=float(sync_time), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-ants",
-               "The number of antennas in the instrument",
-               default=len(stream.antennas), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-inputs",
-               "The number of single polarisation inputs to the instrument",
-               default=len(stream.src_streams), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-fengs",
-               "The number of F-engines in the instrument",
-               default=n_engines, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-feng-out-bits-per-sample",
-               "F-engine output bits per sample. Per number, not complex pair. "
-               "Real and imaginary parts are both this wide",
-               default=stream.bits_per_sample, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-chans",
-               "Number of channels in the output spectrum",
-               default=stream.n_chans, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-chans-per-substream",
-               "Number of channels in each substream for this f-engine stream",
-               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-samples-between-spectra",
-               "Number of samples between spectra",
-               default=stream.n_samples_between_spectra, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-pfb-group-delay",
-               "PFB group delay, specified in number of samples",
-               default=-stream.n_chans * stream.pfb_taps, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-spectra-per-heap",
-               "Number of spectrum chunks per heap",
-               default=stream.n_spectra_per_heap, initial_status=Sensor.Status.NOMINAL),
+        Sensor(
+            float,
+            f"{stream.name}-scale-factor-timestamp",
+            "Factor by which to divide instrument timestamps to convert to unix seconds",
+            "Hz",
+            default=stream.adc_sample_rate,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-sync-time",
+            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+            "s",
+            default=float(sync_time),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-ants",
+            "The number of antennas in the instrument",
+            default=len(stream.antennas),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-inputs",
+            "The number of single polarisation inputs to the instrument",
+            default=len(stream.src_streams),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-fengs",
+            "The number of F-engines in the instrument",
+            default=n_engines,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-feng-out-bits-per-sample",
+            "F-engine output bits per sample. Per number, not complex pair. "
+            "Real and imaginary parts are both this wide",
+            default=stream.bits_per_sample,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-chans",
+            "Number of channels in the output spectrum",
+            default=stream.n_chans,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-chans-per-substream",
+            "Number of channels in each substream for this f-engine stream",
+            default=stream.n_chans_per_substream,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-samples-between-spectra",
+            "Number of samples between spectra",
+            default=stream.n_samples_between_spectra,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-pfb-group-delay",
+            "PFB group delay, specified in number of samples",
+            default=-stream.n_chans * stream.pfb_taps,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-spectra-per-heap",
+            "Number of spectrum chunks per heap",
+            default=stream.n_spectra_per_heap,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
         # Note: reports baseband centre frequency, not on-sky, and hence not
         # stream.centre_frequency.
-        Sensor(float, f"{stream.name}-center-freq",
-               "The centre frequency of the digitised band",
-               default=stream.bandwidth / 2, initial_status=Sensor.Status.NOMINAL),
-        data_suspect_sensor
+        Sensor(
+            float,
+            f"{stream.name}-center-freq",
+            "The centre frequency of the digitised band",
+            default=stream.bandwidth / 2,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        data_suspect_sensor,
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
     telstate_data = {
-        'instrument_dev_name': 'gpucbf',      # Made-up instrument name
+        'instrument_dev_name': 'gpucbf',  # Made-up instrument name
         # Normally obtained from the CBF proxy or subarray controller
         'input_labels': stream.input_labels,
         # Copies of our own sensors, with transformations normally applied by cam2telstate
@@ -600,7 +694,7 @@ def _make_fgpu(
         'ticks_between_spectra': stream.n_samples_between_spectra,
         'n_chans': stream.n_chans,
         'bandwidth': stream.bandwidth,
-        'center_freq': stream.centre_frequency
+        'center_freq': stream.centre_frequency,
     }
     for key, value in telstate_data.items():
         init_telstate[(stream.name, key)] = value
@@ -625,11 +719,14 @@ def _make_fgpu(
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
         # up by network name.
-        fgpu.interfaces = [scheduler.InterfaceRequest(
-            'cbf', infiniband=ibv,
-            multicast_in={src.name for src in srcs},
-            multicast_out={stream.name}
-        )]
+        fgpu.interfaces = [
+            scheduler.InterfaceRequest(
+                'cbf',
+                infiniband=ibv,
+                multicast_in={src.name for src in srcs},
+                multicast_out={stream.name},
+            )
+        ]
         fgpu.interfaces[0].bandwidth_in = sum(src.data_rate() for src in srcs)
         # stream.data_rate() is sum over all the engines
         fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
@@ -637,29 +734,49 @@ def _make_fgpu(
         # Run at least 4 per GPU, scaling with bandwidth. This will
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-        fgpu.gpus[0].mem = 1024     # Actual use is about 800MB, independent of channel count
-        fgpu.command = ['schedrr'] + taskset + [
-            'fgpu',
-            '--src-interface', '{interfaces[cbf].name}',
-            '--dst-interface', '{interfaces[cbf].name}',
-            '--dst-packet-payload', '8192',
-            '--adc-sample-rate', str(srcs[0].adc_sample_rate),
-            '--feng-id', str(i),
-            '--array-size', str(n_engines),
-            '--channels', str(stream.n_chans),
-            '--sync-epoch', str(sync_time),
-            '--taps', str(stream.pfb_taps),
-            '--w-cutoff', str(stream.w_cutoff),
-            '--katcp-port', '{ports[port]}',
-            '--prometheus-port', '{ports[prometheus]}',
-            '--aiomonitor',
-            '--aiomonitor-port', '{ports[aiomonitor]}',
-            '--aioconsole-port', '{ports[aioconsole]}'
-        ]
+        fgpu.gpus[0].mem = 1024  # Actual use is about 800MB, independent of channel count
+        fgpu.command = (
+            ['schedrr']
+            + taskset
+            + [
+                'fgpu',
+                '--src-interface',
+                '{interfaces[cbf].name}',
+                '--dst-interface',
+                '{interfaces[cbf].name}',
+                '--dst-packet-payload',
+                '8192',
+                '--adc-sample-rate',
+                str(srcs[0].adc_sample_rate),
+                '--feng-id',
+                str(i),
+                '--array-size',
+                str(n_engines),
+                '--channels',
+                str(stream.n_chans),
+                '--sync-epoch',
+                str(sync_time),
+                '--taps',
+                str(stream.pfb_taps),
+                '--w-cutoff',
+                str(stream.w_cutoff),
+                '--katcp-port',
+                '{ports[port]}',
+                '--prometheus-port',
+                '{ports[prometheus]}',
+                '--aiomonitor',
+                '--aiomonitor-port',
+                '{ports[aiomonitor]}',
+                '--aioconsole-port',
+                '{ports[aioconsole]}',
+            ]
+        )
         if not configuration.options.develop:
             fgpu.command += [
-                '--src-affinity', '{cores[src0]},{cores[src1]}',
-                '--dst-affinity', '{cores[dst]}',
+                '--src-affinity',
+                '{cores[src0]},{cores[src1]}',
+                '--dst-affinity',
+                '{cores[dst]}',
             ]
         fgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
@@ -669,9 +786,11 @@ def _make_fgpu(
             # multiple instances on a machine will use distinct vectors.
             fgpu.command += [
                 '--src-ibv',
-                '--src-comp-vector', '{cores[src0]},{cores[src1]}',
+                '--src-comp-vector',
+                '{cores[src0]},{cores[src1]}',
                 '--dst-ibv',
-                '--dst-comp-vector', '{cores[dst]}'
+                '--dst-comp-vector',
+                '{cores[dst]}',
             ]
         fgpu.command += stream.command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
@@ -684,8 +803,14 @@ def _make_fgpu(
         # Wire it up to the multicast streams
         for src in srcs:
             src_multicast = find_node(g, f'multicast.{src.name}')
-            g.add_edge(fgpu, src_multicast, port='spead',
-                       depends_resolve=True, depends_init=True, depends_ready=True)
+            g.add_edge(
+                fgpu,
+                src_multicast,
+                port='spead',
+                depends_resolve=True,
+                depends_init=True,
+                depends_ready=True,
+            )
             fgpu.command.append(f'{{endpoints[multicast.{src.name}_spead]}}')
         g.add_edge(fgpu, dst_multicast, port='spead', depends_resolve=True)
         fgpu.command.append(f'{{endpoints[multicast.{stream.name}_spead]}}')
@@ -695,8 +820,16 @@ def _make_fgpu(
 
         # Rename sensors that are relevant to the stream rather than the process
         for j, label in enumerate(input_labels):
-            for name in ["eq", "delay", "dig-clip-cnt", "dig-pwr-dbfs", "feng-clip-cnt",
-                         "rx-timestamp", "rx-unixtime", "rx-missing-unixtime"]:
+            for name in [
+                "eq",
+                "delay",
+                "dig-clip-cnt",
+                "dig-pwr-dbfs",
+                "feng-clip-cnt",
+                "rx-timestamp",
+                "rx-unixtime",
+                "rx-missing-unixtime",
+            ]:
                 fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
         # Prepare expected data rate
         fgpu.static_gauges['fgpu_expected_input_heaps_per_second'] = sum(
@@ -707,11 +840,12 @@ def _make_fgpu(
 
 
 def _make_xbgpu(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        stream: product_config.GpucbfBaselineCorrelationProductsStream,
-        sync_time: int,
-        sensors: SensorSet) -> scheduler.LogicalNode:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.GpucbfBaselineCorrelationProductsStream,
+    sync_time: int,
+    sensors: SensorSet,
+) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
@@ -719,8 +853,9 @@ def _make_xbgpu(
     xbgpu_group = LogicalGroup(f'xbgpu.{stream.name}')
     g.add_node(xbgpu_group)
 
-    dst_multicast = LogicalMulticast(stream.name, stream.n_substreams,
-                                     initial_transmit_state=TransmitState.DOWN)
+    dst_multicast = LogicalMulticast(
+        stream.name, stream.n_substreams, initial_transmit_state=TransmitState.DOWN
+    )
     g.add_node(dst_multicast)
     g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
@@ -744,62 +879,113 @@ def _make_xbgpu(
                     bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
     n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
     data_suspect_sensor = Sensor(
-        str, f"{stream.name}-channel-data-suspect",
-        "A bitmask of flags indicating whether each channel should be "
-        "considered to be garbage.",
+        str,
+        f"{stream.name}-channel-data-suspect",
+        "A bitmask of flags indicating whether each channel should be " "considered to be garbage.",
         default="0" * stream.n_chans,
-        initial_status=Sensor.Status.NOMINAL)
+        initial_status=Sensor.Status.NOMINAL,
+    )
 
     stream_sensors = [
-        Sensor(float, f"{stream.name}-sync-time",
-               "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-               "s",
-               default=float(sync_time), initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-bandwidth",
-               "The analogue bandwidth of the digitised band",
-               "Hz",
-               default=acv.bandwidth, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-xengs",
-               "The number of X-engines in the instrument",
-               default=n_engines, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-accs",
-               "The number of spectra that are accumulated per X-engine output",
-               default=n_accs, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-int-time",
-               "The time, in seconds, for which the X-engines accumulate.",
-               "s",
-               default=stream.int_time, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-xeng-out-bits-per-sample",
-               "X-engine output bits per sample. Per number, not complex pair- "
-               "Real and imaginary parts are both this wide",
-               default=stream.bits_per_sample, initial_status=Sensor.Status.NOMINAL),
-        Sensor(str, f"{stream.name}-bls-ordering",
-               "A string showing the output ordering of baseline data "
-               "produced by the X-engines in this instrument, as a list "
-               "of correlation pairs given by input label.",
-               default=str(bls_ordering), initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-bls",
-               "The number of baselines produced by this correlator instrument.",
-               default=stream.n_baselines, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-chans",
-               "The number of frequency channels in an integration",
-               default=stream.n_chans, initial_status=Sensor.Status.NOMINAL),
-        Sensor(int, f"{stream.name}-n-chans-per-substream",
-               "Number of channels in each substream for this x-engine stream",
-               default=stream.n_chans_per_substream, initial_status=Sensor.Status.NOMINAL),
-        Sensor(float, f"{stream.name}-ddc-mix-freq",
-               "F-engine DDC mixer frequency, where used. 0 where n/a",
-               units="Hz", default=0.0, initial_status=Sensor.Status.NOMINAL),
-        SumSensor(sensors, f"{stream.name}-xeng-clip-cnt",
-                  "Number of visibilities that saturated",
-                  name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
-                  n_children=stream.n_substreams),
-        SyncSensor(sensors, f"{stream.name}-xengs-synchronised",
-                   "For the latest accumulation, was data present from all F-Engines "
-                   "for all X-Engines",
-                   name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
-                   n_children=stream.n_substreams),
-        data_suspect_sensor
+        Sensor(
+            float,
+            f"{stream.name}-sync-time",
+            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+            "s",
+            default=float(sync_time),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-bandwidth",
+            "The analogue bandwidth of the digitised band",
+            "Hz",
+            default=acv.bandwidth,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-xengs",
+            "The number of X-engines in the instrument",
+            default=n_engines,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-accs",
+            "The number of spectra that are accumulated per X-engine output",
+            default=n_accs,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-int-time",
+            "The time, in seconds, for which the X-engines accumulate.",
+            "s",
+            default=stream.int_time,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-xeng-out-bits-per-sample",
+            "X-engine output bits per sample. Per number, not complex pair- "
+            "Real and imaginary parts are both this wide",
+            default=stream.bits_per_sample,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            str,
+            f"{stream.name}-bls-ordering",
+            "A string showing the output ordering of baseline data "
+            "produced by the X-engines in this instrument, as a list "
+            "of correlation pairs given by input label.",
+            default=str(bls_ordering),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-bls",
+            "The number of baselines produced by this correlator instrument.",
+            default=stream.n_baselines,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-chans",
+            "The number of frequency channels in an integration",
+            default=stream.n_chans,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}-n-chans-per-substream",
+            "Number of channels in each substream for this x-engine stream",
+            default=stream.n_chans_per_substream,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}-ddc-mix-freq",
+            "F-engine DDC mixer frequency, where used. 0 where n/a",
+            units="Hz",
+            default=0.0,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        SumSensor(
+            sensors,
+            f"{stream.name}-xeng-clip-cnt",
+            "Number of visibilities that saturated",
+            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
+            n_children=stream.n_substreams,
+        ),
+        SyncSensor(
+            sensors,
+            f"{stream.name}-xengs-synchronised",
+            "For the latest accumulation, was data present from all F-Engines " "for all X-Engines",
+            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
+            n_children=stream.n_substreams,
+        ),
+        data_suspect_sensor,
     ]
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
@@ -812,22 +998,30 @@ def _make_xbgpu(
         'bls_ordering': bls_ordering,
         'int_time': stream.int_time,
         'n_accs': n_accs,
-        'n_chans_per_substream': stream.n_chans_per_substream
+        'n_chans_per_substream': stream.n_chans_per_substream,
     }
     for key, value in telstate_data.items():
         init_telstate[(stream.name, key)] = value
 
-    input_rate = sum(
-        cast(product_config.DigRawAntennaVoltageStreamBase, dig).adc_sample_rate
-        for dig in acv.src_streams
-    ) * acv.bits_per_sample // 8
+    input_rate = (
+        sum(
+            cast(product_config.DigRawAntennaVoltageStreamBase, dig).adc_sample_rate
+            for dig in acv.src_streams
+        )
+        * acv.bits_per_sample
+        // 8
+    )
     bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
 
     # Compute how much memory to provide for input
 
     batch_size = (
-        n_inputs * acv.n_spectra_per_heap
-        * stream.n_chans_per_endpoint * COMPLEX * acv.bits_per_sample // 8
+        n_inputs
+        * acv.n_spectra_per_heap
+        * stream.n_chans_per_endpoint
+        * COMPLEX
+        * acv.bits_per_sample
+        // 8
     )
     target_chunk_size = 16 * 1024**2
     batches_per_chunk = math.ceil(target_chunk_size / batch_size)
@@ -841,8 +1035,13 @@ def _make_xbgpu(
 
     # Compute how much memory to provide for output
     vis_size = (
-        n_inputs * (n_inputs + 1) // 2 * stream.n_chans_per_substream
-        * stream.bits_per_sample // 8 * COMPLEX
+        n_inputs
+        * (n_inputs + 1)
+        // 2
+        * stream.n_chans_per_substream
+        * stream.bits_per_sample
+        // 8
+        * COMPLEX
     )
     # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
     mid_vis_size = batches_per_chunk * vis_size * 2
@@ -867,11 +1066,11 @@ def _make_xbgpu(
         # subscribe to a single multicast group of many. Every xbgpu receives
         # data from every fgpu, so finer-grained tracking is not useful. For
         # the destination it is more useful.
-        xbgpu.interfaces = [scheduler.InterfaceRequest(
-            'cbf', infiniband=ibv,
-            multicast_in={acv.name},
-            multicast_out={(stream, i)}
-        )]
+        xbgpu.interfaces = [
+            scheduler.InterfaceRequest(
+                'cbf', infiniband=ibv, multicast_in={acv.name}, multicast_out={(stream, i)}
+            )
+        ]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
         xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
         xbgpu.gpus = [scheduler.GPURequest()]
@@ -879,40 +1078,54 @@ def _make_xbgpu(
         xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size + 2 * vis_size + mid_vis_size)
         # Minimum capability as a function of bits-per-sample, based on
         # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
-        min_compute_capability = {
-            4: (7, 3),
-            8: (7, 2),
-            16: (7, 0)
-        }
+        min_compute_capability = {4: (7, 3), 8: (7, 2), 16: (7, 0)}
         xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
-        xbgpu.command = ['schedrr'] + taskset + [
-            'xbgpu',
-            '--adc-sample-rate', str(first_dig.adc_sample_rate),
-            '--array-size', str(len(acv.src_streams) // 2),  # 2 pols per antenna
-            '--channels', str(stream.n_chans),
-            '--channels-per-substream', str(stream.n_chans_per_substream),
-            '--samples-between-spectra', str(acv.n_samples_between_spectra),
-            '--spectra-per-heap', str(acv.n_spectra_per_heap),
-            '--heaps-per-fengine-per-chunk', str(batches_per_chunk),
-            '--channel-offset-value', str(i * stream.n_chans_per_substream),
-            '--sample-bits', str(acv.bits_per_sample),
-            '--src-interface', '{interfaces[cbf].name}',
-            '--dst-interface', '{interfaces[cbf].name}',
-            '--heap-accumulation-threshold', str(round(stream.int_time / heap_time)),
-            '--sync-epoch', str(sync_time),
-            '--katcp-port', '{ports[port]}',
-            '--prometheus-port', '{ports[prometheus]}',
-            '--aiomonitor',
-            '--aiomonitor-port', '{ports[aiomonitor]}',
-            '--aioconsole-port', '{ports[aioconsole]}'
-        ]
-        if not configuration.options.develop:
-            xbgpu.command += [
-                '--src-affinity', '{cores[src]}',
-                '--dst-affinity', '{cores[dst]}'
+        xbgpu.command = (
+            ['schedrr']
+            + taskset
+            + [
+                'xbgpu',
+                '--adc-sample-rate',
+                str(first_dig.adc_sample_rate),
+                '--array-size',
+                str(len(acv.src_streams) // 2),  # 2 pols per antenna
+                '--channels',
+                str(stream.n_chans),
+                '--channels-per-substream',
+                str(stream.n_chans_per_substream),
+                '--samples-between-spectra',
+                str(acv.n_samples_between_spectra),
+                '--spectra-per-heap',
+                str(acv.n_spectra_per_heap),
+                '--heaps-per-fengine-per-chunk',
+                str(batches_per_chunk),
+                '--channel-offset-value',
+                str(i * stream.n_chans_per_substream),
+                '--sample-bits',
+                str(acv.bits_per_sample),
+                '--src-interface',
+                '{interfaces[cbf].name}',
+                '--dst-interface',
+                '{interfaces[cbf].name}',
+                '--heap-accumulation-threshold',
+                str(round(stream.int_time / heap_time)),
+                '--sync-epoch',
+                str(sync_time),
+                '--katcp-port',
+                '{ports[port]}',
+                '--prometheus-port',
+                '{ports[prometheus]}',
+                '--aiomonitor',
+                '--aiomonitor-port',
+                '{ports[aiomonitor]}',
+                '--aioconsole-port',
+                '{ports[aioconsole]}',
             ]
+        )
+        if not configuration.options.develop:
+            xbgpu.command += ['--src-affinity', '{cores[src]}', '--dst-affinity', '{cores[dst]}']
         xbgpu.capabilities.append('SYS_NICE')  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
@@ -921,9 +1134,11 @@ def _make_xbgpu(
             # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
                 '--src-ibv',
-                '--src-comp-vector', '{cores[src]}',
+                '--src-comp-vector',
+                '{cores[src]}',
                 '--dst-ibv',
-                '--dst-comp-vector', '{cores[dst]}'
+                '--dst-comp-vector',
+                '{cores[dst]}',
             ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
@@ -932,37 +1147,47 @@ def _make_xbgpu(
         xbgpu.data_suspect_sensor = data_suspect_sensor
         xbgpu.data_suspect_range = (
             i * stream.n_chans_per_substream,
-            (i + 1) * stream.n_chans_per_substream
+            (i + 1) * stream.n_chans_per_substream,
         )
         g.add_node(xbgpu)
 
         # Wire it up to the multicast streams
         src_multicast = find_node(g, f'multicast.{acv.name}')
-        g.add_edge(xbgpu, src_multicast, port='spead',
-                   depends_resolve=True, depends_init=True, depends_ready=True)
+        g.add_edge(
+            xbgpu,
+            src_multicast,
+            port='spead',
+            depends_resolve=True,
+            depends_init=True,
+            depends_ready=True,
+        )
         g.add_edge(xbgpu, dst_multicast, port='spead', depends_resolve=True)
         xbgpu.command += [
             f'{{endpoints_vector[multicast.{acv.name}_spead][{i}]}}',
-            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}'
+            f'{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}',
         ]
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(xbgpu_group, xbgpu, depends_ready=True, depends_init=True)
 
         xbgpu.static_gauges['xbgpu_expected_input_heaps_per_second'] = (
-            acv.adc_sample_rate / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
-            * len(acv.src_streams) / 2   # / 2 because each heap contains two pols
+            acv.adc_sample_rate
+            / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
+            * len(acv.src_streams)
+            / 2  # / 2 because each heap contains two pols
         )
 
     return xbgpu_group
 
 
-def _make_cbf_simulator(g: networkx.MultiDiGraph,
-                        configuration: Configuration,
-                        stream: Union[
-                            product_config.SimBaselineCorrelationProductsStream,
-                            product_config.SimTiedArrayChannelisedVoltageStream
-                        ]) -> scheduler.LogicalNode:
+def _make_cbf_simulator(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: Union[
+        product_config.SimBaselineCorrelationProductsStream,
+        product_config.SimTiedArrayChannelisedVoltageStream,
+    ],
+) -> scheduler.LogicalNode:
     # Determine number of simulators to run.
     n_sim = 1
     if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
@@ -970,8 +1195,9 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             n_sim *= 2
     ibv = not configuration.options.develop
 
-    def make_cbf_simulator_config(task: ProductPhysicalTask,
-                                  resolver: 'product_controller.Resolver') -> Dict[str, Any]:
+    def make_cbf_simulator_config(
+        task: ProductPhysicalTask, resolver: 'product_controller.Resolver'
+    ) -> Dict[str, Any]:
         conf = {
             'cbf_channels': stream.n_chans,
             'cbf_adc_sample_rate': stream.adc_sample_rate,
@@ -980,32 +1206,38 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             'cbf_ibv': ibv,
             'cbf_sync_time': configuration.simulation.start_time or time.time(),
             'cbf_sim_clock_ratio': configuration.simulation.clock_ratio,
-            'servers': n_sim
+            'servers': n_sim,
         }
         sources = configuration.simulation.sources
         if sources:
             conf['cbf_sim_sources'] = [{'description': s.description} for s in sources]
         if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
-            conf.update({
-                'cbf_int_time': stream.int_time,
-                'max_packet_size': 2088
-            })
+            conf.update({'cbf_int_time': stream.int_time, 'max_packet_size': 2088})
         else:
-            conf.update({
-                'beamformer_timesteps': stream.spectra_per_heap,
-                'beamformer_bits': stream.bits_per_sample
-            })
+            conf.update(
+                {
+                    'beamformer_timesteps': stream.spectra_per_heap,
+                    'beamformer_bits': stream.bits_per_sample,
+                }
+            )
         conf['cbf_center_freq'] = float(stream.centre_frequency)
-        conf['cbf_antennas'] = [{'description': ant.description}
-                                for ant in stream.antenna_channelised_voltage.antenna_objects]
+        conf['cbf_antennas'] = [
+            {'description': ant.description}
+            for ant in stream.antenna_channelised_voltage.antenna_objects
+        ]
         return conf
 
     sim_group = LogicalGroup('sim.' + stream.name)
     g.add_node(sim_group, config=make_cbf_simulator_config)
     multicast = LogicalMulticast(stream.name, stream.n_endpoints)
     g.add_node(multicast)
-    g.add_edge(sim_group, multicast, port='spead', depends_resolve=True,
-               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+    g.add_edge(
+        sim_group,
+        multicast,
+        port='spead',
+        depends_resolve=True,
+        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)},
+    )
     g.add_edge(multicast, sim_group, depends_init=True, depends_ready=True)
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph['init_telstate']
@@ -1053,34 +1285,42 @@ def _make_cbf_simulator(g: networkx.MultiDiGraph,
             sim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "nofile=8192"}]
             # Need to enable cap_net_raw capability if using recent mlx5 kernel module.
             sim.command = ['capambel', '-c', 'cap_net_raw+p', '--'] + sim.command
-            sim.capabilities.append('NET_RAW')   # For ibverbs raw QPs
+            sim.capabilities.append('NET_RAW')  # For ibverbs raw QPs
         sim.interfaces = [scheduler.InterfaceRequest('cbf', infiniband=ibv)]
         sim.interfaces[0].bandwidth_out = stream.data_rate()
         sim.transitions = {
             CaptureBlockState.CAPTURING: [
-                KatcpTransition('capture-start', stream.name,
-                                configuration.simulation.start_time or '{time}',
-                                timeout=30)
+                KatcpTransition(
+                    'capture-start',
+                    stream.name,
+                    configuration.simulation.start_time or '{time}',
+                    timeout=30,
+                )
             ],
-            CaptureBlockState.BURNDOWN: [
-                KatcpTransition('capture-stop', stream.name, timeout=60)
-            ]
+            CaptureBlockState.BURNDOWN: [KatcpTransition('capture-stop', stream.name, timeout=60)],
         }
 
-        g.add_node(sim, config=lambda task, resolver, server_id=i + 1: {
-            'cbf_interface': task.interfaces['cbf'].name,
-            'server_id': server_id
-        })
+        g.add_node(
+            sim,
+            config=lambda task, resolver, server_id=i + 1: {
+                'cbf_interface': task.interfaces['cbf'].name,
+                'server_id': server_id,
+            },
+        )
         g.add_edge(sim_group, sim, depends_ready=True, depends_init=True)
         g.add_edge(sim, sim_group, depends_resources=True)
     return sim_group
 
 
-def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
-                   cpus: float,
-                   timeplot_buffer_mb: float,
-                   data_rate: float,
-                   extra_config: dict) -> scheduler.LogicalNode:
+def _make_timeplot(
+    g: networkx.MultiDiGraph,
+    name: str,
+    description: str,
+    cpus: float,
+    timeplot_buffer_mb: float,
+    data_rate: float,
+    extra_config: dict,
+) -> scheduler.LogicalNode:
     """Common backend code for creating a single timeplot server."""
     multicast = find_node(g, 'multicast.timeplot.' + name)
     timeplot = ProductLogicalTask('timeplot.' + name)
@@ -1098,32 +1338,46 @@ def _make_timeplot(g: networkx.MultiDiGraph, name: str, description: str,
     timeplot.interfaces[0].bandwidth_in = data_rate
     timeplot.ports = ['html_port']
     timeplot.volumes = [CONFIG_VOL]
-    timeplot.gui_urls = [{
-        'title': 'Signal Display',
-        'description': f'Signal displays for {{0.subarray_product_id}} {description}',
-        'href': 'http://{0.host}:{0.ports[html_port]}/',
-        'category': 'Plot'
-    }]
+    timeplot.gui_urls = [
+        {
+            'title': 'Signal Display',
+            'description': f'Signal displays for {{0.subarray_product_id}} {description}',
+            'href': 'http://{0.host}:{0.ports[html_port]}/',
+            'category': 'Plot',
+        }
+    ]
     timeplot.critical = False
 
-    g.add_node(timeplot, config=lambda task, resolver: dict({
-        'html_host': LOCALHOST if resolver.localhost else '',
-        'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
-        'spead_interface': task.interfaces['sdp_10g'].name,
-        'memusage': -timeplot_buffer_mb     # Negative value gives MB instead of %
-    }, **extra_config))
-    g.add_edge(timeplot, multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {
-                   'spead': endpoint.host,
-                   'spead_port': endpoint.port
-               })
+    g.add_node(
+        timeplot,
+        config=lambda task, resolver: dict(
+            {
+                'html_host': LOCALHOST if resolver.localhost else '',
+                'config_base': os.path.join(CONFIG_VOL.container_path, '.katsdpdisp'),
+                'spead_interface': task.interfaces['sdp_10g'].name,
+                'memusage': -timeplot_buffer_mb,  # Negative value gives MB instead of %
+            },
+            **extra_config,
+        ),
+    )
+    g.add_edge(
+        timeplot,
+        multicast,
+        port='spead',
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+        config=lambda task, resolver, endpoint: {
+            'spead': endpoint.host,
+            'spead_port': endpoint.port,
+        },
+    )
     return timeplot
 
 
-def _make_timeplot_correlator(g: networkx.MultiDiGraph,
-                              configuration: Configuration,
-                              stream: product_config.VisStream) -> scheduler.LogicalNode:
+def _make_timeplot_correlator(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VisStream
+) -> scheduler.LogicalNode:
     n_ingest = stream.n_servers
 
     # Exact requirement not known (also depends on number of users). Give it
@@ -1138,39 +1392,46 @@ def _make_timeplot_correlator(g: networkx.MultiDiGraph,
     timeplot_buffer = min(256 * timeplot_slot, 16 * 1024**3)
 
     return _make_timeplot(
-        g, name=stream.name, description=stream.name,
-        cpus=cpus, timeplot_buffer_mb=timeplot_buffer / 1024**2,
+        g,
+        name=stream.name,
+        description=stream.name,
+        cpus=cpus,
+        timeplot_buffer_mb=timeplot_buffer / 1024**2,
         data_rate=_correlator_timeplot_data_rate(stream) * n_ingest,
         extra_config={
             'l0_name': stream.name,
-            'max_custom_signals': defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS
-        }
+            'max_custom_signals': defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS,
+        },
     )
 
 
 def _make_timeplot_beamformer(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        stream: product_config.TiedArrayChannelisedVoltageStreamBase) -> \
-            Tuple[scheduler.LogicalNode, scheduler.LogicalNode]:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.TiedArrayChannelisedVoltageStreamBase,
+) -> Tuple[scheduler.LogicalNode, scheduler.LogicalNode]:
     """Make timeplot server for the beamformer, plus a beamformer capture to feed it."""
     beamformer = _make_beamformer_engineering_pol(
-        g, configuration, None, stream, f'bf_ingest_timeplot.{stream.name}', False, 0)
+        g, configuration, None, stream, f'bf_ingest_timeplot.{stream.name}', False, 0
+    )
     beamformer.critical = False
 
     # It's a low-demand setup (only one signal). The CPU and memory numbers
     # could potentially be reduced further.
     timeplot = _make_timeplot(
-        g, name=stream.name, description=stream.name,
-        cpus=0.5, timeplot_buffer_mb=128,
+        g,
+        name=stream.name,
+        description=stream.name,
+        cpus=0.5,
+        timeplot_buffer_mb=128,
         data_rate=_beamformer_timeplot_data_rate(stream),
-        extra_config={'max_custom_signals': 2})
+        extra_config={'max_custom_signals': 2},
+    )
 
     return beamformer, timeplot
 
 
-def _correlator_timeplot_frame_size(stream: product_config.VisStream,
-                                    n_cont_chans: int) -> int:
+def _correlator_timeplot_frame_size(stream: product_config.VisStream, n_cont_chans: int) -> int:
     """Approximate size of the data sent from one ingest process to timeplot, per heap"""
     # This is based on _init_ig_sd from katsdpingest/ingest_session.py
     n_perc_signals = 5 * 8
@@ -1179,15 +1440,15 @@ def _correlator_timeplot_frame_size(stream: product_config.VisStream,
     n_bls = stream.n_baselines
     # sd_data + sd_flags
     ans = n_spec_chans * defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * (BYTES_PER_VIS + BYTES_PER_FLAG)
-    ans += defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * 4          # sd_data_index
+    ans += defaults.TIMEPLOT_MAX_CUSTOM_SIGNALS * 4  # sd_data_index
     # sd_blmxdata + sd_blmxflags
     ans += n_cont_chans * n_bls * (BYTES_PER_VIS + BYTES_PER_FLAG)
-    ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // COMPLEX)    # sd_timeseries + sd_timeseriesabs
+    ans += n_bls * (BYTES_PER_VIS + BYTES_PER_VIS // COMPLEX)  # sd_timeseries + sd_timeseriesabs
     # sd_percspectrum + sd_percspectrumflags
     ans += n_spec_chans * n_perc_signals * (BYTES_PER_VIS // COMPLEX + BYTES_PER_FLAG)
     # input names are e.g. m012v -> 5 chars, 2 inputs per baseline
-    ans += n_bls * 10                               # bls_ordering
-    ans += n_bls * 8 * 4                            # sd_flag_fraction
+    ans += n_bls * 10  # bls_ordering
+    ans += n_bls * 8 * 4  # sd_flag_fraction
     # There are a few scalar values, but that doesn't add up to enough to worry about
     return ans
 
@@ -1195,8 +1456,10 @@ def _correlator_timeplot_frame_size(stream: product_config.VisStream,
 def _correlator_timeplot_continuum_factor(stream: product_config.VisStream) -> int:
     factor = 1
     # Aim for about 256 signal display coarse channels
-    while (stream.n_spectral_chans % (factor * stream.n_servers * 2) == 0
-           and stream.n_spectral_chans // factor >= 384):
+    while (
+        stream.n_spectral_chans % (factor * stream.n_servers * 2) == 0
+        and stream.n_spectral_chans // factor >= 384
+    ):
         factor *= 2
     return factor
 
@@ -1205,14 +1468,16 @@ def _correlator_timeplot_data_rate(stream: product_config.VisStream) -> float:
     """Bandwidth for the correlator timeplot stream from a single ingest"""
     sd_continuum_factor = _correlator_timeplot_continuum_factor(stream)
     sd_frame_size = _correlator_timeplot_frame_size(
-        stream, stream.n_spectral_chans // sd_continuum_factor)
+        stream, stream.n_spectral_chans // sd_continuum_factor
+    )
     # The rates are low, so we allow plenty of padding in case the calculation is
     # missing something.
     return data_rate(sd_frame_size, stream.int_time, ratio=1.2, overhead=4096)
 
 
 def _beamformer_timeplot_data_rate(
-        stream: product_config.TiedArrayChannelisedVoltageStreamBase) -> float:
+    stream: product_config.TiedArrayChannelisedVoltageStreamBase,
+) -> float:
     """Bandwidth for the beamformer timeplot stream.
 
     Parameters
@@ -1223,11 +1488,10 @@ def _beamformer_timeplot_data_rate(
     # XXX The beamformer signal displays are still in development, but the
     # rates are tiny. Until the protocol is finalised we'll just hardcode a
     # number.
-    return 1e6    # 1 MB/s
+    return 1e6  # 1 MB/s
 
 
-def n_cal_nodes(configuration: Configuration,
-                stream: product_config.CalStream) -> int:
+def n_cal_nodes(configuration: Configuration, stream: product_config.CalStream) -> int:
     """Number of processes used to implement cal for a particular output."""
     # Use single cal for 4K or less: it doesn't need the performance, and
     # a unified cal report is more convenient (revisit once split cal supports
@@ -1245,6 +1509,7 @@ def _adjust_ingest_output_channels(streams: Sequence[product_config.VisStream]) 
 
     They are widened where necessary to meet alignment requirements.
     """
+
     def lcm(a, b):
         return a // math.gcd(a, b) * b
 
@@ -1262,14 +1527,21 @@ def _adjust_ingest_output_channels(streams: Sequence[product_config.VisStream]) 
     assert 0 <= assigned[0] < assigned[1] <= src.n_chans, "Aligning channels caused an overflow"
     for stream in streams:
         if assigned != stream.output_channels:
-            logger.info('Rounding output channels for %s from %s to %s',
-                        stream.name, stream.output_channels, assigned)
+            logger.info(
+                'Rounding output channels for %s from %s to %s',
+                stream.name,
+                stream.output_channels,
+                assigned,
+            )
         stream.output_channels = assigned
 
 
-def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
-                 spectral: Optional[product_config.VisStream],
-                 continuum: Optional[product_config.VisStream]) -> scheduler.LogicalNode:
+def _make_ingest(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    spectral: Optional[product_config.VisStream],
+    continuum: Optional[product_config.VisStream],
+) -> scheduler.LogicalNode:
     develop = configuration.options.develop
 
     primary = spectral if spectral is not None else continuum
@@ -1306,7 +1578,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         'sd_output_channels': output_channels_str,
         'use_data_suspect': True,
         'excise': primary.excise,
-        'aiomonitor': True
+        'aiomonitor': True,
     }
     if spectral is not None:
         group_config.update(l0_spectral_name=spectral.name)
@@ -1319,25 +1591,45 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
     if spectral is not None:
         spectral_multicast = LogicalMulticast(spectral.name, n_ingest)
         g.add_node(spectral_multicast)
-        g.add_edge(ingest_group, spectral_multicast, port='spead', depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)})
+        g.add_edge(
+            ingest_group,
+            spectral_multicast,
+            port='spead',
+            depends_resolve=True,
+            config=lambda task, resolver, endpoint: {'l0_spectral_spead': str(endpoint)},
+        )
         g.add_edge(spectral_multicast, ingest_group, depends_init=True, depends_ready=True)
         # Signal display stream
         timeplot_multicast = LogicalMulticast('timeplot.' + name, 1)
         g.add_node(timeplot_multicast)
-        g.add_edge(ingest_group, timeplot_multicast, port='spead', depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)})
+        g.add_edge(
+            ingest_group,
+            timeplot_multicast,
+            port='spead',
+            depends_resolve=True,
+            config=lambda task, resolver, endpoint: {'sdisp_spead': str(endpoint)},
+        )
         g.add_edge(timeplot_multicast, ingest_group, depends_init=True, depends_ready=True)
     if continuum is not None:
         continuum_multicast = LogicalMulticast(continuum.name, n_ingest)
         g.add_node(continuum_multicast)
-        g.add_edge(ingest_group, continuum_multicast, port='spead', depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)})
+        g.add_edge(
+            ingest_group,
+            continuum_multicast,
+            port='spead',
+            depends_resolve=True,
+            config=lambda task, resolver, endpoint: {'l0_continuum_spead': str(endpoint)},
+        )
         g.add_edge(continuum_multicast, ingest_group, depends_init=True, depends_ready=True)
 
     src_multicast = find_node(g, 'multicast.' + src.name)
-    g.add_edge(ingest_group, src_multicast, port='spead', depends_resolve=True,
-               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+    g.add_edge(
+        ingest_group,
+        src_multicast,
+        port='spead',
+        depends_resolve=True,
+        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)},
+    )
 
     for i in range(1, n_ingest + 1):
         ingest = ProductLogicalTask(f'ingest.{name}.{i}', streams=streams)
@@ -1361,8 +1653,7 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         # https://docs.google.com/spreadsheets/d/13LOMcUDV1P0wyh_VSgTOcbnhyfHKqRg5rfkQcmeXmq0/edit
         # We use slightly higher multipliers to be safe, as well as
         # conservatively using src_info instead of spectral_info.
-        ingest.gpus[0].mem = \
-            (70 * src.n_vis + 168 * src.n_chans) / n_ingest / 1024**2 + 128
+        ingest.gpus[0].mem = (70 * src.n_vis + 168 * src.n_chans) / n_ingest / 1024**2 + 128
         # Provide 4 CPUs for 32 antennas, 32K channels (the number in a NUMA
         # node of an ingest machine). It might not actually need this much.
         # Cores are reserved solely to get NUMA affinity with the NIC.
@@ -1374,7 +1665,8 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         ingest.transitions = CAPTURE_TRANSITIONS
         ingest.interfaces = [
             scheduler.InterfaceRequest('cbf', affinity=not develop, infiniband=not develop),
-            scheduler.InterfaceRequest('sdp_10g')]
+            scheduler.InterfaceRequest('sdp_10g'),
+        ]
         ingest.interfaces[0].bandwidth_in = src.data_rate() / n_ingest
         data_rate_out = 0.0
         if spectral is not None:
@@ -1383,19 +1675,17 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
             data_rate_out += continuum.data_rate()
         ingest.interfaces[1].bandwidth_out = data_rate_out / n_ingest
 
-        def make_ingest_config(task: ProductPhysicalTask,
-                               resolver: 'product_controller.Resolver',
-                               server_id: int = i) -> Dict[str, Any]:
-            conf = {
-                'cbf_interface': task.interfaces['cbf'].name,
-                'server_id': server_id
-            }
+        def make_ingest_config(
+            task: ProductPhysicalTask, resolver: 'product_controller.Resolver', server_id: int = i
+        ) -> Dict[str, Any]:
+            conf = {'cbf_interface': task.interfaces['cbf'].name, 'server_id': server_id}
             if spectral is not None:
                 conf.update(l0_spectral_interface=task.interfaces['sdp_10g'].name)
                 conf.update(sdisp_interface=task.interfaces['sdp_10g'].name)
             if continuum is not None:
                 conf.update(l0_continuum_interface=task.interfaces['sdp_10g'].name)
             return conf
+
         g.add_node(ingest, config=make_ingest_config)
         # Connect to ingest_group. We need a ready dependency of the group on
         # the node, so that other nodes depending on the group indirectly wait
@@ -1404,15 +1694,18 @@ def _make_ingest(g: networkx.MultiDiGraph, configuration: Configuration,
         # config.
         g.add_edge(ingest_group, ingest, depends_ready=True, depends_init=True)
         g.add_edge(ingest, ingest_group, depends_resources=True)
-        g.add_edge(ingest, src_multicast,
-                   depends_resolve=True, depends_ready=True, depends_init=True)
+        g.add_edge(
+            ingest, src_multicast, depends_resolve=True, depends_ready=True, depends_init=True
+        )
     return ingest_group
 
 
-def _make_cal(g: networkx.MultiDiGraph,
-              configuration: Configuration,
-              stream: product_config.CalStream,
-              flags_streams: Sequence[product_config.FlagsStream]) -> scheduler.LogicalNode:
+def _make_cal(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.CalStream,
+    flags_streams: Sequence[product_config.FlagsStream],
+) -> scheduler.LogicalNode:
     vis = stream.vis
     n_cal = n_cal_nodes(configuration, stream)
 
@@ -1473,24 +1766,28 @@ def _make_cal(g: networkx.MultiDiGraph,
         'workers': workers,
         'l0_name': vis.name,
         'servers': n_cal,
-        'aiomonitor': True
+        'aiomonitor': True,
     }
     group_config.update(stream.parameters)
-    if isinstance(vis.baseline_correlation_products,
-                  product_config.SimBaselineCorrelationProductsStream):
+    if isinstance(
+        vis.baseline_correlation_products, product_config.SimBaselineCorrelationProductsStream
+    ):
         group_config.update(clock_ratio=configuration.simulation.clock_ratio)
 
     # Virtual node which depends on the real cal nodes, so that other services
     # can declare dependencies on cal rather than individual nodes.
     cal_group = LogicalGroup(stream.name)
-    g.add_node(cal_group, telstate_extra=telstate_extra,
-               config=lambda task, resolver: group_config)
+    g.add_node(cal_group, telstate_extra=telstate_extra, config=lambda task, resolver: group_config)
     src_multicast = find_node(g, 'multicast.' + vis.name)
-    g.add_edge(cal_group, src_multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {
-                   'l0_spead': str(endpoint)
-               })
+    g.add_edge(
+        cal_group,
+        src_multicast,
+        port='spead',
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+        config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)},
+    )
 
     # Flags output
     flags_streams_base = []
@@ -1498,12 +1795,14 @@ def _make_cal(g: networkx.MultiDiGraph,
     for flags_stream in flags_streams:
         flags_vis = flags_stream.vis
         cf = flags_vis.continuum_factor // vis.continuum_factor
-        flags_streams_base.append({
-            'name': flags_stream.name,
-            'src_stream': flags_vis.name,
-            'continuum_factor': cf,
-            'rate_ratio': flags_stream.rate_ratio
-        })
+        flags_streams_base.append(
+            {
+                'name': flags_stream.name,
+                'src_stream': flags_vis.name,
+                'continuum_factor': cf,
+                'rate_ratio': flags_stream.rate_ratio,
+            }
+        )
 
         flags_multicast = LogicalMulticast(flags_stream.name, n_cal)
         flags_multicasts[flags_stream] = flags_multicast
@@ -1512,8 +1811,7 @@ def _make_cal(g: networkx.MultiDiGraph,
 
     dask_prefix = '/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics'
     for i in range(1, n_cal + 1):
-        cal = ProductLogicalTask(f'{stream.name}.{i}',
-                                 streams=(stream,) + tuple(flags_streams))
+        cal = ProductLogicalTask(f'{stream.name}.{i}', streams=(stream,) + tuple(flags_streams))
         cal.subsystem = 'sdp'
         cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = 'katsdpcal'
@@ -1525,35 +1823,38 @@ def _make_cal(g: networkx.MultiDiGraph,
         # Note: these scale the fixed overheads too, so is not strictly accurate.
         cal.interfaces[0].bandwidth_in = vis.data_rate() / n_cal
         cal.interfaces[0].bandwidth_out = sum(
-            flags_stream.data_rate() / n_cal
-            for flags in flags_streams
+            flags_stream.data_rate() / n_cal for flags in flags_streams
         )
         cal.ports = ['port', 'dask_diagnostics', 'aiomonitor_port', 'aioconsole_port']
         cal.wait_ports = ['port']
-        cal.gui_urls = [{
-            'title': 'Cal diagnostics',
-            'description': 'Dask diagnostics for {0.name}',
-            'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix + '/status',
-            'category': 'Plot'
-        }]
+        cal.gui_urls = [
+            {
+                'title': 'Cal diagnostics',
+                'description': 'Dask diagnostics for {0.name}',
+                'href': 'http://{0.host}:{0.ports[dask_diagnostics]}' + dask_prefix + '/status',
+                'category': 'Plot',
+            }
+        ]
         cal.transitions = CAPTURE_TRANSITIONS
         cal.final_state = CaptureBlockState.POSTPROCESSING
 
-        def make_cal_config(task: ProductPhysicalTask,
-                            resolver: 'product_controller.Resolver',
-                            server_id: int = i) -> Dict[str, Any]:
+        def make_cal_config(
+            task: ProductPhysicalTask, resolver: 'product_controller.Resolver', server_id: int = i
+        ) -> Dict[str, Any]:
             cal_config = {
                 'l0_interface': task.interfaces['sdp_10g'].name,
                 'server_id': server_id,
-                'dask_diagnostics': (LOCALHOST if resolver.localhost else '',
-                                     task.ports['dask_diagnostics']),
+                'dask_diagnostics': (
+                    LOCALHOST if resolver.localhost else '',
+                    task.ports['dask_diagnostics'],
+                ),
                 'dask_prefix': dask_prefix.format(task),
-                'flags_streams': copy.deepcopy(flags_streams_base)
+                'flags_streams': copy.deepcopy(flags_streams_base),
             }
             for flags_stream in cal_config['flags_streams']:
                 flags_stream['interface'] = task.interfaces['sdp_10g'].name
                 flags_stream['endpoints'] = str(
-                        task.flags_endpoints[flags_stream['name']]   # type: ignore
+                    task.flags_endpoints[flags_stream['name']]  # type: ignore
                 )
             return cal_config
 
@@ -1561,25 +1862,27 @@ def _make_cal(g: networkx.MultiDiGraph,
         # Connect to cal_group. See comments in _make_ingest for explanation.
         g.add_edge(cal_group, cal, depends_ready=True, depends_init=True)
         g.add_edge(cal, cal_group, depends_resources=True)
-        g.add_edge(cal, src_multicast,
-                   depends_resolve=True, depends_ready=True, depends_init=True)
+        g.add_edge(cal, src_multicast, depends_resolve=True, depends_ready=True, depends_init=True)
 
         for flags_stream, flags_multicast in flags_multicasts.items():
             # A sneaky hack to capture the endpoint information for the flag
             # streams. This is used as a config= function, but instead of
             # returning config we just stash information in the task object
             # which is retrieved by make_cal_config.
-            def add_flags_endpoint(task: ProductPhysicalTask,
-                                   resolver: 'product_controller.Resolver',
-                                   endpoint: Endpoint,
-                                   name: str = flags_stream.name) -> Dict[str, Any]:
+            def add_flags_endpoint(
+                task: ProductPhysicalTask,
+                resolver: 'product_controller.Resolver',
+                endpoint: Endpoint,
+                name: str = flags_stream.name,
+            ) -> Dict[str, Any]:
                 if not hasattr(task, 'flags_endpoints'):
-                    task.flags_endpoints = {}                # type: ignore
-                task.flags_endpoints[name] = endpoint        # type: ignore
+                    task.flags_endpoints = {}  # type: ignore
+                task.flags_endpoints[name] = endpoint  # type: ignore
                 return {}
 
-            g.add_edge(cal, flags_multicast, port='spead', depends_resolve=True,
-                       config=add_flags_endpoint)
+            g.add_edge(
+                cal, flags_multicast, port='spead', depends_resolve=True, config=add_flags_endpoint
+            )
 
     g.graph['archived_streams'].append(stream.name)
     return cal_group
@@ -1605,9 +1908,9 @@ def _writer_mem_mb(dump_size, obj_size, n_substreams, workers, buffer_dumps, max
     return 2 * _mb(memory_pool + write_queue + accum_buffers + socket_buffers) + 512
 
 
-def _writer_max_accum_dumps(stream: product_config.VisStream,
-                            bytes_per_vis: int,
-                            max_channels: Optional[int]) -> int:
+def _writer_max_accum_dumps(
+    stream: product_config.VisStream, bytes_per_vis: int, max_channels: Optional[int]
+) -> int:
     """Compute value of --obj-max-dumps for data writers.
 
     If `max_channels` is not ``None``, it indicates the maximum number of
@@ -1632,13 +1935,15 @@ def _writer_max_accum_dumps(stream: product_config.VisStream,
     return max_accum_dumps
 
 
-def _make_vis_writer(g: networkx.MultiDiGraph,
-                     configuration: Configuration,
-                     stream: product_config.VisStream,
-                     s3_name: str,
-                     local: bool,
-                     prefix: Optional[str] = None,
-                     max_channels: Optional[int] = None):
+def _make_vis_writer(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.VisStream,
+    s3_name: str,
+    local: bool,
+    prefix: Optional[str] = None,
+    max_channels: Optional[int] = None,
+):
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
     vis_writer = ProductLogicalTask('vis_writer.' + output_name, streams=[stream])
@@ -1662,8 +1967,14 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
 
     # Double the memory allocation to be on the safe side. This gives some
     # headroom for page cache etc.
-    vis_writer.mem = _writer_mem_mb(stream.size, defaults.WRITER_OBJECT_SIZE, n_substreams,
-                                    workers, buffer_dumps, max_accum_dumps)
+    vis_writer.mem = _writer_mem_mb(
+        stream.size,
+        defaults.WRITER_OBJECT_SIZE,
+        n_substreams,
+        workers,
+        buffer_dumps,
+        max_accum_dumps,
+    )
     vis_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     vis_writer.wait_ports = ['port']
     vis_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1673,14 +1984,19 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
     else:
         vis_writer.interfaces[0].backwidth_out = stream.data_rate()
         # Creds are passed on the command-line so that they are redacted from telstate.
-        vis_writer.command.extend([
-            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
-            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
-        ])
+        vis_writer.command.extend(
+            [
+                '--s3-access-key',
+                '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+                '--s3-secret-key',
+                '{resolver.s3_config[%s][write][secret_key]}' % s3_name,
+            ]
+        )
     vis_writer.transitions = CAPTURE_TRANSITIONS
 
-    def make_vis_writer_config(task: ProductPhysicalTask,
-                               resolver: 'product_controller.Resolver') -> Dict[str, Any]:
+    def make_vis_writer_config(
+        task: ProductPhysicalTask, resolver: 'product_controller.Resolver'
+    ) -> Dict[str, Any]:
         conf = {
             'l0_name': stream.name,
             'l0_interface': task.interfaces['sdp_10g'].name,
@@ -1691,7 +2007,7 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
-            'aiomonitor': True
+            'aiomonitor': True,
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
@@ -1704,19 +2020,27 @@ def _make_vis_writer(g: networkx.MultiDiGraph,
         return conf
 
     g.add_node(vis_writer, config=make_vis_writer_config)
-    g.add_edge(vis_writer, src_multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)})
+    g.add_edge(
+        vis_writer,
+        src_multicast,
+        port='spead',
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+        config=lambda task, resolver, endpoint: {'l0_spead': str(endpoint)},
+    )
     return vis_writer
 
 
-def _make_flag_writer(g: networkx.MultiDiGraph,
-                      configuration: Configuration,
-                      stream: product_config.FlagsStream,
-                      s3_name: str,
-                      local: bool,
-                      prefix: Optional[str] = None,
-                      max_channels: Optional[int] = None) -> scheduler.LogicalNode:
+def _make_flag_writer(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.FlagsStream,
+    s3_name: str,
+    local: bool,
+    prefix: Optional[str] = None,
+    max_channels: Optional[int] = None,
+) -> scheduler.LogicalNode:
     output_name = prefix + '.' + stream.name if prefix is not None else stream.name
     g.graph['archived_streams'].append(output_name)
     flag_writer = ProductLogicalTask('flag_writer.' + output_name, streams=[stream])
@@ -1737,8 +2061,14 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     # Don't yet have a good idea of real CPU usage. This formula is
     # copied from the vis writer.
     flag_writer.cpus = min(3, 2 * stream.n_vis / _N32_32)
-    flag_writer.mem = _writer_mem_mb(stream.size, defaults.WRITER_OBJECT_SIZE, n_substreams,
-                                     workers, buffer_dumps, max_accum_dumps)
+    flag_writer.mem = _writer_mem_mb(
+        stream.size,
+        defaults.WRITER_OBJECT_SIZE,
+        n_substreams,
+        workers,
+        buffer_dumps,
+        max_accum_dumps,
+    )
     flag_writer.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     flag_writer.wait_ports = ['port']
     flag_writer.interfaces = [scheduler.InterfaceRequest('sdp_10g')]
@@ -1748,10 +2078,14 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
     else:
         flag_writer.interfaces[0].bandwidth_out = flag_writer.interfaces[0].bandwidth_in
         # Creds are passed on the command-line so that they are redacted from telstate.
-        flag_writer.command.extend([
-            '--s3-access-key', '{resolver.s3_config[%s][write][access_key]}' % s3_name,
-            '--s3-secret-key', '{resolver.s3_config[%s][write][secret_key]}' % s3_name
-        ])
+        flag_writer.command.extend(
+            [
+                '--s3-access-key',
+                '{resolver.s3_config[%s][write][access_key]}' % s3_name,
+                '--s3-secret-key',
+                '{resolver.s3_config[%s][write][secret_key]}' % s3_name,
+            ]
+        )
     flag_writer.final_state = CaptureBlockState.POSTPROCESSING
 
     # Capture init / done are used to track progress of completing flags
@@ -1762,11 +2096,12 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
         ],
         CaptureBlockState.POSTPROCESSING: [
             KatcpTransition('capture-done', '{capture_block_id}', timeout=60)
-        ]
+        ],
     }
 
-    def make_flag_writer_config(task: ProductPhysicalTask,
-                                resolver: 'product_controller.Resolver') -> Dict[str, Any]:
+    def make_flag_writer_config(
+        task: ProductPhysicalTask, resolver: 'product_controller.Resolver'
+    ) -> Dict[str, Any]:
         conf = {
             'flags_name': stream.name,
             'flags_interface': task.interfaces['sdp_10g'].name,
@@ -1777,7 +2112,7 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
             's3_endpoint_url': resolver.s3_config[s3_name]['read']['url'],
             's3_expiry_days': resolver.s3_config[s3_name].get('expiry_days', None),
             'direct_write': True,
-            'aiomonitor': True
+            'aiomonitor': True,
         }
         if local:
             conf['npy_path'] = OBJ_DATA_VOL.container_path
@@ -1791,32 +2126,55 @@ def _make_flag_writer(g: networkx.MultiDiGraph,
         return conf
 
     g.add_node(flag_writer, config=make_flag_writer_config)
-    g.add_edge(flag_writer, flags_src, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)})
+    g.add_edge(
+        flag_writer,
+        flags_src,
+        port='spead',
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+        config=lambda task, resolver, endpoint: {'flags_spead': str(endpoint)},
+    )
     return flag_writer
 
 
-def _make_imager_writers(g: networkx.MultiDiGraph,
-                         configuration: Configuration,
-                         s3_name: str,
-                         stream: product_config.ImageStream,
-                         max_channels: Optional[int] = None) -> None:
+def _make_imager_writers(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    s3_name: str,
+    stream: product_config.ImageStream,
+    max_channels: Optional[int] = None,
+) -> None:
     """Make vis and flag writers for an imager output"""
-    _make_vis_writer(g, configuration, stream.vis, s3_name=s3_name,
-                     local=False, prefix=stream.name, max_channels=max_channels)
-    _make_flag_writer(g, configuration, stream.flags, s3_name=s3_name,
-                      local=False, prefix=stream.name, max_channels=max_channels)
+    _make_vis_writer(
+        g,
+        configuration,
+        stream.vis,
+        s3_name=s3_name,
+        local=False,
+        prefix=stream.name,
+        max_channels=max_channels,
+    )
+    _make_flag_writer(
+        g,
+        configuration,
+        stream.flags,
+        s3_name=s3_name,
+        local=False,
+        prefix=stream.name,
+        max_channels=max_channels,
+    )
 
 
 def _make_beamformer_engineering_pol(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        stream: Optional[product_config.BeamformerEngineeringStream],
-        src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
-        node_name: str,
-        ram: bool,
-        idx: int) -> ProductLogicalTask:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: Optional[product_config.BeamformerEngineeringStream],
+    src_stream: product_config.TiedArrayChannelisedVoltageStreamBase,
+    node_name: str,
+    ram: bool,
+    idx: int,
+) -> ProductLogicalTask:
     """Generate node for a single polarisation of beamformer engineering output.
 
     This handles two cases: either it is a capture to file, associated with a
@@ -1871,9 +2229,9 @@ def _make_beamformer_engineering_pol(
     # can't have affinity to both the (single) NIC and to both memory
     # regions.
     bf_ingest.interfaces = [
-        scheduler.InterfaceRequest('cbf',
-                                   infiniband=not configuration.options.develop,
-                                   affinity=timeplot or not ram)
+        scheduler.InterfaceRequest(
+            'cbf', infiniband=not configuration.options.develop, affinity=timeplot or not ram
+        )
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
@@ -1885,64 +2243,79 @@ def _make_beamformer_engineering_pol(
     else:
         volume_name = 'bf_ram{}' if ram else 'bf_ssd{}'
         bf_ingest.volumes = [
-            scheduler.VolumeRequest(volume_name.format(idx), '/data', 'RW', affinity=ram)]
+            scheduler.VolumeRequest(volume_name.format(idx), '/data', 'RW', affinity=ram)
+        ]
     bf_ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
     bf_ingest.wait_ports = ['port']
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 
     def make_beamformer_engineering_pol_config(
-            task: ProductPhysicalTask,
-            resolver: 'product_controller.Resolver') -> Dict[str, Any]:
+        task: ProductPhysicalTask, resolver: 'product_controller.Resolver'
+    ) -> Dict[str, Any]:
         config = {
             'affinity': [task.cores['disk'], task.cores['network']],
             'interface': task.interfaces['cbf'].name,
             'ibv': not configuration.options.develop,
             'stream_name': src_stream.name,
-            'aiomonitor': True
+            'aiomonitor': True,
         }
         if stream is None:
-            config.update({
-                'stats_interface': task.interfaces['sdp_10g'].name,
-                'stats_int_time': 1.0
-            })
+            config.update(
+                {'stats_interface': task.interfaces['sdp_10g'].name, 'stats_int_time': 1.0}
+            )
         else:
-            config.update({
-                'file_base': '/data',
-                'direct_io': not ram,       # Can't use O_DIRECT on tmpfs
-                'channels': '{}:{}'.format(*stream.output_channels)
-            })
+            config.update(
+                {
+                    'file_base': '/data',
+                    'direct_io': not ram,  # Can't use O_DIRECT on tmpfs
+                    'channels': '{}:{}'.format(*stream.output_channels),
+                }
+            )
         return config
 
     g.add_node(bf_ingest, config=make_beamformer_engineering_pol_config)
-    g.add_edge(bf_ingest, src_multicast, port='spead',
-               depends_resolve=True, depends_init=True, depends_ready=True,
-               config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)})
+    g.add_edge(
+        bf_ingest,
+        src_multicast,
+        port='spead',
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+        config=lambda task, resolver, endpoint: {'cbf_spead': str(endpoint)},
+    )
     if timeplot:
         stats_multicast = LogicalMulticast(f'timeplot.{src_stream.name}', 1)
-        g.add_edge(bf_ingest, stats_multicast, port='spead',
-                   depends_resolve=True,
-                   config=lambda task, resolver, endpoint: {'stats': str(endpoint)})
+        g.add_edge(
+            bf_ingest,
+            stats_multicast,
+            port='spead',
+            depends_resolve=True,
+            config=lambda task, resolver, endpoint: {'stats': str(endpoint)},
+        )
         g.add_edge(stats_multicast, bf_ingest, depends_init=True, depends_ready=True)
     return bf_ingest
 
 
 def _make_beamformer_engineering(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        stream: product_config.BeamformerEngineeringStream) -> Sequence[scheduler.LogicalTask]:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    stream: product_config.BeamformerEngineeringStream,
+) -> Sequence[scheduler.LogicalTask]:
     """Generate nodes for beamformer engineering output."""
     ram = stream.store == 'ram'
     nodes = []
     for i, src in enumerate(stream.tied_array_channelised_voltage):
-        nodes.append(_make_beamformer_engineering_pol(
-            g, configuration, stream, src,
-            f'bf_ingest.{stream.name}.{i + 1}', ram, i))
+        nodes.append(
+            _make_beamformer_engineering_pol(
+                g, configuration, stream, src, f'bf_ingest.{stream.name}.{i + 1}', ram, i
+            )
+        )
     return nodes
 
 
-def build_logical_graph(configuration: Configuration,
-                        config_dict: dict,
-                        sensors: SensorSet) -> networkx.MultiDiGraph:
+def build_logical_graph(
+    configuration: Configuration, config_dict: dict, sensors: SensorSet
+) -> networkx.MultiDiGraph:
     # We mutate the configuration to align output channels to requirements.
     configuration = copy.deepcopy(configuration)
 
@@ -1957,7 +2330,7 @@ def build_logical_graph(configuration: Configuration,
     # tuples which are joined later.
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = {
         'sdp_archived_streams': archived_streams,
-        'sdp_config': config_dict
+        'sdp_config': config_dict,
     }
 
     # Sensors that are created for individual streams and managed by the
@@ -1966,16 +2339,17 @@ def build_logical_graph(configuration: Configuration,
 
     g = networkx.MultiDiGraph(
         archived_streams=archived_streams,  # For access as g.graph['archived_streams']
-        init_telstate=init_telstate,        # ditto
+        init_telstate=init_telstate,  # ditto
         config=lambda resolver: ({'host': LOCALHOST} if resolver.localhost else {}),
-        stream_sensors=stream_sensors
+        stream_sensors=stream_sensors,
     )
 
     # Add SPEAD endpoints to the graph.
     input_multicast = []
     for stream in configuration.streams:
-        if isinstance(stream, (product_config.CbfStream,
-                               product_config.DigRawAntennaVoltageStream)):
+        if isinstance(
+            stream, (product_config.CbfStream, product_config.DigRawAntennaVoltageStream)
+        ):
             url = stream.url
             if url.scheme == 'spead':
                 node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
@@ -1997,11 +2371,9 @@ def build_logical_graph(configuration: Configuration,
 
     sync_time = int(time.time())
     for _, streams in itertools.groupby(
-            sorted(
-                configuration.by_class(product_config.SimDigRawAntennaVoltageStream),
-                key=dsim_key
-            ),
-            key=dsim_key):
+        sorted(configuration.by_class(product_config.SimDigRawAntennaVoltageStream), key=dsim_key),
+        key=dsim_key,
+    ):
         _make_dsim(g, configuration, streams, sync_time)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
@@ -2019,8 +2391,11 @@ def build_logical_graph(configuration: Configuration,
     for stream in configuration.by_class(product_config.VisStream):
         if stream.continuum_factor == 1:
             for stream2 in configuration.by_class(product_config.VisStream):
-                if (stream2 not in l0_done and stream2.continuum_factor > 1
-                        and stream2.compatible(stream)):
+                if (
+                    stream2 not in l0_done
+                    and stream2.continuum_factor > 1
+                    and stream2.compatible(stream)
+                ):
                     _adjust_ingest_output_channels([stream, stream2])
                     _make_ingest(g, configuration, stream, stream2)
                     _make_timeplot_correlator(g, configuration, stream)
@@ -2043,8 +2418,10 @@ def build_logical_graph(configuration: Configuration,
         else:
             _make_ingest(g, configuration, None, stream)
     if l0_continuum_only and l0_spectral_only:
-        logger.warning('Both continuum-only and spectral-only L0 streams found - '
-                       'perhaps they were intended to be matched?')
+        logger.warning(
+            'Both continuum-only and spectral-only L0 streams found - '
+            'perhaps they were intended to be matched?'
+        )
 
     for stream in configuration.by_class(product_config.VisStream):
         if stream.archive:
@@ -2073,13 +2450,14 @@ def build_logical_graph(configuration: Configuration,
     for stream in configuration.by_class(product_config.ContinuumImageStream):
         _make_imager_writers(g, configuration, 'continuum', stream)
     for stream in configuration.by_class(product_config.SpectralImageStream):
-        _make_imager_writers(g, configuration, 'spectral', stream,
-                             defaults.SPECTRAL_OBJECT_CHANNELS)
+        _make_imager_writers(
+            g, configuration, 'spectral', stream, defaults.SPECTRAL_OBJECT_CHANNELS
+        )
     # Imagers are mostly handled in build_postprocess_logical_graph, but we create
     # capture block-independent metadata here.
     image_classes: List[Type[product_config.Stream]] = [
         product_config.ContinuumImageStream,
-        product_config.SpectralImageStream
+        product_config.SpectralImageStream,
     ]
     for cls_ in image_classes:
         for stream in configuration.by_class(cls_):
@@ -2115,12 +2493,11 @@ def build_logical_graph(configuration: Configuration,
             # Connect every task to telstate
             if telstate is not None and node is not telstate:
                 if node.pass_telstate:
-                    node.command.extend([
-                        '--telstate', '{endpoints[telstate_telstate]}',
-                        '--name', node.name])
+                    node.command.extend(
+                        ['--telstate', '{endpoints[telstate_telstate]}', '--name', node.name]
+                    )
                 node.wrapper = configuration.options.wrapper
-                g.add_edge(node, telstate, port='telstate',
-                           depends_ready=True, depends_kill=True)
+                g.add_edge(node, telstate, port='telstate', depends_ready=True, depends_kill=True)
             # Make sure meta_writer is the last task to be handled in capture-done
             if meta_writer is not None and node is not meta_writer:
                 g.add_edge(meta_writer, node, depends_init=True)
@@ -2218,11 +2595,12 @@ class TargetMapper:
         return name
 
 
-def _get_targets(configuration: Configuration,
-                 capture_block_id: str,
-                 stream: product_config.ImageStream,
-                 telstate_endpoint: str) -> \
-        Tuple[Sequence[Tuple[katpoint.Target, float]], katdal.DataSet]:
+def _get_targets(
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.ImageStream,
+    telstate_endpoint: str,
+) -> Tuple[Sequence[Tuple[katpoint.Target, float]], katdal.DataSet]:
     """Identify all the targets to image.
 
     Parameter
@@ -2251,7 +2629,7 @@ def _get_targets(configuration: Configuration,
         f'redis://{telstate_endpoint}',
         capture_block_id=capture_block_id,
         stream_name=l0_stream,
-        chunk_store=None
+        chunk_store=None,
     )
     tracking = data_set.sensor.get('Observation/scan_state') == 'track'
     target_sensor = data_set.sensor.get('Observation/target_index')
@@ -2264,8 +2642,12 @@ def _get_targets(configuration: Configuration,
         if obs_time >= stream.min_time:
             targets.append((target, obs_time))
         else:
-            logger.info('Skipping target %s: observed for %.1f seconds, threshold is %.1f',
-                        target.name, obs_time, stream.min_time)
+            logger.info(
+                'Skipping target %s: observed for %.1f seconds, threshold is %.1f',
+                target.name,
+                obs_time,
+                stream.min_time,
+            )
     return targets, data_set
 
 
@@ -2277,13 +2659,15 @@ def _render_continuum_parameters(parameters: Dict[str, Any]) -> str:
     return '; '.join(f'{key}={value!r}' for key, value in parameters.items())
 
 
-async def _make_continuum_imager(g: networkx.MultiDiGraph,
-                                 configuration: Configuration,
-                                 capture_block_id: str,
-                                 stream: product_config.ContinuumImageStream,
-                                 telstate: katsdptelstate.aio.TelescopeState,
-                                 telstate_endpoint: str,
-                                 target_mapper: TargetMapper) -> None:
+async def _make_continuum_imager(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.ContinuumImageStream,
+    telstate: katsdptelstate.aio.TelescopeState,
+    telstate_endpoint: str,
+    target_mapper: TargetMapper,
+) -> None:
     l0_stream = stream.name + '.' + stream.vis.name
     data_url = _stream_url(capture_block_id, l0_stream)
     cpus = _continuum_imager_cpus(configuration)
@@ -2292,13 +2676,14 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
     for target, obs_time in targets:
         target_name = target_mapper(target)
         imager = ProductLogicalTask(
-            f'continuum_image.{stream.name}.{target_name}', streams=[stream])
+            f'continuum_image.{stream.name}.{target_name}', streams=[stream]
+        )
         imager.subsystem = 'sdp'
         imager.cpus = cpus
         # These resources are very rough estimates
         imager.mem = 50000 if not configuration.options.develop else 8000
         imager.disk = _mb(1000 * stream.vis.size + 1000)
-        imager.max_run_time = 86400     # 24 hours
+        imager.max_run_time = 86400  # 24 hours
         imager.volumes = [DATA_VOL]
         imager.gpus = [scheduler.GPURequest()]
         # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
@@ -2307,26 +2692,38 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
         imager.gpus[0].compute = 1.0
         imager.image = 'katsdpcontim'
         mfimage_parameters = dict(nThreads=cpus, **stream.mfimage_parameters)
-        format_args = [         # Args to pass through str.format
-            'run-and-cleanup', '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk', '--',
+        format_args = [  # Args to pass through str.format
+            'run-and-cleanup',
+            '/mnt/mesos/sandbox/{capture_block_id}_aipsdisk',
+            '--',
             'continuum_pipeline.py',
-            '--telstate', '{endpoints[telstate_telstate]}',
-            '--access-key', '{resolver.s3_config[continuum][read][access_key]}',
-            '--secret-key', '{resolver.s3_config[continuum][read][secret_key]}'
+            '--telstate',
+            '{endpoints[telstate_telstate]}',
+            '--access-key',
+            '{resolver.s3_config[continuum][read][access_key]}',
+            '--secret-key',
+            '{resolver.s3_config[continuum][read][secret_key]}',
         ]
-        no_format_args = [      # Args to protect from str.format
-            '--select', f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
-            '--capture-block-id', capture_block_id,
-            '--output-id', stream.name,
-            '--telstate-id', telstate.join(stream.name, target_name),
-            '--outputdir', DATA_VOL.container_path,
-            '--mfimage', _render_continuum_parameters(mfimage_parameters),
-            '-w', '/mnt/mesos/sandbox',
+        no_format_args = [  # Args to protect from str.format
+            '--select',
+            f'scans="track"; corrprods="cross"; targets=[{target.description!r}]',
+            '--capture-block-id',
+            capture_block_id,
+            '--output-id',
+            stream.name,
+            '--telstate-id',
+            telstate.join(stream.name, target_name),
+            '--outputdir',
+            DATA_VOL.container_path,
+            '--mfimage',
+            _render_continuum_parameters(mfimage_parameters),
+            '-w',
+            '/mnt/mesos/sandbox',
         ]
         if stream.uvblavg_parameters:
-            no_format_args.extend([
-                '--uvblavg', _render_continuum_parameters(stream.uvblavg_parameters)
-            ])
+            no_format_args.extend(
+                ['--uvblavg', _render_continuum_parameters(stream.uvblavg_parameters)]
+            )
         imager.command = format_args + [escape_format(arg) for arg in no_format_args] + [data_url]
         imager.katsdpservices_config = False
         imager.metadata_katcp_sensors = False
@@ -2336,26 +2733,30 @@ async def _make_continuum_imager(g: networkx.MultiDiGraph,
     if not targets:
         logger.info('No continuum imager targets found for %s', capture_block_id)
     else:
-        logger.info('Continuum imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target, _ in targets))
+        logger.info(
+            'Continuum imager targets for %s: %s',
+            capture_block_id,
+            ', '.join(target.name for target, _ in targets),
+        )
     view = telstate.view(telstate.join(capture_block_id, stream.name))
     await view.set('targets', {target.description: target_mapper(target) for target, _ in targets})
 
 
-async def _make_spectral_imager(g: networkx.MultiDiGraph,
-                                configuration: Configuration,
-                                capture_block_id: str,
-                                stream: product_config.SpectralImageStream,
-                                telstate: katsdptelstate.aio.TelescopeState,
-                                telstate_endpoint: str,
-                                target_mapper: TargetMapper) -> \
-        Tuple[str, Sequence[scheduler.LogicalNode]]:
+async def _make_spectral_imager(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.SpectralImageStream,
+    telstate: katsdptelstate.aio.TelescopeState,
+    telstate_endpoint: str,
+    target_mapper: TargetMapper,
+) -> Tuple[str, Sequence[scheduler.LogicalNode]]:
     dump_bytes = stream.vis.n_baselines * defaults.SPECTRAL_OBJECT_CHANNELS * BYTES_PER_VFW_SPECTRAL
     data_url = _stream_url(capture_block_id, stream.name + '.' + stream.vis.name)
     targets, data_set = _get_targets(configuration, capture_block_id, stream, telstate_endpoint)
     band = data_set.spectral_windows[data_set.spw].band
     channel_freqs = data_set.channel_freqs * u.Hz
-    del data_set    # Allow Python to recover the memory
+    del data_set  # Allow Python to recover the memory
 
     async with katsdpmodels.fetch.aiohttp.TelescopeStateFetcher(telstate) as fetcher:
         rfi_mask = await fetcher.get('model_rfi_mask_fixed', RFIMask)
@@ -2365,17 +2766,16 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
         telstate_acv = telstate.view(acv.name)
         band_mask = await fetcher.get('model_band_mask_fixed', BandMask, telstate=telstate_acv)
         channel_mask |= band_mask.is_masked(
-            SpectralWindow(acv.bandwidth * u.Hz, acv.centre_frequency * u.Hz),
-            channel_freqs
+            SpectralWindow(acv.bandwidth * u.Hz, acv.centre_frequency * u.Hz), channel_freqs
         )
 
     nodes = []
     for target, obs_time in targets:
         for i in range(0, stream.vis.n_chans, defaults.SPECTRAL_OBJECT_CHANNELS):
             first_channel = max(i, stream.output_channels[0])
-            last_channel = min(i + defaults.SPECTRAL_OBJECT_CHANNELS,
-                               stream.vis.n_chans,
-                               stream.output_channels[1])
+            last_channel = min(
+                i + defaults.SPECTRAL_OBJECT_CHANNELS, stream.vis.n_chans, stream.output_channels[1]
+            )
             if first_channel >= last_channel:
                 continue
             if np.all(channel_mask[first_channel:last_channel]):
@@ -2388,13 +2788,21 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
                 try:
                     continuum_task = find_node(g, 'continuum_image.' + continuum_name)
                 except KeyError:
-                    logger.warning('Skipping %s for %s because it was not found for %s',
-                                   target.name, stream.name, continuum_name,
-                                   extra=dict(capture_block_id=capture_block_id))
+                    logger.warning(
+                        'Skipping %s for %s because it was not found for %s',
+                        target.name,
+                        stream.name,
+                        continuum_name,
+                        extra=dict(capture_block_id=capture_block_id),
+                    )
                     continue
 
-            imager = ProductLogicalTask('spectral_image.{}.{:05}-{:05}.{}'.format(
-                stream.name, first_channel, last_channel, target_name), streams=[stream])
+            imager = ProductLogicalTask(
+                'spectral_image.{}.{:05}-{:05}.{}'.format(
+                    stream.name, first_channel, last_channel, target_name
+                ),
+                streams=[stream],
+            )
             imager.subsystem = 'sdp'
             imager.cpus = _spectral_imager_cpus(configuration)
             # TODO: these resources are very rough estimates. The disk
@@ -2404,7 +2812,7 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
             # where memory usage keeps going up.
             imager.mem = 12 * 1024
             imager.disk = _mb(dump_bytes * dumps) + 1024
-            imager.max_run_time = 6 * 3600     # 6 hours
+            imager.max_run_time = 6 * 3600  # 6 hours
             imager.volumes = [DATA_VOL]
             imager.gpus = [scheduler.GPURequest()]
             # Actual GPU utilisation is fairly low overall, and performance
@@ -2419,27 +2827,41 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
             imager.gpus[0].memory = 3.0
             imager.image = 'katsdpimager'
             imager.command = [
-                'run-and-cleanup', '--create', '--tmp', '/mnt/mesos/sandbox/tmp', '--',
+                'run-and-cleanup',
+                '--create',
+                '--tmp',
+                '/mnt/mesos/sandbox/tmp',
+                '--',
                 'imager-mkat-pipeline.py',
-                '-i', escape_format(f'target={target.description}'),
-                '-i', 'access-key={resolver.s3_config[spectral][read][access_key]}',
-                '-i', 'secret-key={resolver.s3_config[spectral][read][secret_key]}',
-                '-i', 'rfi-mask=fixed',
-                '--stokes', 'I',
-                '--start-channel', str(first_channel),
-                '--stop-channel', str(last_channel),
-                '--major', '5',
-                '--weight-type', 'robust',
-                '--channel-batch', str(defaults.SPECTRAL_OBJECT_CHANNELS),
+                '-i',
+                escape_format(f'target={target.description}'),
+                '-i',
+                'access-key={resolver.s3_config[spectral][read][access_key]}',
+                '-i',
+                'secret-key={resolver.s3_config[spectral][read][secret_key]}',
+                '-i',
+                'rfi-mask=fixed',
+                '--stokes',
+                'I',
+                '--start-channel',
+                str(first_channel),
+                '--stop-channel',
+                str(last_channel),
+                '--major',
+                '5',
+                '--weight-type',
+                'robust',
+                '--channel-batch',
+                str(defaults.SPECTRAL_OBJECT_CHANNELS),
                 data_url,
                 escape_format(DATA_VOL.container_path),
                 escape_format(f'{capture_block_id}_{stream.name}_{target_name}'),
-                escape_format(stream.name)
+                escape_format(stream.name),
             ]
             if stream.continuum is not None:
                 sky_model_url = _sky_model_url(data_url, stream.continuum.name, target)
                 imager.command += ['--subtract', sky_model_url]
-            if band in {'L', 'UHF'}:      # Models are not available for other bands yet
+            if band in {'L', 'UHF'}:  # Models are not available for other bands yet
                 imager.command += ['--primary-beam', 'meerkat']
             for key, value in stream.parameters.items():
                 imager.command += [f'--{key}'.replace('_', '-'), escape_format(str(value))]
@@ -2454,24 +2876,32 @@ async def _make_spectral_imager(g: networkx.MultiDiGraph,
     if not targets:
         logger.info('No spectral imager targets found for %s', capture_block_id)
     else:
-        logger.info('Spectral imager targets for %s: %s', capture_block_id,
-                    ', '.join(target.name for target, _ in targets))
+        logger.info(
+            'Spectral imager targets for %s: %s',
+            capture_block_id,
+            ', '.join(target.name for target, _ in targets),
+        )
     view = telstate.view(telstate.join(capture_block_id, stream.name))
     await view.set('targets', {target.description: target_mapper(target) for target, _ in targets})
-    await view.set('output_channels', [
-        channel for channel in range(stream.output_channels[0], stream.output_channels[1])
-        if not channel_mask[channel]
-    ])
+    await view.set(
+        'output_channels',
+        [
+            channel
+            for channel in range(stream.output_channels[0], stream.output_channels[1])
+            if not channel_mask[channel]
+        ],
+    )
     return data_url, nodes
 
 
 def _make_spectral_imager_report(
-        g: networkx.MultiDiGraph,
-        configuration: Configuration,
-        capture_block_id: str,
-        stream: product_config.SpectralImageStream,
-        data_url: str,
-        spectral_nodes: Sequence[scheduler.LogicalNode]) -> scheduler.LogicalNode:
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.SpectralImageStream,
+    data_url: str,
+    spectral_nodes: Sequence[scheduler.LogicalNode],
+) -> scheduler.LogicalNode:
     report = ProductLogicalTask(f'spectral_image_report.{stream.name}', streams=[stream])
     report.subsystem = 'sdp'
     report.cpus = 1.0
@@ -2486,7 +2916,7 @@ def _make_spectral_imager_report(
         data_url,
         escape_format(DATA_VOL.container_path),
         escape_format(f'{capture_block_id}_{stream.name}'),
-        escape_format(stream.name)
+        escape_format(stream.name),
     ]
     g.add_node(report)
     for node in spectral_nodes:
@@ -2495,10 +2925,11 @@ def _make_spectral_imager_report(
 
 
 async def build_postprocess_logical_graph(
-        configuration: Configuration,
-        capture_block_id: str,
-        telstate: katsdptelstate.aio.TelescopeState,
-        telstate_endpoint: str) -> networkx.MultiDiGraph:
+    configuration: Configuration,
+    capture_block_id: str,
+    telstate: katsdptelstate.aio.TelescopeState,
+    telstate_endpoint: str,
+) -> networkx.MultiDiGraph:
     g = networkx.MultiDiGraph()
     telstate_node = scheduler.LogicalExternal('telstate')
     g.add_node(telstate_node)
@@ -2511,18 +2942,21 @@ async def build_postprocess_logical_graph(
     target_mapper = TargetMapper()
 
     for cstream in configuration.by_class(product_config.ContinuumImageStream):
-        await _make_continuum_imager(g, configuration, capture_block_id, cstream,
-                                     telstate, telstate_endpoint, target_mapper)
+        await _make_continuum_imager(
+            g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
+        )
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
     for sstream in configuration.by_class(product_config.SpectralImageStream):
-        data_url, nodes = await _make_spectral_imager(g, configuration, capture_block_id, sstream,
-                                                      telstate, telstate_endpoint, target_mapper)
+        data_url, nodes = await _make_spectral_imager(
+            g, configuration, capture_block_id, sstream, telstate, telstate_endpoint, target_mapper
+        )
         if nodes:
-            _make_spectral_imager_report(g, configuration, capture_block_id, sstream,
-                                         data_url, nodes)
+            _make_spectral_imager_report(
+                g, configuration, capture_block_id, sstream, data_url, nodes
+            )
 
     seen = set()
     for node in g:
@@ -2532,7 +2966,6 @@ async def build_postprocess_logical_graph(
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
-            g.add_edge(node, telstate_node, port='telstate',
-                       depends_ready=True, depends_kill=True)
+            g.add_edge(node, telstate_node, port='telstate', depends_ready=True, depends_kill=True)
 
     return g

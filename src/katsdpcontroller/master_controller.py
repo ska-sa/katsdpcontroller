@@ -97,7 +97,8 @@ async def _resolve_host(host: str) -> _IPAddress:
         return ipaddress.ip_address(host)
     except ValueError:
         addrs = await asyncio.get_event_loop().getaddrinfo(
-            host, 0, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+            host, 0, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+        )
         return ipaddress.ip_address(addrs[0][4][0])
 
 
@@ -107,8 +108,9 @@ class DeviceStatusWatcher(aiokatcp.AbstractSensorWatcher):
     def __init__(self, callback: Callable[[], None]) -> None:
         self.callback = callback
 
-    def sensor_updated(self, name: str, value: bytes, status: aiokatcp.Sensor.Status,
-                       timestamp: float) -> None:
+    def sensor_updated(
+        self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
+    ) -> None:
         if name == 'device-status':
             self.callback()
 
@@ -129,8 +131,9 @@ class Product:
 
     class TaskState(enum.Enum):
         """State of the product controller process"""
+
         CREATED = 1
-        STARTING = 2      # The task is running, but we haven't finished product-configure on it
+        STARTING = 2  # The task is running, but we haven't finished product-configure on it
         ACTIVE = 3
         DEAD = 4
 
@@ -148,15 +151,26 @@ class Product:
         self.dead_event = asyncio.Event()
         self._dead_callbacks: List[Callable[['Product'], None]] = []
         self.start_time = time.time()
-        self.sensors = SensorSet()     # Sensors created internally - not proxied
-        self.sensors.add(Sensor(Address, f'{self.name}.katcp-address',
-                                'Address of the katcp server for the product controller'))
-        self.sensors.add(Sensor(str, f'{self.name}.host',
-                                'Name of the host running the product controller'))
+        self.sensors = SensorSet()  # Sensors created internally - not proxied
+        self.sensors.add(
+            Sensor(
+                Address,
+                f'{self.name}.katcp-address',
+                'Address of the katcp server for the product controller',
+            )
+        )
+        self.sensors.add(
+            Sensor(str, f'{self.name}.host', 'Name of the host running the product controller')
+        )
 
-    def connect(self, server: aiokatcp.DeviceServer,
-                rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
-                hostname: str, host: _IPAddress, ports: Dict[str, int]) -> None:
+    def connect(
+        self,
+        server: aiokatcp.DeviceServer,
+        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
+        hostname: str,
+        host: _IPAddress,
+        ports: Dict[str, int],
+    ) -> None:
         """Notify product of the location of the katcp interface.
 
         After calling this, :attr:`host`, :attr:`hostname`, :attr:`ports` and :attr:`katcp_conn`
@@ -173,10 +187,15 @@ class Product:
             except KeyError:
                 self.logger.warning('Sensor %s does not exist', sensor_name)
         self.katcp_conn = aiokatcp.Client(str(host), ports['katcp'])
-        self.katcp_conn.add_sensor_watcher(sensor_proxy.SensorWatcher(
-            self.katcp_conn, server, f'{self.name}.',
-            rewrite_gui_urls=rewrite_gui_urls,
-            enum_types=(DeviceStatus,)))
+        self.katcp_conn.add_sensor_watcher(
+            sensor_proxy.SensorWatcher(
+                self.katcp_conn,
+                server,
+                f'{self.name}.',
+                rewrite_gui_urls=rewrite_gui_urls,
+                enum_types=(DeviceStatus,),
+            )
+        )
         self.katcp_conn.add_inform_callback('disconnect', self._disconnect_callback)
         # TODO: start a watchdog
 
@@ -202,8 +221,9 @@ class Product:
         for callback in self._dead_callbacks:
             callback(self)
 
-    async def _katcp_request(self, type_: Type[_T], configuring: _T, dead: _T,
-                             message: str, *args: Any) -> _T:
+    async def _katcp_request(
+        self, type_: Type[_T], configuring: _T, dead: _T, message: str, *args: Any
+    ) -> _T:
         """Query a single value from the product using katcp
 
         Parameters
@@ -230,7 +250,8 @@ class Product:
 
     async def get_state(self) -> ProductState:
         return await self._katcp_request(
-            ProductState, ProductState.CONFIGURING, ProductState.DEAD, 'capture-status')
+            ProductState, ProductState.CONFIGURING, ProductState.DEAD, 'capture-status'
+        )
 
     async def get_telstate_endpoint(self) -> str:
         return await self._katcp_request(str, '', '', 'telstate-endpoint')
@@ -266,9 +287,13 @@ class ProductManagerBase(Generic[_P]):
     It also handles allocation of multicast groups and capture block IDs.
     """
 
-    def __init__(self, args: argparse.Namespace, server: aiokatcp.DeviceServer,
-                 image_resolver_factory: scheduler.ImageResolverFactory,
-                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        server: aiokatcp.DeviceServer,
+        image_resolver_factory: scheduler.ImageResolverFactory,
+        rewrite_gui_urls: Callable[[Sensor], bytes] = None,
+    ) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
         self._next_multicast_group = self._multicast_network.network_address + 1
@@ -294,12 +319,18 @@ class ProductManagerBase(Generic[_P]):
         log_task_exceptions(task, logger, '_save_state')
 
     def valid_multicast_group(self, group: ipaddress.IPv4Address) -> bool:
-        return (group in self._multicast_network
-                and group != self._multicast_network.network_address
-                and group != self._multicast_network.broadcast_address)
+        return (
+            group in self._multicast_network
+            and group != self._multicast_network.network_address
+            and group != self._multicast_network.broadcast_address
+        )
 
-    def _init_state(self, products: Iterable[_P], next_capture_block_id: int,
-                    next_multicast_group: ipaddress.IPv4Address) -> None:
+    def _init_state(
+        self,
+        products: Iterable[_P],
+        next_capture_block_id: int,
+        next_multicast_group: ipaddress.IPv4Address,
+    ) -> None:
         """Set the initial state from persistent storage. This is intended to
         be called by subclasses.
 
@@ -320,15 +351,22 @@ class ProductManagerBase(Generic[_P]):
             if any(not self.valid_multicast_group(group) for group in product.multicast_groups):
                 product.logger.warning(
                     'Product %r contains multicast group(s) outside the defined range %s',
-                    product.name, self._multicast_network)
+                    product.name,
+                    self._multicast_network,
+                )
             self._add_product(product)
         self._next_capture_block_id = next_capture_block_id
 
-        if (next_multicast_group not in self._multicast_network
-                or next_multicast_group == self._multicast_network.network_address):
+        if (
+            next_multicast_group not in self._multicast_network
+            or next_multicast_group == self._multicast_network.network_address
+        ):
             if next_multicast_group != ipaddress.IPv4Address('0.0.0.0'):
-                logger.info('Resetting next multicast group from out-of-range %s to %s',
-                            next_multicast_group, self._multicast_network.network_address + 1)
+                logger.info(
+                    'Resetting next multicast group from out-of-range %s to %s',
+                    next_multicast_group,
+                    self._multicast_network.network_address + 1,
+                )
             next_multicast_group = self._multicast_network.network_address + 1
         self._next_multicast_group = next_multicast_group
 
@@ -478,8 +516,14 @@ class ProductManagerBase(Generic[_P]):
 
 class InternalProduct(Product):
     """Product with internal :class:`.product_controller.DeviceServer`"""
-    def __init__(self, name: str, config: dict, configure_task: Optional[asyncio.Task],
-                 server: aiokatcp.DeviceServer) -> None:
+
+    def __init__(
+        self,
+        name: str,
+        config: dict,
+        configure_task: Optional[asyncio.Task],
+        server: aiokatcp.DeviceServer,
+    ) -> None:
         super().__init__(name, config, configure_task)
         self.server = server
 
@@ -507,9 +551,18 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         sched = scheduler.SchedulerBase(self._args.realtime_role, LOCALHOST, 0)
         server = product_controller.DeviceServer(
-            '127.0.0.1', 0, mc_client, name, sched, self._args.batch_role,
-            True, self._args.localhost, self._image_resolver_factory,
-            s3_config={}, shutdown_delay=0)
+            '127.0.0.1',
+            0,
+            mc_client,
+            name,
+            sched,
+            self._args.batch_role,
+            True,
+            self._args.localhost,
+            self._image_resolver_factory,
+            s3_config={},
+            shutdown_delay=0,
+        )
         product = InternalProduct(name, config, asyncio.current_task(), server)
         self._add_product(product)
         await product.server.start()
@@ -535,21 +588,33 @@ class SingularityProduct(Product):
         self.run_id = name + '-' + uuid.uuid4().hex
         self.task_id: Optional[str] = None
         self._image: Optional[str] = None
-        self.sensors.add(Sensor(
-            Address, f'{name}.http-address',
-            'Address of internal HTTP server (which is NOT the dashboard)'))
-        self.sensors.add(Sensor(
-            Address, f'{name}.aiomonitor-address',
-            'Address of aiomonitor debugging port (only accessible from the host)'))
-        self.sensors.add(Sensor(
-            Address, f'{name}.aioconsole-address',
-            'Address of aioconsole debugging port (only accessible from the host)'))
-        self.sensors.add(Sensor(
-            Address, f'{name}.dashboard-address',
-            'Address of product controller dashboard'))
-        self.sensors.add(Sensor(
-            str, f'{self.name}.version',
-            'Docker image running the product controller'))
+        self.sensors.add(
+            Sensor(
+                Address,
+                f'{name}.http-address',
+                'Address of internal HTTP server (which is NOT the dashboard)',
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Address,
+                f'{name}.aiomonitor-address',
+                'Address of aiomonitor debugging port (only accessible from the host)',
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Address,
+                f'{name}.aioconsole-address',
+                'Address of aioconsole debugging port (only accessible from the host)',
+            )
+        )
+        self.sensors.add(
+            Sensor(Address, f'{name}.dashboard-address', 'Address of product controller dashboard')
+        )
+        self.sensors.add(
+            Sensor(str, f'{self.name}.version', 'Docker image running the product controller')
+        )
 
     @property
     def image(self) -> Optional[str]:
@@ -576,13 +641,19 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
     # the clocked unit tests so that it's possible to control which event
     # happens next.
     new_task_poll_interval = 0.3
-    assert (reconciliation_interval + 1e-6) % new_task_poll_interval > 1e-5, \
+    assert (
+        reconciliation_interval + 1e-6
+    ) % new_task_poll_interval > 1e-5, (
         "reconciliation_interval must not be a multiple of new_task_poll_interval"
+    )
 
-    def __init__(self, args: argparse.Namespace,
-                 server: aiokatcp.DeviceServer,
-                 image_resolver_factory: scheduler.ImageResolverFactory,
-                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        server: aiokatcp.DeviceServer,
+        image_resolver_factory: scheduler.ImageResolverFactory,
+        rewrite_gui_urls: Callable[[Sensor], bytes] = None,
+    ) -> None:
         super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
         self._request_id_prefix = args.name + '_product_'
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
@@ -647,10 +718,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         """
         # Singularity allows requests to be updated with POST, so just do it unconditionally
         request_id = self._request_id_prefix + product_name
-        await self._sing.create_request({
-            "id": request_id,
-            "requestType": "ON_DEMAND"
-        })
+        await self._sing.create_request({"id": request_id, "requestType": "ON_DEMAND"})
         return request_id
 
     async def _ensure_deploy(self, product_name: str, image: str) -> str:
@@ -676,12 +744,12 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         extra = {
             **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
             'task': 'product_controller',
-            'docker.image': image
+            'docker.image': image,
         }
         environ['KATSDP_LOG_GELF_EXTRA'] = json.dumps(extra)
         labels = {
             'za.ac.kat.sdp.katsdpcontroller.task': 'product_controller',
-            'za.ac.kat.sdp.katsdpcontroller.subarray_product_id': product_name
+            'za.ac.kat.sdp.katsdpcontroller.subarray_product_id': product_name,
         }
         docker_parameters = [
             {'key': 'label', 'value': f'{key}={value}'} for (key, value) in labels.items()
@@ -697,14 +765,14 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                     "image": image,
                     "forcePullImage": False,
                     "network": "HOST",
-                    "dockerParameters": docker_parameters
-                }
+                    "dockerParameters": docker_parameters,
+                },
             },
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 2048,
-                "numPorts": 5         # katcp, http, aiomonitor, aioconsole, dashboard
-            }
+                "numPorts": 5,  # katcp, http, aiomonitor, aioconsole, dashboard
+            },
         }
 
         # Singularity can sometimes get stuck in a state where the last deploy
@@ -717,7 +785,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         # previous request.
         try:
             (old_deploy_raw, stat), current_request = await asyncio.gather(
-                self._zk.get(f'/deploys/{request_id}'), self._sing.get_request(request_id))
+                self._zk.get(f'/deploys/{request_id}'), self._sing.get_request(request_id)
+            )
             old_deploy = json.loads(old_deploy_raw)
             old_id = old_deploy['id']
             current_id = current_request['activeDeploy']['id']
@@ -744,7 +813,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 "version": ZK_STATE_VERSION,
                 "products": {},
                 "next_multicast_group": "0.0.0.0",
-                "next_capture_block_id": 0
+                "next_capture_block_id": 0,
             }
             try:
                 payload = (await self._zk.get('/state'))[0]
@@ -765,21 +834,29 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 try:
                     prod.start_time = info['start_time']
                 except KeyError:
-                    pass     # Version 1 didn't have start_time
+                    pass  # Version 1 didn't have start_time
                 try:
                     ports = info['ports']
                 except KeyError:
                     # Version 2 only had the katcp port
                     ports = {'katcp': info['port']}
                 prod.task_state = Product.TaskState.ACTIVE
-                prod.multicast_groups = {ipaddress.ip_address(addr)  # type: ignore
-                                         for addr in info['multicast_groups']}
-                prod.logger.info('Reconnecting to existing product %s at %s:%d',
-                                 prod.name, info['host'], ports['katcp'])
+                prod.multicast_groups = {
+                    ipaddress.ip_address(addr) for addr in info['multicast_groups']  # type: ignore
+                }
+                prod.logger.info(
+                    'Reconnecting to existing product %s at %s:%d',
+                    prod.name,
+                    info['host'],
+                    ports['katcp'],
+                )
                 self._connect(prod, info['host'], await _resolve_host(info['host']), ports)
                 products.append(prod)
-            self._init_state(products, data['next_capture_block_id'],
-                             ipaddress.IPv4Address(data['next_multicast_group']))
+            self._init_state(
+                products,
+                data['next_capture_block_id'],
+                ipaddress.IPv4Address(data['next_multicast_group']),
+            )
 
     async def _save_state(self) -> None:
         """Save the current state to Zookeeper"""
@@ -795,12 +872,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                         'host': prod.hostname,
                         'ports': prod.ports,
                         'multicast_groups': [str(group) for group in prod.multicast_groups],
-                        'start_time': prod.start_time
-                    } for prod in self.products.values()
+                        'start_time': prod.start_time,
+                    }
+                    for prod in self.products.values()
                     if prod.task_state == Product.TaskState.ACTIVE
                 },
                 'next_multicast_group': str(self._next_multicast_group),
-                'next_capture_block_id': self._next_capture_block_id
+                'next_capture_block_id': self._next_capture_block_id,
             }
             payload = json.dumps(data).encode()
             await self._zk_set('/state', payload)
@@ -825,12 +903,12 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             data = await self._sing.get_request_tasks(request_id)
             for state, tasks in data.items():
                 if state in {'pending', 'cleaning'}:
-                    continue      # TODO: cancel unwanted pending tasks before they launch
+                    continue  # TODO: cancel unwanted pending tasks before they launch
                 for task in tasks:
                     task_id: str = task['id']
                     task_info = await self._get_task_info(task_id)
                     if task_info is None:
-                        continue       # Died before we could query it
+                        continue  # Died before we could query it
                     dead_tasks.discard(task_id)
                     logger.debug('Reconciliation: %s is in state %s', task_id, state)
                     run_id: str = task_info['taskRequest']['pendingTask']['runId']
@@ -839,8 +917,11 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                             logger.info('Killing task %s with unknown run_id %s', task_id, run_id)
                             await self._try_kill_task(task_id)
                         else:
-                            logger.debug('Task %s with unknown run_id %s will be killed next time',
-                                         task_id, run_id)
+                            logger.debug(
+                                'Task %s with unknown run_id %s will be killed next time',
+                                task_id,
+                                run_id,
+                            )
                             new_probation.add(task_id)
         for task_id in dead_tasks:
             logger.debug('Task %s died', task_id)
@@ -881,7 +962,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             self._reconciliation_task.cancel()
             # Waits but does not raise exceptions - there is a done callback to log them
             await asyncio.wait([self._reconciliation_task])
-        await self._save_state()   # Should all be saved already, but belt-and-braces
+        await self._save_state()  # Should all be saved already, but belt-and-braces
         await self._sing.close()
         await self._zk.close()
         await super().stop()
@@ -894,7 +975,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             s3_config = _load_s3_config(self._args.s3_config_file)
         except Exception as exc:
             raise ProductFailed(
-                f'Could not load S3 credentials from {self._args.s3_config_file}: {exc}') from exc
+                f'Could not load S3 credentials from {self._args.s3_config_file}: {exc}'
+            ) from exc
         args = extract_shared_options(self._args)
         # If the config specifies an image tag, use it to override the tag.
         image_resolver_kwargs = {}
@@ -912,13 +994,15 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         except Exception as exc:
             raise ProductFailed(f'Could not load image tag file: {exc}')
         port = device_server_sockname(self._server)[1]
-        args.extend([
-            '--s3-config=' + json.dumps(s3_config),
-            f'--image-tag={image_resolver.tag}',
-            f'--subarray-product-id={name}',
-            f'{self._args.external_hostname}:{port}',
-            f'zk://{self._args.zk}/mesos'
-        ])
+        args.extend(
+            [
+                '--s3-config=' + json.dumps(s3_config),
+                f'--image-tag={image_resolver.tag}',
+                f'--subarray-product-id={name}',
+                f'{self._args.external_hostname}:{port}',
+                f'zk://{self._args.zk}/mesos',
+            ]
+        )
 
         product = SingularityProduct(name, config, asyncio.current_task())
         self._add_product(product)
@@ -929,10 +1013,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             product.image = image
             request_id = await self._ensure_request(name)
             await self._ensure_deploy(name, image)
-            await self._sing.create_run(request_id, {
-                "runId": product.run_id,
-                "commandLineArgs": args
-            })
+            await self._sing.create_run(
+                request_id, {"runId": product.run_id, "commandLineArgs": args}
+            )
             # Wait until the task is running or dead
             loop = asyncio.get_event_loop()
             while True:
@@ -972,7 +1055,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 'http': int(env['PORT1']),
                 'aiomonitor': int(env['PORT2']),
                 'aioconsole': int(env['PORT3']),
-                'dashboard': int(env['PORT4'])
+                'dashboard': int(env['PORT4']),
             }
             self._connect(product, env['TASK_HOST'], host, ports)
             success = True
@@ -980,13 +1063,13 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             raise ProductFailed(f'Failed to start product controller: {exc}') from exc
         finally:
             if success:
-                product.configure_task = None   # Stops died() from trying to cancel us
+                product.configure_task = None  # Stops died() from trying to cancel us
             else:
                 if task_id is not None:
                     # Make best effort to kill it; it might be dead already though
                     kill_task = loop.create_task(self._try_kill_task(task_id))
                     log_task_exceptions(kill_task, product.logger, f'kill task {task_id}')
-                product.configure_task = None   # Stops died() from trying to cancel us
+                product.configure_task = None  # Stops died() from trying to cancel us
                 product.died()
                 # No need for self._save_state, because the product never had a chance to
                 # reach ACTIVE state and hence wasn't stored
@@ -1011,8 +1094,9 @@ class DeviceServer(aiokatcp.DeviceServer):
     _image_lookup: scheduler.ImageLookup
     _interface_changed_callbacks: List[Callable[[], None]]
 
-    def __init__(self, args: argparse.Namespace,
-                 rewrite_gui_urls: Callable[[Sensor], bytes] = None) -> None:
+    def __init__(
+        self, args: argparse.Namespace, rewrite_gui_urls: Callable[[Sensor], bytes] = None
+    ) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
         else:
@@ -1024,33 +1108,67 @@ class DeviceServer(aiokatcp.DeviceServer):
             manager_cls = InternalProductManager
         else:
             manager_cls = SingularityProductManager
-        self._manager = manager_cls(args, self, image_resolver_factory,
-                                    rewrite_gui_urls if args.haproxy else None)
+        self._manager = manager_cls(
+            args, self, image_resolver_factory, rewrite_gui_urls if args.haproxy else None
+        )
         self._consul_url = args.consul_url
         self._override_dicts = {}
         self._interface_changed_callbacks = []
         self._args = args
         super().__init__(args.host, args.port)
-        self.sensors.add(Sensor(DeviceStatus, "device-status",
-                                "Combined (worst) status of all subarray product controllers",
-                                default=DeviceStatus.OK,
-                                status_func=device_status_to_sensor_status))
-        self.sensors.add(Sensor(str, "gui-urls", "Links to associated GUIs",
-                                default=json.dumps(args.gui_urls),
-                                initial_status=Sensor.Status.NOMINAL))
-        self.sensors.add(Sensor(str, "products", "JSON list of subarray products",
-                                default="[]", initial_status=Sensor.Status.NOMINAL))
-        self.sensors.add(Sensor(int, "cbf-resources-total",
-                                "Total number of devices (e.g. servers) that are known "
-                                "to the master controller and suitable for running CBF "
-                                "tasks, including those reserved for maintenance."))
-        self.sensors.add(Sensor(int, "cbf-resources-maintenance",
-                                "Total number of devices that have been flagged for "
-                                "maintenance and which will not be used to run any "
-                                "new subarray products."))
-        self.sensors.add(Sensor(int, "cbf-resources-free",
-                                "Number of devices that are not in maintenance "
-                                "and are not currently running any tasks."))
+        self.sensors.add(
+            Sensor(
+                DeviceStatus,
+                "device-status",
+                "Combined (worst) status of all subarray product controllers",
+                default=DeviceStatus.OK,
+                status_func=device_status_to_sensor_status,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                str,
+                "gui-urls",
+                "Links to associated GUIs",
+                default=json.dumps(args.gui_urls),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                str,
+                "products",
+                "JSON list of subarray products",
+                default="[]",
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "cbf-resources-total",
+                "Total number of devices (e.g. servers) that are known "
+                "to the master controller and suitable for running CBF "
+                "tasks, including those reserved for maintenance.",
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "cbf-resources-maintenance",
+                "Total number of devices that have been flagged for "
+                "maintenance and which will not be used to run any "
+                "new subarray products.",
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "cbf-resources-free",
+                "Number of devices that are not in maintenance "
+                "and are not currently running any tasks.",
+            )
+        )
 
         # Updated by SensorProxyClient with sensor values prior to gui-url rewriting
         self.orig_sensors = SensorSet()
@@ -1062,8 +1180,11 @@ class DeviceServer(aiokatcp.DeviceServer):
     async def start(self) -> None:
         await self._manager.start()
         if not self._args.interface_mode:
-            self.add_service_task(asyncio.create_task(
-                self._update_resource_sensors_repeat(), name="update_resource_sensors"))
+            self.add_service_task(
+                asyncio.create_task(
+                    self._update_resource_sensors_repeat(), name="update_resource_sensors"
+                )
+            )
         await super().start()
 
     async def on_stop(self) -> None:
@@ -1164,7 +1285,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             if name not in self._manager.products:
                 return name
         # itertools.count never finishes, but to keep mypy happy:
-        assert False     # pragma: nocover
+        assert False  # pragma: nocover
 
     def _get_katcp(self, subarray_product_id: str) -> aiokatcp.Client:
         """Get the katcp connection to an active subarray product.
@@ -1179,12 +1300,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply(f'There is no subarray product with ID {subarray_product_id}')
         if product.task_state != Product.TaskState.ACTIVE:
             raise FailReply(f'Subarray product {subarray_product_id} is still being configured')
-        assert product.katcp_conn is not None    # Guaranteed by task_state == ACTIVE
+        assert product.katcp_conn is not None  # Guaranteed by task_state == ACTIVE
         return product.katcp_conn
 
     @time_request
-    async def request_get_multicast_groups(
-            self, ctx, name: str, n_addresses: int) -> str:
+    async def request_get_multicast_groups(self, ctx, name: str, n_addresses: int) -> str:
         """Allocate multicast groups for a subarray product.
 
         This should only be used by product controllers.
@@ -1265,18 +1385,21 @@ class DeviceServer(aiokatcp.DeviceServer):
         override_dict_json : str
             A JSON string containing a dict of config key:value overrides to use.
         """
-        product_logger = logging.LoggerAdapter(
-            logger, dict(subarray_product_id=name))
-        product_logger.info("?set-config-override called on %s with %s",
-                            name, override_dict_json)
+        product_logger = logging.LoggerAdapter(logger, dict(subarray_product_id=name))
+        product_logger.info("?set-config-override called on %s with %s", name, override_dict_json)
         try:
             override = load_json_dict(override_dict_json)
-            product_logger.info("Set override for subarray product %s to the following: %s",
-                                name, override_dict_json)
+            product_logger.info(
+                "Set override for subarray product %s to the following: %s",
+                name,
+                override_dict_json,
+            )
             self._override_dicts[name] = override
         except ValueError as exc:
-            msg = (f"The supplied override string {override_dict_json} does not appear to "
-                   f"be a valid json string containing a dict. {exc}")
+            msg = (
+                f"The supplied override string {override_dict_json} does not appear to "
+                f"be a valid json string containing a dict. {exc}"
+            )
             product_logger.error(msg)
             raise FailReply(msg)
         n = len(override)
@@ -1299,8 +1422,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         if orig_name in self._override_dicts:
             # this is a use-once set of overrides
             odict = self._override_dicts.pop(orig_name)
-            product_logger.warning("Setting overrides on %s for the following: %s",
-                                   name, odict)
+            product_logger.warning("Setting overrides on %s for the following: %s", name, odict)
             config = product_config.override(config, odict)
         product_logger.info("Configuring %s with '%s'", name, json.dumps(config))
 
@@ -1315,8 +1437,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 assert product.host is not None and product.ports
 
                 await product.katcp_conn.wait_connected()
-                await product.katcp_conn.request('product-configure', name,
-                                                 json.dumps(config))
+                await product.katcp_conn.request('product-configure', name, json.dumps(config))
                 await self._manager.product_active(product)
                 success = True
                 return product
@@ -1328,7 +1449,8 @@ class DeviceServer(aiokatcp.DeviceServer):
             # died. We can distinguish them by checking the product state.
             if product is not None and product.task_state == Product.TaskState.DEAD:
                 raise FailReply(
-                    f'Task for {name} died before the subarray was configured') from None
+                    f'Task for {name} died before the subarray was configured'
+                ) from None
             else:
                 raise
         except ProductFailed as exc:
@@ -1423,8 +1545,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
         product = self._manager.products.get(name)
         if product is None:
-            raise FailReply(f"Deconfiguration of subarray product {name} requested, "
-                            "but no configuration found.")
+            raise FailReply(
+                f"Deconfiguration of subarray product {name} requested, "
+                "but no configuration found."
+            )
         await self.product_deconfigure(product, force)
 
     @time_request
@@ -1448,8 +1572,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         product_logger.info("?product-reconfigure called on %s", name)
         product = self._manager.products.get(name)
         if product is None:
-            raise FailReply(f"The specified subarray product id {name} has no existing "
-                            f"configuration and thus cannot be reconfigured.")
+            raise FailReply(
+                f"The specified subarray product id {name} has no existing "
+                f"configuration and thus cannot be reconfigured."
+            )
         config = product.config
 
         product_logger.info("Deconfiguring %s as part of a reconfigure request", name)
@@ -1463,8 +1589,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         product_logger.info("Waiting for %s to disappear", name)
         await product.dead_event.wait()
 
-        product_logger.info("Issuing new configure for %s as part of reconfigure request.",
-                            name)
+        product_logger.info("Issuing new configure for %s as part of reconfigure request.", name)
         try:
             await self.product_configure(name, config)
         except Exception as error:
@@ -1495,8 +1620,9 @@ class DeviceServer(aiokatcp.DeviceServer):
         ctx.informs([(s.name, await s.description()) for s in products])
 
     @time_request
-    async def request_capture_init(self, ctx, subarray_product_id: str,
-                                   override_dict_json: str = '{}') -> str:
+    async def request_capture_init(
+        self, ctx, subarray_product_id: str, override_dict_json: str = '{}'
+    ) -> str:
         """Request capture of the specified subarray product to start.
 
         Note: This command is used to prepare the SDP for reception of data as
@@ -1530,7 +1656,8 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_telstate_endpoint(
-            self, ctx, subarray_product_id: str = None) -> Optional[str]:
+        self, ctx, subarray_product_id: str = None
+    ) -> Optional[str]:
         """Returns the endpoint for the telescope state of the specified subarray product.
 
         If no subarray product is specified, generates an inform for each
@@ -1546,9 +1673,13 @@ class DeviceServer(aiokatcp.DeviceServer):
         state : str
         """
         if subarray_product_id is None:
-            ctx.informs([(product_id, await product.get_telstate_endpoint())
-                         for (product_id, product) in self._manager.products.items()])
-            return None   # ctx.informs sends the reply
+            ctx.informs(
+                [
+                    (product_id, await product.get_telstate_endpoint())
+                    for (product_id, product) in self._manager.products.items()
+                ]
+            )
+            return None  # ctx.informs sends the reply
         product = self._manager.products.get(subarray_product_id)
         if product is None:
             raise FailReply('No existing subarray product configuration with this id found')
@@ -1556,7 +1687,8 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_capture_status(
-            self, ctx, subarray_product_id: str = None) -> Optional[ProductState]:
+        self, ctx, subarray_product_id: str = None
+    ) -> Optional[ProductState]:
         """Returns the status of the specified subarray product.
 
         If no subarray product is specified, generates an inform per subarray
@@ -1574,7 +1706,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         if subarray_product_id is None:
             products = list(self._manager.products.values())
             ctx.informs([(s.name, await s.get_state()) for s in products])
-            return None     # ctx.informs sends the reply
+            return None  # ctx.informs sends the reply
         else:
             product = self._manager.products.get(subarray_product_id)
             if product is None:
@@ -1613,9 +1745,12 @@ class DeviceServer(aiokatcp.DeviceServer):
         results = await asyncio.gather(*futures, return_exceptions=True)
         for name, result in zip(names, results):
             if isinstance(result, BaseException):
-                logger.warning("Failed to deconfigure product %s during sdp-shutdown. "
-                               "Forging ahead...", name, exc_info=result,
-                               extra=dict(subarray_product_id=name))
+                logger.warning(
+                    "Failed to deconfigure product %s during sdp-shutdown. " "Forging ahead...",
+                    name,
+                    exc_info=result,
+                    extra=dict(subarray_product_id=name),
+                )
 
     @staticmethod
     async def _poweroff_endpoints(consul_url: yarl.URL) -> Sequence[Tuple[str, int]]:
@@ -1626,8 +1761,10 @@ class DeviceServer(aiokatcp.DeviceServer):
                 async with session.get(url) as resp:
                     nodes = await resp.json()
         except (OSError, ValueError, aiohttp.ClientError) as exc:
-            msg = ('Could not retrieve list of nodes running poweroff service from consul. '
-                   'No nodes will be powered off.')
+            msg = (
+                'Could not retrieve list of nodes running poweroff service from consul. '
+                'No nodes will be powered off.'
+            )
             logger.exception(msg)
             raise FailReply(f'{msg} {exc}')
         endpoints: List[Tuple[str, int]] = []
@@ -1656,15 +1793,20 @@ class DeviceServer(aiokatcp.DeviceServer):
             On success, a comma-separated lists of hosts that have been shutdown; on
             failure a human-readable message listing success and failure machines.
         """
-        logger.warning("Master Controller interrupted by sdp-shutdown request - "
-                       "deconfiguring existing products (may lead to data loss!).")
+        logger.warning(
+            "Master Controller interrupted by sdp-shutdown request - "
+            "deconfiguring existing products (may lead to data loss!)."
+        )
         await self._deconfigure_all()
         endpoints = await self._poweroff_endpoints(self._consul_url)
-        urls = [yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
-                for (host, port) in endpoints]
+        urls = [
+            yarl.URL.build(scheme='http', host=host, port=port, path='/poweroff')
+            for (host, port) in endpoints
+        ]
         successful: List[str] = []
         failed: List[str] = []
         async with aiohttp.ClientSession() as session:
+
             async def post1(url):
                 async with session.post(url, headers={'X-Poweroff-Server': '1'}) as resp:
                     resp.raise_for_status()
@@ -1673,8 +1815,9 @@ class DeviceServer(aiokatcp.DeviceServer):
             results = await asyncio.gather(*futures, return_exceptions=True)
             for endpoint, result in zip(endpoints, results):
                 if isinstance(result, BaseException):
-                    logger.warning('Shutting down %s:%d failed: %s',
-                                   endpoint[0], endpoint[1], result)
+                    logger.warning(
+                        'Shutting down %s:%d failed: %s', endpoint[0], endpoint[1], result
+                    )
                     failed.append(endpoint[0])
                 else:
                     successful.append(endpoint[0])
@@ -1725,53 +1868,94 @@ def _load_gui_urls(path: str) -> List[Dict[str, str]]:
 def parse_args(argv: List[str]) -> argparse.Namespace:
     usage = "%(prog)s [options] zk singularity"
     parser = argparse.ArgumentParser(usage=usage)
-    parser.add_argument('-a', '--host', default="", metavar='HOST',
-                        help='attach to server HOST [localhost]')
-    parser.add_argument('-i', '--interface-mode', default=False,
-                        action='store_true',
-                        help='run the controller in interface only mode for testing '
-                             'integration and ICD compliance. [%(default)s]')
-    parser.add_argument('-p', '--port', type=int, default=5001, metavar='N',
-                        help='katcp listen port [%(default)s]')
-    parser.add_argument('-l', '--log-level', metavar='LEVEL',
-                        help='set the Python logging level [%(default)s]')
-    parser.add_argument('--name', default='sdpmc',
-                        help='name to use in Zookeeper and Singularity [%(default)s]')
-    parser.add_argument('--external-hostname', metavar='FQDN', default=socket.getfqdn(),
-                        help='Name by which others connect to this machine [%(default)s]')
-    parser.add_argument('--http-port', type=int, default=8080, metavar='PORT',
-                        help='port for the web server [%(default)s]')
-    parser.add_argument('--haproxy', action='store_true',
-                        help='Run haproxy to provide frontend to GUIs [no]')
-    parser.add_argument('--external-url', metavar='URL', type=yarl.URL,
-                        help='External URL for clients to browse the GUI')
-    parser.add_argument('--consul-url', type=yarl.URL, default='http://127.0.0.1:8500/',
-                        help='base URL for local consul agent [%(default)s]')
-    parser.add_argument('--image-tag-file',
-                        metavar='FILE', help='Load image tag to run from file (on each configure)')
-    parser.add_argument('--s3-config-file',
-                        metavar='FILE',
-                        help='configuration for connecting services to S3 '
-                             '(loaded on each configure)')
-    parser.add_argument('--safe-multicast-cidr', default='239.192.0.0/18',
-                        metavar='MULTICAST-CIDR',
-                        help='block of multicast addresses from which to draw internal allocation. '
-                             'Needs to be at least /16. [%(default)s]')
-    parser.add_argument('--gui-urls', metavar='FILE-OR-DIR',
-                        help='file containing JSON describing related GUIs, '
-                             'or directory with .json files [none]')
-    parser.add_argument('--registry',
-                        default='sdp-docker-registry.kat.ac.za:5000', metavar='HOST:PORT',
-                        help='registry from which to pull images [%(default)s]')
-    parser.add_argument('--no-pull', action='store_true', default=False,
-                        help='skip pulling images from the registry if already present')
+    parser.add_argument(
+        '-a', '--host', default="", metavar='HOST', help='attach to server HOST [localhost]'
+    )
+    parser.add_argument(
+        '-i',
+        '--interface-mode',
+        default=False,
+        action='store_true',
+        help='run the controller in interface only mode for testing '
+        'integration and ICD compliance. [%(default)s]',
+    )
+    parser.add_argument(
+        '-p', '--port', type=int, default=5001, metavar='N', help='katcp listen port [%(default)s]'
+    )
+    parser.add_argument(
+        '-l', '--log-level', metavar='LEVEL', help='set the Python logging level [%(default)s]'
+    )
+    parser.add_argument(
+        '--name', default='sdpmc', help='name to use in Zookeeper and Singularity [%(default)s]'
+    )
+    parser.add_argument(
+        '--external-hostname',
+        metavar='FQDN',
+        default=socket.getfqdn(),
+        help='Name by which others connect to this machine [%(default)s]',
+    )
+    parser.add_argument(
+        '--http-port',
+        type=int,
+        default=8080,
+        metavar='PORT',
+        help='port for the web server [%(default)s]',
+    )
+    parser.add_argument(
+        '--haproxy', action='store_true', help='Run haproxy to provide frontend to GUIs [no]'
+    )
+    parser.add_argument(
+        '--external-url',
+        metavar='URL',
+        type=yarl.URL,
+        help='External URL for clients to browse the GUI',
+    )
+    parser.add_argument(
+        '--consul-url',
+        type=yarl.URL,
+        default='http://127.0.0.1:8500/',
+        help='base URL for local consul agent [%(default)s]',
+    )
+    parser.add_argument(
+        '--image-tag-file',
+        metavar='FILE',
+        help='Load image tag to run from file (on each configure)',
+    )
+    parser.add_argument(
+        '--s3-config-file',
+        metavar='FILE',
+        help='configuration for connecting services to S3 ' '(loaded on each configure)',
+    )
+    parser.add_argument(
+        '--safe-multicast-cidr',
+        default='239.192.0.0/18',
+        metavar='MULTICAST-CIDR',
+        help='block of multicast addresses from which to draw internal allocation. '
+        'Needs to be at least /16. [%(default)s]',
+    )
+    parser.add_argument(
+        '--gui-urls',
+        metavar='FILE-OR-DIR',
+        help='file containing JSON describing related GUIs, '
+        'or directory with .json files [none]',
+    )
+    parser.add_argument(
+        '--registry',
+        default='sdp-docker-registry.kat.ac.za:5000',
+        metavar='HOST:PORT',
+        help='registry from which to pull images [%(default)s]',
+    )
+    parser.add_argument(
+        '--no-pull',
+        action='store_true',
+        default=False,
+        help='skip pulling images from the registry if already present',
+    )
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     # TODO: support Zookeeper ensemble
-    parser.add_argument('zk',
-                        help='endpoint for Zookeeper server e.g. server.domain:2181')
-    parser.add_argument('singularity',
-                        help='URL for Singularity server')
+    parser.add_argument('zk', help='endpoint for Zookeeper server e.g. server.domain:2181')
+    parser.add_argument('singularity', help='URL for Singularity server')
     args = parser.parse_args(argv)
 
     if args.localhost:
@@ -1790,7 +1974,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
     if args.external_url is None:
         args.external_url = yarl.URL.build(
-            scheme='http', host=args.external_hostname, port=args.http_port, path='/')
+            scheme='http', host=args.external_hostname, port=args.http_port, path='/'
+        )
 
     if args.s3_config_file is None and not args.interface_mode:
         parser.error('--s3-config-file is required (unless --interface-mode is given)')

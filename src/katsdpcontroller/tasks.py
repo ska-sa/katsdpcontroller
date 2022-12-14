@@ -61,7 +61,8 @@ POSTPROCESSING_TIME_BUCKETS = [
     18 * 3600,
     20 * 3600,
     22 * 3600,
-    24 * 3600]
+    24 * 3600,
+]
 # Buckets appropriate for measuring processing times relative to observation
 # times.
 POSTPROCESSING_REL_BUCKETS = [
@@ -82,27 +83,30 @@ POSTPROCESSING_REL_BUCKETS = [
     2.5,
     5.0,
     7.5,
-    10.0
+    10.0,
 ]
 BATCH_RUNTIME = Histogram(
     'katsdpcontroller_batch_runtime_seconds',
     'Wall-clock execution time of batch tasks',
     ['task_type'],
-    buckets=POSTPROCESSING_TIME_BUCKETS)
+    buckets=POSTPROCESSING_TIME_BUCKETS,
+)
 BATCH_RUNTIME_REL = Histogram(
     'katsdpcontroller_batch_runtime_rel',
     'Wall-clock execution time of batch jobs as a fraction of data length',
     ['task_type'],
-    buckets=POSTPROCESSING_REL_BUCKETS)
+    buckets=POSTPROCESSING_REL_BUCKETS,
+)
 
 
 class CaptureBlockState(scheduler.OrderedEnum):
     """State of a single capture block."""
-    INITIALISING = 0         # Only occurs briefly on construction
-    CAPTURING = 1            # capture-init called, capture-done not yet called
-    BURNDOWN = 2             # capture-done returned, but real-time processing still happening
-    POSTPROCESSING = 3       # real-time processing complete, running batch processing
-    DEAD = 4                 # fully complete
+
+    INITIALISING = 0  # Only occurs briefly on construction
+    CAPTURING = 1  # capture-init called, capture-done not yet called
+    BURNDOWN = 2  # capture-done returned, but real-time processing still happening
+    POSTPROCESSING = 3  # real-time processing complete, running batch processing
+    DEAD = 4  # fully complete
 
 
 class KatcpTransition:
@@ -120,6 +124,7 @@ class KatcpTransition:
     timeout : float
         Maximum time to wait for the query to succeed.
     """
+
     def __init__(self, name, *args, timeout=None):
         self.name = name
         self.args = args
@@ -129,8 +134,9 @@ class KatcpTransition:
 
     def format(self, *args, **kwargs):
         """Apply string formatting to each argument and return a new object"""
-        formatted_args = [arg.format(*args, **kwargs) if isinstance(arg, str) else arg
-                          for arg in self.args]
+        formatted_args = [
+            arg.format(*args, **kwargs) if isinstance(arg, str) else arg for arg in self.args
+        ]
         return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
     def __repr__(self):
@@ -183,6 +189,7 @@ class ProductLogicalTask(scheduler.LogicalTask):
 
 class ConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
+
     def _graph_config(self, resolver, graph):
         return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
 
@@ -190,20 +197,21 @@ class ConfigMixin:
         await super().resolve(resolver, graph, image)
         if not self.logical_node.katsdpservices_config:
             if self._graph_config(resolver, graph):
-                logger.warning('Graph node %s has explicit config but katsdpservices_config=False',
-                               self.name)
+                logger.warning(
+                    'Graph node %s has explicit config but katsdpservices_config=False', self.name
+                )
             return
         if not resolver.telstate:
             if self._graph_config(resolver, graph):
                 logger.warning(
-                    "Graph node %s has explicit config but there is no telstate",
-                    self.name)
+                    "Graph node %s has explicit config but there is no telstate", self.name
+                )
             return
 
         # Not every task will take a --external-hostname option, but the
         # katsdpservices argument parser doesn't mind unused arguments.
         config = {}
-        if self.host is not None:   # Can happen if this isn't a PhysicalTask
+        if self.host is not None:  # Can happen if this isn't a PhysicalTask
             config['external_hostname'] = self.host
         for name, value in self.ports.items():
             config[name] = value
@@ -212,11 +220,13 @@ class ConfigMixin:
             if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr['port']
                 endpoint = Endpoint(trg.host, trg.ports[port])
-            config.update(attr.get('config', lambda task_, resolver_, endpoint_: {})(
-                self, resolver, endpoint))
+            config.update(
+                attr.get('config', lambda task_, resolver_, endpoint_: {})(self, resolver, endpoint)
+            )
         config.update(self._graph_config(resolver, graph))
         overrides = resolver.service_overrides.get(
-            self.logical_node.name, product_config.ServiceOverride()).config
+            self.logical_node.name, product_config.ServiceOverride()
+        ).config
         if overrides:
             logger.warning('Overriding config for %s', self.name)
             config = product_config.override(config, overrides)
@@ -230,11 +240,12 @@ class CaptureBlockStateObserver:
     """Watches a capture-block-state sensor in a child.
     Users can wait for specific conditions to be satisfied.
     """
+
     def __init__(self, sensor, logger):
         self.sensor = sensor
         self.logger = logger
         self._last = {}
-        self._waiters = []    # Each a tuple of a predicate and a future
+        self._waiters = []  # Each a tuple of a predicate and a future
         self(sensor, sensor.reading)
         sensor.attach(self)
 
@@ -255,7 +266,7 @@ class CaptureBlockStateObserver:
         """Called when the sensor value changes, to wake up waiters"""
         new_waiters = []
         for waiter in self._waiters:
-            if not waiter[1].done():   # Skip over cancelled futures
+            if not waiter[1].done():  # Skip over cancelled futures
                 if waiter[0](self._last):
                     waiter[1].set_result(None)
                 else:
@@ -264,7 +275,7 @@ class CaptureBlockStateObserver:
 
     async def wait(self, condition):
         if condition(self._last):
-            return      # Already satisfied, no need to wait
+            return  # Already satisfied, no need to wait
         future = asyncio.Future()
         self._waiters.append((condition, future))
         await future
@@ -281,7 +292,7 @@ class CaptureBlockStateObserver:
         """
         self.sensor.detach(self)
         self._last = {}
-        self._trigger()   # Give waiters a chance to react to an empty map
+        self._trigger()  # Give waiters a chance to react to an empty map
         for waiter in self._waiters:
             waiter[1].set_exception(ConnectionResetError())
         self._waiters = []
@@ -323,15 +334,19 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         ingest.sdp_l0.1.input_rate
     """
 
-    def __init__(self, logical_task: ProductLogicalTask, sdp_controller,
-                 subarray_product, capture_block_id: str) -> None:
+    def __init__(
+        self,
+        logical_task: ProductLogicalTask,
+        sdp_controller,
+        subarray_product,
+        capture_block_id: str,
+    ) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
-        self.capture_block_id = capture_block_id   # Only useful for batch tasks
-        self.logger = logging.LoggerAdapter(
-            logger, dict(child_task=self.name))
+        self.capture_block_id = capture_block_id  # Only useful for batch tasks
+        self.logger = logging.LoggerAdapter(logger, dict(child_task=self.name))
         if capture_block_id is None:
             self.name = logical_task.name
         else:
@@ -348,20 +363,25 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         self._capture_blocks_empty = asyncio.Event()
         self._capture_blocks_empty.set()
 
-        self._state_sensor = Sensor(scheduler.TaskState, self.name + '.state',
-                                    "State of the state machine", "",
-                                    default=self.state,
-                                    initial_status=Sensor.Status.NOMINAL)
+        self._state_sensor = Sensor(
+            scheduler.TaskState,
+            self.name + '.state',
+            "State of the state machine",
+            "",
+            default=self.state,
+            initial_status=Sensor.Status.NOMINAL,
+        )
         self._mesos_state_sensor = Sensor(
-            str, self.name + '.mesos-state', 'Mesos-reported task state')
-        self._version_sensor = Sensor(
-            str, self.name + '.version', 'Image of executing container')
+            str, self.name + '.mesos-state', 'Mesos-reported task state'
+        )
+        self._version_sensor = Sensor(str, self.name + '.version', 'Image of executing container')
         self._source_sensor = Sensor(
-            str, self.name + '.source', 'Version control source for the container')
+            str, self.name + '.source', 'Version control source for the container'
+        )
         self._revision_sensor = Sensor(
-            str, self.name + '.revision', 'Version control revision for the container')
-        self._host_sensor = Sensor(
-            str, self.name + '.host', 'Host running the task')
+            str, self.name + '.revision', 'Version control revision for the container'
+        )
+        self._host_sensor = Sensor(str, self.name + '.host', 'Host running the task')
         if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
@@ -394,8 +414,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         """
         if self.katcp_connection is None:
             raise ValueError('Cannot issue request without a katcp connection')
-        self.logger.info("Issuing request %s %s to node %s (timeout %gs)",
-                         req, args, self.name, timeout)
+        self.logger.info(
+            "Issuing request %s %s to node %s (timeout %gs)", req, args, self.name, timeout
+        )
         try:
             async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
@@ -413,34 +434,46 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         # establish katcp connection to this node if appropriate
         if 'port' in self.ports:
             while True:
-                self.logger.info("Attempting to establish katcp connection to %s:%s for node %s",
-                                 self.host, self.ports['port'], self.name)
+                self.logger.info(
+                    "Attempting to establish katcp connection to %s:%s for node %s",
+                    self.host,
+                    self.ports['port'],
+                    self.name,
+                )
                 prefix = self.name + '.'
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
-                    self.sdp_controller, prefix,
+                    self.sdp_controller,
+                    prefix,
                     renames=self.logical_node.sensor_renames,
-                    host=self.host, port=self.ports['port'])
+                    host=self.host,
+                    port=self.ports['port'],
+                )
                 try:
                     await self.katcp_connection.wait_synced()
-                    self.logger.info("Connected to %s:%s for node %s",
-                                     self.host, self.ports['port'], self.name)
+                    self.logger.info(
+                        "Connected to %s:%s for node %s", self.host, self.ports['port'], self.name
+                    )
                     sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
-                            sensor, logger=self.logger)
+                            sensor, logger=self.logger
+                        )
                     sensor = self.sdp_controller.sensors.get(prefix + 'device-status')
                     if sensor is not None:
-                        self.device_status_observer = DeviceStatusObserver(
-                            sensor, self)
+                        self.device_status_observer = DeviceStatusObserver(sensor, self)
                     break
                 except RuntimeError:
                     self.katcp_connection.close()
                     await self.katcp_connection.wait_closed()
                     # no need for these to lurk around
                     self.katcp_connection = None
-                    self.logger.exception("Failed to connect to %s via katcp on %s:%d. "
-                                          "Check to see if networking issues could be to blame.",
-                                          self.name, self.host, self.ports['port'])
+                    self.logger.exception(
+                        "Failed to connect to %s via katcp on %s:%d. "
+                        "Check to see if networking issues could be to blame.",
+                        self.name,
+                        self.host,
+                        self.ports['port'],
+                    )
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
@@ -448,7 +481,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
 
     def _add_sensor(self, sensor):
         """Add the supplied Sensor object to the top level device and
-           track it locally.
+        track it locally.
         """
         self.sensors[sensor.name] = sensor
         self.sdp_controller.sensors.add(sensor)
@@ -479,7 +512,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             data_suspect = data_suspect[:a] + "1" * (b - a) + data_suspect[b:]
             self.logical_node.data_suspect_sensor.set_value(
                 data_suspect,
-                status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR
+                status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR,
             )
         if self.katcp_connection is not None:
             try:
@@ -527,16 +560,17 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         self._host_sensor.value = self.host
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
-                aiokatcp.Address,
-                f'{self.name}.{key}', f'IP endpoint for {key}')
+                aiokatcp.Address, f'{self.name}.{key}', f'IP endpoint for {key}'
+            )
             try:
                 addrinfo = await asyncio.get_event_loop().getaddrinfo(self.host, value)
                 host, port = addrinfo[0][4][:2]
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
             except socket.gaierror as error:
                 self.logger.warning('Could not resolve %s: %s', self.host, error)
-                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')),
-                                          status=Sensor.Status.FAILURE)
+                endpoint_sensor.set_value(
+                    aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')), status=Sensor.Status.FAILURE
+                )
             self._add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
@@ -554,8 +588,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
 
     def clone(self):
         clone = self.logical_node.physical_factory(
-            self.logical_node, self.sdp_controller, self.subarray_product,
-            self.capture_block_id)
+            self.logical_node, self.sdp_controller, self.subarray_product, self.capture_block_id
+        )
         clone.generation = self.generation + 1
         return clone
 
@@ -599,7 +633,8 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.PhysicalTask.__init__(self, logical_task)
         ProductPhysicalTaskMixin.__init__(
-            self, logical_task, sdp_controller, subarray_product, capture_block_id)
+            self, logical_task, sdp_controller, subarray_product, capture_block_id
+        )
         self.consul_services = []
 
     def subst_args(self, resolver):
@@ -625,7 +660,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         }
         return args
 
-    @property   # type: ignore
+    @property  # type: ignore
     def status(self):
         return self._status
 
@@ -646,7 +681,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
                 'Tags': ['prometheus-metrics'],
                 'Meta': {
                     'subarray_product_id': self.subarray_product_id,
-                    'task_name': self.logical_node.name
+                    'task_name': self.logical_node.name,
                 },
                 'Port': prometheus_port,
                 'Checks': [
@@ -655,9 +690,9 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
                         "Timeout": "5s",
                         # Using the metrics endpoint as a health check
                         "HTTP": f"http://{LOCALHOST}:{prometheus_port}/metrics",
-                        "DeregisterCriticalServiceAfter": "90s"
+                        "DeregisterCriticalServiceAfter": "90s",
                     }
-                ]
+                ],
             }
             # Connect to the Consul agent on the machine that will be running
             # the task. Note that this requires it to be configured to listen
@@ -685,34 +720,38 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             'task': self.logical_node.name,
             'task_type': self.logical_node.task_type,
             'task_id': self.taskinfo.task_id.value,
-            'subarray_product_id': self.subarray_product_id
+            'subarray_product_id': self.subarray_product_id,
         }
         if self.capture_block_id is not None:
             labels['capture_block_id'] = self.capture_block_id
-        self.taskinfo.container.docker.setdefault('parameters', []).extend([
-            {'key': 'label', 'value': f'za.ac.kat.sdp.katsdpcontroller.{key}={value}'}
-            for (key, value) in labels.items()])
+        self.taskinfo.container.docker.setdefault('parameters', []).extend(
+            [
+                {'key': 'label', 'value': f'za.ac.kat.sdp.katsdpcontroller.{key}={value}'}
+                for (key, value) in labels.items()
+            ]
+        )
 
         # Set extra fields for katsdpservices-using services to log to logstash
         if self.logical_node.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
             extras = {
                 **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
                 **labels,
-                'docker.image': self.taskinfo.container.docker.image
+                'docker.image': self.taskinfo.container.docker.image,
             }
             env = {
                 'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
                 'KATSDP_LOG_GELF_EXTRA': json.dumps(extras),
                 'KATSDP_LOG_GELF_LOCALNAME': self.host,
-                'LOGSPOUT': 'ignore'
+                'LOGSPOUT': 'ignore',
             }
-            self.taskinfo.command.environment.setdefault('variables', []).extend([
-                {'name': key, 'value': value} for (key, value) in env.items()
-            ])
+            self.taskinfo.command.environment.setdefault('variables', []).extend(
+                [{'name': key, 'value': value} for (key, value) in env.items()]
+            )
 
         # Apply overrides to taskinfo given by the user
         overrides = resolver.service_overrides.get(
-            self.logical_node.name, product_config.ServiceOverride()).taskinfo
+            self.logical_node.name, product_config.ServiceOverride()
+        ).taskinfo
         if overrides:
             self.logger.warning('Applying overrides to taskinfo of %s', self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
@@ -774,7 +813,8 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
 
 @asynccontextmanager
 async def wrap_katcp_server(
-        server: aiokatcp.DeviceServer) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
+    server: aiokatcp.DeviceServer,
+) -> AsyncGenerator[aiokatcp.DeviceServer, None]:
     await server.start()
     yield server
     await server.stop()
@@ -789,7 +829,8 @@ class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTa
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.FakePhysicalTask.__init__(self, logical_task)
         ProductPhysicalTaskMixin.__init__(
-            self, logical_task, sdp_controller, subarray_product, capture_block_id)
+            self, logical_task, sdp_controller, subarray_product, capture_block_id
+        )
 
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         assert self.host is not None
@@ -811,6 +852,7 @@ class LogicalGroup(scheduler.LogicalExternal):
     instead of one to each of the real nodes. It also allows for shared config
     to be stored once rather than repeated.
     """
+
     def __init__(self, name):
         super().__init__(name)
         self.physical_factory = PhysicalGroup
@@ -825,6 +867,7 @@ class PhysicalGroup(ConfigMixin, scheduler.PhysicalExternal):
 
 class PoweroffLogicalTask(scheduler.LogicalTask):
     """Logical task for powering off a machine."""
+
     def __init__(self, host):
         super().__init__('kibisis.' + host)
         self.host = host

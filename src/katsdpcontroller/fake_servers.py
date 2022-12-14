@@ -25,7 +25,7 @@ def _add_device_status_sensor(sensors: SensorSet) -> None:
             "device-status",
             "Overall engine health",
             default=DeviceStatus.DEGRADED,
-            initial_status=Sensor.Status.WARN
+            initial_status=Sensor.Status.WARN,
         )
     )
 
@@ -37,7 +37,7 @@ def _add_rx_device_status_sensor(sensors: SensorSet, description: str) -> None:
             "rx.device-status",
             description,
             default=DeviceStatus.DEGRADED,
-            initial_status=Sensor.Status.WARN
+            initial_status=Sensor.Status.WARN,
         )
     )
 
@@ -45,26 +45,40 @@ def _add_rx_device_status_sensor(sensors: SensorSet, description: str) -> None:
 def _add_time_sync_sensors(sensors: SensorSet) -> None:
     sensors.add(
         Sensor(
-            float, "time.esterror", "Estimated time synchronisation error", units="s",
-            default=0.0, initial_status=Sensor.Status.NOMINAL
+            float,
+            "time.esterror",
+            "Estimated time synchronisation error",
+            units="s",
+            default=0.0,
+            initial_status=Sensor.Status.NOMINAL,
         )
     )
     sensors.add(
         Sensor(
-            float, "time.maxerror", "Upper bound on time synchronisation error", units="s",
-            default=0.0, initial_status=Sensor.Status.NOMINAL
+            float,
+            "time.maxerror",
+            "Upper bound on time synchronisation error",
+            units="s",
+            default=0.0,
+            initial_status=Sensor.Status.NOMINAL,
         )
     )
     sensors.add(
         Sensor(
-            ClockState, "time.state", "Kernel clock state",
-            default=ClockState.OK, initial_status=Sensor.Status.NOMINAL
+            ClockState,
+            "time.state",
+            "Kernel clock state",
+            default=ClockState.OK,
+            initial_status=Sensor.Status.NOMINAL,
         )
     )
     sensors.add(
         Sensor(
-            bool, "time.synchronised", "Whether the host clock is synchronised within tolerances",
-            default=True, initial_status=Sensor.Status.NOMINAL
+            bool,
+            "time.synchronised",
+            "Whether the host clock is synchronised within tolerances",
+            default=True,
+            initial_status=Sensor.Status.NOMINAL,
         )
     )
 
@@ -86,7 +100,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "For this input, the complex, unitless, per-channel digital scaling factors "
                     "implemented prior to requantisation",
                     default="[1.0+0.0j]",
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
             self.sensors.add(
@@ -98,7 +112,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "delay-rate <unit-less or, seconds-per-second>, "
                     "phase <radians>, phase-rate <radians per second>).",
                     default="(-1, 0.0, 0.0, 0.0, 0.0)",
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
             self.sensors.add(
@@ -107,7 +121,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     f"input{pol}-dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
             self.sensors.add(
@@ -117,7 +131,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "Digitiser ADC average power",
                     units="dBFS",
                     default=-25.0,
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
             self.sensors.add(
@@ -126,7 +140,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     f"input{pol}-feng-clip-cnt",
                     "Number of output samples that are saturated",
                     default=0,
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
             self.sensors.add(
@@ -136,7 +150,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "The timestamp (in samples) of the last chunk of data received "
                     "from the digitiser",
                     default=-1,
-                    initial_status=Sensor.Status.ERROR
+                    initial_status=Sensor.Status.ERROR,
                 )
             )
             self.sensors.add(
@@ -146,7 +160,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     "The timestamp (in UNIX time) of the last chunk of data received "
                     "from the digitiser",
                     default=Timestamp(-1.0),
-                    initial_status=Sensor.Status.ERROR
+                    initial_status=Sensor.Status.ERROR,
                 )
             )
             self.sensors.add(
@@ -155,15 +169,14 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     f"input{pol}-rx-missing-unixtime",
                     "The timestamp (in UNIX time) when missing data was last detected",
                     default=Timestamp(-1.0),
-                    initial_status=Sensor.Status.NOMINAL
+                    initial_status=Sensor.Status.NOMINAL,
                 )
             )
 
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(
-            self.sensors,
-            "The F-engine is receiving a good, clean digitiser stream"
+            self.sensors, "The F-engine is receiving a good, clean digitiser stream"
         )
 
     async def request_delays(self, ctx, start_time: Timestamp, *delays: str) -> None:
@@ -214,7 +227,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
                 default=True,
-                initial_status=Sensor.Status.NOMINAL
+                initial_status=Sensor.Status.NOMINAL,
             )
         )
         self.sensors.add(
@@ -223,7 +236,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "xeng-clip-cnt",
                 "Number of visibilities that saturated",
                 default=0,
-                initial_status=Sensor.Status.NOMINAL
+                initial_status=Sensor.Status.NOMINAL,
             )
         )
         self.sensors.add(
@@ -232,17 +245,16 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "chan-range",
                 "The range of channels processed by this XB-engine, inclusive",
                 default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
-                initial_status=Sensor.Status.NOMINAL
+                initial_status=Sensor.Status.NOMINAL,
             )
         )
         self.sensors.add(
             Sensor(
                 int,
                 "input-rx-timestamp",
-                "The timestamp (in samples) of the last chunk of data received "
-                "from an F-engine",
+                "The timestamp (in samples) of the last chunk of data received " "from an F-engine",
                 default=-1,
-                initial_status=Sensor.Status.ERROR
+                initial_status=Sensor.Status.ERROR,
             )
         )
         self.sensors.add(
@@ -252,7 +264,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "The timestamp (in UNIX time) of the last chunk of data received "
                 "from an F-engine",
                 default=Timestamp(-1.0),
-                initial_status=Sensor.Status.ERROR
+                initial_status=Sensor.Status.ERROR,
             )
         )
         self.sensors.add(
@@ -261,15 +273,14 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 "input-rx-missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=Timestamp(-1.0),
-                initial_status=Sensor.Status.NOMINAL
+                initial_status=Sensor.Status.NOMINAL,
             )
         )
 
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(
-            self.sensors,
-            "The XB-engine is receiving a good, clean F-engine stream"
+            self.sensors, "The XB-engine is receiving a good, clean F-engine stream"
         )
 
 
@@ -277,9 +288,14 @@ class FakeIngestDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.sensors.add(
-            Sensor(bool, 'capture-active',
-                   'Is there a currently active capture session (prometheus: gauge)',
-                   default=False, initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                bool,
+                'capture-active',
+                'Is there a currently active capture session (prometheus: gauge)',
+                default=False,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Dummy implementation of capture-init."""
@@ -296,9 +312,14 @@ class FakeCalDeviceServer(FakeDeviceServer):
         self._capture_blocks: Dict[str, str] = {}
         self._current_capture_block: Optional[str] = None
         self.sensors.add(
-            Sensor(str, 'capture-block-state',
-                   'JSON dict with the state of each capture block',
-                   default='{}', initial_status=Sensor.Status.NOMINAL))
+            Sensor(
+                str,
+                'capture-block-state',
+                'JSON dict with the state of each capture block',
+                default='{}',
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
 
     def _update_capture_block_state(self) -> None:
         """Update the sensor from the internal state."""
