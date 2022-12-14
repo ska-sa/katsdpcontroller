@@ -163,8 +163,8 @@ class _Haproxy:
         env = jinja2.Environment(
             loader=jinja2.PackageLoader("katsdpcontroller"),
             undefined=jinja2.StrictUndefined,
-            autoescape=False,
-        )  # autoescaping is for HTML
+            autoescape=False,  # autoescaping is for HTML
+        )
         self._template = env.get_template("haproxy.conf.j2")
 
     async def update(self, guis: dict, internal_port: int) -> None:
