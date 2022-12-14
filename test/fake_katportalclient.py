@@ -41,7 +41,7 @@ class KATPortalClient:
         try:
             return self.components[component]
         except KeyError:
-            raise katportalclient.SensorLookupError(f"Not such component {component}") from None
+            raise katportalclient.SensorLookupError(f"No such component {component}") from None
 
     @tornado.gen.coroutine
     def sensor_values(self, filters, include_value_ts=False):
