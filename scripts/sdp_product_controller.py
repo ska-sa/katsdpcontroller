@@ -129,7 +129,7 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     )
     parser.add_argument(
         "mesos_master",
-        help="Zookeeper URL for discovering Mesos master " "e.g. zk://server.domain:2181/mesos",
+        help="Zookeeper URL for discovering Mesos master e.g. zk://server.domain:2181/mesos",
     )
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
