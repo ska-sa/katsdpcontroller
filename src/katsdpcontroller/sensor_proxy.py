@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 _Metric = Union[Gauge, Counter, Histogram]
 # Use a string so that code won't completely break if Prometheus internals change.
 # The Union is required because mypy doesn't like pure strings being used indirectly.
-_LabelWrapper = Union['prometheus_client.core._LabelWrapper']
-_Factory = Callable[[aiokatcp.Sensor], Optional['PrometheusInfo']]
+_LabelWrapper = Union["prometheus_client.core._LabelWrapper"]
+_Factory = Callable[[aiokatcp.Sensor], Optional["PrometheusInfo"]]
 
 
 def _dummy_factory(sensor: aiokatcp.Sensor) -> None:
@@ -24,7 +24,7 @@ def _reading_to_float(reading: aiokatcp.Reading) -> float:
     value = reading.value
     if isinstance(value, enum.Enum):
         try:
-            values = list(type(value))     # type: List[enum.Enum]
+            values = list(type(value))  # type: List[enum.Enum]
             idx = values.index(value)
         except ValueError:
             idx = -1
@@ -39,11 +39,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     See :class:`SensorProxyClient` for an explanation of the parameters.
     """
 
-    def __init__(self, client: aiokatcp.Client, server: aiokatcp.DeviceServer,
-                 prefix: str,
-                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
-                 enum_types: Sequence[Type[enum.Enum]] = (),
-                 renames: Optional[Mapping[str, str]] = None) -> None:
+    def __init__(
+        self,
+        client: aiokatcp.Client,
+        server: aiokatcp.DeviceServer,
+        prefix: str,
+        rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+        enum_types: Sequence[Type[enum.Enum]] = (),
+        renames: Optional[Mapping[str, str]] = None,
+    ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
         self.renames = renames if renames is not None else {}
@@ -62,17 +66,27 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def rewrite_name(self, name: str) -> str:
         return self.renames.get(name, self.prefix + name)
 
-    def sensor_added(self, name: str, description: str, units: str, type_name: str,
-                     *args: bytes) -> None:
+    def sensor_added(
+        self, name: str, description: str, units: str, type_name: str, *args: bytes
+    ) -> None:
         """Add a new or replaced sensor with unqualified name `name`."""
         super().sensor_added(name, description, units, type_name, *args)
         sensor = self.sensors[self.rewrite_name(name)]
         self.orig_sensors.add(sensor)
-        if (self.rewrite_gui_urls is not None
-                and sensor.name.endswith('.gui-urls') and sensor.stype is bytes):
+        if (
+            self.rewrite_gui_urls is not None
+            and sensor.name.endswith(".gui-urls")
+            and sensor.stype is bytes
+        ):
             new_value = self.rewrite_gui_urls(sensor)
-            sensor = aiokatcp.Sensor(sensor.stype, sensor.name, sensor.description,
-                                     sensor.units, new_value, sensor.status)
+            sensor = aiokatcp.Sensor(
+                sensor.stype,
+                sensor.name,
+                sensor.description,
+                sensor.units,
+                new_value,
+                sensor.status,
+            )
         self.server.sensors.add(sensor)
         self._interface_changed = True
 
@@ -87,20 +101,24 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         rewritten = self.rewrite_name(name)
         self._sensor_removed(rewritten)
 
-    def sensor_updated(self, name: str, value: bytes, status: aiokatcp.Sensor.Status,
-                       timestamp: float) -> None:
+    def sensor_updated(
+        self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
+    ) -> None:
         super().sensor_updated(name, value, status, timestamp)
         rewritten_name = self.rewrite_name(name)
         sensor = self.sensors[rewritten_name]
-        if (self.rewrite_gui_urls is not None
-                and rewritten_name.endswith('.gui-urls') and sensor.stype is bytes):
+        if (
+            self.rewrite_gui_urls is not None
+            and rewritten_name.endswith(".gui-urls")
+            and sensor.stype is bytes
+        ):
             value = self.rewrite_gui_urls(sensor)
             self.server.sensors[rewritten_name].set_value(value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
         if self._interface_changed:
-            self.server.mass_inform('interface-changed', 'sensor-list')
+            self.server.mass_inform("interface-changed", "sensor-list")
         self._interface_changed = False
 
     def state_updated(self, state: aiokatcp.SyncState) -> None:
@@ -135,11 +153,15 @@ class SensorProxyClient(aiokatcp.Client):
         Passed to the base class
     """
 
-    def __init__(self, server: aiokatcp.DeviceServer, prefix: str,
-                 rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
-                 enum_types: Sequence[Type[enum.Enum]] = (),
-                 renames: Optional[Mapping[str, str]] = None,
-                 **kwargs) -> None:
+    def __init__(
+        self,
+        server: aiokatcp.DeviceServer,
+        prefix: str,
+        rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+        enum_types: Sequence[Type[enum.Enum]] = (),
+        renames: Optional[Mapping[str, str]] = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         watcher = SensorWatcher(self, server, prefix, rewrite_gui_urls, renames=renames)
         self._synced = watcher.synced
@@ -164,10 +186,14 @@ class PrometheusInfo:
         Labels to combine with `name` to produce the series.
     """
 
-    def __init__(self, class_: Callable[..., _LabelWrapper],
-                 name: str, description: str,
-                 labels: Mapping[str, str],
-                 registry: CollectorRegistry = prometheus_client.REGISTRY) -> None:
+    def __init__(
+        self,
+        class_: Callable[..., _LabelWrapper],
+        name: str,
+        description: str,
+        labels: Mapping[str, str],
+        registry: CollectorRegistry = prometheus_client.REGISTRY,
+    ) -> None:
         self.class_ = class_
         self.name = name
         self.description = description
@@ -178,10 +204,13 @@ class PrometheusInfo:
 class PrometheusObserver:
     """Watches a sensor and mirrors updates into a Prometheus Gauge, Counter or Histogram."""
 
-    def __init__(self, sensor: aiokatcp.Sensor,
-                 value_metric: _LabelWrapper,
-                 status_metric: _LabelWrapper,
-                 label_values: Iterable[str]) -> None:
+    def __init__(
+        self,
+        sensor: aiokatcp.Sensor,
+        value_metric: _LabelWrapper,
+        status_metric: _LabelWrapper,
+        label_values: Iterable[str],
+    ) -> None:
         self._sensor = sensor
         self._old_value = 0.0
         self._old_timestamp: Optional[float] = None
@@ -201,27 +230,30 @@ class PrometheusObserver:
         # Gauge aren't actually classes (they're functions). So we have to
         # use introspection.
         metric_type = type(self._value_metric).__name__
-        if metric_type == 'Gauge':
+        if metric_type == "Gauge":
             if valid:
                 self._value_metric.set(value)
-        elif metric_type == 'Counter':
+        elif metric_type == "Counter":
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
                 if value < self._old_value:
                     logger.debug(
-                        'Counter %s went backwards (%d to %d), not sending delta to Prometheus',
-                        self._sensor.name, self._old_value, value)
+                        "Counter %s went backwards (%d to %d), not sending delta to Prometheus",
+                        self._sensor.name,
+                        self._old_value,
+                        value,
+                    )
                     # self._old_value is still updated with value. This is
                     # appropriate if the counter was reset (e.g. at the
                     # start of a new observation), so that Prometheus
                     # sees a cumulative count.
                 else:
                     self._value_metric.inc(value - self._old_value)
-        elif metric_type == 'Histogram':
+        elif metric_type == "Histogram":
             if valid and timestamp != self._old_timestamp:
                 self._value_metric.observe(value)
         else:
-            raise TypeError(f'Expected a Counter, Gauge or Histogram, not {metric_type}')
+            raise TypeError(f"Expected a Counter, Gauge or Histogram, not {metric_type}")
         if valid:
             self._old_value = value
         self._old_timestamp = timestamp
@@ -260,10 +292,13 @@ class PrometheusWatcher:
     # and the status metric.
     _metrics: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = {}
 
-    def __init__(self, sensors: aiokatcp.SensorSet,
-                 labels: Mapping[str, str] = None,
-                 factory: _Factory = None,
-                 metrics: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None) -> None:
+    def __init__(
+        self,
+        sensors: aiokatcp.SensorSet,
+        labels: Mapping[str, str] = None,
+        factory: _Factory = None,
+        metrics: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
+    ) -> None:
         self.sensors = sensors
         # Indexed by sensor name; None if no observer is needed.
         # Invariant: _observers has an entry if and only if the corresponding
@@ -296,10 +331,15 @@ class PrometheusWatcher:
             value_metric, status_metric = self._metrics[info.name]
         except KeyError:
             label_names = list(self._labels.keys()) + list(info.labels.keys())
-            value_metric = info.class_(info.name, info.description, label_names,
-                                       registry=info.registry)
-            status_metric = Gauge(info.name + '_status', f'Status of katcp sensor {info.name}',
-                                  label_names, registry=info.registry)
+            value_metric = info.class_(
+                info.name, info.description, label_names, registry=info.registry
+            )
+            status_metric = Gauge(
+                info.name + "_status",
+                f"Status of katcp sensor {info.name}",
+                label_names,
+                registry=info.registry,
+            )
             self._metrics[info.name] = (value_metric, status_metric)
 
         label_values = list(self._labels.values()) + list(info.labels.values())

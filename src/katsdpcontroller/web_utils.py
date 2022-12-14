@@ -9,6 +9,7 @@ from aiohttp import web
 
 class _ReplaceLevel:
     """Wraps a logger to replace calls to .info with a chosen level."""
+
     def __init__(self, logger, level):
         self._logger = logger
         self._level = level
@@ -24,13 +25,13 @@ async def prometheus_handler(request: web.Request) -> web.Response:
     response = await prometheus_async.aio.web.server_stats(request)
     if response.status == 200:
         # Avoid spamming logs (feeds into AccessLogger).
-        response['log_level'] = logging.DEBUG
+        response["log_level"] = logging.DEBUG
     return response
 
 
 async def health_handler(request: web.Request) -> web.Response:
-    response = web.Response(text='Health OK')
-    response['log_level'] = logging.DEBUG   # avoid spamming logs
+    response = web.Response(text="Health OK")
+    response["log_level"] = logging.DEBUG  # avoid spamming logs
     return response
 
 
@@ -40,8 +41,9 @@ class AccessLogger(aiohttp.web_log.AccessLogger):
     The request handler can assign to a ``log_level`` attribute of the
     response to specify the log level. If not set, it defaults to INFO.
     """
+
     def log(self, request, response, time):
-        level = response.get('log_level', logging.INFO)
+        level = response.get("log_level", logging.INFO)
         # Callee calls self.logger.info. We temporarily swap out the logger
         # to override the log level. It's not thread-safe, but aiohttp runs
         # on the event loop anyway.
@@ -60,12 +62,15 @@ async def cache_control(request, handler):
     For resources in /static it allows caching for an hour. For everything
     else it disables caching.
     """
-    if request.path.startswith('/static/'):
+    if request.path.startswith("/static/"):
+
         def add_headers(obj):
-            obj.headers['Cache-Control'] = 'max-age=3600'
+            obj.headers["Cache-Control"] = "max-age=3600"
+
     else:
+
         def add_headers(obj):
-            obj.headers['Cache-Control'] = 'no-store'
+            obj.headers["Cache-Control"] = "no-store"
 
     try:
         response = await handler(request)
