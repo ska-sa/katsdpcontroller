@@ -19,11 +19,11 @@ from unittest import mock
 import aiokatcp
 import pytest
 
-_T = TypeVar('_T')
+_T = TypeVar("_T")
 
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
-CONFIG = '''{
+CONFIG = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
@@ -185,9 +185,9 @@ CONFIG = '''{
         }
     },
     "config": {}
-}'''  # noqa: E501
+}"""  # noqa: E501
 
-CONFIG_CBF_ONLY = '''{
+CONFIG_CBF_ONLY = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
@@ -230,9 +230,9 @@ CONFIG_CBF_ONLY = '''{
         }
     },
     "config": {}
-}'''
+}"""
 
-S3_CONFIG = '''
+S3_CONFIG = """
 {
     "continuum": {
         "read": {
@@ -268,52 +268,52 @@ S3_CONFIG = '''
             "url": "https://models.s3.invalid/models"
         }
     }
-}'''
+}"""
 
 EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
-    (b'gui-urls', b'', b'string'),
+    (b"device-status", b"", b"discrete", b"ok", b"degraded", b"fail"),
+    (b"gui-urls", b"", b"string"),
 ]
 
 # This is just a subset meant to check common classes of sensors.
 # There are too many for it to be practical to maintain a canonical list.
 EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'bf_ingest.sdp_beamformer_engineering_ram.1.port', b'', b'address'),
-    (b'bf_ingest.sdp_beamformer_engineering_ram.1.mesos-state', b'', b'string'),
+    (b"bf_ingest.sdp_beamformer_engineering_ram.1.port", b"", b"address"),
+    (b"bf_ingest.sdp_beamformer_engineering_ram.1.mesos-state", b"", b"string"),
     (
-        b'bf_ingest.sdp_beamformer_engineering_ram.2.state',
-        b'',
-        b'discrete',
-        b'not-ready',
-        b'starting',
-        b'started',
-        b'running',
-        b'ready',
-        b'killing',
-        b'dead',
+        b"bf_ingest.sdp_beamformer_engineering_ram.2.state",
+        b"",
+        b"discrete",
+        b"not-ready",
+        b"starting",
+        b"started",
+        b"running",
+        b"ready",
+        b"killing",
+        b"dead",
     ),
-    (b'cal.1.capture-block-state', b'', b'string'),
-    (b'cal.1.gui-urls', b'', b'string'),
-    (b'capture-block-state', b'', b'string'),
-    (b'gpucbf_antenna_channelised_voltage-bandwidth', b'Hz', b'float'),
-    (b'gpucbf_m900h-destination', b'', b'string'),
-    (b'gui-urls', b'', b'string'),
-    (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
+    (b"cal.1.capture-block-state", b"", b"string"),
+    (b"cal.1.gui-urls", b"", b"string"),
+    (b"capture-block-state", b"", b"string"),
+    (b"gpucbf_antenna_channelised_voltage-bandwidth", b"Hz", b"float"),
+    (b"gpucbf_m900h-destination", b"", b"string"),
+    (b"gui-urls", b"", b"string"),
+    (b"ingest.sdp_l0.1.capture-active", b"", b"boolean"),
     (
-        b'state',
-        b'',
-        b'discrete',
-        b'configuring',
-        b'idle',
-        b'capturing',
-        b'deconfiguring',
-        b'dead',
-        b'error',
-        b'postprocessing',
+        b"state",
+        b"",
+        b"discrete",
+        b"configuring",
+        b"idle",
+        b"capturing",
+        b"deconfiguring",
+        b"dead",
+        b"error",
+        b"postprocessing",
     ),
-    (b'telstate.telstate', b'', b'address'),
-    (b'timeplot.sdp_l0.gui-urls', b'', b'string'),
-    (b'timeplot.sdp_l0.html_port', b'', b'address'),
+    (b"telstate.telstate", b"", b"address"),
+    (b"timeplot.sdp_l0.gui-urls", b"", b"string"),
+    (b"timeplot.sdp_l0.html_port", b"", b"address"),
 ]
 
 
@@ -384,7 +384,7 @@ class DelayedManager:
         self.mock.side_effect = self._old_side_effect
         return await self._result
 
-    async def __aenter__(self) -> 'DelayedManager':
+    async def __aenter__(self) -> "DelayedManager":
         await self._started
         return self
 
@@ -402,7 +402,7 @@ class DelayedManager:
             self._request_task.cancel()
             return
         if self.cancelled:
-            with pytest.raises(aiokatcp.FailReply, match='request cancelled'):
+            with pytest.raises(aiokatcp.FailReply, match="request cancelled"):
                 await self._request_task
         else:
             await self._request_task  # Will raise if it failed
@@ -431,7 +431,7 @@ class Background(Generic[_T]):
     def __init__(self, awaitable: Awaitable[_T]) -> None:
         self._future = asyncio.ensure_future(awaitable)
 
-    def __enter__(self) -> 'Background':
+    def __enter__(self) -> "Background":
         return self
 
     def __exit__(
@@ -443,7 +443,7 @@ class Background(Generic[_T]):
         if not exc_type:
             assert self._future.done()
 
-    async def __aenter__(self) -> 'Background':
+    async def __aenter__(self) -> "Background":
         return self
 
     async def __aexit__(
