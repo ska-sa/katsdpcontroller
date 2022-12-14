@@ -36,7 +36,7 @@ _T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 # Name of edge attribute, as a constant to better catch typos
-DEPENDS_INIT = 'depends_init'
+DEPENDS_INIT = "depends_init"
 # Buckets appropriate for measuring postprocessing task times (in seconds)
 POSTPROCESSING_TIME_BUCKETS = [
     1 * 60,
@@ -86,15 +86,15 @@ POSTPROCESSING_REL_BUCKETS = [
     10.0,
 ]
 BATCH_RUNTIME = Histogram(
-    'katsdpcontroller_batch_runtime_seconds',
-    'Wall-clock execution time of batch tasks',
-    ['task_type'],
+    "katsdpcontroller_batch_runtime_seconds",
+    "Wall-clock execution time of batch tasks",
+    ["task_type"],
     buckets=POSTPROCESSING_TIME_BUCKETS,
 )
 BATCH_RUNTIME_REL = Histogram(
-    'katsdpcontroller_batch_runtime_rel',
-    'Wall-clock execution time of batch jobs as a fraction of data length',
-    ['task_type'],
+    "katsdpcontroller_batch_runtime_rel",
+    "Wall-clock execution time of batch jobs as a fraction of data length",
+    ["task_type"],
     buckets=POSTPROCESSING_REL_BUCKETS,
 )
 
@@ -129,7 +129,7 @@ class KatcpTransition:
         self.name = name
         self.args = args
         if timeout is None:
-            raise ValueError('timeout is required')
+            raise ValueError("timeout is required")
         self.timeout = timeout
 
     def format(self, *args, **kwargs):
@@ -140,14 +140,14 @@ class KatcpTransition:
         return KatcpTransition(self.name, *formatted_args, timeout=self.timeout)
 
     def __repr__(self):
-        args = [f'{arg!r}' for arg in (self.name,) + self.args]
-        return 'KatcpTransition({}, timeout={!r})'.format(', '.join(args), self.timeout)
+        args = [f"{arg!r}" for arg in (self.name,) + self.args]
+        return "KatcpTransition({}, timeout={!r})".format(", ".join(args), self.timeout)
 
 
 class ProductLogicalTask(scheduler.LogicalTask):
     def __init__(self, name, streams=()):
         super().__init__(name)
-        self.task_type = name.split('.', 1)[0]
+        self.task_type = name.split(".", 1)[0]
         self.streams = list(streams)
         self.stream_names = frozenset(stream.name for stream in streams)
         self.physical_factory = ProductPhysicalTask
@@ -191,14 +191,14 @@ class ConfigMixin:
     """Mixin class that takes config information from the graph and sets it in telstate."""
 
     def _graph_config(self, resolver, graph):
-        return graph.nodes[self].get('config', lambda task_, resolver_: {})(self, resolver)
+        return graph.nodes[self].get("config", lambda task_, resolver_: {})(self, resolver)
 
     async def resolve(self, resolver, graph, image=None):
         await super().resolve(resolver, graph, image)
         if not self.logical_node.katsdpservices_config:
             if self._graph_config(resolver, graph):
                 logger.warning(
-                    'Graph node %s has explicit config but katsdpservices_config=False', self.name
+                    "Graph node %s has explicit config but katsdpservices_config=False", self.name
                 )
             return
         if not resolver.telstate:
@@ -212,28 +212,28 @@ class ConfigMixin:
         # katsdpservices argument parser doesn't mind unused arguments.
         config = {}
         if self.host is not None:  # Can happen if this isn't a PhysicalTask
-            config['external_hostname'] = self.host
+            config["external_hostname"] = self.host
         for name, value in self.ports.items():
             config[name] = value
         for _src, trg, attr in graph.out_edges(self, data=True):
             endpoint = None
-            if 'port' in attr and trg.state >= scheduler.TaskState.STARTING:
-                port = attr['port']
+            if "port" in attr and trg.state >= scheduler.TaskState.STARTING:
+                port = attr["port"]
                 endpoint = Endpoint(trg.host, trg.ports[port])
             config.update(
-                attr.get('config', lambda task_, resolver_, endpoint_: {})(self, resolver, endpoint)
+                attr.get("config", lambda task_, resolver_, endpoint_: {})(self, resolver, endpoint)
             )
         config.update(self._graph_config(resolver, graph))
         overrides = resolver.service_overrides.get(
             self.logical_node.name, product_config.ServiceOverride()
         ).config
         if overrides:
-            logger.warning('Overriding config for %s', self.name)
+            logger.warning("Overriding config for %s", self.name)
             config = product_config.override(config, overrides)
-        logger.debug('Config for %s: %s', self.name, config)
+        logger.debug("Config for %s: %s", self.name, config)
         self.task_config = config
         if config:
-            await resolver.telstate.set('config.' + self.logical_node.name, config)
+            await resolver.telstate.set("config." + self.logical_node.name, config)
 
 
 class CaptureBlockStateObserver:
@@ -252,12 +252,12 @@ class CaptureBlockStateObserver:
     def __call__(self, sensor, reading):
         if reading.status in [Sensor.Status.NOMINAL, Sensor.Status.WARN, Sensor.Status.ERROR]:
             try:
-                value = json.loads(reading.value.decode('utf-8'))
+                value = json.loads(reading.value.decode("utf-8"))
             except ValueError:
-                self.logger.warning('Invalid JSON in %s: %r', sensor.name, reading.value)
+                self.logger.warning("Invalid JSON in %s: %r", sensor.name, reading.value)
             else:
                 if not isinstance(value, dict):
-                    self.logger.warning('%s is not a dict: %r', sensor.name, reading.value)
+                    self.logger.warning("%s is not a dict: %r", sensor.name, reading.value)
                 else:
                     self._last = value
                     self._trigger()
@@ -350,7 +350,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if capture_block_id is None:
             self.name = logical_task.name
         else:
-            self.name = '.'.join([capture_block_id, logical_task.name])
+            self.name = ".".join([capture_block_id, logical_task.name])
         self.gui_urls: List[dict] = []
         # dict of exposed KATCP sensors. This excludes the state sensors, which
         # are present even when the process is not running.
@@ -365,23 +365,23 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
 
         self._state_sensor = Sensor(
             scheduler.TaskState,
-            self.name + '.state',
+            self.name + ".state",
             "State of the state machine",
             "",
             default=self.state,
             initial_status=Sensor.Status.NOMINAL,
         )
         self._mesos_state_sensor = Sensor(
-            str, self.name + '.mesos-state', 'Mesos-reported task state'
+            str, self.name + ".mesos-state", "Mesos-reported task state"
         )
-        self._version_sensor = Sensor(str, self.name + '.version', 'Image of executing container')
+        self._version_sensor = Sensor(str, self.name + ".version", "Image of executing container")
         self._source_sensor = Sensor(
-            str, self.name + '.source', 'Version control source for the container'
+            str, self.name + ".source", "Version control source for the container"
         )
         self._revision_sensor = Sensor(
-            str, self.name + '.revision', 'Version control revision for the container'
+            str, self.name + ".revision", "Version control revision for the container"
         )
-        self._host_sensor = Sensor(str, self.name + '.host', 'Host running the task')
+        self._host_sensor = Sensor(str, self.name + ".host", "Host running the task")
         if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
@@ -413,7 +413,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         message is printed and FailReply is raised.
         """
         if self.katcp_connection is None:
-            raise ValueError('Cannot issue request without a katcp connection')
+            raise ValueError("Cannot issue request without a katcp connection")
         self.logger.info(
             "Issuing request %s %s to node %s (timeout %gs)", req, args, self.name, timeout
         )
@@ -425,40 +425,40 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
             msg = f"Failed to issue req {req} to node {self.name}. {error}"
-            self.logger.warning('%s', msg)
+            self.logger.warning("%s", msg)
             raise FailReply(msg) from error
 
     async def wait_ready(self):
         if not await super().wait_ready():
             return False
         # establish katcp connection to this node if appropriate
-        if 'port' in self.ports:
+        if "port" in self.ports:
             while True:
                 self.logger.info(
                     "Attempting to establish katcp connection to %s:%s for node %s",
                     self.host,
-                    self.ports['port'],
+                    self.ports["port"],
                     self.name,
                 )
-                prefix = self.name + '.'
+                prefix = self.name + "."
                 self.katcp_connection = sensor_proxy.SensorProxyClient(
                     self.sdp_controller,
                     prefix,
                     renames=self.logical_node.sensor_renames,
                     host=self.host,
-                    port=self.ports['port'],
+                    port=self.ports["port"],
                 )
                 try:
                     await self.katcp_connection.wait_synced()
                     self.logger.info(
-                        "Connected to %s:%s for node %s", self.host, self.ports['port'], self.name
+                        "Connected to %s:%s for node %s", self.host, self.ports["port"], self.name
                     )
-                    sensor = self.sdp_controller.sensors.get(prefix + 'capture-block-state')
+                    sensor = self.sdp_controller.sensors.get(prefix + "capture-block-state")
                     if sensor is not None:
                         self.capture_block_state_observer = CaptureBlockStateObserver(
                             sensor, logger=self.logger
                         )
-                    sensor = self.sdp_controller.sensors.get(prefix + 'device-status')
+                    sensor = self.sdp_controller.sensors.get(prefix + "device-status")
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(sensor, self)
                     break
@@ -472,7 +472,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                         "Check to see if networking issues could be to blame.",
                         self.name,
                         self.host,
-                        self.ports['port'],
+                        self.ports["port"],
                     )
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
@@ -519,7 +519,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 self.katcp_connection.close()
                 need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
-                self.logger.error('Failed to shut down katcp connection to %s', self.name)
+                self.logger.error("Failed to shut down katcp connection to %s", self.name)
             self.katcp_connection = None
         if self.capture_block_state_observer is not None:
             self.capture_block_state_observer.close()
@@ -528,10 +528,10 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self.device_status_observer.close()
             self.device_status_observer = None
         if need_inform:
-            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     def kill(self, driver, **kwargs):
-        force = kwargs.pop('force', False)
+        force = kwargs.pop("force", False)
         if not force:
             asyncio.ensure_future(self.graceful_kill(driver, **kwargs))
         else:
@@ -552,7 +552,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 else:
                     gui_urls[-1][key] = value
         if gui_urls:
-            gui_urls_sensor = Sensor(str, self.name + '.gui-urls', 'URLs for GUIs')
+            gui_urls_sensor = Sensor(str, self.name + ".gui-urls", "URLs for GUIs")
             gui_urls_sensor.set_value(json.dumps(gui_urls))
             self._add_sensor(gui_urls_sensor)
             sensors_added = True
@@ -560,21 +560,21 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         self._host_sensor.value = self.host
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
-                aiokatcp.Address, f'{self.name}.{key}', f'IP endpoint for {key}'
+                aiokatcp.Address, f"{self.name}.{key}", f"IP endpoint for {key}"
             )
             try:
                 addrinfo = await asyncio.get_event_loop().getaddrinfo(self.host, value)
                 host, port = addrinfo[0][4][:2]
                 endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
             except socket.gaierror as error:
-                self.logger.warning('Could not resolve %s: %s', self.host, error)
+                self.logger.warning("Could not resolve %s: %s", self.host, error)
                 endpoint_sensor.set_value(
-                    aiokatcp.Address(ipaddress.IPv4Address('0.0.0.0')), status=Sensor.Status.FAILURE
+                    aiokatcp.Address(ipaddress.IPv4Address("0.0.0.0")), status=Sensor.Status.FAILURE
                 )
             self._add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
-            self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     def set_state(self, state):
         super().set_state(state)
@@ -605,16 +605,16 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
     async def graceful_kill(self, driver, **kwargs):
         try:
             if self.logical_node.final_state == CaptureBlockState.DEAD:
-                capture_blocks = kwargs.get('capture_blocks', {})
+                capture_blocks = kwargs.get("capture_blocks", {})
                 # Explicitly copy the values because it will mutate
                 for capture_block in list(capture_blocks.values()):
                     await capture_block.dead_event.wait()
         except Exception:
-            self.logger.exception('Exception in graceful shutdown of %s, killing it', self.name)
+            self.logger.exception("Exception in graceful shutdown of %s, killing it", self.name)
 
-        self.logger.info('Waiting for capture blocks on %s', self.name)
+        self.logger.info("Waiting for capture blocks on %s", self.name)
         await self._capture_blocks_empty.wait()
-        self.logger.info('All capture blocks for %s completed', self.name)
+        self.logger.info("All capture blocks for %s completed", self.name)
         self._disconnect()
         super().kill(driver, **kwargs)
 
@@ -653,8 +653,8 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         """
         args = super().subst_args(resolver)
         if self.capture_block_id is not None:
-            args['capture_block_id'] = self.capture_block_id
-        args['endpoints_vector'] = {
+            args["capture_block_id"] = self.capture_block_id
+        args["endpoints_vector"] = {
             name: endpoint_list_parser(endpoint.port)(endpoint.host)
             for name, endpoint in self.endpoints.items()
         }
@@ -674,17 +674,17 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         if not await super().wait_ready():
             return False
         # register Prometheus metrics with consul if appropriate
-        if 'prometheus' in self.ports:
-            prometheus_port = self.ports['prometheus']
+        if "prometheus" in self.ports:
+            prometheus_port = self.ports["prometheus"]
             service = {
-                'Name': self.logical_node.task_type,
-                'Tags': ['prometheus-metrics'],
-                'Meta': {
-                    'subarray_product_id': self.subarray_product_id,
-                    'task_name': self.logical_node.name,
+                "Name": self.logical_node.task_type,
+                "Tags": ["prometheus-metrics"],
+                "Meta": {
+                    "subarray_product_id": self.subarray_product_id,
+                    "task_name": self.logical_node.name,
                 },
-                'Port': prometheus_port,
-                'Checks': [
+                "Port": prometheus_port,
+                "Checks": [
                     {
                         "Interval": "15s",
                         "Timeout": "5s",
@@ -701,7 +701,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             # TODO: see if there is some way this requirement can be
             # eliminated e.g. by running via a wrapper script / sidecar
             # container that handles the registration and deregistration.
-            consul_url = yarl.URL.build(scheme='http', host=self.host, port=CONSUL_PORT)
+            consul_url = yarl.URL.build(scheme="http", host=self.host, port=CONSUL_PORT)
             self.consul_services.append(await ConsulService.register(service, consul_url))
         return True
 
@@ -717,35 +717,35 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
 
         # Provide info about which container this is for logspout to collect.
         labels = {
-            'task': self.logical_node.name,
-            'task_type': self.logical_node.task_type,
-            'task_id': self.taskinfo.task_id.value,
-            'subarray_product_id': self.subarray_product_id,
+            "task": self.logical_node.name,
+            "task_type": self.logical_node.task_type,
+            "task_id": self.taskinfo.task_id.value,
+            "subarray_product_id": self.subarray_product_id,
         }
         if self.capture_block_id is not None:
-            labels['capture_block_id'] = self.capture_block_id
-        self.taskinfo.container.docker.setdefault('parameters', []).extend(
+            labels["capture_block_id"] = self.capture_block_id
+        self.taskinfo.container.docker.setdefault("parameters", []).extend(
             [
-                {'key': 'label', 'value': f'za.ac.kat.sdp.katsdpcontroller.{key}={value}'}
+                {"key": "label", "value": f"za.ac.kat.sdp.katsdpcontroller.{key}={value}"}
                 for (key, value) in labels.items()
             ]
         )
 
         # Set extra fields for katsdpservices-using services to log to logstash
-        if self.logical_node.katsdpservices_logging and 'KATSDP_LOG_GELF_ADDRESS' in os.environ:
+        if self.logical_node.katsdpservices_logging and "KATSDP_LOG_GELF_ADDRESS" in os.environ:
             extras = {
-                **json.loads(os.environ.get('KATSDP_LOG_GELF_EXTRA', '{}')),
+                **json.loads(os.environ.get("KATSDP_LOG_GELF_EXTRA", "{}")),
                 **labels,
-                'docker.image': self.taskinfo.container.docker.image,
+                "docker.image": self.taskinfo.container.docker.image,
             }
             env = {
-                'KATSDP_LOG_GELF_ADDRESS': os.environ['KATSDP_LOG_GELF_ADDRESS'],
-                'KATSDP_LOG_GELF_EXTRA': json.dumps(extras),
-                'KATSDP_LOG_GELF_LOCALNAME': self.host,
-                'LOGSPOUT': 'ignore',
+                "KATSDP_LOG_GELF_ADDRESS": os.environ["KATSDP_LOG_GELF_ADDRESS"],
+                "KATSDP_LOG_GELF_EXTRA": json.dumps(extras),
+                "KATSDP_LOG_GELF_LOCALNAME": self.host,
+                "LOGSPOUT": "ignore",
             }
-            self.taskinfo.command.environment.setdefault('variables', []).extend(
-                [{'name': key, 'value': value} for (key, value) in env.items()]
+            self.taskinfo.command.environment.setdefault("variables", []).extend(
+                [{"name": key, "value": value} for (key, value) in env.items()]
             )
 
         # Apply overrides to taskinfo given by the user
@@ -753,17 +753,17 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             self.logical_node.name, product_config.ServiceOverride()
         ).taskinfo
         if overrides:
-            self.logger.warning('Applying overrides to taskinfo of %s', self.name)
+            self.logger.warning("Applying overrides to taskinfo of %s", self.name)
             self.taskinfo = Dict(product_config.override(self.taskinfo.to_dict(), overrides))
 
         # Fill in values for version sensors
         self._version_sensor.value = self.taskinfo.container.docker.image
         # org.label-schema is the deprecated version
-        for key in ['org.opencontainers.image.source', 'org.label-schema.vcs-url']:
+        for key in ["org.opencontainers.image.source", "org.label-schema.vcs-url"]:
             if key in self.image.labels:
                 self._source_sensor.value = self.image.labels[key]
                 break
-        for key in ['org.opencontainers.image.revision', 'org.label-schema.vcs-ref']:
+        for key in ["org.opencontainers.image.revision", "org.label-schema.vcs-ref"]:
             if key in self.image.labels:
                 self._revision_sensor.value = self.image.labels[key]
                 break
@@ -782,7 +782,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
                 elapsed = self.end_time - self.start_time
                 batch_runtime.observe(elapsed)
                 batch_runtime_rel.observe(elapsed / self.logical_node.batch_data_time)
-                logger.info('Task %s ran for %s s', self.name, elapsed)
+                logger.info("Task %s ran for %s s", self.name, elapsed)
 
 
 class FakeDeviceServer(aiokatcp.DeviceServer):
@@ -834,7 +834,7 @@ class ProductFakePhysicalTask(ProductPhysicalTaskMixin, scheduler.FakePhysicalTa
 
     async def _create_server(self, port: str, sock: socket.socket) -> AsyncContextManager:
         assert self.host is not None
-        if port != 'port':  # conventional name for katcp port
+        if port != "port":  # conventional name for katcp port
             return await super()._create_server(port, sock)
         host, port_no = sock.getsockname()[:2]
         sock.close()  # TODO: allow aiokatcp to take an existing socket
@@ -869,24 +869,24 @@ class PoweroffLogicalTask(scheduler.LogicalTask):
     """Logical task for powering off a machine."""
 
     def __init__(self, host):
-        super().__init__('kibisis.' + host)
+        super().__init__("kibisis." + host)
         self.host = host
         # Use minimal resources, to reduce chance it that it won't fit
         self.cpus = 0.001
         self.mem = 64
-        self.image = 'docker-base-runtime'
-        self.command = ['/sbin/poweroff']
+        self.image = "docker-base-runtime"
+        self.command = ["/sbin/poweroff"]
 
         # See https://groups.google.com/forum/#!topic/coreos-dev/AXCs_2_J6Mc
         self.taskinfo.container.volumes = []
-        for path in ['/var/run/dbus', '/run/systemd']:
+        for path in ["/var/run/dbus", "/run/systemd"]:
             volume = Dict()
-            volume.mode = 'RW'
+            volume.mode = "RW"
             volume.container_path = path
             volume.host_path = path
             self.taskinfo.container.volumes.append(volume)
-        self.taskinfo.container.docker.setdefault('parameters', [])
-        self.taskinfo.container.docker.parameters.append({'key': 'user', 'value': 'root'})
+        self.taskinfo.container.docker.setdefault("parameters", [])
+        self.taskinfo.container.docker.parameters.append({"key": "user", "value": "root"})
 
     def valid_agent(self, agent):
         if not super().valid_agent(agent):

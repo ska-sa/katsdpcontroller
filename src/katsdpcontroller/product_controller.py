@@ -59,28 +59,28 @@ from .tasks import (
 BATCH_PRIORITY = 1  #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400  # A week
 _HINT_RE = re.compile(
-    r'\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)'
-    r'(?: +labels: *(?P<labels>[a-z,]+))?',
+    r"\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)"
+    r"(?: +labels: *(?P<labels>[a-z,]+))?",
     re.IGNORECASE,
 )
 POSTPROCESSING_TIME = Histogram(
-    'katsdpcontroller_postprocessing_time_seconds',
-    'Wall-clock time for postprocessing each capture block (including burndown phase)',
+    "katsdpcontroller_postprocessing_time_seconds",
+    "Wall-clock time for postprocessing each capture block (including burndown phase)",
     buckets=POSTPROCESSING_TIME_BUCKETS,
 )
 POSTPROCESSING_TIME_REL = Histogram(
-    'katsdpcontroller_postprocessing_time_rel',
-    'Wall-clock time for postprocessing each capture block (including burndown phase)'
-    ', relative to observation time',
+    "katsdpcontroller_postprocessing_time_rel",
+    "Wall-clock time for postprocessing each capture block (including burndown phase)"
+    ", relative to observation time",
     buckets=POSTPROCESSING_REL_BUCKETS,
 )
 STATIC_GAUGES = [
     Gauge(
-        'fgpu_expected_input_heaps_per_second', 'Number of heaps that should be received per second'
+        "fgpu_expected_input_heaps_per_second", "Number of heaps that should be received per second"
     ),
     Gauge(
-        'xbgpu_expected_input_heaps_per_second',
-        'Number of heaps that should be received per second',
+        "xbgpu_expected_input_heaps_per_second",
+        "Number of heaps that should be received per second",
     ),
 ]
 logger = logging.getLogger(__name__)
@@ -89,12 +89,12 @@ logger = logging.getLogger(__name__)
 def _redact_arg(arg: str, s3_config: dict) -> str:
     """Process one argument for _redact_keys"""
     for config in s3_config.values():
-        for mode in ['read', 'write']:
+        for mode in ["read", "write"]:
             if mode in config:
-                for name in ['access_key', 'secret_key']:
+                for name in ["access_key", "secret_key"]:
                     key = config[mode].get(name)
-                    if key and (arg == key or arg.endswith('=' + key)):
-                        return arg[: -len(key)] + 'REDACTED'
+                    if key and (arg == key or arg.endswith("=" + key)):
+                        return arg[: -len(key)] + "REDACTED"
     return arg
 
 
@@ -136,10 +136,10 @@ def _normalise_s3_config(s3_config: dict) -> dict:
     """Normalise s3_config to have separate `url` fields for `read` and `write`."""
     s3_config = copy.deepcopy(s3_config)
     for config in s3_config.values():
-        if 'url' in config:
-            for mode in ['read', 'write']:
-                config.setdefault(mode, {})['url'] = config['url']
-            del config['url']
+        if "url" in config:
+            for mode in ["read", "write"]:
+                config.setdefault(mode, {})["url"] = config["url"]
+            del config["url"]
     return s3_config
 
 
@@ -150,40 +150,40 @@ def _prometheus_factory(
     match = _HINT_RE.search(sensor.description)
     if not match:
         return None
-    type_ = match.group('type').lower()
-    args_ = match.group('args')
-    if type_ == 'counter':
+    type_ = match.group("type").lower()
+    args_ = match.group("args")
+    if type_ == "counter":
         class_ = Counter
         if args_ is not None:
-            logger.warning('Arguments are not supported for counters (%s)', sensor.name)
-    elif type_ == 'gauge':
+            logger.warning("Arguments are not supported for counters (%s)", sensor.name)
+    elif type_ == "gauge":
         class_ = Gauge
         if args_ is not None:
-            logger.warning('Arguments are not supported for gauges (%s)', sensor.name)
-    elif type_ == 'histogram':
+            logger.warning("Arguments are not supported for gauges (%s)", sensor.name)
+    elif type_ == "histogram":
         class_ = Histogram
         if args_ is not None:
             try:
-                buckets = [float(x.strip()) for x in args_.split(',')]
+                buckets = [float(x.strip()) for x in args_.split(",")]
                 class_ = functools.partial(Histogram, buckets=buckets)
             except ValueError as exc:
-                logger.warning('Could not parse histogram buckets (%s): %s', sensor.name, exc)
+                logger.warning("Could not parse histogram buckets (%s): %s", sensor.name, exc)
     else:
-        logger.warning('Ignoring unknown Prometheus metric type %s for %s', type_, sensor.name)
+        logger.warning("Ignoring unknown Prometheus metric type %s for %s", type_, sensor.name)
         return None
-    parts = sensor.name.rsplit('.')
+    parts = sensor.name.rsplit(".")
     base = parts.pop()
-    label_names = (match.group('labels') or '').split(',')
+    label_names = (match.group("labels") or "").split(",")
     label_names = [label for label in label_names if label]  # ''.split(',') is [''], want []
     if len(parts) < len(label_names):
-        logger.warning('Not enough parts in name %s for labels %s', sensor.name, label_names)
+        logger.warning("Not enough parts in name %s for labels %s", sensor.name, label_names)
         return None
     service_parts = len(parts) - len(label_names)
-    service = '.'.join(parts[:service_parts])
+    service = ".".join(parts[:service_parts])
     labels = dict(zip(label_names, parts[service_parts:]))
     if service:
-        labels['service'] = service
-    normalised_name = 'katsdpcontroller_' + base.replace('-', '_')
+        labels["service"] = service
+    normalised_name = "katsdpcontroller_" + base.replace("-", "_")
     return sensor_proxy.PrometheusInfo(
         class_, normalised_name, sensor.description, labels, registry
     )
@@ -204,20 +204,20 @@ def _relative_url(base: yarl.URL, target: yarl.URL) -> yarl.URL:
         if `target` is not nested under `base`
     """
     if not base.is_absolute() or not target.is_absolute():
-        raise ValueError('Absolute URLs expected')
+        raise ValueError("Absolute URLs expected")
     if base.query_string or target.query_string:
-        raise ValueError('Query strings are not supported')
+        raise ValueError("Query strings are not supported")
     if base.fragment or target.fragment:
-        raise ValueError('Fragments are not supported')
+        raise ValueError("Fragments are not supported")
     if base.origin() != target.origin():
-        raise ValueError('URLs have different origins')
+        raise ValueError("URLs have different origins")
     # Strip off the last component, which is empty if the URL ends with a /
     # other than at the root, or the filename if it does not.
     base_parts = base.raw_parts[:-1] if len(base.parts) > 1 else base.raw_parts
     if target.raw_parts[: len(base_parts)] != base_parts:
-        raise ValueError('Target URL is not nested under the base')
+        raise ValueError("Target URL is not nested under the base")
     rel_parts = target.raw_parts[len(base_parts) :]
-    rel = yarl.URL.build(path='/'.join(rel_parts), encoded=True)
+    rel = yarl.URL.build(path="/".join(rel_parts), encoded=True)
     assert base.join(rel) == target
     return rel
 
@@ -253,7 +253,7 @@ class KatcpImageLookup(scheduler.ImageLookup):
         self._conn = conn
 
     async def __call__(self, repo: str, tag: str) -> scheduler.Image:
-        reply, informs = await self._conn.request('image-lookup-v2', repo, tag)
+        reply, informs = await self._conn.request("image-lookup-v2", repo, tag)
         data = json.loads(aiokatcp.decode(str, reply[0]))
         return scheduler.Image(**data)
 
@@ -288,7 +288,7 @@ class Resources:
     async def get_multicast_groups(self, n_addresses: int) -> str:
         """Assign multicast addresses for a group."""
         reply, informs = await self.master_controller.request(
-            'get-multicast-groups', self.subarray_product_id, n_addresses
+            "get-multicast-groups", self.subarray_product_id, n_addresses
         )
         return reply[0].decode()
 
@@ -308,28 +308,28 @@ class TaskStats(scheduler.TaskStats):
             )
 
         def add_counter(name: str, description: str) -> None:
-            add_sensor(name, description + ' (prometheus: counter)')
+            add_sensor(name, description + " (prometheus: counter)")
 
         self.sensors = aiokatcp.SensorSet()
-        for queue in ['default', 'batch']:
+        for queue in ["default", "batch"]:
             for state in scheduler.TaskState:
                 name = state.name.lower()
                 add_sensor(
-                    f'{queue}.{name}.tasks-in-state',
-                    f'Number of tasks in queue {queue} and state {state.name} '
-                    '(prometheus: gauge labels: queue,state)',
+                    f"{queue}.{name}.tasks-in-state",
+                    f"Number of tasks in queue {queue} and state {state.name} "
+                    "(prometheus: gauge labels: queue,state)",
                 )
-        add_counter('batch-tasks-created', 'Number of batch tasks that have been created')
-        add_counter('batch-tasks-started', 'Number of batch tasks that have become ready to start')
+        add_counter("batch-tasks-created", "Number of batch tasks that have been created")
+        add_counter("batch-tasks-started", "Number of batch tasks that have become ready to start")
         add_counter(
-            'batch-tasks-skipped',
-            'Number of batch tasks that were skipped because a dependency failed',
+            "batch-tasks-skipped",
+            "Number of batch tasks that were skipped because a dependency failed",
         )
         add_counter(
-            'batch-tasks-done', 'Number of completed batch tasks (including failed and skipped)'
+            "batch-tasks-done", "Number of completed batch tasks (including failed and skipped)"
         )
-        add_counter('batch-tasks-retried', 'Number of batch tasks that failed and were rescheduled')
-        add_counter('batch-tasks-failed', 'Number of batch tasks that failed (after all retries)')
+        add_counter("batch-tasks-retried", "Number of batch tasks that failed and were rescheduled")
+        add_counter("batch-tasks-failed", "Number of batch tasks that failed (after all retries)")
 
     def task_state_changes(
         self, changes: Mapping[scheduler.LaunchQueue, Mapping[scheduler.TaskState, int]]
@@ -338,28 +338,28 @@ class TaskStats(scheduler.TaskStats):
         for queue, deltas in changes.items():
             for state, delta in deltas.items():
                 state_name = state.name.lower()
-                sensor_name = f'{queue.name}.{state_name}.tasks-in-state'
+                sensor_name = f"{queue.name}.{state_name}.tasks-in-state"
                 sensor = self.sensors.get(sensor_name)
                 if sensor:
                     sensor.set_value(sensor.value + delta, timestamp=now)
 
     def batch_tasks_created(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-created'].value += n_tasks
+        self.sensors["batch-tasks-created"].value += n_tasks
 
     def batch_tasks_started(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-started'].value += n_tasks
+        self.sensors["batch-tasks-started"].value += n_tasks
 
     def batch_tasks_skipped(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-skipped'].value += n_tasks
+        self.sensors["batch-tasks-skipped"].value += n_tasks
 
     def batch_tasks_retried(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-retried'].value += n_tasks
+        self.sensors["batch-tasks-retried"].value += n_tasks
 
     def batch_tasks_failed(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-failed'].value += n_tasks
+        self.sensors["batch-tasks-failed"].value += n_tasks
 
     def batch_tasks_done(self, n_tasks: int) -> None:
-        self.sensors['batch-tasks-done'].value += n_tasks
+        self.sensors["batch-tasks-done"].value += n_tasks
 
 
 class CaptureBlock:
@@ -439,7 +439,7 @@ class SubarrayProduct:
     def _instantiate(
         self, logical_node: scheduler.LogicalNode, capture_block_id: Optional[str]
     ) -> scheduler.PhysicalNode:
-        if getattr(logical_node, 'sdp_physical_factory', False):
+        if getattr(logical_node, "sdp_physical_factory", False):
             return logical_node.physical_factory(
                 logical_node, self.sdp_controller, self, capture_block_id
             )
@@ -460,8 +460,8 @@ class SubarrayProduct:
         config_dict: dict,
         resolver: Resolver,
         subarray_product_id: str,
-        sdp_controller: 'DeviceServer',
-        telstate_name: str = 'telstate',
+        sdp_controller: "DeviceServer",
+        telstate_name: str = "telstate",
     ) -> None:
         #: Current background task (can only be one)
         self._async_task: Optional[asyncio.Task] = None
@@ -501,7 +501,7 @@ class SubarrayProduct:
             "State of the subarray product state machine (prometheus: gauge)",
             status_func=_error_on_error,
         )
-        self._device_status_sensor = sdp_controller.sensors['device-status']
+        self._device_status_sensor = sdp_controller.sensors["device-status"]
 
         # Set gauges for expected data rates
         for gauge in STATIC_GAUGES:
@@ -517,7 +517,7 @@ class SubarrayProduct:
         self.add_sensor(self._state_sensor)
         # Priority is lower (higher number) than the default queue
         self.batch_queue = scheduler.LaunchQueue(
-            sdp_controller.batch_role, 'batch', priority=BATCH_PRIORITY
+            sdp_controller.batch_role, "batch", priority=BATCH_PRIORITY
         )
         sched.add_queue(self.batch_queue)
         # generate physical nodes
@@ -537,10 +537,10 @@ class SubarrayProduct:
         )
 
         logger.info("Created: %r", self)
-        logger.info('Logical graph nodes:\n' + '\n'.join(repr(node) for node in self.logical_graph))
+        logger.info("Logical graph nodes:\n" + "\n".join(repr(node) for node in self.logical_graph))
 
     def __del__(self) -> None:
-        if hasattr(self, 'batch_queue'):
+        if hasattr(self, "batch_queue"):
             self.sched.remove_queue(self.batch_queue)
 
     def __repr__(self) -> str:
@@ -587,14 +587,14 @@ class SubarrayProduct:
         """Raise a FailReply if there is an asynchronous operation in progress."""
         if self.async_busy:
             raise FailReply(
-                'Subarray product {} is busy with an operation. '
-                'Please wait for it to complete first.'.format(self.subarray_product_id)
+                "Subarray product {} is busy with an operation. "
+                "Please wait for it to complete first.".format(self.subarray_product_id)
             )
 
     def _fail_if_no_telstate(self) -> None:
         """Raise a FailReply if there is no telescope state."""
         if self.telstate is None:
-            raise FailReply(f'Subarray product {self.subarray_product_id} has no SDP components.')
+            raise FailReply(f"Subarray product {self.subarray_product_id} has no SDP components.")
 
     def _find_stream(self, stream_name: str) -> product_config.Stream:
         """Find the stream with a given name.
@@ -661,7 +661,7 @@ class SubarrayProduct:
             if reqs:
                 if node.katcp_connection is None:
                     logger.warning(
-                        'Cannot issue %s to %s because there is no katcp connection',
+                        "Cannot issue %s to %s because there is no katcp connection",
                         reqs[0],
                         node.name,
                     )
@@ -674,11 +674,11 @@ class SubarrayProduct:
             ):
                 observer = node.capture_block_state_observer
                 if observer is not None:
-                    logger.info('Waiting for %s on %s', capture_block.name, node.name)
+                    logger.info("Waiting for %s on %s", capture_block.name, node.name)
                     await observer.wait_capture_block_done(capture_block.name)
-                    logger.info('Done waiting for %s on %s', capture_block.name, node.name)
+                    logger.info("Done waiting for %s on %s", capture_block.name, node.name)
                 else:
-                    logger.debug('Task %s has no capture-block-state observer', node.name)
+                    logger.debug("Task %s has no capture-block-state observer", node.name)
         finally:
             if (
                 isinstance(node, tasks.ProductPhysicalTask)
@@ -811,7 +811,7 @@ class SubarrayProduct:
             physical_graph = self._instantiate_physical_graph(logical_graph, capture_block.name)
             capture_block.postprocess_physical_graph = physical_graph
             nodes = {node.logical_node.name: node for node in physical_graph}
-            telstate_node = nodes['telstate']
+            telstate_node = nodes["telstate"]
             telstate_node.host = self.telstate_node.host
             telstate_node.ports = dict(self.telstate_node.ports)
             # This doesn't actually run anything, just marks the fake telstate node
@@ -846,7 +846,7 @@ class SubarrayProduct:
             postprocessing_time = time.time() - done_time
             POSTPROCESSING_TIME.observe(postprocessing_time)
             logger.info(
-                'Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)',
+                "Capture block %s postprocessing finished in %.3fs (obs time: %.3fs)",
                 capture_block.name,
                 postprocessing_time,
                 observation_time,
@@ -883,7 +883,7 @@ class SubarrayProduct:
                 alive, died = self.check_nodes()
                 # is everything we asked for alive
                 if not alive:
-                    fail_list = ', '.join(node.logical_node.name for node in died) or 'Some nodes'
+                    fail_list = ", ".join(node.logical_node.name for node in died) or "Some nodes"
                     ret_msg = (
                         f"{fail_list} failed to start. " "Check the error log for specific details."
                     )
@@ -895,14 +895,14 @@ class SubarrayProduct:
                 for task in self.physical_graph:
                     if isinstance(task, scheduler.PhysicalTask):
                         details[task.logical_node.name] = {
-                            'host': task.host,
-                            'taskinfo': _redact_keys(task.taskinfo, resolver.s3_config).to_dict(),
+                            "host": task.host,
+                            "taskinfo": _redact_keys(task.taskinfo, resolver.s3_config).to_dict(),
                         }
                 if telstate is not None:
-                    await telstate.add('sdp_task_details', details, immutable=True)
-                    await telstate.add('sdp_image_tag', resolver.image_resolver.tag, immutable=True)
+                    await telstate.add("sdp_task_details", details, immutable=True)
+                    await telstate.add("sdp_image_tag", resolver.image_resolver.tag, immutable=True)
                     await telstate.add(
-                        'sdp_image_overrides', resolver.image_resolver.overrides, immutable=True
+                        "sdp_image_overrides", resolver.image_resolver.overrides, immutable=True
                     )
             except BaseException as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
@@ -910,7 +910,7 @@ class SubarrayProduct:
                 raise exc
         except scheduler.InsufficientResourcesError as error:
             raise FailReply(
-                'Insufficient resources to launch {}: {}'.format(self.subarray_product_id, error)
+                "Insufficient resources to launch {}: {}".format(self.subarray_product_id, error)
             ) from error
         except scheduler.ImageError as error:
             raise FailReply(str(error)) from error
@@ -942,7 +942,7 @@ class SubarrayProduct:
             for capture_block in list(self.capture_blocks.values()):
                 if capture_block.postprocess_task is not None:
                     logger.warning(
-                        'Cancelling postprocessing for capture block %s', capture_block.name
+                        "Cancelling postprocessing for capture block %s", capture_block.name
                     )
                     capture_block.postprocess_task.cancel()
                 else:
@@ -974,7 +974,7 @@ class SubarrayProduct:
         # can change during the await.
         while self.capture_blocks:
             name, capture_block = next(iter(self.capture_blocks.items()))
-            logging.info('Waiting for capture block %s to terminate', name)
+            logging.info("Waiting for capture block %s to terminate", name)
             await capture_block.dead_event.wait()
             self.capture_blocks.pop(name, None)
 
@@ -1015,13 +1015,13 @@ class SubarrayProduct:
         self._update_capture_block_sensor()
         try:
             assert self.telstate is not None
-            await self.telstate.add('sdp_capture_block_id', capture_block.name)
+            await self.telstate.add("sdp_capture_block_id", capture_block.name)
             for node in self.physical_graph:
                 if isinstance(node, tasks.ProductPhysicalTask):
                     node.add_capture_block(capture_block)
             await self.exec_transitions(CaptureBlockState.CAPTURING, True, capture_block)
             if self.state == ProductState.ERROR:
-                raise FailReply('Subarray product went into ERROR while starting capture')
+                raise FailReply("Subarray product went into ERROR while starting capture")
         except asyncio.CancelledError:
             self._capture_block_dead(capture_block)
             raise
@@ -1051,7 +1051,7 @@ class SubarrayProduct:
         try:
             await self._capture_done_impl(capture_block)
             if self.state == ProductState.ERROR and not error_expected:
-                raise FailReply('Subarray product went into ERROR while stopping capture')
+                raise FailReply("Subarray product went into ERROR while stopping capture")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1130,11 +1130,11 @@ class SubarrayProduct:
             await task
         finally:
             self._clear_async_task(task)
-        logger.info('Subarray product %s successfully configured', self.subarray_product_id)
+        logger.info("Subarray product %s successfully configured", self.subarray_product_id)
         # A number of sensors are added without individually triggering interface-changed
         # notifications, so that subscribers don't try to repeatly refresh
         # their sensor lists.
-        self.sdp_controller.mass_inform('interface-changed', 'sensor-list')
+        self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     async def deconfigure(self, force: bool = False) -> bool:
         """Start deconfiguration of the subarray, but does not wait for it to complete.
@@ -1154,19 +1154,19 @@ class SubarrayProduct:
                 self._fail_if_busy()
             else:
                 logger.warning(
-                    'Subarray product %s is busy with an operation, ' 'but deconfiguring anyway',
+                    "Subarray product %s is busy with an operation, " "but deconfiguring anyway",
                     self.subarray_product_id,
                 )
 
         if self.state not in (ProductState.IDLE, ProductState.ERROR):
             if not force:
                 raise FailReply(
-                    'Subarray product is not idle and thus cannot be deconfigured. '
-                    'Please issue capture_done first.'
+                    "Subarray product is not idle and thus cannot be deconfigured. "
+                    "Please issue capture_done first."
                 )
             else:
                 logger.warning(
-                    'Subarray product %s is in state %s, but deconfiguring anyway',
+                    "Subarray product %s is in state %s, but deconfiguring anyway",
                     self.subarray_product_id,
                     self.state.name,
                 )
@@ -1190,11 +1190,11 @@ class SubarrayProduct:
         self._fail_if_busy()
         if self.state != ProductState.IDLE:
             raise FailReply(
-                'Subarray product {} is currently in state {}, not IDLE as expected. '
-                'Cannot be inited.'.format(self.subarray_product_id, self.state.name)
+                "Subarray product {} is currently in state {}, not IDLE as expected. "
+                "Cannot be inited.".format(self.subarray_product_id, self.state.name)
             )
         self._fail_if_no_telstate()
-        logger.info('Using capture block ID %s', capture_block_id)
+        logger.info("Using capture block ID %s", capture_block_id)
 
         capture_block = CaptureBlock(capture_block_id, configuration)
         task = asyncio.get_event_loop().create_task(self._capture_init(capture_block))
@@ -1204,7 +1204,7 @@ class SubarrayProduct:
         finally:
             self._clear_async_task(task)
         logger.info(
-            'Started capture block %s on subarray product %s',
+            "Started capture block %s on subarray product %s",
             capture_block_id,
             self.subarray_product_id,
         )
@@ -1214,8 +1214,8 @@ class SubarrayProduct:
         self._fail_if_busy()
         if self.state != ProductState.CAPTURING:
             raise FailReply(
-                'Subarray product is currently in state {}, not CAPTURING as expected. '
-                'Cannot be stopped.'.format(self.state.name)
+                "Subarray product is currently in state {}, not CAPTURING as expected. "
+                "Cannot be stopped.".format(self.state.name)
             )
         assert self.current_capture_block is not None
         capture_block_id = self.current_capture_block.name
@@ -1226,7 +1226,7 @@ class SubarrayProduct:
         finally:
             self._clear_async_task(task)
         logger.info(
-            'Finished capture block %s on subarray product %s',
+            "Finished capture block %s on subarray product %s",
             capture_block_id,
             self.subarray_product_id,
         )
@@ -1234,20 +1234,20 @@ class SubarrayProduct:
 
     def write_graphs(self, output_dir: str) -> None:
         """Write visualisations to `output_dir`."""
-        for name in ['ready', 'init', 'kill', 'resolve', 'resources']:
-            if name != 'resources':
-                g = scheduler.subgraph(self.logical_graph, 'depends_' + name)
+        for name in ["ready", "init", "kill", "resolve", "resources"]:
+            if name != "resources":
+                g = scheduler.subgraph(self.logical_graph, "depends_" + name)
             else:
                 g = scheduler.subgraph(
                     self.logical_graph, scheduler.SchedulerBase.depends_resources
                 )
             g = networkx.relabel_nodes(g, {node: node.name for node in g})
             g = networkx.drawing.nx_pydot.to_pydot(g)
-            filename = os.path.join(output_dir, f'{self.subarray_product_id}_{name}.svg')
+            filename = os.path.join(output_dir, f"{self.subarray_product_id}_{name}.svg")
             try:
                 g.write_svg(filename)
             except OSError as error:
-                logger.warning('Could not write %s: %s', filename, error)
+                logger.warning("Could not write %s: %s", filename, error)
 
     async def set_delays(
         self, stream_name: str, timestamp: aiokatcp.Timestamp, coefficient_sets: Sequence[str]
@@ -1369,9 +1369,9 @@ class SubarrayProduct:
         assert self.telstate_node is not None
         boot = [self.telstate_node]
 
-        init_telstate = copy.deepcopy(self.physical_graph.graph.get('init_telstate', {}))
-        init_telstate['subarray_product_id'] = self.subarray_product_id
-        init_telstate['config'] = self.physical_graph.graph.get('config', lambda resolver: {})(
+        init_telstate = copy.deepcopy(self.physical_graph.graph.get("init_telstate", {}))
+        init_telstate["subarray_product_id"] = self.subarray_product_id
+        init_telstate["config"] = self.physical_graph.graph.get("config", lambda resolver: {})(
             self.resolver
         )
         # Provide attributes to describe the relationships between CBF streams
@@ -1379,24 +1379,24 @@ class SubarrayProduct:
         # specific sensors are easier to mock.
         for stream in self.configuration.streams:
             if isinstance(stream, product_config.CbfStream):
-                init_telstate[(stream.name, 'instrument_dev_name')] = stream.instrument_dev_name
+                init_telstate[(stream.name, "instrument_dev_name")] = stream.instrument_dev_name
                 if stream.src_streams:
-                    init_telstate[(stream.name, 'src_streams')] = [
+                    init_telstate[(stream.name, "src_streams")] = [
                         src_stream.name for src_stream in stream.src_streams
                     ]
 
         # Load canonical model URLs
         if not self.configuration.options.interface_mode:
-            model_base_url = self.resolver.s3_config['models']['read']['url']
-            if not model_base_url.endswith('/'):
-                model_base_url += '/'  # Ensure it is a directory
-            init_telstate['sdp_model_base_url'] = model_base_url
+            model_base_url = self.resolver.s3_config["models"]["read"]["url"]
+            if not model_base_url.endswith("/"):
+                model_base_url += "/"  # Ensure it is a directory
+            init_telstate["sdp_model_base_url"] = model_base_url
             async with katsdpmodels.fetch.aiohttp.Fetcher() as fetcher:
                 rfi_mask_model_urls = await _resolve_model(
-                    fetcher, model_base_url, 'rfi_mask/current.alias'
+                    fetcher, model_base_url, "rfi_mask/current.alias"
                 )
-                init_telstate[('model', 'rfi_mask', 'config')] = rfi_mask_model_urls[0]
-                init_telstate[('model', 'rfi_mask', 'fixed')] = rfi_mask_model_urls[1]
+                init_telstate[("model", "rfi_mask", "config")] = rfi_mask_model_urls[0]
+                init_telstate[("model", "rfi_mask", "fixed")] = rfi_mask_model_urls[1]
                 for stream in itertools.chain(
                     self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
                     self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream),
@@ -1405,25 +1405,25 @@ class SubarrayProduct:
                     band_mask_model_urls = await _resolve_model(
                         fetcher,
                         model_base_url,
-                        f'band_mask/current/{stream.band}/nb_ratio={ratio}.alias',
+                        f"band_mask/current/{stream.band}/nb_ratio={ratio}.alias",
                     )
-                    prefix: Tuple[str, ...] = (stream.name, 'model', 'band_mask')
-                    init_telstate[prefix + ('config',)] = band_mask_model_urls[0]
-                    init_telstate[prefix + ('fixed',)] = band_mask_model_urls[1]
-                    for group in ['individual', 'cohort']:
+                    prefix: Tuple[str, ...] = (stream.name, "model", "band_mask")
+                    init_telstate[prefix + ("config",)] = band_mask_model_urls[0]
+                    init_telstate[prefix + ("fixed",)] = band_mask_model_urls[1]
+                    for group in ["individual", "cohort"]:
                         config_value = _IndexedKey()
                         fixed_value = _IndexedKey()
                         for ant in stream.antennas:
                             pb_model_urls = await _resolve_model(
                                 fetcher,
                                 model_base_url,
-                                f'primary_beam/current/{group}/{ant}/{stream.band}.alias',
+                                f"primary_beam/current/{group}/{ant}/{stream.band}.alias",
                             )
                             config_value[ant] = pb_model_urls[0]
                             fixed_value[ant] = pb_model_urls[1]
-                        prefix = (stream.name, 'model', 'primary_beam', group)
-                        init_telstate[prefix + ('config',)] = config_value
-                        init_telstate[prefix + ('fixed',)] = fixed_value
+                        prefix = (stream.name, "model", "primary_beam", group)
+                        init_telstate[prefix + ("config",)] = config_value
+                        init_telstate[prefix + ("fixed",)] = fixed_value
 
         logger.debug("Launching telstate. Initial values %s", init_telstate)
         await self.sched.launch(self.physical_graph, self.resolver, boot)
@@ -1432,11 +1432,11 @@ class SubarrayProduct:
         if self.configuration.options.interface_mode:
             telstate_backend = katsdptelstate.aio.memory.MemoryBackend()
         else:
-            self.telstate_endpoint = '{}:{}'.format(
-                self.telstate_node.host, self.telstate_node.ports['telstate']
+            self.telstate_endpoint = "{}:{}".format(
+                self.telstate_node.host, self.telstate_node.ports["telstate"]
             )
             telstate_backend = await katsdptelstate.aio.redis.RedisBackend.from_url(
-                f'redis://{self.telstate_endpoint}'
+                f"redis://{self.telstate_endpoint}"
             )
         telstate = katsdptelstate.aio.TelescopeState(telstate_backend)
         self.telstate = telstate
@@ -1477,12 +1477,12 @@ class SubarrayProduct:
         return result, died
 
     def unexpected_death(self, task: tasks.ProductAnyPhysicalTask) -> None:
-        logger.warning('Task %s died unexpectedly', task.name)
+        logger.warning("Task %s died unexpectedly", task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
     def bad_device_status(self, task: tasks.ProductAnyPhysicalTask) -> None:
-        logger.warning('Task %s has failed (device-status)', task.name)
+        logger.warning("Task %s has failed (device-status)", task.name)
         if task.logical_node.critical:
             self._go_to_error()
 
@@ -1506,7 +1506,7 @@ class SubarrayProduct:
         if self.state == ProductState.CAPTURING and not self.async_busy:
             assert self.current_capture_block is not None
             capture_block_id = self.current_capture_block.name
-            logger.warning('Attempting to terminate capture block %s', capture_block_id)
+            logger.warning("Attempting to terminate capture block %s", capture_block_id)
             task = asyncio.get_event_loop().create_task(self._capture_done(error_expected=True))
             self._async_task = task
             log_task_exceptions(
@@ -1516,7 +1516,7 @@ class SubarrayProduct:
             def cleanup(task):
                 self._clear_async_task(task)
                 logger.info(
-                    'Finished capture block %s on subarray product %s',
+                    "Finished capture block %s on subarray product %s",
                     capture_block_id,
                     self.subarray_product_id,
                 )
@@ -1536,7 +1536,7 @@ class SubarrayProduct:
 
 
 class DeviceServer(aiokatcp.DeviceServer):
-    VERSION = 'product-controller-1.1'
+    VERSION = "product-controller-1.1"
     BUILD_STATE = "katsdpcontroller-" + katsdpcontroller.__version__
 
     def __init__(
@@ -1592,15 +1592,15 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sensors.add(
             Sensor(
                 str,
-                'gui-urls',
-                'URLs for product-wide GUIs',
+                "gui-urls",
+                "URLs for product-wide GUIs",
                 default=json.dumps(gui_urls),
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
         self._prometheus_watcher = sensor_proxy.PrometheusWatcher(
             self.sensors,
-            {'subarray_product_id': subarray_product_id},
+            {"subarray_product_id": subarray_product_id},
             functools.partial(_prometheus_factory, prometheus_registry),
         )
         task_stats = sched.task_stats
@@ -1616,11 +1616,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             return
         port = self.sched.http_port
         service = {
-            'Name': 'product-controller',
-            'Tags': ['prometheus-metrics'],
-            'Meta': {'subarray_product_id': self.subarray_product_id},
-            'Port': port,
-            'Checks': [
+            "Name": "product-controller",
+            "Tags": ["prometheus-metrics"],
+            "Meta": {"subarray_product_id": self.subarray_product_id},
+            "Port": port,
+            "Checks": [
                 {
                     "Interval": "15s",
                     "Timeout": "5s",
@@ -1640,11 +1640,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         await self._consul_service.deregister()
         self._prometheus_watcher.close()
         if self.product is not None and self.product.state != ProductState.DEAD:
-            logger.warning('Product controller interrupted - deconfiguring running product')
+            logger.warning("Product controller interrupted - deconfiguring running product")
             try:
                 await self.product.deconfigure(force=True)
             except Exception:
-                logger.warning('Failed to deconfigure product %s during shutdown', exc_info=True)
+                logger.warning("Failed to deconfigure product %s during shutdown", exc_info=True)
         self.master_controller.close()
         await self.master_controller.wait_closed()
         await self.sched.close()
@@ -1686,14 +1686,14 @@ class DeviceServer(aiokatcp.DeviceServer):
         def dead_callback(product):
             if self.shutdown_delay > 0:
                 logger.info(
-                    'Sleeping %.1f seconds to give time for final Prometheus scrapes',
+                    "Sleeping %.1f seconds to give time for final Prometheus scrapes",
                     self.shutdown_delay,
                 )
                 asyncio.get_event_loop().call_later(self.shutdown_delay, self.halt, False)
             else:
                 self.halt(False)
 
-        logger.debug('config is %s', json.dumps(config_dict, indent=2, sort_keys=True))
+        logger.debug("config is %s", json.dumps(config_dict, indent=2, sort_keys=True))
         logger.info("Launching subarray product.")
 
         image_tag = configuration.options.image_tag
@@ -1706,8 +1706,8 @@ class DeviceServer(aiokatcp.DeviceServer):
             image_resolver.override(image_name, image_path)
         resolver = Resolver(
             image_resolver,
-            scheduler.TaskIDAllocator(name + '-'),
-            self.sched.http_url if self.sched else '',
+            scheduler.TaskIDAllocator(name + "-"),
+            self.sched.http_url if self.sched else "",
             configuration.options.service_overrides,
             self.s3_config,
             self.localhost,
@@ -1739,7 +1739,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         logger.info("?product-configure called with: %s", ctx.req)
 
         if self.product is not None:
-            raise FailReply('Already configured or configuring')
+            raise FailReply("Already configured or configuring")
         try:
             config_dict = load_json_dict(config)
             configuration = await Configuration.from_config(config_dict)
@@ -1762,8 +1762,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         """
         if self.product is None:
             raise FailReply(
-                '?product-configure has not been called yet. '
-                'It must be called before other requests.'
+                "?product-configure has not been called yet. "
+                "It must be called before other requests."
             )
         return self.product
 
@@ -1781,7 +1781,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         return await self._get_product().deconfigure(force=force)
 
     async def request_capture_init(
-        self, ctx, capture_block_id: str, override_dict_json: str = '{}'
+        self, ctx, capture_block_id: str, override_dict_json: str = "{}"
     ) -> None:
         """Request capture of the specified subarray product to start.
 
@@ -1796,7 +1796,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             overrides = load_json_dict(override_dict_json)
         except ValueError as error:
-            retmsg = f'Override {override_dict_json} is not a valid JSON dict: {error}'
+            retmsg = f"Override {override_dict_json} is not a valid JSON dict: {error}"
             logger.error(retmsg)
             raise FailReply(retmsg) from error
 
@@ -1913,11 +1913,11 @@ class DeviceServer(aiokatcp.DeviceServer):
         multicasts = self._get_product().capture_list()
         response = []
         for mc in multicasts:
-            name = mc.logical_node.name.split('.', 1)[1]  # Strip off "multicast." prefix
+            name = mc.logical_node.name.split(".", 1)[1]  # Strip off "multicast." prefix
             if stream is not None and stream != name:
                 continue
             response.append(
-                (name, str(Endpoint(mc.host, mc.ports['spead'])), mc.transmit_state.name.lower())
+                (name, str(Endpoint(mc.host, mc.ports["spead"])), mc.transmit_state.name.lower())
             )
         if stream is not None and not response:
             raise FailReply(f"Unknown stream {stream!r}")
