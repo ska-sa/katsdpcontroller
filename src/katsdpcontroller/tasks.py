@@ -102,13 +102,11 @@ BATCH_RUNTIME_REL = Histogram(
 class CaptureBlockState(scheduler.OrderedEnum):
     """State of a single capture block."""
 
-    # fmt: off
-    INITIALISING = 0         # Only occurs briefly on construction
-    CAPTURING = 1            # capture-init called, capture-done not yet called
-    BURNDOWN = 2             # capture-done returned, but real-time processing still happening
-    POSTPROCESSING = 3       # real-time processing complete, running batch processing
-    DEAD = 4                 # fully complete
-    # fmt: on
+    INITIALISING = 0  # Only occurs briefly on construction
+    CAPTURING = 1  # capture-init called, capture-done not yet called
+    BURNDOWN = 2  # capture-done returned, but real-time processing still happening
+    POSTPROCESSING = 3  # real-time processing complete, running batch processing
+    DEAD = 4  # fully complete
 
 
 class KatcpTransition:
