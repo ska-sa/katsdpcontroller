@@ -247,15 +247,15 @@ from .defaults import LOCALHOST
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
 TERMINAL_STATUSES = frozenset(
-    ['TASK_FINISHED', 'TASK_FAILED', 'TASK_KILLED', 'TASK_LOST', 'TASK_ERROR']
+    ["TASK_FINISHED", "TASK_FAILED", "TASK_KILLED", "TASK_LOST", "TASK_ERROR"]
 )
 # Names for standard edge attributes, to give some protection against typos
-DEPENDS_READY = 'depends_ready'
-DEPENDS_RESOURCES = 'depends_resources'
-DEPENDS_RESOLVE = 'depends_resolve'
-DEPENDS_KILL = 'depends_kill'
-DEPENDS_FINISHED = 'depends_finished'  # for batch tasks
-DEPENDS_FINISHED_CRITICAL = 'depends_finished_critical'
+DEPENDS_READY = "depends_ready"
+DEPENDS_RESOURCES = "depends_resources"
+DEPENDS_RESOLVE = "depends_resolve"
+DEPENDS_KILL = "depends_kill"
+DEPENDS_FINISHED = "depends_finished"  # for batch tasks
+DEPENDS_FINISHED_CRITICAL = "depends_finished_critical"
 DECIMAL_CONTEXT = decimal.Context(
     traps=[
         decimal.Overflow,
@@ -266,11 +266,11 @@ DECIMAL_CONTEXT = decimal.Context(
     ]
 )
 DECIMAL_CAST_CONTEXT = decimal.Context()
-DECIMAL_ZERO = Decimal('0.000')
+DECIMAL_ZERO = Decimal("0.000")
 logger = logging.getLogger(__name__)
 
 
-Volume = namedtuple('Volume', ['name', 'host_path', 'numa_node'])
+Volume = namedtuple("Volume", ["name", "host_path", "numa_node"])
 Volume.__doc__ = """Abstraction of a host path offered by an agent.
 
     Volumes are defined by setting the Mesos attribute
@@ -355,7 +355,7 @@ async def poll_ports(host, ports):
             )
         except socket.gaierror as error:
             logger.error(
-                'Failure to resolve address for %s (%s). Waiting 5s to retry.', host, error
+                "Failure to resolve address for %s (%s). Waiting 5s to retry.", host, error
             )
             await asyncio.sleep(5)
         else:
@@ -372,11 +372,11 @@ async def poll_ports(host, ports):
                 try:
                     await loop.sock_connect(sock, (sockaddr[0], port))
                 except OSError as error:
-                    logger.debug('Port %d on %s not ready: %s', port, host, error)
+                    logger.debug("Port %d on %s not ready: %s", port, host, error)
                     await asyncio.sleep(1)
                 else:
                     break
-        logger.debug('Port %d on %s ready', port, host)
+        logger.debug("Port %d on %s ready", port, host)
 
 
 class ResourceRequest:
@@ -481,12 +481,12 @@ class Resource:
     def add(self, resource):
         """Add a Mesos resource message to the internal resource list"""
         if resource.name != self.name:
-            raise ValueError(f'Name mismatch {self.name} != {resource.name}')
+            raise ValueError(f"Name mismatch {self.name} != {resource.name}")
         # Keeps the most specifically reserved resources at the end
         # so that they're used first before unreserved resources.
         pos = 0
-        role = resource.get('role', '*')
-        while pos < len(self.parts) and len(self.parts[pos].get('role', '*')) < len(role):
+        role = resource.get("role", "*")
+        while pos < len(self.parts) and len(self.parts[pos].get("role", "*")) < len(role):
             pos += 1
         transformed = self._transform(resource)
         self.parts.insert(pos, transformed)
@@ -507,7 +507,7 @@ class Resource:
             available = sum((self._available(part, **kwargs) for part in self.parts), self.ZERO)
         if amount > available:
             raise ValueError(
-                'Requested amount {} of {} is more than available {} (kwargs={})'.format(
+                "Requested amount {} of {} is more than available {} (kwargs={})".format(
                     amount, self.name, available, kwargs
                 )
             )
@@ -565,10 +565,10 @@ class Resource:
         parts = []
         for part in self.parts:
             key = self.name
-            if part.get('role', '*') != '*':
-                key += '(' + part['role'] + ')'
-            parts.append(key + ':' + self._value_str(part))
-        return '; '.join(parts)
+            if part.get("role", "*") != "*":
+                key += "(" + part["role"] + ")"
+            parts.append(key + ":" + self._value_str(part))
+        return "; ".join(parts)
 
     @classmethod
     def empty_request(cls):
@@ -582,8 +582,8 @@ class ScalarResource(Resource):
     REQUEST_CLASS = ScalarResourceRequest
 
     def _transform(self, resource):
-        if resource.type != 'SCALAR':
-            raise TypeError(f'Expected SCALAR resource, got {resource.type}')
+        if resource.type != "SCALAR":
+            raise TypeError(f"Expected SCALAR resource, got {resource.type}")
         resource = copy.deepcopy(resource)
         resource.scalar.value = _as_decimal(resource.scalar.value)
         return resource
@@ -625,8 +625,8 @@ class RangeResource(Resource):
     REQUEST_CLASS = RangeResourceRequest
 
     def _transform(self, resource):
-        if resource.type != 'RANGES':
-            raise TypeError(f'Expected RANGES resource, got {resource.type}')
+        if resource.type != "RANGES":
+            raise TypeError(f"Expected RANGES resource, got {resource.type}")
         resource = copy.deepcopy(resource)
         # Ensures we take resources from the first range first
         resource.ranges.range.reverse()
@@ -642,7 +642,7 @@ class RangeResource(Resource):
         return total
 
     def _value_str(self, resource):
-        return '[' + ','.join(f'{r.begin}-{r.end}' for r in resource.ranges.range) + ']'
+        return "[" + ",".join(f"{r.begin}-{r.end}" for r in resource.ranges.range) + "]"
 
     def _allocate(self, resource, amount, *, use_random=False):
         out = copy.deepcopy(resource)
@@ -653,7 +653,7 @@ class RangeResource(Resource):
                 r = resource.ranges.range[pos]
                 use = min(amount, r.end - r.begin + 1)
                 # TODO: use_random
-                out.ranges.range.append(Dict({'begin': r.begin, 'end': r.begin + use - 1}))
+                out.ranges.range.append(Dict({"begin": r.begin, "end": r.begin + use - 1}))
                 r.begin += use
                 if r.begin > r.end:
                     del resource.ranges.range[pos]
@@ -682,11 +682,11 @@ class RangeResource(Resource):
                 elif item == r.end:
                     r.end -= 1
                 else:
-                    resource.ranges.range.insert(pos, Dict({'begin': item + 1, 'end': r.end}))
+                    resource.ranges.range.insert(pos, Dict({"begin": item + 1, "end": r.end}))
                     r.end = item - 1
             items.sort(reverse=True)
             for item in items:
-                out.ranges.range.append(Dict({'begin': item, 'end': item}))
+                out.ranges.range.append(Dict({"begin": item, "end": item}))
         return out
 
     def _subset_part(self, part, group):
@@ -695,7 +695,7 @@ class RangeResource(Resource):
         for r in part.ranges.range:
             for i in range(r.end, r.begin - 1, -1):
                 if i in group:
-                    out.ranges.range.append(Dict({'begin': i, 'end': i}))
+                    out.ranges.range.append(Dict({"begin": i, "end": i}))
         return out
 
     def subset(self, group):
@@ -765,23 +765,23 @@ class ResourceRequestsContainer(metaclass=ResourceRequestsContainerMeta):
         self.requests = {name: cls.empty_request() for name, cls in self.RESOURCE_REQUESTS.items()}
 
     def format_requests(self):
-        return ''.join(
-            f' {name}={request.amount}' for name, request in self.requests.items() if request.amount
+        return "".join(
+            f" {name}={request.amount}" for name, request in self.requests.items() if request.amount
         )
 
     def __repr__(self):
-        return f'<{self.__class__.__name__}{self.format_requests()}>'
+        return f"<{self.__class__.__name__}{self.format_requests()}>"
 
 
 GLOBAL_RESOURCES = {
-    'cpus': ScalarResource,
-    'mem': ScalarResource,
-    'disk': ScalarResource,
-    'ports': RangeResource,
-    'cores': RangeResource,
+    "cpus": ScalarResource,
+    "mem": ScalarResource,
+    "disk": ScalarResource,
+    "ports": RangeResource,
+    "cores": RangeResource,
 }
-GPU_RESOURCES = {'compute': ScalarResource, 'mem': ScalarResource}
-INTERFACE_RESOURCES = {'bandwidth_in': ScalarResource, 'bandwidth_out': ScalarResource}
+GPU_RESOURCES = {"compute": ScalarResource, "mem": ScalarResource}
+INTERFACE_RESOURCES = {"bandwidth_in": ScalarResource, "bandwidth_out": ScalarResource}
 
 
 class GPURequest(ResourceRequestsContainer):
@@ -823,11 +823,11 @@ class GPURequest(ResourceRequestsContainer):
         return numa_node is None or not self.affinity or agent_gpu.numa_node == numa_node
 
     def __repr__(self):
-        return '<{} {}{}{}>'.format(
+        return "<{} {}{}{}>".format(
             self.__class__.__name__,
-            self.name if self.name is not None else '*',
+            self.name if self.name is not None else "*",
             self.format_requests(),
-            ' affinity=True' if self.affinity else '',
+            " affinity=True" if self.affinity else "",
         )
 
 
@@ -888,12 +888,12 @@ class InterfaceRequest(ResourceRequestsContainer):
         return self.network in interface.networks
 
     def __repr__(self):
-        return '<{} {}{}{}{}>'.format(
+        return "<{} {}{}{}{}>".format(
             self.__class__.__name__,
             self.network,
             self.format_requests(),
-            ' infiniband=True' if self.infiniband else '',
-            ' affinity=True' if self.affinity else '',
+            " infiniband=True" if self.infiniband else "",
+            " affinity=True" if self.affinity else "",
         )
 
 
@@ -925,8 +925,8 @@ class VolumeRequest:
         return volume.name == self.name
 
     def __repr__(self):
-        return '<{} {} {}{}>'.format(
-            self.__class__.__name__, self.name, self.mode, ' affinity=True' if self.affinity else ''
+        return "<{} {} {}{}>".format(
+            self.__class__.__name__, self.name, self.mode, " affinity=True" if self.affinity else ""
         )
 
 
@@ -941,7 +941,7 @@ class GPUResources:
 
     def __init__(self, index):
         self.index = index
-        prefix = f'katsdpcontroller.gpu.{index}.'
+        prefix = f"katsdpcontroller.gpu.{index}."
         self.resources = {name: cls(prefix + name) for name, cls in GPU_RESOURCES.items()}
 
 
@@ -958,7 +958,7 @@ class InterfaceResources:
 
     def __init__(self, index):
         self.index = index
-        prefix = f'katsdpcontroller.interface.{index}.'
+        prefix = f"katsdpcontroller.interface.{index}."
         self.resources = {name: cls(prefix + name) for name, cls in INTERFACE_RESOURCES.items()}
         self.infiniband_multicast_out = set()
         self.multicast_in = set()
@@ -986,7 +986,7 @@ def _strip_scheme(image: str) -> str:
 
     Docker doesn't like these on image paths.
     """
-    return re.sub(r'^https?://', '', image)
+    return re.sub(r"^https?://", "", image)
 
 
 @dataclass
@@ -1011,7 +1011,7 @@ class Image:
         else:
             result = f"{self.registry}/{self.repo}:{self.tag}"
         # Docker doesn't like leading http:// or https://
-        return re.sub(r'^https?://', '', result)
+        return re.sub(r"^https?://", "", result)
 
 
 class ImageLookup(ABC):
@@ -1031,9 +1031,9 @@ class _RegistryImageLookup(ImageLookup):
     def _split_repo_name(self, name: str) -> Tuple[str, str]:
         """Like docker.auth.split_repo_name, but defaults to the private registry."""
         # This implementation is an adapted version of docker.auth.split_repo_name.
-        parts = name.split('/', 1)
+        parts = name.split("/", 1)
         if len(parts) == 1 or (
-            '.' not in parts[0] and ':' not in parts[0] and parts[0] != 'localhost'
+            "." not in parts[0] and ":" not in parts[0] and parts[0] != "localhost"
         ):
             registry = self._private_registry
             repo = name
@@ -1071,11 +1071,11 @@ class HTTPImageLookup(_RegistryImageLookup):
         This fails if there is an authorization error, leaving the caller to
         obtain a token and try again.
         """
-        if '://' not in registry:
+        if "://" not in registry:
             # If no scheme is specified, assume https
-            registry = 'https://' + registry
-        manifest_url = f'{registry}/v2/{repo}/manifests/{tag}'
-        headers = {aiohttp.hdrs.ACCEPT: 'application/vnd.docker.distribution.manifest.v2+json'}
+            registry = "https://" + registry
+        manifest_url = f"{registry}/v2/{repo}/manifests/{tag}"
+        headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.v2+json"}
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
         try:
@@ -1085,24 +1085,24 @@ class HTTPImageLookup(_RegistryImageLookup):
                 manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
             ) as response:
                 response.raise_for_status()
-                digest = response.headers['Docker-Content-Digest']
+                digest = response.headers["Docker-Content-Digest"]
                 manifest_data = await response.json(content_type=None)
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f'Failed to get digest from {manifest_url}: {error}') from error
+            raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
         except KeyError:
-            raise ImageError(f'Docker-Content-Digest header not found for {manifest_url}')
+            raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
         except ValueError:
-            raise ImageError(f'Invalid manifest for {manifest_url}')
+            raise ImageError(f"Invalid manifest for {manifest_url}")
 
         try:
-            content_type = manifest_data['config']['mediaType']
-            if content_type != 'application/vnd.docker.container.image.v1+json':
-                raise ImageError(f'Unknown mediaType {content_type!r} in {manifest_url}')
-            image_blob = manifest_data['config']['digest']
+            content_type = manifest_data["config"]["mediaType"]
+            if content_type != "application/vnd.docker.container.image.v1+json":
+                raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
+            image_blob = manifest_data["config"]["digest"]
         except (KeyError, TypeError):
-            raise ImageError(f'Could not find image blob in {manifest_url}')
+            raise ImageError(f"Could not find image blob in {manifest_url}")
 
-        image_url = f'{registry}/v2/{repo}/blobs/{image_blob}'
+        image_url = f"{registry}/v2/{repo}/blobs/{image_blob}"
         headers[aiohttp.hdrs.ACCEPT] = content_type
         try:
             async with session.get(
@@ -1113,11 +1113,11 @@ class HTTPImageLookup(_RegistryImageLookup):
                 # application/octet-stream. Passing content_type=None
                 # here suppresses the content-type check.
                 response_json = await response.json(content_type=None)
-            labels = response_json.get('config', {}).get('Labels', {})
+            labels = response_json.get("config", {}).get("Labels", {})
             if not isinstance(labels, dict):
                 labels = {}
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f'Failed to get labels from {image_url}: {error}') from error
+            raise ImageError(f"Failed to get labels from {image_url}: {error}") from error
         return Image(registry=registry, repo=repo, tag=tag, digest=digest, labels=labels)
 
     async def _get_token(
@@ -1128,21 +1128,21 @@ class HTTPImageLookup(_RegistryImageLookup):
         scope: str,
         auth: Optional[aiohttp.BasicAuth],
     ) -> str:
-        headers = {aiohttp.hdrs.ACCEPT: 'application/json'}
-        params = {'scope': scope, 'service': service, 'client_id': 'katsdpcontroller'}
+        headers = {aiohttp.hdrs.ACCEPT: "application/json"}
+        params = {"scope": scope, "service": service, "client_id": "katsdpcontroller"}
         try:
             async with session.get(
                 realm, params=params, headers=headers, timeout=15, auth=auth
             ) as resp:
                 resp.raise_for_status()
                 content = await resp.json()
-                token = content['token']
+                token = content["token"]
                 # Valid syntax determined by RFC 6750
-                if not re.fullmatch('[-A-Za-z0-9._~+/]+=*', token):
-                    raise ValueError('Invalid syntax for authentication token')
+                if not re.fullmatch("[-A-Za-z0-9._~+/]+=*", token):
+                    raise ValueError("Invalid syntax for authentication token")
                 return token
         except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, ValueError) as error:
-            raise ImageError(f'Failed to get authentication token from {realm}: {error}') from error
+            raise ImageError(f"Failed to get authentication token from {realm}: {error}") from error
 
     async def __call__(self, repo: str, tag: str) -> Image:
         # TODO: see if it's possible to do some connection pooling
@@ -1154,9 +1154,9 @@ class HTTPImageLookup(_RegistryImageLookup):
         if authdata is None:
             auth = None
         else:
-            auth = aiohttp.BasicAuth(authdata['username'], authdata['password'])
+            auth = aiohttp.BasicAuth(authdata["username"], authdata["password"])
 
-        cafile = '/etc/ssl/certs/ca-certificates.crt'
+        cafile = "/etc/ssl/certs/ca-certificates.crt"
         ssl_context: Optional[ssl.SSLContext]
         if os.path.exists(cafile):
             ssl_context = ssl.create_default_context(cafile=cafile)
@@ -1176,16 +1176,16 @@ class HTTPImageLookup(_RegistryImageLookup):
                     try:
                         assert cause.headers is not None
                         hdr = cause.headers[aiohttp.hdrs.WWW_AUTHENTICATE]
-                        challenge = www_authenticate.parse(hdr)['Bearer']
-                        realm = challenge['realm']
-                        service = challenge['service']
-                        scope = challenge['scope']
+                        challenge = www_authenticate.parse(hdr)["Bearer"]
+                        realm = challenge["realm"]
+                        service = challenge["service"]
+                        scope = challenge["scope"]
                     except (ValueError, KeyError):
                         raise error from None  # Raise the original error if we can't parse
                     # Note: since we're running images from this registry, we
                     # trust it, and don't bother checking the realm for CSRF.
                     token = await self._get_token(session, realm, service, scope, auth)
-                    auth_header = f'Bearer {token}'
+                    auth_header = f"Bearer {token}"
                     image = await self._get_image(
                         session, registry, repo, tag, ssl_context, auth_header
                     )
@@ -1223,7 +1223,7 @@ class ImageResolver:
             self._tag = tag
             self._tag_file = None
         elif self._tag_file is None:
-            self._tag = 'latest'
+            self._tag = "latest"
         else:
             with open(self._tag_file) as f:
                 self._tag = f.read().strip()
@@ -1232,8 +1232,8 @@ class ImageResolver:
                 # It's probably a reasonable constraint so that we don't allow
                 # whitespace, / and other nonsense, even if Docker itself no
                 # longer enforces it.
-                if not re.match(r'^[\w][\w.-]{0,127}$', self._tag):
-                    raise ValueError(f'Invalid tag {repr(self._tag)} in {self._tag_file}')
+                if not re.match(r"^[\w][\w.-]{0,127}$", self._tag):
+                    raise ValueError(f"Invalid tag {repr(self._tag)} in {self._tag_file}")
 
     @property
     def tag(self) -> str:
@@ -1253,10 +1253,10 @@ class ImageResolver:
             return self._cache[name]
 
         # Use split_repo_name to avoid being confused by a :port in the registry part
-        if ':' in docker.auth.split_repo_name(name)[1]:
+        if ":" in docker.auth.split_repo_name(name)[1]:
             # A tag was already specified in the graph or the override
             logger.warning("Image %s has a predefined tag, ignoring tag %s", name, self._tag)
-            repo, tag = name.rsplit(':', 1)
+            repo, tag = name.rsplit(":", 1)
         else:
             repo = name
             tag = self._tag
@@ -1267,9 +1267,9 @@ class ImageResolver:
             # that caller put in the cache so that calls with the same
             # name always return the same value.
             resolved = self._cache[name]
-            logger.debug('ImageResolver race detected resolving %s to %s', name, resolved)
+            logger.debug("ImageResolver race detected resolving %s to %s", name, resolved)
         else:
-            logger.debug('ImageResolver resolved %s to %s', name, resolved)
+            logger.debug("ImageResolver resolved %s to %s", name, resolved)
             self._cache[name] = resolved
         return resolved
 
@@ -1306,14 +1306,14 @@ class TaskIDAllocator:
     ``__new__`` method is overridden to return a per-prefix singleton.
     """
 
-    _by_prefix: ClassVar[typing.Dict[str, 'TaskIDAllocator']] = {}
+    _by_prefix: ClassVar[typing.Dict[str, "TaskIDAllocator"]] = {}
     _prefix: str
     _next_id: int
 
-    def __init__(self, prefix=''):
+    def __init__(self, prefix=""):
         pass  # Initialised by new
 
-    def __new__(cls, prefix=''):
+    def __new__(cls, prefix=""):
         # Obtain the singleton
         try:
             return TaskIDAllocator._by_prefix[prefix]
@@ -1356,9 +1356,9 @@ class InsufficientResourcesError(RuntimeError):
 
     def _subsystem_str(self) -> str:
         if self.subsystem is None:
-            return ''
+            return ""
         else:
-            return f' (subsystem {self.subsystem})'
+            return f" (subsystem {self.subsystem})"
 
 
 class TaskNoAgentError(InsufficientResourcesError):
@@ -1607,7 +1607,7 @@ class LogicalNode:
         self.physical_factory = PhysicalNode
 
     def __repr__(self):
-        return f'<{self.__class__.__name__} {self.name!r}>'
+        return f"<{self.__class__.__name__} {self.name!r}>"
 
 
 class LogicalExternal(LogicalNode):
@@ -1715,7 +1715,7 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.command = []
         self.wrapper = None
         self.taskinfo = Dict()
-        self.taskinfo.container.type = 'DOCKER'
+        self.taskinfo.container.type = "DOCKER"
         self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
@@ -1732,16 +1732,16 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
 
     def __repr__(self):
         s = io.StringIO()
-        s.write(f'<{self.__class__.__name__} {self.name!r}{self.format_requests()}')
+        s.write(f"<{self.__class__.__name__} {self.name!r}{self.format_requests()}")
         if self.gpus:
-            s.write(f' gpus={self.gpus}')
+            s.write(f" gpus={self.gpus}")
         if self.interfaces:
-            s.write(f' interfaces={self.interfaces}')
+            s.write(f" interfaces={self.interfaces}")
         if self.volumes:
-            s.write(f' volumes={self.volumes}')
+            s.write(f" volumes={self.volumes}")
         if self.host:
-            s.write(f' host={self.host!r}')
-        s.write('>')
+            s.write(f" host={self.host!r}")
+        s.write(">")
         return s.getvalue()
 
 
@@ -1750,11 +1750,11 @@ class AgentGPU(GPUResources):
 
     def __init__(self, spec, index):
         super().__init__(index)
-        self.uuid = spec.get('uuid')
-        self.name = spec['name']
-        self.compute_capability = tuple(spec['compute_capability'])
-        self.device_attributes = spec['device_attributes']
-        self.numa_node = spec.get('numa_node')
+        self.uuid = spec.get("uuid")
+        self.name = spec["name"]
+        self.compute_capability = tuple(spec["compute_capability"])
+        self.device_attributes = spec["device_attributes"]
+        self.numa_node = spec.get("numa_node")
 
 
 class AgentInterface(InterfaceResources):
@@ -1784,16 +1784,16 @@ class AgentInterface(InterfaceResources):
 
     def __init__(self, spec, index):
         super().__init__(index)
-        self.name = spec['name']
+        self.name = spec["name"]
         # For compatibility, spec['network'] is either a string or a list of strings
-        networks = spec['network']
+        networks = spec["network"]
         self.networks = {networks} if isinstance(networks, str) else set(networks)
-        self.ipv4_address = ipaddress.IPv4Address(spec['ipv4_address'])
-        self.numa_node = spec.get('numa_node')
-        self.infiniband_devices = spec.get('infiniband_devices', [])
+        self.ipv4_address = ipaddress.IPv4Address(spec["ipv4_address"])
+        self.numa_node = spec.get("numa_node")
+        self.infiniband_devices = spec.get("infiniband_devices", [])
         # Default to True for backwards compatibility with nodes that don't
         # advertise the setting (where the loopback has always been enabled).
-        self.infiniband_multicast_loopback = spec.get('infiniband_multicast_loopback', True)
+        self.infiniband_multicast_loopback = spec.get("infiniband_multicast_loopback", True)
         self.infiniband_multicast_out = set()
         self.multicast_in = set()
 
@@ -1801,7 +1801,7 @@ class AgentInterface(InterfaceResources):
 def decode_json_base64(value):
     """Decodes a object that has been encoded with JSON then url-safe base64."""
     json_bytes = base64.urlsafe_b64decode(value)
-    return json.loads(json_bytes.decode('utf-8'))
+    return json.loads(json_bytes.decode("utf-8"))
 
 
 class _Everything:
@@ -1827,7 +1827,7 @@ class Agent:
 
     def __init__(self, offers):
         if not offers:
-            raise ValueError('At least one offer must be specified')
+            raise ValueError("At least one offer must be specified")
         self.offers = offers
         self.agent_id = offers[0].agent_id.value
         self.role = offers[0].allocation_info.role
@@ -1842,49 +1842,49 @@ class Agent:
         self.priority = None
         for attribute in offers[0].attributes:
             try:
-                if attribute.name == 'katsdpcontroller.interfaces' and attribute.type == 'TEXT':
+                if attribute.name == "katsdpcontroller.interfaces" and attribute.type == "TEXT":
                     value = decode_json_base64(attribute.text.value)
                     schemas.INTERFACES.validate(value)
                     self.interfaces = [AgentInterface(item, i) for i, item in enumerate(value)]
-                elif attribute.name == 'katsdpcontroller.volumes' and attribute.type == 'TEXT':
+                elif attribute.name == "katsdpcontroller.volumes" and attribute.type == "TEXT":
                     value = decode_json_base64(attribute.text.value)
                     schemas.VOLUMES.validate(value)
                     volumes = []
                     for item in value:
                         volumes.append(
                             Volume(
-                                name=item['name'],
-                                host_path=item['host_path'],
-                                numa_node=item.get('numa_node'),
+                                name=item["name"],
+                                host_path=item["host_path"],
+                                numa_node=item.get("numa_node"),
                             )
                         )
                     self.volumes = volumes
-                elif attribute.name == 'katsdpcontroller.gpus' and attribute.type == 'TEXT':
+                elif attribute.name == "katsdpcontroller.gpus" and attribute.type == "TEXT":
                     value = decode_json_base64(attribute.text.value)
                     schemas.GPUS.validate(value)
                     self.gpus = [AgentGPU(item, i) for i, item in enumerate(value)]
-                elif attribute.name == 'katsdpcontroller.numa' and attribute.type == 'TEXT':
+                elif attribute.name == "katsdpcontroller.numa" and attribute.type == "TEXT":
                     value = decode_json_base64(attribute.text.value)
                     schemas.NUMA.validate(value)
                     self.numa = value
                 elif (
-                    attribute.name == 'katsdpcontroller.infiniband_devices'
-                    and attribute.type == 'TEXT'
+                    attribute.name == "katsdpcontroller.infiniband_devices"
+                    and attribute.type == "TEXT"
                 ):
                     value = decode_json_base64(attribute.text.value)
                     schemas.INFINIBAND_DEVICES.validate(value)
                     self.infiniband_devices = value
-                elif attribute.name == 'katsdpcontroller.priority' and attribute.type == 'SCALAR':
+                elif attribute.name == "katsdpcontroller.priority" and attribute.type == "SCALAR":
                     self.priority = attribute.scalar.value
-                elif attribute.name == 'katsdpcontroller.subsystems' and attribute.type == 'TEXT':
+                elif attribute.name == "katsdpcontroller.subsystems" and attribute.type == "TEXT":
                     value = decode_json_base64(attribute.text.value)
                     schemas.SUBSYSTEMS.validate(value)
                     self.subsystems = set(value)
             except (ValueError, KeyError, TypeError, ipaddress.AddressValueError):
-                logger.warning('Could not parse %s (%s)', attribute.name, attribute.text.value)
-                logger.debug('Exception', exc_info=True)
+                logger.warning("Could not parse %s (%s)", attribute.name, attribute.text.value)
+                logger.debug("Exception", exc_info=True)
             except jsonschema.ValidationError as e:
-                logger.warning('Validation error parsing %s: %s', value, e)
+                logger.warning("Validation error parsing %s: %s", value, e)
 
         # These resources all represent resources not yet allocated
         self.resources = {name: cls(name) for name, cls in GLOBAL_RESOURCES.items()}
@@ -1892,19 +1892,19 @@ class Agent:
             for resource in offer.resources:
                 # Skip specialised resource types and use only general-purpose
                 # resources.
-                if 'disk' in resource and 'source' in resource.disk:
+                if "disk" in resource and "source" in resource.disk:
                     continue
                 if resource.name in self.resources:
                     self.resources[resource.name].add(resource)
-                elif resource.name.startswith('katsdpcontroller.gpu.'):
-                    parts = resource.name.split('.', 3)
+                elif resource.name.startswith("katsdpcontroller.gpu."):
+                    parts = resource.name.split(".", 3)
                     # TODO: catch exceptions here
                     index = int(parts[2])
                     resource_name = parts[3]
                     if resource_name in self.gpus[index].resources:
                         self.gpus[index].resources[resource_name].add(resource)
-                elif resource.name.startswith('katsdpcontroller.interface.'):
-                    parts = resource.name.split('.', 3)
+                elif resource.name.startswith("katsdpcontroller.interface."):
+                    parts = resource.name.split(".", 3)
                     # TODO: catch exceptions here
                     index = int(parts[2])
                     resource_name = parts[3]
@@ -1913,9 +1913,9 @@ class Agent:
         if self.priority is None:
             self.priority = float(len(self.gpus) + len(self.interfaces) + len(self.volumes))
         # Split offers of cores by NUMA node
-        self.numa_cores = [self.resources['cores'].subset(numa_node) for numa_node in self.numa]
-        del self.resources['cores']  # Prevent accidentally allocating from this
-        logger.debug('Agent %s has priority %f', self.agent_id, self.priority)
+        self.numa_cores = [self.resources["cores"].subset(numa_node) for numa_node in self.numa]
+        del self.resources["cores"]  # Prevent accidentally allocating from this
+        logger.debug("Agent %s has priority %f", self.agent_id, self.priority)
 
     @classmethod
     def _match_children(cls, numa_node, requested, actual, msg):
@@ -1960,7 +1960,7 @@ class Agent:
                     need = request.requests[name].amount
                     have = item.resources[name].available
                     if have < need:
-                        logger.debug('Not enough %s on %s %d for request %d', name, msg, j, i)
+                        logger.debug("Not enough %s on %s %d for request %d", name, msg, j, i)
                         good = False
                         break
                 if good:
@@ -1968,7 +1968,7 @@ class Agent:
                     break
             if use is None:
                 raise InsufficientResourcesError(
-                    'No suitable {} found for request {}'.format(msg, i)
+                    "No suitable {} found for request {}".format(msg, i)
                 )
             assign[use] = i
         return assign
@@ -1979,39 +1979,39 @@ class Agent:
             cores = self.numa_cores[numa_node]
             total_cores = len(self.numa[numa_node])
         else:
-            cores = RangeResource('cores')
+            cores = RangeResource("cores")
             total_cores = 0
         need = max(
-            logical_task.requests['cores'].amount, math.ceil(logical_task.numa_nodes * total_cores)
+            logical_task.requests["cores"].amount, math.ceil(logical_task.numa_nodes * total_cores)
         )
         have = cores.available
         if need > have:
             raise InsufficientResourcesError(
-                'not enough cores on node {} ({} < {})'.format(numa_node, have, need)
+                "not enough cores on node {} ({} < {})".format(numa_node, have, need)
             )
 
         # Match network requests to interfaces
         interface_map = self._match_children(
-            numa_node, logical_task.interfaces, self.interfaces, 'interface'
+            numa_node, logical_task.interfaces, self.interfaces, "interface"
         )
         # Match volume requests to volumes
         for request in logical_task.volumes:
             if not any(request.matches(volume, numa_node) for volume in self.volumes):
                 if not any(request.matches(volume, None) for volume in self.volumes):
-                    raise InsufficientResourcesError(f'Volume {request.name} not present')
+                    raise InsufficientResourcesError(f"Volume {request.name} not present")
                 else:
                     raise InsufficientResourcesError(
-                        f'Volume {request.name} not present on NUMA node {numa_node}'
+                        f"Volume {request.name} not present on NUMA node {numa_node}"
                     )
         # Match GPU requests to GPUs
-        gpu_map = self._match_children(numa_node, logical_task.gpus, self.gpus, 'GPU')
+        gpu_map = self._match_children(numa_node, logical_task.gpus, self.gpus, "GPU")
 
         # Have now verified that the task fits. Create the resources for it
         alloc = ResourceAllocation(self)
         for name, request in logical_task.requests.items():
-            if name == 'cores':
+            if name == "cores":
                 res = cores.allocate(need)
-            elif name == 'ports':
+            elif name == "ports":
                 res = self.resources[name].allocate(request.amount, use_random=self._random)
             else:
                 res = self.resources[name].allocate(request.amount)
@@ -2059,28 +2059,28 @@ class Agent:
             if there are not enough resources to add the task
         """
         if not logical_task.valid_agent(self):
-            raise InsufficientResourcesError('Task does not match this agent')
+            raise InsufficientResourcesError("Task does not match this agent")
         for name, request in logical_task.requests.items():
-            if name == 'cores':
+            if name == "cores":
                 continue  # Handled specially lower down
             need = request.amount
             have = self.resources[name].available
             if have < need:
-                raise InsufficientResourcesError(f'Not enough {name} ({have} < {need})')
+                raise InsufficientResourcesError(f"Not enough {name} ({have} < {need})")
 
-        if logical_task.requests['cores'].amount:
+        if logical_task.requests["cores"].amount:
             # For tasks requesting cores we activate NUMA awareness
             for numa_node in range(len(self.numa)):
                 try:
                     return self._allocate_numa_node(numa_node, logical_task)
                 except InsufficientResourcesError:
                     logger.debug(
-                        'Failed to allocate NUMA node %d on %s',
+                        "Failed to allocate NUMA node %d on %s",
                         numa_node,
                         self.agent_id,
                         exc_info=True,
                     )
-            raise InsufficientResourcesError('No suitable NUMA node found')
+            raise InsufficientResourcesError("No suitable NUMA node found")
         return self._allocate_numa_node(None, logical_task)
 
     def can_allocate(self, logical_task):
@@ -2204,7 +2204,7 @@ class PhysicalNode:
         for dep in self.depends_ready:
             await dep.ready_event.wait()
             if not dep.was_ready:
-                logger.debug('Dependency %s of %s failed', dep.name, self.name)
+                logger.debug("Dependency %s of %s failed", dep.name, self.name)
                 return False
         if self.logical_node.wait_ports is not None:
             wait_ports = [self.ports[port] for port in self.logical_node.wait_ports]
@@ -2233,7 +2233,7 @@ class PhysicalNode:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception('exception while waiting for task %s to be ready', self.name)
+            logger.exception("exception while waiting for task %s to be ready", self.name)
 
     def set_state(self, state):
         """Update :attr:`state`.
@@ -2244,13 +2244,13 @@ class PhysicalNode:
         Subclasses may override this to take special actions on particular
         transitions, but should chain to the base class.
         """
-        logger.debug('Task %s: %s -> %s', self.name, self.state, state)
+        logger.debug("Task %s: %s -> %s", self.name, self.state, state)
         if state < self.state:
             # STARTING -> NOT_READY is permitted, for the case where a
             # launch is cancelled before the tasks are actually launched.
             if state != TaskState.NOT_READY or self.state != TaskState.STARTING:
                 logger.warning(
-                    'Ignoring state change that went backwards (%s -> %s) on task %s',
+                    "Ignoring state change that went backwards (%s -> %s) on task %s",
                     self.state,
                     state,
                     self.name,
@@ -2449,9 +2449,9 @@ class PhysicalTask(PhysicalNode):
         """
         await super().resolve(resolver, graph)
         for _src, trg, attr in graph.out_edges([self], data=True):
-            if 'port' in attr:
-                port = attr['port']
-                endpoint_name = f'{trg.logical_node.name}_{port}'
+            if "port" in attr:
+                port = attr["port"]
+                endpoint_name = f"{trg.logical_node.name}_{port}"
                 self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
 
         docker_devices = set()
@@ -2467,29 +2467,29 @@ class PhysicalTask(PhysicalNode):
             # Archive types recognised by Mesos Fetcher (.gz is excluded
             # because it doesn't contain a collection of files).
             archive_exts = [
-                '.tar',
-                '.tgz',
-                '.tar.gz',
-                '.tbz2',
-                '.tar.bz2',
-                '.txz',
-                '.tar.xz',
-                '.zip',
+                ".tar",
+                ".tgz",
+                ".tar.gz",
+                ".tbz2",
+                ".tar.bz2",
+                ".txz",
+                ".tar.xz",
+                ".zip",
             ]
             if not any(self.logical_node.wrapper.endswith(ext) for ext in archive_exts):
-                uri.output_file = 'wrapper'
+                uri.output_file = "wrapper"
                 uri.executable = True
-            taskinfo.command.setdefault('uris', []).append(uri)
-            command.insert(0, '/mnt/mesos/sandbox/wrapper')
+            taskinfo.command.setdefault("uris", []).append(uri)
+            command.insert(0, "/mnt/mesos/sandbox/wrapper")
         if self.depends_ready:
             uri = Dict()
-            uri.value = urllib.parse.urljoin(resolver.http_url, 'static/delay_run.sh')
+            uri.value = urllib.parse.urljoin(resolver.http_url, "static/delay_run.sh")
             uri.executable = True
-            taskinfo.command.setdefault('uris', []).append(uri)
+            taskinfo.command.setdefault("uris", []).append(uri)
             command = [
-                '/mnt/mesos/sandbox/delay_run.sh',
+                "/mnt/mesos/sandbox/delay_run.sh",
                 urllib.parse.urljoin(
-                    resolver.http_url, f'tasks/{taskinfo.task_id.value}/wait_start'
+                    resolver.http_url, f"tasks/{taskinfo.task_id.value}/wait_start"
                 ),
             ] + command
         if command:
@@ -2505,9 +2505,9 @@ class PhysicalTask(PhysicalNode):
         if self.logical_node.max_run_time is not None:
             taskinfo.max_completion_time.nanoseconds = int(self.logical_node.max_run_time * 1e9)
 
-        if self.allocation.resources['cores']:
-            core_list = ','.join(str(core) for core in self.allocation.resources['cores'])
-            docker_parameters.append({'key': 'cpuset-cpus', 'value': core_list})
+        if self.allocation.resources["cores"]:
+            core_list = ",".join(str(core) for core in self.allocation.resources["cores"])
+            docker_parameters.append({"key": "cpuset-cpus", "value": core_list})
 
         any_infiniband = False
         for request, interface_alloc in zip(
@@ -2520,7 +2520,7 @@ class PhysicalTask(PhysicalNode):
         if any_infiniband:
             # ibverbs uses memory mapping for DMA. Take away the default rlimit
             # maximum since Docker tends to set a very low limit.
-            docker_parameters.append({'key': 'ulimit', 'value': 'memlock=-1'})
+            docker_parameters.append({"key": "ulimit", "value": "memlock=-1"})
             # rdma_get_devices requires *all* the devices to be present to
             # succeed, even if they're not all used.
             if self.agent.infiniband_devices:
@@ -2541,35 +2541,35 @@ class PhysicalTask(PhysicalNode):
         if gpu_uuids:
             # TODO: once we've upgraded to Docker 19.03 everywhere we can use its
             # built-in GPU support.
-            docker_parameters.append({'key': 'runtime', 'value': 'nvidia'})
-            env = taskinfo.command.environment.setdefault('variables', [])
-            env.append({'name': 'NVIDIA_VISIBLE_DEVICES', 'value': ','.join(gpu_uuids)})
+            docker_parameters.append({"key": "runtime", "value": "nvidia"})
+            env = taskinfo.command.environment.setdefault("variables", [])
+            env.append({"name": "NVIDIA_VISIBLE_DEVICES", "value": ",".join(gpu_uuids)})
 
         # container.linux_info.capabilities doesn't work with Docker
         # containerizer (https://issues.apache.org/jira/browse/MESOS-6163), so
         # pass in the parameters.
         for capability in self.logical_node.capabilities:
-            docker_parameters.append({'key': 'cap-add', 'value': capability})
+            docker_parameters.append({"key": "cap-add", "value": capability})
 
         for device in docker_devices:
-            docker_parameters.append({'key': 'device', 'value': device})
+            docker_parameters.append({"key": "device", "value": device})
         if docker_parameters:
-            taskinfo.container.docker.setdefault('parameters', []).extend(docker_parameters)
+            taskinfo.container.docker.setdefault("parameters", []).extend(docker_parameters)
 
         for rvolume, avolume in zip(self.logical_node.volumes, self.allocation.volumes):
             volume = Dict()
             volume.mode = rvolume.mode
             volume.container_path = rvolume.container_path
             volume.host_path = avolume.host_path
-            taskinfo.container.setdefault('volumes', []).append(volume)
+            taskinfo.container.setdefault("volumes", []).append(volume)
 
-        taskinfo.discovery.visibility = 'EXTERNAL'
+        taskinfo.discovery.visibility = "EXTERNAL"
         taskinfo.discovery.name = self.name
         taskinfo.discovery.ports.ports = []
         for port_name, port_number in self.ports.items():
             # TODO: need a way to indicate non-TCP
             taskinfo.discovery.ports.ports.append(
-                Dict(number=port_number, name=port_name, protocol='tcp')
+                Dict(number=port_number, name=port_name, protocol="tcp")
             )
         self.taskinfo = taskinfo
         self.image = image
@@ -2582,11 +2582,11 @@ class PhysicalTask(PhysicalNode):
         for r, cls in GLOBAL_RESOURCES.items():
             if issubclass(cls, RangeResource):
                 args[r] = getattr(self, r)
-        args['interfaces'] = self.interfaces
-        args['endpoints'] = self.endpoints
-        args['host'] = self.host
-        args['resolver'] = resolver
-        args['generation'] = self.generation
+        args["interfaces"] = self.interfaces
+        args["endpoints"] = self.endpoints
+        args["host"] = self.host
+        args["resolver"] = resolver
+        args["generation"] = self.generation
         return args
 
     def set_state(self, state: TaskState) -> None:
@@ -2599,7 +2599,7 @@ class PhysicalTask(PhysicalNode):
 
     def set_status(self, status):
         self.status = status
-        if status.state == 'TASK_RUNNING' and self.start_time is None:
+        if status.state == "TASK_RUNNING" and self.start_time is None:
             self.start_time = status.timestamp
         elif status.state in TERMINAL_STATUSES and self.end_time is None:
             self.end_time = status.timestamp
@@ -2646,7 +2646,7 @@ class PhysicalTask(PhysicalNode):
 
     def __del__(self):
         # hasattr is to protect against failure early in __init__
-        if hasattr(self, '_queue'):
+        if hasattr(self, "_queue"):
             self.queue = None
 
 
@@ -2823,7 +2823,7 @@ class _LaunchGroup:
         self.resources_future = asyncio.Future()
         self.future = asyncio.Future()
         self.deadline = deadline
-        self.last_insufficient = InsufficientResourcesError('No resource offers received')
+        self.last_insufficient = InsufficientResourcesError("No resource offers received")
 
 
 class LaunchQueue:
@@ -2840,7 +2840,7 @@ class LaunchQueue:
         higher-priority queue (ala UNIX nice).
     """
 
-    def __init__(self, role, name='', *, priority=0):
+    def __init__(self, role, name="", *, priority=0):
         self.role = role
         self.name = name
         self.priority = priority
@@ -2884,29 +2884,29 @@ def run_in_event_loop(func, *args, **kw):
 
 
 async def wait_start_handler(request):
-    scheduler = request.app['katsdpcontroller_scheduler']
-    task_id = request.match_info['id']
+    scheduler = request.app["katsdpcontroller_scheduler"]
+    task_id = request.match_info["id"]
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
-        raise aiohttp.web.HTTPNotFound(text=f'Task ID {task_id} not active\n')
+        raise aiohttp.web.HTTPNotFound(text=f"Task ID {task_id} not active\n")
     else:
         try:
             for dep in task.depends_ready:
                 await dep.ready_event.wait()
                 if not dep.was_ready:
-                    logger.info('Not starting %s because %s died', task.name, dep.name)
+                    logger.info("Not starting %s because %s died", task.name, dep.name)
                     raise aiohttp.web.HTTPServiceUnavailable(
-                        text=f'Dependency {dep.name} died without becoming ready\n'
+                        text=f"Dependency {dep.name} died without becoming ready\n"
                     )
         except (asyncio.CancelledError, aiohttp.web.HTTPException):
             raise
         except Exception as error:
-            logger.exception('Exception while waiting for dependencies')
+            logger.exception("Exception while waiting for dependencies")
             raise aiohttp.web.HTTPInternalServerError(
-                text=f'Exception while waiting for dependencies:\n{error}\n'
+                text=f"Exception while waiting for dependencies:\n{error}\n"
             )
         else:
-            return aiohttp.web.Response(body='')
+            return aiohttp.web.Response(body="")
 
 
 def subgraph(graph, edge_filter, nodes=None):
@@ -3057,7 +3057,7 @@ class SchedulerBase:
         self._offers = {}  #: offers keyed by role then agent ID then offer ID
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event()
-        self._default_queue = LaunchQueue(default_role, 'default')
+        self._default_queue = LaunchQueue(default_role, "default")
         self._queues = [self._default_queue]
         #: Mesos roles for which we want to (and expect to) receive offers
         self._roles_needed = set()
@@ -3072,10 +3072,10 @@ class SchedulerBase:
 
         # Configure the web app
         app = aiohttp.web.Application()
-        app['katsdpcontroller_scheduler'] = self
-        app.router.add_get('/tasks/{id}/wait_start', wait_start_handler)
+        app["katsdpcontroller_scheduler"] = self
+        app.router.add_get("/tasks/{id}/wait_start", wait_start_handler)
         app.router.add_static(
-            '/static', pkg_resources.resource_filename('katsdpcontroller', 'static')
+            "/static", pkg_resources.resource_filename("katsdpcontroller", "static")
         )
         self.app = app
         if runner_kwargs is None:
@@ -3088,14 +3088,14 @@ class SchedulerBase:
         This starts up the webapp, so any additions to it must be made first.
         """
         if self.http_runner.sites:
-            raise RuntimeError('Already started')
+            raise RuntimeError("Already started")
         await self.http_runner.setup()
         site = aiohttp.web.TCPSite(self.http_runner, self.http_host, self.http_port)
         await site.start()
         self.http_host, self.http_port = self.http_runner.addresses[0][:2]
         if not self.http_url:
             self.http_url = site.name
-        logger.info('Internal HTTP server at %s', self.http_url)
+        logger.info("Internal HTTP server at %s", self.http_url)
 
     def add_queue(self, queue):
         """Register a new queue.
@@ -3106,7 +3106,7 @@ class SchedulerBase:
             If `queue` has already been added
         """
         if queue in self._queues:
-            raise ValueError('Queue has already been added')
+            raise ValueError("Queue has already been added")
         self._queues.append(queue)
 
     def remove_queue(self, queue):
@@ -3122,7 +3122,7 @@ class SchedulerBase:
             If `queue` is not empty
         """
         if queue:
-            raise asyncio.InvalidStateError('queue is not empty')
+            raise asyncio.InvalidStateError("queue is not empty")
         self._queues.remove(queue)
 
     @classmethod
@@ -3193,7 +3193,7 @@ class SchedulerBase:
             for r, cls in GLOBAL_RESOURCES.items():
                 # Cores are special because only the cores on a single NUMA node
                 # can be allocated together
-                if r == 'cores':
+                if r == "cores":
                     available = [cores.available for agent in agents for cores in agent.numa_cores]
                 else:
                     available = [agent.resources[r].available for agent in agents]
@@ -3404,7 +3404,7 @@ class SchedulerBase:
                 # there is no other choice. Should eventually look into smarter
                 # algorithms e.g. Dominant Resource Fairness
                 # (http://mesos.apache.org/documentation/latest/allocation-module/)
-                agents.sort(key=lambda agent: (agent.priority, agent.resources['mem'].available))
+                agents.sort(key=lambda agent: (agent.priority, agent.resources["mem"].available))
                 nodes.sort(key=self._node_sort_key, reverse=True)
                 allocations = []
                 insufficient = False
@@ -3418,7 +3418,7 @@ class SchedulerBase:
                                 break
                             except InsufficientResourcesError as error:
                                 logger.debug(
-                                    'Cannot add %s to %s: %s', node.name, agent.agent_id, error
+                                    "Cannot add %s to %s: %s", node.name, agent.agent_id, error
                                 )
                         else:
                             insufficient = True
@@ -3430,7 +3430,7 @@ class SchedulerBase:
                     # Raises an InsufficientResourcesError
                     self._diagnose_insufficient(orig_agents, nodes)
             except InsufficientResourcesError as error:
-                logger.debug('Could not yet launch graph: %s', error)
+                logger.debug("Could not yet launch graph: %s", error)
                 group.last_insufficient = error
             else:
                 try:
@@ -3439,10 +3439,10 @@ class SchedulerBase:
                     if not group.resources_future.done():
                         group.resources_future.set_result(None)
                     # Two-phase resolving
-                    logger.debug('Allocating resources to tasks')
+                    logger.debug("Allocating resources to tasks")
                     for (node, allocation) in allocations:
                         node.allocate(allocation)
-                    logger.debug('Performing resolution')
+                    logger.debug("Performing resolution")
                     order_graph = subgraph(group.graph, DEPENDS_RESOLVE, nodes)
                     # Lexicographical sorting isn't required for
                     # functionality, but the unit tests depend on it to get
@@ -3450,7 +3450,7 @@ class SchedulerBase:
                     for node in networkx.lexicographical_topological_sort(
                         order_graph.reverse(), key=lambda x: x.name
                     ):
-                        logger.debug('Resolving %s', node.name)
+                        logger.debug("Resolving %s", node.name)
                         await node.resolve(group.resolver, group.graph)
                     # Last chance for the group to be cancelled. After this point, we must
                     # not await anything.
@@ -3480,7 +3480,7 @@ class SchedulerBase:
                         for offer_id in offer_ids:
                             self._remove_offer(role, agent.agent_id, offer_id.value)
                         logger.info(
-                            'Launched %d tasks on %s', len(taskinfos[agent]), agent.agent_id
+                            "Launched %d tasks on %s", len(taskinfos[agent]), agent.agent_id
                         )
                     for node in nodes:
                         node.set_state(TaskState.STARTED)
@@ -3542,7 +3542,7 @@ class SchedulerBase:
             except asyncio.CancelledError:
                 raise  # Normal operation in close()
             except Exception:
-                logger.exception('Error in _launch_once')
+                logger.exception("Error in _launch_once")
 
     @classmethod
     def depends_resources(cls, data):
@@ -3551,7 +3551,7 @@ class SchedulerBase:
         It takes into account the keys that implicitly specify a
         `depends_resources` dependency.
         """
-        keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, 'port']
+        keys = [DEPENDS_RESOURCES, DEPENDS_RESOLVE, DEPENDS_READY, "port"]
         return any(data.get(key) for key in keys)
 
     async def launch(self, graph, resolver, nodes=None, *, queue=None, resources_timeout=None):
@@ -3618,19 +3618,19 @@ class SchedulerBase:
             If `queue` has not been added with :meth:`add_queue`.
         """
         if self._closing:
-            raise asyncio.InvalidStateError('Cannot launch tasks while shutting down')
+            raise asyncio.InvalidStateError("Cannot launch tasks while shutting down")
         if nodes is None:
             nodes = graph.nodes()
         if queue is None:
             queue = self._default_queue
         if queue not in self._queues:
-            raise ValueError('queue has not been added to the scheduler')
+            raise ValueError("queue has not been added to the scheduler")
         if resources_timeout is None:
             resources_timeout = self.resources_timeout
         if self._driver is None:
             for node in nodes:
                 if isinstance(node, PhysicalTask):
-                    raise TypeError(f'{node.name} is a PhysicalTask but there is no Mesos driver')
+                    raise TypeError(f"{node.name} is a PhysicalTask but there is no Mesos driver")
         # Create a startup schedule. The nodes are partitioned into groups that can
         # be started at the same time.
 
@@ -3644,13 +3644,13 @@ class SchedulerBase:
             if trg not in remaining_set and trg.state == TaskState.NOT_READY:
                 if self.depends_resources(data):
                     raise DependencyError(
-                        '{} depends on {} but it is neither'
-                        'started nor scheduled'.format(src.name, trg.name)
+                        "{} depends on {} but it is neither"
+                        "started nor scheduled".format(src.name, trg.name)
                     )
         if not networkx.is_directed_acyclic_graph(depends_ready_graph):
-            raise CycleError('cycle between depends_ready dependencies')
+            raise CycleError("cycle between depends_ready dependencies")
         if not networkx.is_directed_acyclic_graph(depends_resolve_graph):
-            raise CycleError('cycle between depends_resolve dependencies')
+            raise CycleError("cycle between depends_resolve dependencies")
 
         for node in remaining:
             node.set_state(TaskState.STARTING)
@@ -3667,7 +3667,7 @@ class SchedulerBase:
             await asyncio.wait_for(pending.resources_future, timeout=resources_timeout)
             await pending.future
         except BaseException as error:
-            logger.debug('Exception in launching group', exc_info=True)
+            logger.debug("Exception in launching group", exc_info=True)
             # Could be
             # - a timeout
             # - we were cancelled
@@ -3694,7 +3694,7 @@ class SchedulerBase:
 
         async def wait_one(node):
             await node.dead_event.wait()
-            if node.status is not None and node.status.state != 'TASK_FINISHED':
+            if node.status is not None and node.status.state != "TASK_FINISHED":
                 raise TaskError(node)
 
         for node in nodes:
@@ -3765,7 +3765,7 @@ class SchedulerBase:
                 if not attempts:
                     raise
                 else:
-                    logger.warning('Batch graph failed (%s), retrying', error)
+                    logger.warning("Batch graph failed (%s), retrying", error)
                     new_nodes = [node.clone() for node in nodes]
                     mapping = dict(zip(nodes, new_nodes))
                     networkx.relabel_nodes(graph, mapping, copy=False)
@@ -3842,21 +3842,21 @@ class SchedulerBase:
                         node, data=DEPENDS_FINISHED_CRITICAL, default=True
                     ):
                         future = futures[dep]
-                        logger.info('%s waiting for %s', node.name, dep.name)
+                        logger.info("%s waiting for %s", node.name, dep.name)
                         try:
                             await future
                         except Exception:
                             if len(node_set) == 1:
                                 desc = node.name
                             else:
-                                desc = node.name + f' (and {len(node_set) - 1} others)'
+                                desc = node.name + f" (and {len(node_set) - 1} others)"
                             if critical:
-                                logger.info('Skipping %s because %s failed', desc, dep.name)
+                                logger.info("Skipping %s because %s failed", desc, dep.name)
                                 self.task_stats.batch_tasks_skipped(len(node_set))
                                 raise TaskSkipped(node) from None
                             else:
                                 logger.debug(
-                                    'Continuing with %s after non-critical %s failed',
+                                    "Continuing with %s after non-critical %s failed",
                                     desc,
                                     dep.name,
                                 )
@@ -3872,7 +3872,7 @@ class SchedulerBase:
                         attempts=attempts,
                     )
                 except Exception:
-                    logger.exception('Batch task %s failed', node.name)
+                    logger.exception("Batch task %s failed", node.name)
                     self.task_stats.batch_tasks_failed(len(node_set))
                     raise
             finally:
@@ -3929,14 +3929,14 @@ class SchedulerBase:
                     await src.dead_event.wait()
                 # Re-check state because it might have changed while waiting
                 if node.state <= TaskState.KILLING:
-                    logger.debug('Killing %s', node.name)
+                    logger.debug("Killing %s", node.name)
                     node.kill(self._driver, **kwargs)
                     node.set_state(TaskState.KILLING)
             await node.dead_event.wait()
 
         kill_graph = subgraph(graph, DEPENDS_KILL, nodes)
         if not networkx.is_directed_acyclic_graph(kill_graph):
-            raise CycleError('cycle between depends_kill dependencies')
+            raise CycleError("cycle between depends_kill dependencies")
         futures = []
         for node in kill_graph:
             futures.append(asyncio.ensure_future(kill_one(node, kill_graph)))
@@ -4029,7 +4029,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     @run_in_event_loop
     def resourceOffers(self, driver, offers):
         def format_time(t):
-            return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
         to_decline = []
         to_suppress = set()
@@ -4039,7 +4039,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 start_time = start_time_ns / 1e9
                 if not offer.unavailability.duration:
                     logger.debug(
-                        'Declining offer %s from %s: unavailable from %s forever',
+                        "Declining offer %s from %s: unavailable from %s forever",
                         offer.id.value,
                         offer.hostname,
                         format_time(start_time),
@@ -4050,7 +4050,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 end_time = end_time_ns / 1e9
                 if end_time >= time.time():
                     logger.debug(
-                        'Declining offer %s from %s: unavailable from %s to %s',
+                        "Declining offer %s from %s: unavailable from %s to %s",
                         offer.id.value,
                         offer.hostname,
                         format_time(start_time),
@@ -4060,7 +4060,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                     continue
                 else:
                     logger.debug(
-                        'Offer %s on %s has unavailability in the past: %s to %s',
+                        "Offer %s on %s has unavailability in the past: %s to %s",
                         offer.id.value,
                         offer.hostname,
                         format_time(start_time),
@@ -4069,7 +4069,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
             role = offer.allocation_info.role
             if role in self._roles_needed:
                 logger.debug(
-                    'Adding offer %s on %s with role %s to pool',
+                    "Adding offer %s on %s with role %s to pool",
                     offer.id.value,
                     offer.agent_id.value,
                     role,
@@ -4081,7 +4081,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 # This can happen either due to a race or at startup, when
                 # we haven't yet suppressed roles.
                 logger.debug(
-                    'Declining offer %s on %s with role %s',
+                    "Declining offer %s on %s with role %s",
                     offer.id.value,
                     offer.agent_id.value,
                     role,
@@ -4098,7 +4098,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     @run_in_event_loop
     def inverseOffers(self, driver, offers):
         for offer in offers:
-            logger.debug('Declining inverse offer %s', offer.id.value)
+            logger.debug("Declining inverse offer %s", offer.id.value)
             self._driver.declineInverseOffer(offer.id)
 
     @run_in_event_loop
@@ -4114,14 +4114,14 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     @run_in_event_loop
     def statusUpdate(self, driver, status):
         logger.debug(
-            'Update: task %s in state %s (%s)', status.task_id.value, status.state, status.message
+            "Update: task %s in state %s (%s)", status.task_id.value, status.state, status.message
         )
         task = self.get_task(status.task_id.value)
         if task is not None:
             if status.state in TERMINAL_STATUSES:
                 task.set_state(TaskState.DEAD)
                 del self._active[status.task_id.value]
-            elif status.state == 'TASK_RUNNING':
+            elif status.state == "TASK_RUNNING":
                 if task.state < TaskState.RUNNING:
                     task.set_state(TaskState.RUNNING)
                     # The task itself is responsible for advancing to
@@ -4129,16 +4129,16 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
             task.set_status(status)
             if (
                 task.kill_sent_time is not None
-                and status.state != 'TASK_KILLING'
+                and status.state != "TASK_KILLING"
                 and status.state not in TERMINAL_STATUSES
                 and self._loop.time() > task.kill_sent_time + self.kill_timeout
             ):
-                logger.warning('Retrying kill on %s (task ID %s)', task.name, status.task_id.value)
+                logger.warning("Retrying kill on %s (task ID %s)", task.name, status.task_id.value)
                 self._driver.killTask(status.task_id)
         else:
             if status.state not in TERMINAL_STATUSES:
                 logger.warning(
-                    'Received status update for unknown task %s, killing it', status.task_id.value
+                    "Received status update for unknown task %s, killing it", status.task_id.value
                 )
                 self._driver.killTask(status.task_id)
         self._driver.acknowledgeStatusUpdate(status)
@@ -4160,16 +4160,16 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
         while True:
             try:
                 if explicit:
-                    tasks = [{'task_id': {'value': task_id}} for task_id in self._active]
-                    logger.debug('Requesting explicit reconciliation of %d tasks', len(tasks))
+                    tasks = [{"task_id": {"value": task_id}} for task_id in self._active]
+                    logger.debug("Requesting explicit reconciliation of %d tasks", len(tasks))
                 else:
                     tasks = []
-                    logger.debug('Requesting implicit reconciliation')
+                    logger.debug("Requesting implicit reconciliation")
                 self._driver.reconcileTasks(tasks)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning('Exception during task reconciliation', exc_info=True)
+                logger.warning("Exception during task reconciliation", exc_info=True)
             await asyncio.sleep(self.reconciliation_interval)
             explicit = not explicit
 
@@ -4186,49 +4186,49 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
 
 
 __all__ = [
-    'LogicalNode',
-    'PhysicalNode',
-    'LogicalExternal',
-    'PhysicalExternal',
-    'LogicalTask',
-    'PhysicalTask',
-    'FakePhysicalTask',
-    'AnyPhysicalTask',
-    'TaskState',
-    'Volume',
-    'ResourceRequest',
-    'ScalarResourceRequest',
-    'RangeResourceRequest',
-    'Resource',
-    'ScalarResource',
-    'RangeResource',
-    'ResourceAllocation',
-    'GPUResources',
-    'InterfaceResources',
-    'InsufficientResourcesError',
-    'TaskNoAgentError',
-    'TaskInsufficientResourcesError',
-    'TaskInsufficientGPUResourcesError',
-    'TaskInsufficientInterfaceResourcesError',
-    'TaskNoInterfaceError',
-    'TaskNoVolumeError',
-    'TaskNoGPUError',
-    'GroupInsufficientResourcesError',
-    'GroupInsufficientGPUResourcesError',
-    'GroupInsufficientInterfaceResourcesError',
-    'InterfaceRequest',
-    'GPURequest',
-    'Image',
-    'ImageLookup',
-    'SimpleImageLookup',
-    'HTTPImageLookup',
-    'ImageResolver',
-    'TaskIDAllocator',
-    'Resolver',
-    'Agent',
-    'AgentGPU',
-    'AgentInterface',
-    'SchedulerBase',
-    'Scheduler',
-    'instantiate',
+    "LogicalNode",
+    "PhysicalNode",
+    "LogicalExternal",
+    "PhysicalExternal",
+    "LogicalTask",
+    "PhysicalTask",
+    "FakePhysicalTask",
+    "AnyPhysicalTask",
+    "TaskState",
+    "Volume",
+    "ResourceRequest",
+    "ScalarResourceRequest",
+    "RangeResourceRequest",
+    "Resource",
+    "ScalarResource",
+    "RangeResource",
+    "ResourceAllocation",
+    "GPUResources",
+    "InterfaceResources",
+    "InsufficientResourcesError",
+    "TaskNoAgentError",
+    "TaskInsufficientResourcesError",
+    "TaskInsufficientGPUResourcesError",
+    "TaskInsufficientInterfaceResourcesError",
+    "TaskNoInterfaceError",
+    "TaskNoVolumeError",
+    "TaskNoGPUError",
+    "GroupInsufficientResourcesError",
+    "GroupInsufficientGPUResourcesError",
+    "GroupInsufficientInterfaceResourcesError",
+    "InterfaceRequest",
+    "GPURequest",
+    "Image",
+    "ImageLookup",
+    "SimpleImageLookup",
+    "HTTPImageLookup",
+    "ImageResolver",
+    "TaskIDAllocator",
+    "Resolver",
+    "Agent",
+    "AgentGPU",
+    "AgentInterface",
+    "SchedulerBase",
+    "Scheduler",
+    "instantiate",
 ]
