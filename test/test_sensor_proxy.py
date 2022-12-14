@@ -231,8 +231,8 @@ class TestPrometheusWatcher:
         value: Optional[float],
         status: Optional[Sensor.Status] = Sensor.Status.NOMINAL,
         suffix: str = "",
-        extra_labels: Mapping[str, str] = None,
-        extra_value_labels: Mapping[str, str] = None,
+        extra_labels: Optional[Mapping[str, str]] = None,
+        extra_value_labels: Optional[Mapping[str, str]] = None,
     ):
         labels = {"label1": "labelvalue1"}
         if extra_labels is not None:

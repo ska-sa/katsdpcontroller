@@ -446,7 +446,7 @@ class SubarrayProduct:
         return logical_node.physical_factory(logical_node)
 
     def _instantiate_physical_graph(
-        self, logical_graph: networkx.MultiDiGraph, capture_block_id: str = None
+        self, logical_graph: networkx.MultiDiGraph, capture_block_id: Optional[str] = None
     ) -> networkx.MultiDiGraph:
         mapping = {
             logical: self._instantiate(logical, capture_block_id) for logical in logical_graph
@@ -1548,8 +1548,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         localhost: bool,
         image_resolver_factory: scheduler.ImageResolverFactory,
         s3_config: dict,
-        graph_dir: str = None,
-        dashboard_url: str = None,
+        graph_dir: Optional[str] = None,
+        dashboard_url: Optional[str] = None,
         prometheus_registry: CollectorRegistry = REGISTRY,
         shutdown_delay: float = 10.0,
     ) -> None:
@@ -1905,7 +1905,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         """Halt data transmission for the named data stream."""
         await self._get_product().capture_start_stop(stream, start=False)
 
-    async def request_capture_list(self, ctx, stream: str = None) -> None:
+    async def request_capture_list(self, ctx, stream: Optional[str] = None) -> None:
         """List CBF data streams."""
         multicasts = self._get_product().capture_list()
         response = []

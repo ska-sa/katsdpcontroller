@@ -292,7 +292,7 @@ class ProductManagerBase(Generic[_P]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Callable[[Sensor], bytes] = None,
+        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
     ) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
@@ -672,7 +672,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Callable[[Sensor], bytes] = None,
+        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
     ) -> None:
         super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
         self._request_id_prefix = args.name + "_product_"
@@ -1121,7 +1121,7 @@ class DeviceServer(aiokatcp.DeviceServer):
     _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(
-        self, args: argparse.Namespace, rewrite_gui_urls: Callable[[Sensor], bytes] = None
+        self, args: argparse.Namespace, rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None
     ) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
@@ -1624,7 +1624,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             raise FailReply(f"{msg}: {error}")
 
     @time_request
-    async def request_product_list(self, ctx, name: str = None) -> None:
+    async def request_product_list(self, ctx, name: Optional[str] = None) -> None:
         """List existing subarray products
 
         Parameters
@@ -1682,7 +1682,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_telstate_endpoint(
-        self, ctx, subarray_product_id: str = None
+        self, ctx, subarray_product_id: Optional[str] = None
     ) -> Optional[str]:
         """Returns the endpoint for the telescope state of the specified subarray product.
 
@@ -1713,7 +1713,7 @@ class DeviceServer(aiokatcp.DeviceServer):
 
     @time_request
     async def request_capture_status(
-        self, ctx, subarray_product_id: str = None
+        self, ctx, subarray_product_id: Optional[str] = None
     ) -> Optional[ProductState]:
         """Returns the status of the specified subarray product.
 
