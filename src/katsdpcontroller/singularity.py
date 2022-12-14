@@ -20,7 +20,7 @@ class ConflictError(SingularityError):
     """HTTP error code 409"""
 
 
-_CT_JSON = {'Content-type': 'application/json'}
+_CT_JSON = {"Content-type": "application/json"}
 _STATUS_TO_EXCEPTION = {404: NotFoundError, 409: ConflictError}
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ async def _read_resp(resp):
         try:
             resp.raise_for_status()
         except aiohttp.ClientResponseError as exc:
-            logger.debug('Error response content: %s', msg)
+            logger.debug("Error response content: %s", msg)
             if exc.status in _STATUS_TO_EXCEPTION:
                 raise _STATUS_TO_EXCEPTION[exc.status]() from exc
             raise
@@ -73,31 +73,31 @@ class Singularity:
             return await _read_resp(resp)
 
     async def get_request(self, request_id: str) -> dict:
-        return await self._get(f'requests/request/{request_id}')
+        return await self._get(f"requests/request/{request_id}")
 
     async def get_requests(self, *, request_type: Union[str, Sequence[str]] = ()) -> dict:
         if isinstance(request_type, str):
             request_type = [request_type]
-        params = [('requestType', r) for r in request_type]
-        return await self._get('requests', params=params)
+        params = [("requestType", r) for r in request_type]
+        return await self._get("requests", params=params)
 
     async def create_request(self, request: dict) -> dict:
-        return await self._post('requests', request)
+        return await self._post("requests", request)
 
     async def create_deploy(self, deploy: dict) -> dict:
-        return await self._post('deploys', deploy)
+        return await self._post("deploys", deploy)
 
     async def create_run(self, request_id: str, run: dict) -> dict:
-        return await self._post(f'requests/request/{request_id}/run', run)
+        return await self._post(f"requests/request/{request_id}/run", run)
 
     async def get_task(self, task_id: str) -> dict:
-        return await self._get(f'tasks/task/{task_id}')
+        return await self._get(f"tasks/task/{task_id}")
 
     async def kill_task(self, task_id: str) -> dict:
-        return await self._delete(f'tasks/task/{task_id}')
+        return await self._delete(f"tasks/task/{task_id}")
 
     async def get_request_tasks(self, request_id: str) -> dict:
-        return await self._get(f'tasks/ids/request/{request_id}')
+        return await self._get(f"tasks/ids/request/{request_id}")
 
     async def track_run(self, request_id: str, run_id: str) -> dict:
-        return await self._get(f'track/run/{request_id}/{run_id}')
+        return await self._get(f"track/run/{request_id}/{run_id}")

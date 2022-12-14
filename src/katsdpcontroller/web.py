@@ -33,7 +33,7 @@ from aiokatcp import Reading, Sensor
 from . import master_controller, web_utils
 
 logger = logging.getLogger(__name__)
-GUI_URLS_RE = re.compile(r'^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$')
+GUI_URLS_RE = re.compile(r"^(?P<product>[^.]+)(?:\.(?P<service>.*))?\.gui-urls$")
 
 
 def _dump_yarl(obj: object) -> str:
@@ -48,56 +48,56 @@ def _dump_yarl(obj: object) -> str:
 
 
 def _get_guis(server: master_controller.DeviceServer) -> dict:
-    if server.sensors['gui-urls'].status == Sensor.Status.NOMINAL:
-        general = json.loads(server.sensors['gui-urls'].value)
+    if server.sensors["gui-urls"].status == Sensor.Status.NOMINAL:
+        general = json.loads(server.sensors["gui-urls"].value)
     else:
         general = []
-    product_names = json.loads(server.sensors['products'].value)
+    product_names = json.loads(server.sensors["products"].value)
     products: Dict[str, List[dict]] = {name: [] for name in product_names}
     for sensor in server.sensors.values():
         if sensor.status != Sensor.Status.NOMINAL:
             continue
         match = GUI_URLS_RE.match(sensor.name)
-        if match and match.group('product') in products:
+        if match and match.group("product") in products:
             guis = json.loads(sensor.value)
             orig_guis = json.loads(server.orig_sensors[sensor.name].value)
-            product_name = match.group('product')
-            service = match.group('service') or ''
+            product_name = match.group("product")
+            service = match.group("service") or ""
             for gui, orig_gui in zip(guis, orig_guis):
                 products[product_name].append(
                     {
                         **gui,
-                        'service': service,
-                        'label': gui_label(gui),
-                        'href': yarl.URL(gui['href']),
-                        'orig_href': yarl.URL(orig_gui['href']),
+                        "service": service,
+                        "label": gui_label(gui),
+                        "href": yarl.URL(gui["href"]),
+                        "orig_href": yarl.URL(orig_gui["href"]),
                     }
                 )
     for product in products.values():
-        product.sort(key=lambda gui: (gui['service'], gui['title']))
-    return {'general': general, 'products': products}
+        product.sort(key=lambda gui: (gui["service"], gui["title"]))
+    return {"general": general, "products": products}
 
 
-@aiohttp_jinja2.template('rotate_sd.html.j2')
+@aiohttp_jinja2.template("rotate_sd.html.j2")
 async def _rotate_handler(request: web.Request) -> dict:
-    defaults: Dict[str, Any] = {'rotate_interval': 5000, 'width': 500, 'height': 500}
+    defaults: Dict[str, Any] = {"rotate_interval": 5000, "width": 500, "height": 500}
     defaults.update(request.query)
     return defaults
 
 
-@aiohttp_jinja2.template('index.html.j2')
+@aiohttp_jinja2.template("index.html.j2")
 async def _index_handler(request: web.Request) -> dict:
-    return _get_guis(request.app['server'])
+    return _get_guis(request.app["server"])
 
 
 async def _favicon_handler(request: web.Request) -> web.Response:
-    raise web.HTTPFound(location='static/favicon.ico')
+    raise web.HTTPFound(location="static/favicon.ico")
 
 
 async def _missing_gui_handler(request: web.Request) -> web.Response:
-    response = aiohttp_jinja2.render_template('missing_gui.html.j2', request, {}, status=404)
+    response = aiohttp_jinja2.render_template("missing_gui.html.j2", request, {}, status=404)
     # Avoid spamming logs (feeds into web_utils.AccessLogger).
-    response['log_level'] = logging.DEBUG
+    response["log_level"] = logging.DEBUG
     return response
 
 
@@ -111,7 +111,7 @@ async def _block_dashboard(request: web.Request) -> web.Response:
     await asyncio.sleep(2)
     response = web.json_response({}, status=404)
     # Avoid spamming the logs many times a second
-    response['log_level'] = logging.DEBUG
+    response["log_level"] = logging.DEBUG
     return response
 
 
@@ -126,19 +126,19 @@ async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(timeout=60, autoping=True, heartbeat=30)
     await ws.prepare(request)
 
-    updater = request.app['updater']
+    updater = request.app["updater"]
     updater.add_websocket(ws)
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                if msg.data == 'guis':
+                if msg.data == "guis":
                     await updater.update_websocket(ws)
                 else:
-                    logger.warning('unhandled command %r on websocket %s', msg.data, ws)
+                    logger.warning("unhandled command %r on websocket %s", msg.data, ws)
             elif msg.type == WSMsgType.ERROR:
-                logger.error('ws connection closed with exception %s', ws.exception())
+                logger.error("ws connection closed with exception %s", ws.exception())
             else:
-                logger.error('unhandled non-text data on websocket %s', ws)
+                logger.error("unhandled non-text data on websocket %s", ws)
     except asyncio.CancelledError:
         logger.info("Connection cancelled...")
     except Exception:
@@ -155,17 +155,17 @@ class _Haproxy:
 
     def __init__(self, haproxy_bind: Tuple[str, int]) -> None:
         self._tmpdir = tempfile.mkdtemp()
-        self._cfg = open(os.path.join(self._tmpdir, 'haproxy.cfg'), 'w+')
-        self._pidfile = os.path.join(self._tmpdir, 'haproxy.pid')
-        self._content = ''
+        self._cfg = open(os.path.join(self._tmpdir, "haproxy.cfg"), "w+")
+        self._pidfile = os.path.join(self._tmpdir, "haproxy.pid")
+        self._content = ""
         self._process: Optional[asyncio.subprocess.Process] = None
         self.haproxy_bind = haproxy_bind
         env = jinja2.Environment(
-            loader=jinja2.PackageLoader('katsdpcontroller'),
+            loader=jinja2.PackageLoader("katsdpcontroller"),
             undefined=jinja2.StrictUndefined,
             autoescape=False,
         )  # autoescaping is for HTML
-        self._template = env.get_template('haproxy.conf.j2')
+        self._template = env.get_template("haproxy.conf.j2")
 
     async def update(self, guis: dict, internal_port: int) -> None:
         content = self._template.render(
@@ -175,14 +175,14 @@ class _Haproxy:
             guis=guis,
         )
         if content != self._content:
-            logger.info('Updating haproxy')
+            logger.info("Updating haproxy")
             self._cfg.seek(0)
             self._cfg.truncate(0)
             self._cfg.write(content)
             self._cfg.flush()
             if self._process is None:
                 self._process = await asyncio.create_subprocess_exec(
-                    'haproxy', '-W', '-p', self._pidfile, '-f', self._cfg.name
+                    "haproxy", "-W", "-p", self._pidfile, "-f", self._cfg.name
                 )
             else:
                 self._process.send_signal(signal.SIGUSR2)
@@ -194,7 +194,7 @@ class _Haproxy:
                 self._process.terminate()
             ret = await self._process.wait()
             if ret:
-                logger.warning('haproxy exited with non-zero exit status %d', ret)
+                logger.warning("haproxy exited with non-zero exit status %d", ret)
         self._cfg.close()
         shutil.rmtree(self._tmpdir)
 
@@ -229,18 +229,18 @@ class _Updater:
 
     def add_websocket(self, ws: web.WebSocketResponse) -> None:
         self._websockets.add(ws)
-        ws['last_guis'] = None
+        ws["last_guis"] = None
 
     def remove_websocket(self, ws: web.WebSocketResponse) -> None:
         self._websockets.discard(ws)
 
     async def _send_update(self, ws: web.WebSocketResponse, gui: dict, force: bool) -> bool:
-        if gui != ws['last_guis'] or force:
+        if gui != ws["last_guis"] or force:
             # If send_json raises we don't know what state the WS client will
             # have, so just ensure we update it next time.
-            ws['last_guis'] = None
+            ws["last_guis"] = None
             await ws.send_json(gui, dumps=functools.partial(json.dumps, default=_dump_yarl))
-            ws['last_guis'] = gui
+            ws["last_guis"] = gui
             return True
         else:
             return False
@@ -269,22 +269,22 @@ class _Updater:
             await asyncio.sleep(0.1)
             self._dirty.clear()
             if not self._internal_port and self._haproxy:
-                logger.info('Updater woken but internal port is not yet set')
+                logger.info("Updater woken but internal port is not yet set")
                 continue
-            logger.info('Updater woken up and updating state')
+            logger.info("Updater woken up and updating state")
 
             # Ensure we are subscribed to changes in gui-urls sensors
             # (they don't typically change, but they are only initialised
             # after we are woken up to indicate that the sensor exists).
             for sensor in self._server.sensors.values():
-                if sensor.name.endswith('.gui-urls') and sensor not in self._observer_set:
+                if sensor.name.endswith(".gui-urls") and sensor not in self._observer_set:
                     sensor.attach(self._observer)
                     self._observer_set.add(sensor)
 
             try:
                 guis = _get_guis(self._server)
             except Exception:
-                logger.exception('Failed to get GUI list')
+                logger.exception("Failed to get GUI list")
                 continue
 
             if self._haproxy:
@@ -295,29 +295,29 @@ class _Updater:
                 try:
                     sent += int(await self._send_update(ws, guis, False))
                 except Exception:
-                    logger.exception('Failed to send update to %s', ws)
+                    logger.exception("Failed to send update to %s", ws)
             if sent:
-                logger.info('Sent new GUIs to %d websocket(s)', sent)
+                logger.info("Sent new GUIs to %d websocket(s)", sent)
 
 
 def gui_label(gui: dict) -> str:
-    return re.sub(r'[^a-z0-9_-]', '-', gui['title'].lower())
+    return re.sub(r"[^a-z0-9_-]", "-", gui["title"].lower())
 
 
 def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
     if sensor.status != Sensor.Status.NOMINAL:
         return sensor.value
-    parts = sensor.name.split('.')
+    parts = sensor.name.split(".")
     product = parts[0]
-    service = '.'.join(parts[1:-1])
-    if service == '':
-        service = 'product'
+    service = ".".join(parts[1:-1])
+    if service == "":
+        service = "product"
     try:
         value = json.loads(sensor.value)
         for gui in value:
             label = gui_label(gui)
-            prefix = f'gui/{product}/{service}/{label}/'
-            orig_path = yarl.URL(gui['href']).path[1:]
+            prefix = f"gui/{product}/{service}/{label}/"
+            orig_path = yarl.URL(gui["href"]).path[1:]
             # If the original URL is already under the right path, we
             # assume that it has been set up to avoid path rewriting by
             # haproxy. In that case, anything after the prefix is a path
@@ -325,10 +325,10 @@ def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
             # preserved in the rewritten URL.
             if orig_path.startswith(prefix):
                 prefix = orig_path
-            gui['href'] = str(external_url / prefix)
+            gui["href"] = str(external_url / prefix)
         return json.dumps(value).encode()
     except (TypeError, ValueError, KeyError) as exc:
-        logger.warning('Invalid gui-url in %s: %s', sensor.name, exc)
+        logger.warning("Invalid gui-url in %s: %s", sensor.name, exc)
         return sensor.value
 
 
@@ -344,24 +344,24 @@ def make_app(
     is listening.
     """
     app = web.Application(middlewares=[web_utils.cache_control])
-    app['server'] = server
-    app['updater'] = updater = _Updater(server, haproxy_bind)
+    app["server"] = server
+    app["updater"] = updater = _Updater(server, haproxy_bind)
     app.on_shutdown.append(updater.close)
     app.add_routes(
         [
-            web.get('/', _index_handler),
-            web.get('/favicon.ico', _favicon_handler),
-            web.get('/metrics', web_utils.prometheus_handler),
-            web.get('/ws', _websocket_handler),
-            web.get('/rotate', _rotate_handler),
-            web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
-            web.route('*', '/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
-            web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static')),
+            web.get("/", _index_handler),
+            web.get("/favicon.ico", _favicon_handler),
+            web.get("/metrics", web_utils.prometheus_handler),
+            web.get("/ws", _websocket_handler),
+            web.get("/rotate", _rotate_handler),
+            web.post("/gui/{product}/{path:.*}/_dash-update-component", _block_dashboard),
+            web.route("*", "/gui/{product}/{service}/{gui}{path:.*}", _missing_gui_handler),
+            web.static("/static", pkg_resources.resource_filename("katsdpcontroller", "static")),
         ]
     )
     aiohttp_jinja2.setup(
         app,
-        loader=jinja2.PackageLoader('katsdpcontroller'),
+        loader=jinja2.PackageLoader("katsdpcontroller"),
         context_processors=[aiohttp_jinja2.request_processor],
         autoescape=True,
     )

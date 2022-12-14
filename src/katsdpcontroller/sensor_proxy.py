@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 _Metric = Union[Gauge, Counter, Histogram]
 # Use a string so that code won't completely break if Prometheus internals change.
 # The Union is required because mypy doesn't like pure strings being used indirectly.
-_LabelWrapper = Union['prometheus_client.core._LabelWrapper']
-_Factory = Callable[[aiokatcp.Sensor], Optional['PrometheusInfo']]
+_LabelWrapper = Union["prometheus_client.core._LabelWrapper"]
+_Factory = Callable[[aiokatcp.Sensor], Optional["PrometheusInfo"]]
 
 
 def _dummy_factory(sensor: aiokatcp.Sensor) -> None:
@@ -75,7 +75,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         self.orig_sensors.add(sensor)
         if (
             self.rewrite_gui_urls is not None
-            and sensor.name.endswith('.gui-urls')
+            and sensor.name.endswith(".gui-urls")
             and sensor.stype is bytes
         ):
             new_value = self.rewrite_gui_urls(sensor)
@@ -109,7 +109,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         sensor = self.sensors[rewritten_name]
         if (
             self.rewrite_gui_urls is not None
-            and rewritten_name.endswith('.gui-urls')
+            and rewritten_name.endswith(".gui-urls")
             and sensor.stype is bytes
         ):
             value = self.rewrite_gui_urls(sensor)
@@ -118,7 +118,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def batch_stop(self) -> None:
         super().batch_stop()
         if self._interface_changed:
-            self.server.mass_inform('interface-changed', 'sensor-list')
+            self.server.mass_inform("interface-changed", "sensor-list")
         self._interface_changed = False
 
     def state_updated(self, state: aiokatcp.SyncState) -> None:
@@ -230,15 +230,15 @@ class PrometheusObserver:
         # Gauge aren't actually classes (they're functions). So we have to
         # use introspection.
         metric_type = type(self._value_metric).__name__
-        if metric_type == 'Gauge':
+        if metric_type == "Gauge":
             if valid:
                 self._value_metric.set(value)
-        elif metric_type == 'Counter':
+        elif metric_type == "Counter":
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
                 if value < self._old_value:
                     logger.debug(
-                        'Counter %s went backwards (%d to %d), not sending delta to Prometheus',
+                        "Counter %s went backwards (%d to %d), not sending delta to Prometheus",
                         self._sensor.name,
                         self._old_value,
                         value,
@@ -249,11 +249,11 @@ class PrometheusObserver:
                     # sees a cumulative count.
                 else:
                     self._value_metric.inc(value - self._old_value)
-        elif metric_type == 'Histogram':
+        elif metric_type == "Histogram":
             if valid and timestamp != self._old_timestamp:
                 self._value_metric.observe(value)
         else:
-            raise TypeError(f'Expected a Counter, Gauge or Histogram, not {metric_type}')
+            raise TypeError(f"Expected a Counter, Gauge or Histogram, not {metric_type}")
         if valid:
             self._old_value = value
         self._old_timestamp = timestamp
@@ -335,8 +335,8 @@ class PrometheusWatcher:
                 info.name, info.description, label_names, registry=info.registry
             )
             status_metric = Gauge(
-                info.name + '_status',
-                f'Status of katcp sensor {info.name}',
+                info.name + "_status",
+                f"Status of katcp sensor {info.name}",
                 label_names,
                 registry=info.registry,
             )

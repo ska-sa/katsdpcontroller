@@ -13,9 +13,9 @@ from prometheus_client import Histogram
 from . import scheduler
 
 REQUEST_TIME = Histogram(
-    'katsdpcontroller_request_time_seconds',
-    'Time to process katcp requests',
-    ['request'],
+    "katsdpcontroller_request_time_seconds",
+    "Time to process katcp requests",
+    ["request"],
     buckets=(0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0),
 )
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def load_json_dict(text: AnyStr) -> dict:
     """
     ans = json.loads(text)
     if not isinstance(ans, dict):
-        raise ValueError('not a dict')
+        raise ValueError("not a dict")
     return ans
 
 
@@ -66,7 +66,7 @@ def log_task_exceptions(
             try:
                 task.result()
             except Exception:
-                logger.exception('%s', msg)
+                logger.exception("%s", msg)
 
     task.add_done_callback(done_callback)
 
@@ -75,56 +75,56 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
     """Add command-line options that flow through master controller to the product controller."""
     # Keep these in sync with extract_shared_options
     parser.add_argument(
-        '--localhost',
-        action='store_true',
-        help='Bind all ports to localhost (for security on dev systems)',
+        "--localhost",
+        action="store_true",
+        help="Bind all ports to localhost (for security on dev systems)",
     )
     parser.add_argument(
-        '--image-override',
-        action='append',
+        "--image-override",
+        action="append",
         default=[],
-        metavar='NAME:IMAGE',
-        help='Override an image name lookup [none]',
+        metavar="NAME:IMAGE",
+        help="Override an image name lookup [none]",
     )
     parser.add_argument(
-        '--write-graphs',
-        metavar='DIR',
-        help='Write visualisations of the processing graph to directory',
+        "--write-graphs",
+        metavar="DIR",
+        help="Write visualisations of the processing graph to directory",
     )
     parser.add_argument(
-        '--realtime-role',
-        default='realtime',
-        help='Mesos role for realtime capture tasks [%(default)s]',
+        "--realtime-role",
+        default="realtime",
+        help="Mesos role for realtime capture tasks [%(default)s]",
     )
     parser.add_argument(
-        '--batch-role', default='batch', help='Mesos role for batch processing tasks [%(default)s]'
+        "--batch-role", default="batch", help="Mesos role for batch processing tasks [%(default)s]"
     )
     parser.add_argument(
-        '--principal',
-        default='katsdpcontroller',
-        help='Mesos principal for the framework [%(default)s]',
+        "--principal",
+        default="katsdpcontroller",
+        help="Mesos principal for the framework [%(default)s]",
     )
     parser.add_argument(
-        '--user', default='root', help='User to run as on the Mesos agents [%(default)s]'
+        "--user", default="root", help="User to run as on the Mesos agents [%(default)s]"
     )
 
 
 def extract_shared_options(args: argparse.Namespace) -> List[str]:
     """Turn the arguments provided by :func:`add_shared_options` into command-line arguments."""
     ret = [
-        f'--realtime-role={args.realtime_role}',
-        f'--batch-role={args.batch_role}',
-        f'--principal={args.principal}',
-        f'--user={args.user}',
+        f"--realtime-role={args.realtime_role}",
+        f"--batch-role={args.batch_role}",
+        f"--principal={args.principal}",
+        f"--user={args.user}",
     ]
     if args.localhost:
-        ret.append('--localhost')
+        ret.append("--localhost")
     if args.interface_mode:
-        ret.append('--interface-mode')
+        ret.append("--interface-mode")
     if args.write_graphs is not None:
-        ret.append(f'--write-graphs={args.write_graphs}')
+        ret.append(f"--write-graphs={args.write_graphs}")
     for override in args.image_override:
-        ret.append(f'--image-override={override}')
+        ret.append(f"--image-override={override}")
     return ret
 
 
@@ -133,11 +133,11 @@ def make_image_resolver_factory(
 ) -> scheduler.ImageResolverFactory:
     # The master controller only has --image-tag-file and the product
     # controller only has --image-tag, so we have to load them dynamically.
-    tag: Optional[str] = vars(args).get('image_tag')
-    tag_file: Optional[str] = vars(args).get('image_tag_file')
+    tag: Optional[str] = vars(args).get("image_tag")
+    tag_file: Optional[str] = vars(args).get("image_tag_file")
     factory = scheduler.ImageResolverFactory(lookup=lookup, tag=tag, tag_file=tag_file)
     for override in args.image_override:
-        fields = override.split(':', 1)
+        fields = override.split(":", 1)
         if len(fields) < 2:
             raise ValueError("--image-override option must have a colon")
         factory.override(fields[0], fields[1])
