@@ -64,11 +64,15 @@ def _get_guis(server: master_controller.DeviceServer) -> dict:
             product_name = match.group('product')
             service = match.group('service') or ''
             for gui, orig_gui in zip(guis, orig_guis):
-                products[product_name].append({**gui,
-                                               'service': service,
-                                               'label': gui_label(gui),
-                                               'href': yarl.URL(gui['href']),
-                                               'orig_href': yarl.URL(orig_gui['href'])})
+                products[product_name].append(
+                    {
+                        **gui,
+                        'service': service,
+                        'label': gui_label(gui),
+                        'href': yarl.URL(gui['href']),
+                        'orig_href': yarl.URL(orig_gui['href']),
+                    }
+                )
     for product in products.values():
         product.sort(key=lambda gui: (gui['service'], gui['title']))
     return {'general': general, 'products': products}
@@ -156,16 +160,20 @@ class _Haproxy:
         self._content = ''
         self._process: Optional[asyncio.subprocess.Process] = None
         self.haproxy_bind = haproxy_bind
-        env = jinja2.Environment(loader=jinja2.PackageLoader('katsdpcontroller'),
-                                 undefined=jinja2.StrictUndefined,
-                                 autoescape=False)   # autoescaping is for HTML
+        env = jinja2.Environment(
+            loader=jinja2.PackageLoader('katsdpcontroller'),
+            undefined=jinja2.StrictUndefined,
+            autoescape=False,
+        )  # autoescaping is for HTML
         self._template = env.get_template('haproxy.conf.j2')
 
     async def update(self, guis: dict, internal_port: int) -> None:
-        content = self._template.render(haproxy_bind=self.haproxy_bind,
-                                        internal_port=internal_port,
-                                        tmpdir=self._tmpdir,
-                                        guis=guis)
+        content = self._template.render(
+            haproxy_bind=self.haproxy_bind,
+            internal_port=internal_port,
+            tmpdir=self._tmpdir,
+            guis=guis,
+        )
         if content != self._content:
             logger.info('Updating haproxy')
             self._cfg.seek(0)
@@ -174,7 +182,8 @@ class _Haproxy:
             self._cfg.flush()
             if self._process is None:
                 self._process = await asyncio.create_subprocess_exec(
-                    'haproxy', '-W', '-p', self._pidfile, '-f', self._cfg.name)
+                    'haproxy', '-W', '-p', self._pidfile, '-f', self._cfg.name
+                )
             else:
                 self._process.send_signal(signal.SIGUSR2)
             self._content = content
@@ -191,8 +200,9 @@ class _Haproxy:
 
 
 class _Updater:
-    def __init__(self, server: master_controller.DeviceServer,
-                 haproxy_bind: Optional[Tuple[str, int]]) -> None:
+    def __init__(
+        self, server: master_controller.DeviceServer, haproxy_bind: Optional[Tuple[str, int]]
+    ) -> None:
         def observer(sensor: Sensor, reading: Reading) -> None:
             dirty.set()
 
@@ -206,7 +216,7 @@ class _Updater:
         self._haproxy: Optional[_Haproxy] = _Haproxy(haproxy_bind) if haproxy_bind else None
         server.add_interface_changed_callback(dirty.set)
         self._task = asyncio.get_event_loop().create_task(self._update())
-        self._internal_port = 0    # Port running the internal web server (set by property later)
+        self._internal_port = 0  # Port running the internal web server (set by property later)
 
     @property
     def internal_port(self) -> int:
@@ -322,8 +332,9 @@ def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
         return sensor.value
 
 
-def make_app(server: master_controller.DeviceServer,
-             haproxy_bind: Optional[Tuple[str, int]]) -> web.Application:
+def make_app(
+    server: master_controller.DeviceServer, haproxy_bind: Optional[Tuple[str, int]]
+) -> web.Application:
     """Create the web application.
 
     If `haproxy_bind` is provided, also run an haproxy process on this host:port
@@ -336,19 +347,22 @@ def make_app(server: master_controller.DeviceServer,
     app['server'] = server
     app['updater'] = updater = _Updater(server, haproxy_bind)
     app.on_shutdown.append(updater.close)
-    app.add_routes([
-        web.get('/', _index_handler),
-        web.get('/favicon.ico', _favicon_handler),
-        web.get('/metrics', web_utils.prometheus_handler),
-        web.get('/ws', _websocket_handler),
-        web.get('/rotate', _rotate_handler),
-        web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
-        web.route('*', '/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
-        web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static'))
-    ])
+    app.add_routes(
+        [
+            web.get('/', _index_handler),
+            web.get('/favicon.ico', _favicon_handler),
+            web.get('/metrics', web_utils.prometheus_handler),
+            web.get('/ws', _websocket_handler),
+            web.get('/rotate', _rotate_handler),
+            web.post('/gui/{product}/{path:.*}/_dash-update-component', _block_dashboard),
+            web.route('*', '/gui/{product}/{service}/{gui}{path:.*}', _missing_gui_handler),
+            web.static('/static', pkg_resources.resource_filename('katsdpcontroller', 'static')),
+        ]
+    )
     aiohttp_jinja2.setup(
         app,
         loader=jinja2.PackageLoader('katsdpcontroller'),
         context_processors=[aiohttp_jinja2.request_processor],
-        autoescape=True)
+        autoescape=True,
+    )
     return app

@@ -33,7 +33,8 @@ class ConsulService:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.put(
-                        self.base_url / f'v1/agent/service/deregister/{self.service_id}') as resp:
+                    self.base_url / f'v1/agent/service/deregister/{self.service_id}'
+                ) as resp:
                     resp.raise_for_status()
                     self.service_id = None
                     logging.info('Deregistered from consul (ID %s)', self.service_id)
@@ -65,9 +66,11 @@ class ConsulService:
         service = {**service, 'ID': service_id}
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.put(base_url / 'v1/agent/service/register',
-                                       params={'replace-existing-checks': '1'},
-                                       json=service) as resp:
+                async with session.put(
+                    base_url / 'v1/agent/service/register',
+                    params={'replace-existing-checks': '1'},
+                    json=service,
+                ) as resp:
                     resp.raise_for_status()
                     logging.info("Registered with consul as ID %s", service_id)
                     return ConsulService(service_id, base_url)

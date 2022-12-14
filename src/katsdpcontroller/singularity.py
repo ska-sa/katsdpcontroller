@@ -21,10 +21,7 @@ class ConflictError(SingularityError):
 
 
 _CT_JSON = {'Content-type': 'application/json'}
-_STATUS_TO_EXCEPTION = {
-    404: NotFoundError,
-    409: ConflictError
-}
+_STATUS_TO_EXCEPTION = {404: NotFoundError, 409: ConflictError}
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +47,7 @@ class Singularity:
     turned into specific exception types to make them easier to catch. Any
     other errors allow :class:`aiohttp.ClientResponseError` to propagate.
     """
+
     def __init__(self, url: Union[str, yarl.URL]) -> None:
         self._http_session = aiohttp.ClientSession()
         self._url = yarl.URL(url)
@@ -59,8 +57,9 @@ class Singularity:
 
     async def _post(self, path: str, data: dict, **kwargs) -> dict:
         url = self._url / path
-        async with self._http_session.post(url, headers=_CT_JSON,
-                                           data=json.dumps(data), **kwargs) as resp:
+        async with self._http_session.post(
+            url, headers=_CT_JSON, data=json.dumps(data), **kwargs
+        ) as resp:
             return await _read_resp(resp)
 
     async def _get(self, path: str, **kwargs) -> dict:
