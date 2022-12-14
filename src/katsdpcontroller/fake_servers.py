@@ -257,6 +257,16 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 initial_status=Sensor.Status.NOMINAL
             )
         )
+        self.sensors.add(
+            Sensor(
+                DeviceStatus,
+                "rx.device-status",
+                "The XB-engine is receiving a good, clean F-engine stream",
+                default=DeviceStatus.DEGRADED,
+                initial_status=Sensor.Status.WARN
+            )
+        )
+
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
 
