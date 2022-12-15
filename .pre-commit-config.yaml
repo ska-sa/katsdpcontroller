@@ -1,10 +1,29 @@
 repos:
+- repo: https://github.com/psf/black
+  rev: "22.10.0"
+  hooks:
+    - id: black
+- repo: https://github.com/PyCQA/isort
+  rev: "5.10.1"
+  hooks:
+    - id: isort
 - repo: https://github.com/PyCQA/flake8
-  rev: 3.9.2
+  rev: "3.9.2"
   hooks:
     - id: flake8
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v0.780
+# mypy is configured as a "local" repo so that it has access to the installed
+# virtualenv. The alternative is to list all the necessary packages for
+# type-checking as additional_dependencies, and without something like
+# https://github.com/pre-commit/pre-commit/issues/730 this will lead to
+# unwanted duplication.
+- repo: local
   hooks:
     - id: mypy
-      args: []
+      name: mypy
+      entry: mypy
+      language: python
+      files: '\.pyi?$'
+      # Passing filenames to mypy can do odd things. See
+      # https://github.com/pre-commit/mirrors-mypy/issues/33.
+      # mypy.ini determines the set of files that will actually be checked.
+      pass_filenames: false

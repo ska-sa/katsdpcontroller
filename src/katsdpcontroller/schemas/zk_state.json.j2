@@ -6,8 +6,8 @@
     "properties": {
         "version": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 4
+            "minimum": 4,
+            "maximum": 5
         }
     }
 }
@@ -37,36 +37,41 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-{% if version >= 2 %}
                     "start_time",
-{% endif %}
-{% if version >= 3 %}
                     "ports",
-{% else %}
-                    "port",
-{% endif %}
-{% if version >= 4 %}
                     "image",
-{% endif %}
                     "run_id", "task_id", "host", "config", "multicast_groups"
                 ],
                 "properties": {
-{% if version >= 2 %}
                     "start_time": {"type": "number"},
-{% endif %}
-{% if version >= 3 %}
                     "ports": {
                         "type": "object",
                         "required": ["katcp"],
                         "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 65535}
                     },
-{% else %}
-                    "port": {"type": "integer", "minimum": 0, "maximum": 65535},
-{% endif %}
                     "run_id": {"type": "string"},
                     "task_id": {"type": "string"},
-{% if version >= 4 %}
+{% if version == 4 %}
                     "image": {"type": "string"},
+{% else %}
+                    "image": {
+                        "type": "object",
+                        "properties": {
+                            "registry": {"type": "string"},
+                            "repo": {"type": "string"},
+                            "tag": {"type": "string"},
+                            "digest": {"type": "string"},
+                            "labels": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"}
+                            }
+                        },
+                        "required": ["registry", "repo"],
+                        "anyOf": [
+                            {"required": ["tag"]},
+                            {"required": ["digest"]}
+                        ]
+                    },
 {% endif %}
                     "host": {"type": "string"},
                     "config": {"type": "object"},

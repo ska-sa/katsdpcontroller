@@ -2,15 +2,15 @@
 
 import re
 
-import tornado.gen
 import katportalclient
+import tornado.gen
 
 
 def _make_sample(value):
     if isinstance(value, katportalclient.SensorSample):
         return value
     else:
-        return katportalclient.SensorSample(1234567890.0, value, 'nominal')
+        return katportalclient.SensorSample(1234567890.0, value, "nominal")
 
 
 class KATPortalClient:
@@ -36,17 +36,16 @@ class KATPortalClient:
 
     @tornado.gen.coroutine
     def sensor_subarray_lookup(self, component, sensor, return_katcp_name=False):
-        assert not return_katcp_name    # Not implemented and not needed
-        assert sensor is None           # Alternative not implemented
+        assert not return_katcp_name  # Not implemented and not needed
+        assert sensor is None  # Alternative not implemented
         try:
             return self.components[component]
         except KeyError:
-            raise katportalclient.SensorLookupError('Not such component {}'
-                                                    .format(component)) from None
+            raise katportalclient.SensorLookupError(f"No such component {component}") from None
 
     @tornado.gen.coroutine
     def sensor_values(self, filters, include_value_ts=False):
-        assert not include_value_ts     # Not implemented and not needed
+        assert not include_value_ts  # Not implemented and not needed
         if isinstance(filters, str):
             filters = [filters]
         results = {}
@@ -57,6 +56,6 @@ class KATPortalClient:
                 if pattern.search(sensor_name):
                     filt_results[sensor_name] = sample
             if not filt_results:
-                raise katportalclient.SensorNotFoundError(f'No values for filter {filt} found')
+                raise katportalclient.SensorNotFoundError(f"No values for filter {filt} found")
             results.update(filt_results)
         return results
