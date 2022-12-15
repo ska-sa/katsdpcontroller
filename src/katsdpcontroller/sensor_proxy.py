@@ -44,7 +44,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         client: aiokatcp.Client,
         server: aiokatcp.DeviceServer,
         prefix: str,
-        rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, str]] = None,
     ) -> None:
@@ -157,7 +157,7 @@ class SensorProxyClient(aiokatcp.Client):
         self,
         server: aiokatcp.DeviceServer,
         prefix: str,
-        rewrite_gui_urls: Callable[[aiokatcp.Sensor], bytes] = None,
+        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, str]] = None,
         **kwargs,
@@ -295,9 +295,9 @@ class PrometheusWatcher:
     def __init__(
         self,
         sensors: aiokatcp.SensorSet,
-        labels: Mapping[str, str] = None,
-        factory: _Factory = None,
-        metrics: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = None,
+        labels: Optional[Mapping[str, str]] = None,
+        factory: Optional[_Factory] = None,
+        metrics: Optional[Dict[str, Tuple[_LabelWrapper, _LabelWrapper]]] = None,
     ) -> None:
         self.sensors = sensors
         # Indexed by sensor name; None if no observer is needed.

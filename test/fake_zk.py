@@ -5,7 +5,7 @@ functions don't return values that they should.
 """
 
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import aiozk
 import aiozk.protocol.stat
@@ -40,7 +40,7 @@ class _Node:
 
 
 class ZKClient:
-    def __init__(self, server: str, chroot: str = None, *args, **kwargs) -> None:
+    def __init__(self, server: str, chroot: Optional[str] = None, *args, **kwargs) -> None:
         self._nodes: Dict[str, _Node] = {"/": _Node()}
 
     def normalize_path(self, path: str) -> str:
@@ -58,7 +58,7 @@ class ZKClient:
     async def close(self) -> None:
         pass
 
-    async def create(self, path: str, data: bytes = None, ephemeral=False) -> None:
+    async def create(self, path: str, data: Optional[bytes] = None, ephemeral=False) -> None:
         path = self.normalize_path(path)
         if path in self._nodes:
             raise aiozk.exc.NodeExists

@@ -290,7 +290,7 @@ class TestSingularityProductManager:
             return json.loads(payload)
 
         async def start_product(
-            self, name: str = "foo", lifecycle: fake_singularity.Lifecycle = None
+            self, name: str = "foo", lifecycle: Optional[fake_singularity.Lifecycle] = None
         ) -> SingularityProduct:
             if lifecycle:
                 self.singularity_server.lifecycles.append(lifecycle)
@@ -1171,7 +1171,9 @@ class TestDeviceServerReal:
         constructor.
         """
 
-        def zkclient(server: str, chroot: str = None, *args, **kwargs) -> fake_zk.ZKClient:
+        def zkclient(
+            server: str, chroot: Optional[str] = None, *args, **kwargs
+        ) -> fake_zk.ZKClient:
             client = fake_zk.ZKClient(server, chroot, *args, **kwargs)
             clients[chroot] = client
             return client

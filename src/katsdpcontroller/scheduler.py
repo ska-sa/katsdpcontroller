@@ -1252,7 +1252,9 @@ class ImageResolver:
         If specified, `tag_file` is ignored and this tag is used.
     """
 
-    def __init__(self, lookup: ImageLookup, tag_file: str = None, tag: str = None) -> None:
+    def __init__(
+        self, lookup: ImageLookup, tag_file: Optional[str] = None, tag: Optional[str] = None
+    ) -> None:
         self._lookup = lookup
         self._tag_file = tag_file
         self._overrides: typing.Dict[str, str] = {}

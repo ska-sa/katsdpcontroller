@@ -12,7 +12,18 @@ import typing
 
 # Needs to be imported this way so that it is unaffected by mocking of socket.getaddrinfo
 from socket import getaddrinfo
-from typing import Any, AsyncGenerator, Callable, Generator, List, Mapping, Sequence, Set, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Callable,
+    Generator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 from unittest import mock
 
 import aiokatcp
@@ -722,10 +733,10 @@ class DummyScheduler:
         self,
         graph: networkx.MultiDiGraph,
         resolver: scheduler.Resolver,
-        nodes: Sequence[scheduler.PhysicalNode] = None,
+        nodes: Optional[Sequence[scheduler.PhysicalNode]] = None,
         *,
-        queue: scheduler.LaunchQueue = None,
-        resources_timeout: float = None,
+        queue: Optional[scheduler.LaunchQueue] = None,
+        resources_timeout: Optional[float] = None,
     ) -> None:
         """Mock implementation of Scheduler.launch."""
         if nodes is None:
@@ -777,10 +788,10 @@ class DummyScheduler:
         self,
         graph: networkx.MultiDiGraph,
         resolver: scheduler.Resolver,
-        nodes: Sequence[scheduler.PhysicalNode] = None,
+        nodes: Optional[Sequence[scheduler.PhysicalNode]] = None,
         *,
-        queue: scheduler.LaunchQueue = None,
-        resources_timeout: float = None,
+        queue: Optional[scheduler.LaunchQueue] = None,
+        resources_timeout: Optional[float] = None,
         attempts: int = 1,
     ) -> None:
         """Mock implementation of Scheduler.batch_run.
@@ -800,7 +811,10 @@ class DummyScheduler:
         self.n_batch_tasks += len(nodes)
 
     async def kill(
-        self, graph: networkx.MultiDiGraph, nodes: Sequence[scheduler.PhysicalNode] = None, **kwargs
+        self,
+        graph: networkx.MultiDiGraph,
+        nodes: Optional[Sequence[scheduler.PhysicalNode]] = None,
+        **kwargs,
     ) -> None:
         """Mock implementation of Scheduler.kill."""
         if nodes is not None:
@@ -1876,8 +1890,8 @@ class TestController(BaseTestController):
         service: str,
         type: str,
         value: float,
-        sample_name: str = None,
-        extra_labels: Mapping[str, str] = None,
+        sample_name: Optional[str] = None,
+        extra_labels: Optional[Mapping[str, str]] = None,
     ) -> None:
         name = "katsdpcontroller_" + name
         for metric in registry.collect():
