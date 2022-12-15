@@ -308,24 +308,11 @@ class TelstateTask(ProductPhysicalTask):
 
 
 class IngestTask(ProductPhysicalTask):
-<<<<<<< HEAD
     async def resolve(self, resolver, graph, image_path=None):
         await super().resolve(resolver, graph, image_path)
         parameters = self.taskinfo.container.docker.setdefault('parameters', [])
         parameters.append({'key': 'env',
                            'value': f'KATSDPSIGPROC_TUNE_MATCH={KATSDPSIGPROC_TUNE_MATCH}'})
-=======
-    async def resolve(self, resolver, graph, image=None):
-        # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image.
-        if image is None:
-            gpu = self.agent.gpus[self.allocation.gpus[0].index]
-            gpu_name = normalise_gpu_name(gpu.name)
-            image = await resolver.image_resolver("katsdpingest_" + gpu_name)
-            if gpu != defaults.INGEST_GPU_NAME:
-                logger.info("Develop mode: using %s for ingest", image.path)
-        await super().resolve(resolver, graph, image)
->>>>>>> master
 
 
 def _mb(value):
@@ -1643,18 +1630,11 @@ def _make_ingest(
         else:
             ingest.physical_factory = IngestTask
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
-<<<<<<< HEAD
         ingest.image = 'katsdpingest_' + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         ingest.command = ['capambel', '-c', 'cap_net_raw+p', '-v', '--', 'ingest.py']
         ingest.capabilities.append('NET_RAW')
         ingest.ports = ['port', 'aiomonitor_port', 'aioconsole_port']
         ingest.wait_ports = ['port']
-=======
-        ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
-        ingest.command = ["ingest.py"]
-        ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
-        ingest.wait_ports = ["port"]
->>>>>>> master
         ingest.gpus = [scheduler.GPURequest()]
         # Do not request a specific GPU -- use a Jenkins-autotuned version with fallback behaviour
         ingest.gpus[-1].name = None
