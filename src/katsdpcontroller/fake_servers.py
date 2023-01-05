@@ -96,7 +96,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     str,
-                    f"input{pol}-eq",
+                    f"input{pol}.eq",
                     "For this input, the complex, unitless, per-channel digital scaling factors "
                     "implemented prior to requantisation",
                     default="[1.0+0.0j]",
@@ -106,7 +106,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     str,
-                    f"input{pol}-delay",
+                    f"input{pol}.delay",
                     "The delay settings for this input: (loadmcnt <ADC sample "
                     "count when model was loaded>, delay <in seconds>, "
                     "delay-rate <unit-less or, seconds-per-second>, "
@@ -118,7 +118,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     int,
-                    f"input{pol}-dig-clip-cnt",
+                    f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=Sensor.Status.NOMINAL,
@@ -127,7 +127,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     float,
-                    f"input{pol}-dig-pwr-dbfs",
+                    f"input{pol}.dig-pwr-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
                     default=-25.0,
@@ -137,7 +137,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     int,
-                    f"input{pol}-feng-clip-cnt",
+                    f"input{pol}.feng-clip-cnt",
                     "Number of output samples that are saturated",
                     default=0,
                     initial_status=Sensor.Status.NOMINAL,
@@ -146,7 +146,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     int,
-                    f"input{pol}-rx-timestamp",
+                    f"input{pol}.rx-timestamp",
                     "The timestamp (in samples) of the last chunk of data received "
                     "from the digitiser",
                     default=-1,
@@ -156,7 +156,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     Timestamp,
-                    f"input{pol}-rx-unixtime",
+                    f"input{pol}.rx-unixtime",
                     "The timestamp (in UNIX time) of the last chunk of data received "
                     "from the digitiser",
                     default=Timestamp(-1.0),
@@ -166,7 +166,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     Timestamp,
-                    f"input{pol}-rx-missing-unixtime",
+                    f"input{pol}.rx-missing-unixtime",
                     "The timestamp (in UNIX time) when missing data was last detected",
                     default=Timestamp(-1.0),
                     initial_status=Sensor.Status.NOMINAL,
@@ -191,7 +191,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             delay, delay_rate = (float(x) for x in delay_args.split(","))
             phase, phase_rate = (float(x) for x in phase_args.split(","))
             value = f"({load_time}, {delay}, {delay_rate}, {phase}, {phase_rate})"
-            self.sensors[f"input{i}-delay"].value = value
+            self.sensors[f"input{i}.delay"].value = value
 
     async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
         """Set or query the eq gains."""
@@ -202,7 +202,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 # Same value for all channels
                 cvalues = cvalues[:1]
             self._gains[input] = cvalues
-            self.sensors[f"input{input}-eq"].value = (
+            self.sensors[f"input{input}.eq"].value = (
                 "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
             )
         return tuple(_format_complex(v) for v in self._gains[input])
