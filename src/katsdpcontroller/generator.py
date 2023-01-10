@@ -798,6 +798,9 @@ def _make_fgpu(
         fgpu.pass_telstate = False
         fgpu.data_suspect_sensor = data_suspect_sensor
         fgpu.data_suspect_range = (2 * i, 2 * i + 2)
+        # Identify the antenna, if the input labels are consistent
+        if input_labels[0][:-1] == input_labels[1][:-1]:
+            fgpu.consul_meta["antenna"] = input_labels[0][:-1]
         g.add_node(fgpu)
 
         # Wire it up to the multicast streams
@@ -831,10 +834,11 @@ def _make_fgpu(
                 "rx-missing-unixtime",
             ]:
                 fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
-        # Prepare expected data rate
+        # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
         )
+        fgpu.static_gauges["fgpu_expected_engines"] = 1.0
 
     return fgpu_group
 
@@ -1170,6 +1174,7 @@ def _make_xbgpu(
             * len(acv.src_streams)
             / 2  # / 2 because each heap contains two pols
         )
+        xbgpu.static_gauges["xbgpu_expected_engines"] = 1.0
 
     return xbgpu_group
 

@@ -185,6 +185,8 @@ class ProductLogicalTask(scheduler.LogicalTask):
         # in the range given by the tuple data_suspect_range will be set to 0's.
         self.data_suspect_sensor: Optional[Sensor[str]] = None
         self.data_suspect_range = (0, 0)
+        # Extra metadata to populate in consul
+        self.consul_meta: typing.Dict[str, str] = {}
 
 
 class ConfigMixin:
@@ -680,6 +682,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
                 "Meta": {
                     "subarray_product_id": self.subarray_product_id,
                     "task_name": self.logical_node.name,
+                    **self.logical_node.consul_meta,
                 },
                 "Port": prometheus_port,
                 "Checks": [
