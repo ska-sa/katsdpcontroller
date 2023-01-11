@@ -295,8 +295,8 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b"cal.1.capture-block-state", b"", b"string"),
     (b"cal.1.gui-urls", b"", b"string"),
     (b"capture-block-state", b"", b"string"),
-    (b"gpucbf_antenna_channelised_voltage-bandwidth", b"Hz", b"float"),
-    (b"gpucbf_m900h-destination", b"", b"string"),
+    (b"gpucbf_antenna_channelised_voltage.bandwidth", b"Hz", b"float"),
+    (b"gpucbf_m900h.destination", b"", b"string"),
     (b"gui-urls", b"", b"string"),
     (b"ingest.sdp_l0.1.capture-active", b"", b"boolean"),
     (
