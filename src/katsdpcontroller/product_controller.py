@@ -78,10 +78,12 @@ STATIC_GAUGES = [
     Gauge(
         "fgpu_expected_input_heaps_per_second", "Number of heaps that should be received per second"
     ),
+    Gauge("fgpu_expected_engines", "Number of F-engines that should be present"),
     Gauge(
         "xbgpu_expected_input_heaps_per_second",
         "Number of heaps that should be received per second",
     ),
+    Gauge("xbgpu_expected_engines", "Number of XB-engines that should be present"),
 ]
 logger = logging.getLogger(__name__)
 
