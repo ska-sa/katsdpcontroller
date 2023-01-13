@@ -419,9 +419,9 @@ def _make_meta_writer(
     meta_writer.interfaces = [scheduler.InterfaceRequest("sdp_10g")]
     # Actual required data rate is minimal, but bursty. Use 1 Gb/s,
     # except in development mode where it might not be available.
-    meta_writer.interfaces[0].bandwidth_out = (1e9 if not
-                                               configuration.options.develop_opts.less_resources
-                                               else 10e6)
+    meta_writer.interfaces[0].bandwidth_out = (
+        1e9 if not configuration.options.develop_opts.less_resources else 10e6
+    )
     meta_writer.transitions = {
         CaptureBlockState.BURNDOWN: [
             KatcpTransition("write-meta", "{capture_block_id}", True, timeout=120)  # Light dump
@@ -1666,10 +1666,13 @@ def _make_ingest(
         ingest.mem = 32 * _mb(src.size) / n_ingest + 4096
         ingest.transitions = CAPTURE_TRANSITIONS
         ingest.interfaces = [
-            scheduler.InterfaceRequest("cbf", affinity=not develop_opts.disable_ibv,
-                                       infiniband=not develop_opts.disable_ibv),
+            scheduler.InterfaceRequest(
+                "cbf",
+                affinity=not develop_opts.disable_ibv,
+                infiniband=not develop_opts.disable_ibv,
+            ),
             scheduler.InterfaceRequest("sdp_10g"),
-            ]
+        ]
         ingest.interfaces[0].bandwidth_in = src.data_rate() / n_ingest
         data_rate_out = 0.0
         if spectral is not None:
@@ -2233,8 +2236,9 @@ def _make_beamformer_engineering_pol(
     # regions.
     bf_ingest.interfaces = [
         scheduler.InterfaceRequest(
-            "cbf", infiniband=not configuration.options.develop_opts.disable_ibv,
-            affinity=timeplot or not ram
+            "cbf",
+            infiniband=not configuration.options.develop_opts.disable_ibv,
+            affinity=timeplot or not ram,
         )
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator

@@ -220,20 +220,19 @@ class ServiceOverride:
 
 
 class DevelopOptions:
-    def __init__(self, *,
-                 any_gpu: bool = True,
-                 disable_ibv: bool = True,
-                 less_resources: bool = True) -> None:
+    def __init__(
+        self, *, any_gpu: bool = True, disable_ibv: bool = True, less_resources: bool = True
+    ) -> None:
         self.any_gpu = any_gpu
         self.disable_ibv = disable_ibv
         self.less_resources = less_resources
 
     @classmethod
-    def from_config(cls, config: Mapping[str, bool]) -> 'DevelopOptions':
+    def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
         return cls(
-            any_gpu=config.get('any_gpu', True),
-            disable_ibv=config.get('disable_ibv', True),
-            less_resources=config.get('less_resources', True)
+            any_gpu=config.get("any_gpu", True),
+            disable_ibv=config.get("disable_ibv", True),
+            less_resources=config.get("less_resources", True),
         )
 
 
@@ -250,9 +249,9 @@ class Options:
         interface_mode: bool = False,
     ) -> None:
         if not develop:
-            self.develop_opts = DevelopOptions(any_gpu=False,
-                                               disable_ibv=False,
-                                               less_resources=False)
+            self.develop_opts = DevelopOptions(
+                any_gpu=False, disable_ibv=False, less_resources=False
+            )
         else:
             self.develop_opts = DevelopOptions.from_config(develop_opts)
         self.wrapper = wrapper
@@ -270,11 +269,11 @@ class Options:
             for (name, value) in config.get("service_overrides", {}).items()
         }
         return cls(
-            develop=config.get('develop', False),
-            develop_opts=config.get('develop_opts', {}),
-            wrapper=config.get('wrapper'),
-            image_tag=config.get('image_tag'),
-            image_overrides=config.get('image_overrides', {}),
+            develop=config.get("develop", False),
+            develop_opts=config.get("develop_opts", {}),
+            wrapper=config.get("wrapper"),
+            image_tag=config.get("image_tag"),
+            image_overrides=config.get("image_overrides", {}),
             service_overrides=service_overrides,
         )
 

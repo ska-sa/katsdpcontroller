@@ -193,10 +193,9 @@ class TestOptions:
         assert options.develop_opts.any_gpu is True
         assert options.develop_opts.disable_ibv is True
         assert options.develop_opts.less_resources is True
-        assert options.wrapper == config['wrapper']
-        assert list(options.service_overrides.keys()) == ['service1']
-        assert options.service_overrides['service1'].host == 'testhost'
-
+        assert options.wrapper == config["wrapper"]
+        assert list(options.service_overrides.keys()) == ["service1"]
+        assert options.service_overrides["service1"].host == "testhost"
 
     def test_defaults(self) -> None:
         options = Options.from_config({})
@@ -207,10 +206,7 @@ class TestOptions:
         assert options.service_overrides == {}
 
     def test_dev_opts(self) -> None:
-        config = {
-            'develop': True,
-            'develop_opts': {'disable_ibv': False}
-        }
+        config = {"develop": True, "develop_opts": {"disable_ibv": False}}
 
         options = Options.from_config(config)
         assert options.develop_opts.any_gpu is True
