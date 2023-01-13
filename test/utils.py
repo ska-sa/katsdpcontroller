@@ -1,20 +1,29 @@
 """Utilities for unit tests"""
 
 import asyncio
-from unittest import mock
-from typing import (List, Tuple, Iterable, Coroutine, Awaitable, Optional,
-                    Type, Any, TypeVar, Generic)
 from types import TracebackType
+from typing import (
+    Any,
+    Awaitable,
+    Coroutine,
+    Generic,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
+from unittest import mock
 
 import aiokatcp
 import pytest
 
-
-_T = TypeVar('_T')
+_T = TypeVar("_T")
 
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
-CONFIG = '''{
+CONFIG = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
@@ -176,9 +185,9 @@ CONFIG = '''{
         }
     },
     "config": {}
-}'''     # noqa: E501
+}"""  # noqa: E501
 
-CONFIG_CBF_ONLY = '''{
+CONFIG_CBF_ONLY = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
@@ -221,9 +230,9 @@ CONFIG_CBF_ONLY = '''{
         }
     },
     "config": {}
-}'''
+}"""
 
-S3_CONFIG = '''
+S3_CONFIG = """
 {
     "continuum": {
         "read": {
@@ -259,32 +268,52 @@ S3_CONFIG = '''
             "url": "https://models.s3.invalid/models"
         }
     }
-}'''
+}"""
 
 EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'device-status', b'', b'discrete', b'ok', b'degraded', b'fail'),
-    (b'gui-urls', b'', b'string')
+    (b"device-status", b"", b"discrete", b"ok", b"degraded", b"fail"),
+    (b"gui-urls", b"", b"string"),
 ]
 
 # This is just a subset meant to check common classes of sensors.
 # There are too many for it to be practical to maintain a canonical list.
 EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
-    (b'bf_ingest.sdp_beamformer_engineering_ram.1.port', b'', b'address'),
-    (b'bf_ingest.sdp_beamformer_engineering_ram.1.mesos-state', b'', b'string'),
-    (b'bf_ingest.sdp_beamformer_engineering_ram.2.state', b'', b'discrete',
-     b'not-ready', b'starting', b'started', b'running', b'ready', b'killing', b'dead'),
-    (b'cal.1.capture-block-state', b'', b'string'),
-    (b'cal.1.gui-urls', b'', b'string'),
-    (b'capture-block-state', b'', b'string'),
-    (b'gpucbf_antenna_channelised_voltage-bandwidth', b'Hz', b'float'),
-    (b'gpucbf_m900h-destination', b'', b'string'),
-    (b'gui-urls', b'', b'string'),
-    (b'ingest.sdp_l0.1.capture-active', b'', b'boolean'),
-    (b'state', b'', b'discrete',
-     b'configuring', b'idle', b'capturing', b'deconfiguring', b'dead', b'error', b'postprocessing'),
-    (b'telstate.telstate', b'', b'address'),
-    (b'timeplot.sdp_l0.gui-urls', b'', b'string'),
-    (b'timeplot.sdp_l0.html_port', b'', b'address')
+    (b"bf_ingest.sdp_beamformer_engineering_ram.1.port", b"", b"address"),
+    (b"bf_ingest.sdp_beamformer_engineering_ram.1.mesos-state", b"", b"string"),
+    (
+        b"bf_ingest.sdp_beamformer_engineering_ram.2.state",
+        b"",
+        b"discrete",
+        b"not-ready",
+        b"starting",
+        b"started",
+        b"running",
+        b"ready",
+        b"killing",
+        b"dead",
+    ),
+    (b"cal.1.capture-block-state", b"", b"string"),
+    (b"cal.1.gui-urls", b"", b"string"),
+    (b"capture-block-state", b"", b"string"),
+    (b"gpucbf_antenna_channelised_voltage-bandwidth", b"Hz", b"float"),
+    (b"gpucbf_m900h-destination", b"", b"string"),
+    (b"gui-urls", b"", b"string"),
+    (b"ingest.sdp_l0.1.capture-active", b"", b"boolean"),
+    (
+        b"state",
+        b"",
+        b"discrete",
+        b"configuring",
+        b"idle",
+        b"capturing",
+        b"deconfiguring",
+        b"dead",
+        b"error",
+        b"postprocessing",
+    ),
+    (b"telstate.telstate", b"", b"address"),
+    (b"timeplot.sdp_l0.gui-urls", b"", b"string"),
+    (b"timeplot.sdp_l0.html_port", b"", b"address"),
 ]
 
 
@@ -294,17 +323,20 @@ async def assert_request_fails(client: aiokatcp.Client, name: str, *args: Any) -
 
 
 async def assert_sensor_value(
-        client: aiokatcp.Client, name: str, value: Any,
-        status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL) -> None:
+    client: aiokatcp.Client,
+    name: str,
+    value: Any,
+    status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL,
+) -> None:
     encoded = aiokatcp.encode(value)
     reply, informs = await client.request("sensor-value", name)
     assert informs[0].arguments[4] == encoded
     assert informs[0].arguments[3] == aiokatcp.encode(status)
 
 
-async def assert_sensors(client: aiokatcp.Client,
-                         expected_list: Iterable[Tuple[bytes, ...]],
-                         subset: bool = False) -> None:
+async def assert_sensors(
+    client: aiokatcp.Client, expected_list: Iterable[Tuple[bytes, ...]], subset: bool = False
+) -> None:
     """Check that the expected sensors are all present.
 
     The values are not checked. Each sensor is described by the raw data
@@ -332,8 +364,10 @@ class DelayedManager:
     If `cancelled` is true, the request is expected to fail with a message
     about being cancelled, otherwise it is expected to succeed.
     """
-    def __init__(self, coro: Coroutine, mock: mock.Mock, return_value: Any,
-                 cancelled: bool) -> None:
+
+    def __init__(
+        self, coro: Coroutine, mock: mock.Mock, return_value: Any, cancelled: bool
+    ) -> None:
         # Set when the call to the mock is made
         self._started: asyncio.Future[None] = asyncio.Future()
         self.mock = mock
@@ -350,13 +384,16 @@ class DelayedManager:
         self.mock.side_effect = self._old_side_effect
         return await self._result
 
-    async def __aenter__(self) -> 'DelayedManager':
+    async def __aenter__(self) -> "DelayedManager":
         await self._started
         return self
 
-    async def __aexit__(self, exc_type: Optional[Type[BaseException]],
-                        exc_value: Optional[BaseException],
-                        traceback: Optional[TracebackType]) -> None:
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         # Unblock the mock call
         if not self._result.cancelled():
             self._result.set_result(self.return_value)
@@ -365,10 +402,10 @@ class DelayedManager:
             self._request_task.cancel()
             return
         if self.cancelled:
-            with pytest.raises(aiokatcp.FailReply, match='request cancelled'):
+            with pytest.raises(aiokatcp.FailReply, match="request cancelled"):
                 await self._request_task
         else:
-            await self._request_task     # Will raise if it failed
+            await self._request_task  # Will raise if it failed
 
 
 class Background(Generic[_T]):
@@ -394,21 +431,27 @@ class Background(Generic[_T]):
     def __init__(self, awaitable: Awaitable[_T]) -> None:
         self._future = asyncio.ensure_future(awaitable)
 
-    def __enter__(self) -> 'Background':
+    def __enter__(self) -> "Background":
         return self
 
-    def __exit__(self, exc_type: Optional[Type[BaseException]],
-                 exc_value: Optional[BaseException],
-                 traceback: Optional[TracebackType]) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         if not exc_type:
             assert self._future.done()
 
-    async def __aenter__(self) -> 'Background':
+    async def __aenter__(self) -> "Background":
         return self
 
-    async def __aexit__(self, exc_type: Optional[Type[BaseException]],
-                        exc_value: Optional[BaseException],
-                        traceback: Optional[TracebackType]) -> None:
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         if not exc_type:
             await self._future
 
@@ -419,10 +462,11 @@ class Background(Generic[_T]):
 
 def future_return(mock: mock.Mock) -> asyncio.Future:
     """Modify a callable mock so that it blocks on a future then returns it."""
+
     async def replacement(*args, **kwargs):
         return await future
 
-    future = asyncio.Future()         # type: asyncio.Future[Any]
+    future = asyncio.Future()  # type: asyncio.Future[Any]
     mock.side_effect = replacement
     return future
 
