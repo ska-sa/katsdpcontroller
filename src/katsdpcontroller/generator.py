@@ -1570,7 +1570,7 @@ def _make_ingest(
         "continuum_factor": continuum.continuum_factor if continuum is not None else 1,
         "sd_continuum_factor": sd_continuum_factor,
         "sd_spead_rate": sd_spead_rate,
-        "cbf_ibv": not develop_opts.disable_ibf,
+        "cbf_ibv": not develop_opts.disable_ibv,
         "cbf_name": src.name,
         "servers": n_ingest,
         "antenna_mask": primary.antennas,
