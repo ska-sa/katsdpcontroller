@@ -833,7 +833,7 @@ def _make_fgpu(
                 "rx-unixtime",
                 "rx-missing-unixtime",
             ]:
-                fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}.{label}.{name}"
+                fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
         # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
