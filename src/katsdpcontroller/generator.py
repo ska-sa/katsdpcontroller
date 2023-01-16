@@ -1168,6 +1168,14 @@ def _make_xbgpu(
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(xbgpu_group, xbgpu, depends_ready=True, depends_init=True)
 
+        # Rename sensors that are relevant to the stream rather than the process
+        for name in [
+            "rx-timestamp",
+            "rx-unixtime",
+            "rx-missing-unixtime",
+        ]:
+            xbgpu.sensor_renames[f"input.{name}"] = f"{stream.name}.{i}.{name}"
+
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
             / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
