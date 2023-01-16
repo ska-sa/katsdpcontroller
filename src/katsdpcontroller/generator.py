@@ -829,9 +829,9 @@ def _make_fgpu(
                 "dig-clip-cnt",
                 "dig-pwr-dbfs",
                 "feng-clip-cnt",
-                "rx-timestamp",
-                "rx-unixtime",
-                "rx-missing-unixtime",
+                "rx.timestamp",
+                "rx.unixtime",
+                "rx.missing-unixtime",
             ]:
                 fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
         # Prepare expected data rates etc
@@ -986,7 +986,7 @@ def _make_xbgpu(
             sensors,
             f"{stream.name}.xengs-synchronised",
             "For the latest accumulation, was data present from all F-Engines for all X-Engines",
-            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
+            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.rx.synchronised"),
             n_children=stream.n_substreams,
         ),
         data_suspect_sensor,
@@ -1170,11 +1170,11 @@ def _make_xbgpu(
 
         # Rename sensors that are relevant to the stream rather than the process
         for name in [
-            "rx-timestamp",
-            "rx-unixtime",
-            "rx-missing-unixtime",
+            "rx.timestamp",
+            "rx.unixtime",
+            "rx.missing-unixtime",
         ]:
-            xbgpu.sensor_renames[f"input.{name}"] = f"{stream.name}.{i}.{name}"
+            xbgpu.sensor_renames[name] = f"{stream.name}.{i}.{name}"
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate

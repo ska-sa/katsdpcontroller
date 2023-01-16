@@ -146,7 +146,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     int,
-                    f"input{pol}.rx-timestamp",
+                    f"input{pol}.rx.timestamp",
                     "The timestamp (in samples) of the last chunk of data received "
                     "from the digitiser",
                     default=-1,
@@ -156,7 +156,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     Timestamp,
-                    f"input{pol}.rx-unixtime",
+                    f"input{pol}.rx.unixtime",
                     "The timestamp (in UNIX time) of the last chunk of data received "
                     "from the digitiser",
                     default=Timestamp(-1.0),
@@ -166,7 +166,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors.add(
                 Sensor(
                     Timestamp,
-                    f"input{pol}.rx-missing-unixtime",
+                    f"input{pol}.rx.missing-unixtime",
                     "The timestamp (in UNIX time) when missing data was last detected",
                     default=Timestamp(-1.0),
                     initial_status=Sensor.Status.NOMINAL,
@@ -224,7 +224,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         self.sensors.add(
             Sensor(
                 bool,
-                "synchronised",
+                "rx.synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
                 default=True,
                 initial_status=Sensor.Status.NOMINAL,
@@ -251,7 +251,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         self.sensors.add(
             Sensor(
                 int,
-                "input-rx-timestamp",
+                "rx.timestamp",
                 "The timestamp (in samples) of the last chunk of data received from an F-engine",
                 default=-1,
                 initial_status=Sensor.Status.ERROR,
@@ -260,7 +260,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         self.sensors.add(
             Sensor(
                 Timestamp,
-                "input-rx-unixtime",
+                "rx.unixtime",
                 "The timestamp (in UNIX time) of the last chunk of data received "
                 "from an F-engine",
                 default=Timestamp(-1.0),
@@ -270,7 +270,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         self.sensors.add(
             Sensor(
                 Timestamp,
-                "input-rx-missing-unixtime",
+                "rx.missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=Timestamp(-1.0),
                 initial_status=Sensor.Status.NOMINAL,
