@@ -117,6 +117,8 @@ OBJ_DATA_VOL = scheduler.VolumeRequest("obj_data", "/var/kat/data", "RW")
 CONFIG_VOL = scheduler.VolumeRequest("config", "/var/kat/config", "RW")
 #: Number of components in a complex number
 COMPLEX = 2
+#: Autotune fallback behaviour
+KATSDPSIGPROC_TUNE_MATCH = defaults.KATSDPSIGPROC_TUNE_MATCH
 
 logger = logging.getLogger(__name__)
 
@@ -306,16 +308,12 @@ class TelstateTask(ProductPhysicalTask):
 
 
 class IngestTask(ProductPhysicalTask):
-    async def resolve(self, resolver, graph, image=None):
-        # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image.
-        if image is None:
-            gpu = self.agent.gpus[self.allocation.gpus[0].index]
-            gpu_name = normalise_gpu_name(gpu.name)
-            image = await resolver.image_resolver("katsdpingest_" + gpu_name)
-            if gpu != defaults.INGEST_GPU_NAME:
-                logger.info("Develop mode: using %s for ingest", image.path)
-        await super().resolve(resolver, graph, image)
+    async def resolve(self, resolver, graph, image_path=None):
+        await super().resolve(resolver, graph, image_path)
+        parameters = self.taskinfo.container.docker.setdefault("parameters", [])
+        parameters.append(
+            {"key": "env", "value": f"KATSDPSIGPROC_TUNE_MATCH={KATSDPSIGPROC_TUNE_MATCH}"}
+        )
 
 
 def _mb(value):
@@ -1642,12 +1640,13 @@ def _make_ingest(
             ingest.physical_factory = IngestTask
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
-        ingest.command = ["ingest.py"]
+        ingest.command = ["capambel", "-c", "cap_net_raw+p", "-v", "--", "ingest.py"]
+        ingest.capabilities.append("NET_RAW")
         ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
         ingest.wait_ports = ["port"]
         ingest.gpus = [scheduler.GPURequest()]
-        if not develop_opts.any_gpu:
-            ingest.gpus[-1].name = defaults.INGEST_GPU_NAME
+        # Do not request a specific GPU -- use a Jenkins-autotuned version with fallback behaviour
+        ingest.gpus[-1].name = None
         # Scale for a full GPU for 32 antennas, 32K channels on one node
         scale = src.n_vis / _N32_32 / n_ingest
         ingest.gpus[0].compute = scale
