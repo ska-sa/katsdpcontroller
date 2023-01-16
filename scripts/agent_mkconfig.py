@@ -100,7 +100,9 @@ class HWLocParser:
         for i in range(len(self._nodes)):
             if int(self._nodes[i].get("os_index", 0)) != i:
                 raise RuntimeError("NUMA nodes are not numbered contiguously by the OS")
-            while not self._nodes[i].findall(".//object[@type='PU']"):
+            while not self._nodes[i].findall(".//object[@type='PU']") or not self._nodes[i].findall(
+                ".//object[@type='Bridge']"
+            ):
                 self._nodes[i] = parent_map[self._nodes[i]]
 
     def cpus_by_node(self):
