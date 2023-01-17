@@ -153,7 +153,7 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         stream_name = logical_task.stream_name
         self._endpoint_sensor = Sensor(
             str,
-            f"{stream_name}-destination",
+            f"{stream_name}.destination",
             f"The IP address, range and port to which data for stream {stream_name} is sent",
         )
         subarray_product.add_sensor(self._endpoint_sensor)
@@ -547,7 +547,7 @@ def _make_fgpu(
     # TODO: this list is not complete, and will need to be updated as the ICD evolves.
     data_suspect_sensor = Sensor(
         str,
-        f"{stream.name}-input-data-suspect",
+        f"{stream.name}.input-data-suspect",
         "A bitmask of flags indicating for each input whether the data for "
         "that input should be considered to be garbage. Input order matches "
         "input labels.",
@@ -572,7 +572,7 @@ def _make_fgpu(
         ),
         Sensor(
             float,
-            f"{stream.name}-adc-sample-rate",
+            f"{stream.name}.adc-sample-rate",
             "Sample rate of the ADC",
             "Hz",
             default=stream.adc_sample_rate,
@@ -580,7 +580,7 @@ def _make_fgpu(
         ),
         Sensor(
             float,
-            f"{stream.name}-bandwidth",
+            f"{stream.name}.bandwidth",
             "The analogue bandwidth of the digitised band",
             "Hz",
             default=stream.bandwidth,
@@ -589,7 +589,7 @@ def _make_fgpu(
         # The timestamps are simply ADC sample counts
         Sensor(
             float,
-            f"{stream.name}-scale-factor-timestamp",
+            f"{stream.name}.scale-factor-timestamp",
             "Factor by which to divide instrument timestamps to convert to unix seconds",
             "Hz",
             default=stream.adc_sample_rate,
@@ -597,7 +597,7 @@ def _make_fgpu(
         ),
         Sensor(
             float,
-            f"{stream.name}-sync-time",
+            f"{stream.name}.sync-time",
             "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
             "s",
             default=float(sync_time),
@@ -605,28 +605,28 @@ def _make_fgpu(
         ),
         Sensor(
             int,
-            f"{stream.name}-n-ants",
+            f"{stream.name}.n-ants",
             "The number of antennas in the instrument",
             default=len(stream.antennas),
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-inputs",
+            f"{stream.name}.n-inputs",
             "The number of single polarisation inputs to the instrument",
             default=len(stream.src_streams),
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-fengs",
+            f"{stream.name}.n-fengs",
             "The number of F-engines in the instrument",
             default=n_engines,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-feng-out-bits-per-sample",
+            f"{stream.name}.feng-out-bits-per-sample",
             "F-engine output bits per sample. Per number, not complex pair. "
             "Real and imaginary parts are both this wide",
             default=stream.bits_per_sample,
@@ -634,35 +634,35 @@ def _make_fgpu(
         ),
         Sensor(
             int,
-            f"{stream.name}-n-chans",
+            f"{stream.name}.n-chans",
             "Number of channels in the output spectrum",
             default=stream.n_chans,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-chans-per-substream",
+            f"{stream.name}.n-chans-per-substream",
             "Number of channels in each substream for this f-engine stream",
             default=stream.n_chans_per_substream,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-samples-between-spectra",
+            f"{stream.name}.n-samples-between-spectra",
             "Number of samples between spectra",
             default=stream.n_samples_between_spectra,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-pfb-group-delay",
+            f"{stream.name}.pfb-group-delay",
             "PFB group delay, specified in number of samples",
             default=-stream.n_chans * stream.pfb_taps,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-spectra-per-heap",
+            f"{stream.name}.spectra-per-heap",
             "Number of spectrum chunks per heap",
             default=stream.n_spectra_per_heap,
             initial_status=Sensor.Status.NOMINAL,
@@ -671,7 +671,7 @@ def _make_fgpu(
         # stream.centre_frequency.
         Sensor(
             float,
-            f"{stream.name}-center-freq",
+            f"{stream.name}.center-freq",
             "The centre frequency of the digitised band",
             default=stream.bandwidth / 2,
             initial_status=Sensor.Status.NOMINAL,
@@ -829,11 +829,11 @@ def _make_fgpu(
                 "dig-clip-cnt",
                 "dig-pwr-dbfs",
                 "feng-clip-cnt",
-                "rx-timestamp",
-                "rx-unixtime",
-                "rx-missing-unixtime",
+                "rx.timestamp",
+                "rx.unixtime",
+                "rx.missing-unixtime",
             ]:
-                fgpu.sensor_renames[f"input{j}-{name}"] = f"{stream.name}-{label}-{name}"
+                fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
         # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
@@ -884,7 +884,7 @@ def _make_xbgpu(
     n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
     data_suspect_sensor = Sensor(
         str,
-        f"{stream.name}-channel-data-suspect",
+        f"{stream.name}.channel-data-suspect",
         "A bitmask of flags indicating whether each channel should be considered to be garbage.",
         default="0" * stream.n_chans,
         initial_status=Sensor.Status.NOMINAL,
@@ -893,7 +893,7 @@ def _make_xbgpu(
     stream_sensors = [
         Sensor(
             float,
-            f"{stream.name}-sync-time",
+            f"{stream.name}.sync-time",
             "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
             "s",
             default=float(sync_time),
@@ -901,7 +901,7 @@ def _make_xbgpu(
         ),
         Sensor(
             float,
-            f"{stream.name}-bandwidth",
+            f"{stream.name}.bandwidth",
             "The analogue bandwidth of the digitised band",
             "Hz",
             default=acv.bandwidth,
@@ -909,21 +909,21 @@ def _make_xbgpu(
         ),
         Sensor(
             int,
-            f"{stream.name}-n-xengs",
+            f"{stream.name}.n-xengs",
             "The number of X-engines in the instrument",
             default=n_engines,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-accs",
+            f"{stream.name}.n-accs",
             "The number of spectra that are accumulated per X-engine output",
             default=n_accs,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             float,
-            f"{stream.name}-int-time",
+            f"{stream.name}.int-time",
             "The time, in seconds, for which the X-engines accumulate.",
             "s",
             default=stream.int_time,
@@ -931,7 +931,7 @@ def _make_xbgpu(
         ),
         Sensor(
             int,
-            f"{stream.name}-xeng-out-bits-per-sample",
+            f"{stream.name}.xeng-out-bits-per-sample",
             "X-engine output bits per sample. Per number, not complex pair- "
             "Real and imaginary parts are both this wide",
             default=stream.bits_per_sample,
@@ -939,7 +939,7 @@ def _make_xbgpu(
         ),
         Sensor(
             str,
-            f"{stream.name}-bls-ordering",
+            f"{stream.name}.bls-ordering",
             "A string showing the output ordering of baseline data "
             "produced by the X-engines in this instrument, as a list "
             "of correlation pairs given by input label.",
@@ -948,28 +948,28 @@ def _make_xbgpu(
         ),
         Sensor(
             int,
-            f"{stream.name}-n-bls",
+            f"{stream.name}.n-bls",
             "The number of baselines produced by this correlator instrument.",
             default=stream.n_baselines,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-chans",
+            f"{stream.name}.n-chans",
             "The number of frequency channels in an integration",
             default=stream.n_chans,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             int,
-            f"{stream.name}-n-chans-per-substream",
+            f"{stream.name}.n-chans-per-substream",
             "Number of channels in each substream for this x-engine stream",
             default=stream.n_chans_per_substream,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
             float,
-            f"{stream.name}-ddc-mix-freq",
+            f"{stream.name}.ddc-mix-freq",
             "F-engine DDC mixer frequency, where used. 0 where n/a",
             units="Hz",
             default=0.0,
@@ -977,16 +977,16 @@ def _make_xbgpu(
         ),
         SumSensor(
             sensors,
-            f"{stream.name}-xeng-clip-cnt",
+            f"{stream.name}.xeng-clip-cnt",
             "Number of visibilities that saturated",
             name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
             n_children=stream.n_substreams,
         ),
         SyncSensor(
             sensors,
-            f"{stream.name}-xengs-synchronised",
+            f"{stream.name}.xengs-synchronised",
             "For the latest accumulation, was data present from all F-Engines for all X-Engines",
-            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.synchronised"),
+            name_regex=re.compile(rf"xb\.{re.escape(stream.name)}\.[0-9]+\.rx.synchronised"),
             n_children=stream.n_substreams,
         ),
         data_suspect_sensor,
@@ -1167,6 +1167,14 @@ def _make_xbgpu(
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(xbgpu_group, xbgpu, depends_ready=True, depends_init=True)
+
+        # Rename sensors that are relevant to the stream rather than the process
+        for name in [
+            "rx.timestamp",
+            "rx.unixtime",
+            "rx.missing-unixtime",
+        ]:
+            xbgpu.sensor_renames[name] = f"{stream.name}.{i}.{name}"
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate

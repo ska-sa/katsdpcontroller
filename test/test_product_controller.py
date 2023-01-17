@@ -583,7 +583,7 @@ class TestControllerInterface(BaseTestController):
         )
         assert reply == [b"1.0+2.0j"]
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq", "[1.0+2.0j]"
+            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901h.eq", "[1.0+2.0j]"
         )
         await client.request("product-deconfigure")
 
@@ -597,7 +597,7 @@ class TestControllerInterface(BaseTestController):
         assert reply == gains
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-gpucbf_m901h-eq",
+            "gpucbf_antenna_channelised_voltage.gpucbf_m901h.eq",
             "[" + ", ".join(g.decode() for g in gains) + "]",
         )
         await client.request("product-deconfigure")
@@ -608,7 +608,7 @@ class TestControllerInterface(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "1.0+2.0j")
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
-                client, f"gpucbf_antenna_channelised_voltage-{name}-eq", "[1.0+2.0j]"
+                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1.0+2.0j]"
             )
         await client.request("product-deconfigure")
 
@@ -620,7 +620,7 @@ class TestControllerInterface(BaseTestController):
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
                 client,
-                f"gpucbf_antenna_channelised_voltage-{name}-eq",
+                f"gpucbf_antenna_channelised_voltage.{name}.eq",
                 "[" + ", ".join(g.decode() for g in gains) + "]",
             )
         await client.request("product-deconfigure")
@@ -631,7 +631,7 @@ class TestControllerInterface(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "default")
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
-                client, f"gpucbf_antenna_channelised_voltage-{name}-eq", "[1.0+0.0j]"
+                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1.0+0.0j]"
             )
         await client.request("product-deconfigure")
 
@@ -640,7 +640,7 @@ class TestControllerInterface(BaseTestController):
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-sync-time",
+            "gpucbf_antenna_channelised_voltage.sync-time",
             123456789.0,  # Just to detect any change in sync time logic in generator.py
         )
         await client.request(
@@ -654,22 +654,22 @@ class TestControllerInterface(BaseTestController):
         )
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-gpucbf_m900v-delay",
+            "gpucbf_antenna_channelised_voltage.gpucbf_m900v.delay",
             "(4280000000, 0.5, 0.0, 0.0, 0.0)",
         )
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-gpucbf_m900h-delay",
+            "gpucbf_antenna_channelised_voltage.gpucbf_m900h.delay",
             "(4280000000, 0.0, 0.125, 0.0, 0.0)",
         )
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-gpucbf_m901v-delay",
+            "gpucbf_antenna_channelised_voltage.gpucbf_m901v.delay",
             "(4280000000, 0.0, 0.0, 0.25, 0.0)",
         )
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-gpucbf_m901h-delay",
+            "gpucbf_antenna_channelised_voltage.gpucbf_m901h.delay",
             "(4280000000, 0.0, 0.0, 0.0, 1.0)",
         )
         await client.request("product-deconfigure")
@@ -677,14 +677,14 @@ class TestControllerInterface(BaseTestController):
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-input-data-suspect", b"0000"
+            client, "gpucbf_antenna_channelised_voltage.input-data-suspect", b"0000"
         )
         # Kill off one of the tasks
         assert server.product is not None  # Keeps mypy happy
         server.product._nodes["f.gpucbf_antenna_channelised_voltage.1"].kill(None)
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-input-data-suspect",
+            "gpucbf_antenna_channelised_voltage.input-data-suspect",
             b"0011",
             status=Sensor.Status.WARN,
         )
@@ -692,7 +692,7 @@ class TestControllerInterface(BaseTestController):
         server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
         await assert_sensor_value(
             client,
-            "gpucbf_antenna_channelised_voltage-input-data-suspect",
+            "gpucbf_antenna_channelised_voltage.input-data-suspect",
             b"1111",
             status=Sensor.Status.ERROR,
         )
@@ -702,14 +702,14 @@ class TestControllerInterface(BaseTestController):
     ) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await assert_sensor_value(
-            client, "gpucbf_baseline_correlation_products-channel-data-suspect", b"0" * 4096
+            client, "gpucbf_baseline_correlation_products.channel-data-suspect", b"0" * 4096
         )
         # Kill off one of the tasks
         assert server.product is not None
         server.product._nodes["xb.gpucbf_baseline_correlation_products.1"].kill(None)
         await assert_sensor_value(
             client,
-            "gpucbf_baseline_correlation_products-channel-data-suspect",
+            "gpucbf_baseline_correlation_products.channel-data-suspect",
             b"0" * 1024 + b"1" * 1024 + b"0" * 2048,
             status=Sensor.Status.WARN,
         )
@@ -1189,30 +1189,30 @@ class TestController(BaseTestController):
         n_xengs = 4  # Update if sizing logic changes
         # antenna-channelised-voltage sensors
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-adc-sample-rate", 1712e6
+            client, "gpucbf_antenna_channelised_voltage.adc-sample-rate", 1712e6
         )
-        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-bandwidth", 856e6)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage.bandwidth", 856e6)
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-scale-factor-timestamp", 1712e6
+            client, "gpucbf_antenna_channelised_voltage.scale-factor-timestamp", 1712e6
         )
-        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-ants", 2)
-        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-inputs", 4)
-        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-fengs", 2)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage.n-ants", 2)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage.n-inputs", 4)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage.n-fengs", 2)
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-feng-out-bits-per-sample", 8
+            client, "gpucbf_antenna_channelised_voltage.feng-out-bits-per-sample", 8
         )
-        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage-n-chans", 4096)
+        await assert_sensor_value(client, "gpucbf_antenna_channelised_voltage.n-chans", 4096)
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage-n-chans-per-substream", 4096 // n_xengs
+            client, "gpucbf_antenna_channelised_voltage.n-chans-per-substream", 4096 // n_xengs
         )
 
         # baseline-correlation-products sensors
-        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-accs", 408 * 256)
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products.n-accs", 408 * 256)
         await assert_sensor_value(
-            client, "gpucbf_baseline_correlation_products-int-time", 408 * 256 * 4096 / 856e6
+            client, "gpucbf_baseline_correlation_products.int-time", 408 * 256 * 4096 / 856e6
         )
         await assert_sensor_value(
-            client, "gpucbf_baseline_correlation_products-xeng-out-bits-per-sample", 32
+            client, "gpucbf_baseline_correlation_products.xeng-out-bits-per-sample", 32
         )
         expected_bls_ordering = (
             "[('gpucbf_m900v', 'gpucbf_m900v'), "
@@ -1229,18 +1229,18 @@ class TestController(BaseTestController):
             "('gpucbf_m901h', 'gpucbf_m901h')]"
         )
         await assert_sensor_value(
-            client, "gpucbf_baseline_correlation_products-bls-ordering", expected_bls_ordering
+            client, "gpucbf_baseline_correlation_products.bls-ordering", expected_bls_ordering
         )
-        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-bls", 12)
-        await assert_sensor_value(client, "gpucbf_baseline_correlation_products-n-chans", 4096)
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products.n-bls", 12)
+        await assert_sensor_value(client, "gpucbf_baseline_correlation_products.n-chans", 4096)
         await assert_sensor_value(
-            client, "gpucbf_baseline_correlation_products-n-chans-per-substream", 4096 // n_xengs
+            client, "gpucbf_baseline_correlation_products.n-chans-per-substream", 4096 // n_xengs
         )
         # Test a multicast stream destination sensor
         stream_name = "gpucbf_baseline_correlation_products"
         node = product._nodes[f"multicast.{stream_name}"]
         await assert_sensor_value(
-            client, f"{stream_name}-destination", str(Endpoint(node.host, node.ports["spead"]))
+            client, f"{stream_name}.destination", str(Endpoint(node.host, node.ports["spead"]))
         )
 
     async def test_product_configure_telstate_fail(
