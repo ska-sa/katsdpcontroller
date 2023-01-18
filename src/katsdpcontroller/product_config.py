@@ -344,8 +344,8 @@ class CbfStream:
     instrument_dev_name: str
 
 
-class DigRawAntennaVoltageStreamBase(Stream):
-    """Common base class for dig.raw_antenna_voltage and sim.dig.raw_antenna_voltage."""
+class DigBasebandVoltageStreamBase(Stream):
+    """Common base class for dig.baseband_voltage and sim.dig.baseband_voltage."""
 
     def __init__(
         self,
@@ -372,8 +372,8 @@ class DigRawAntennaVoltageStreamBase(Stream):
         return data_rate(heap_size, heap_time, ratio, overhead)
 
 
-class DigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
-    stream_type: ClassVar[str] = "dig.raw_antenna_voltage"
+class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
+    stream_type: ClassVar[str] = "dig.baseband_voltage"
 
     def __init__(
         self,
@@ -404,7 +404,7 @@ class DigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
         config: Mapping[str, Any],
         src_streams: Sequence["Stream"],
         sensors: Mapping[str, Any],
-    ) -> "DigRawAntennaVoltageStream":
+    ) -> "DigBasebandVoltageStream":
         return cls(
             name,
             src_streams,
@@ -416,8 +416,8 @@ class DigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
         )
 
 
-class SimDigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
-    stream_type: ClassVar[str] = "sim.dig.raw_antenna_voltage"
+class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
+    stream_type: ClassVar[str] = "sim.dig.baseband_voltage"
 
     def __init__(
         self,
@@ -449,7 +449,7 @@ class SimDigRawAntennaVoltageStream(DigRawAntennaVoltageStreamBase):
         config: Mapping[str, Any],
         src_streams: Sequence["Stream"],
         sensors: Mapping[str, Any],
-    ) -> "SimDigRawAntennaVoltageStream":
+    ) -> "SimDigBasebandVoltageStream":
         return cls(
             name,
             src_streams,
@@ -561,8 +561,8 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
 
     stream_type: ClassVar[str] = "gpucbf.antenna_channelised_voltage"
     _valid_src_types: ClassVar[_ValidTypes] = {
-        "dig.raw_antenna_voltage",
-        "sim.dig.raw_antenna_voltage",
+        "dig.baseband_voltage",
+        "sim.dig.baseband_voltage",
     }
 
     def __init__(
@@ -589,10 +589,10 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         if len(set(self.input_labels)) != len(src_streams):
             raise ValueError("input labels are not unique")
         first = src_streams[0]
-        assert isinstance(first, DigRawAntennaVoltageStreamBase)
+        assert isinstance(first, DigBasebandVoltageStreamBase)
         antenna_names = []
         for src in src_streams:
-            assert isinstance(src, DigRawAntennaVoltageStreamBase)
+            assert isinstance(src, DigBasebandVoltageStreamBase)
             if src.antenna_name not in antenna_names:
                 antenna_names.append(src.antenna_name)
             if src.band != first.band:
@@ -644,11 +644,11 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
 
     def sources(
         self, feng_id: int
-    ) -> Tuple[DigRawAntennaVoltageStreamBase, DigRawAntennaVoltageStreamBase]:
+    ) -> Tuple[DigBasebandVoltageStreamBase, DigBasebandVoltageStreamBase]:
         """Get the two source streams for a specific F-engine."""
         return (
-            cast(DigRawAntennaVoltageStreamBase, self.src_streams[2 * feng_id]),
-            cast(DigRawAntennaVoltageStreamBase, self.src_streams[2 * feng_id + 1]),
+            cast(DigBasebandVoltageStreamBase, self.src_streams[2 * feng_id]),
+            cast(DigBasebandVoltageStreamBase, self.src_streams[2 * feng_id + 1]),
         )
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
@@ -1647,13 +1647,13 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "cbf.antenna_channelised_voltage": AntennaChannelisedVoltageStream,
     "cbf.tied_array_channelised_voltage": TiedArrayChannelisedVoltageStream,
     "cbf.baseline_correlation_products": BaselineCorrelationProductsStream,
-    "dig.raw_antenna_voltage": DigRawAntennaVoltageStream,
+    "dig.baseband_voltage": DigBasebandVoltageStream,
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,
     "sim.cbf.antenna_channelised_voltage": SimAntennaChannelisedVoltageStream,
     "sim.cbf.tied_array_channelised_voltage": SimTiedArrayChannelisedVoltageStream,
     "sim.cbf.baseline_correlation_products": SimBaselineCorrelationProductsStream,
-    "sim.dig.raw_antenna_voltage": SimDigRawAntennaVoltageStream,
+    "sim.dig.baseband_voltage": SimDigBasebandVoltageStream,
     "cam.http": CamHttpStream,
     "sdp.vis": VisStream,
     "sdp.beamformer": BeamformerStream,

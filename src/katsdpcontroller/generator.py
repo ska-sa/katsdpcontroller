@@ -437,7 +437,7 @@ def _make_meta_writer(
 def _make_dsim(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    streams: Iterable[product_config.SimDigRawAntennaVoltageStream],
+    streams: Iterable[product_config.SimDigBasebandVoltageStream],
     sync_time: int,
 ) -> scheduler.LogicalNode:
     """Create the dsim process for a single antenna.
@@ -1009,7 +1009,7 @@ def _make_xbgpu(
 
     input_rate = (
         sum(
-            cast(product_config.DigRawAntennaVoltageStreamBase, dig).adc_sample_rate
+            cast(product_config.DigBasebandVoltageStreamBase, dig).adc_sample_rate
             for dig in acv.src_streams
         )
         * acv.bits_per_sample
@@ -2354,9 +2354,7 @@ def build_logical_graph(
     # Add SPEAD endpoints to the graph.
     input_multicast = []
     for stream in configuration.streams:
-        if isinstance(
-            stream, (product_config.CbfStream, product_config.DigRawAntennaVoltageStream)
-        ):
+        if isinstance(stream, (product_config.CbfStream, product_config.DigBasebandVoltageStream)):
             url = stream.url
             if url.scheme == "spead":
                 node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
@@ -2372,13 +2370,13 @@ def build_logical_graph(
             g.add_edge(node, cam2telstate, depends_ready=True)
 
     # Simulators
-    def dsim_key(stream: product_config.SimDigRawAntennaVoltageStream) -> Tuple[str, float]:
+    def dsim_key(stream: product_config.SimDigBasebandVoltageStream) -> Tuple[str, float]:
         """Key for dsim streams that should be run in the same process."""
         return (stream.antenna.name, stream.adc_sample_rate)
 
     sync_time = int(time.time())
     for _, streams in itertools.groupby(
-        sorted(configuration.by_class(product_config.SimDigRawAntennaVoltageStream), key=dsim_key),
+        sorted(configuration.by_class(product_config.SimDigBasebandVoltageStream), key=dsim_key),
         key=dsim_key,
     ):
         _make_dsim(g, configuration, streams, sync_time)

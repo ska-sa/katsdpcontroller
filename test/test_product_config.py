@@ -22,8 +22,8 @@ from katsdpcontroller.product_config import (
     CamHttpStream,
     Configuration,
     ContinuumImageStream,
-    DigRawAntennaVoltageStream,
-    DigRawAntennaVoltageStreamBase,
+    DigBasebandVoltageStream,
+    DigBasebandVoltageStreamBase,
     FlagsStream,
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
@@ -31,7 +31,7 @@ from katsdpcontroller.product_config import (
     ServiceOverride,
     SimAntennaChannelisedVoltageStream,
     SimBaselineCorrelationProductsStream,
-    SimDigRawAntennaVoltageStream,
+    SimDigBasebandVoltageStream,
     SimTiedArrayChannelisedVoltageStream,
     Simulation,
     SpectralImageStream,
@@ -243,13 +243,13 @@ class TestCamHttpStream:
         assert cam_http.url == yarl.URL("http://test.invalid")
 
 
-class TestDigRawAntennaVoltageStream:
-    """Test :class:`~.DigRawAntennaVoltageStream`."""
+class TestDigBasebandVoltageStream:
+    """Test :class:`~.DigBasebandVoltageStream`."""
 
     @pytest.fixture
     def config(self) -> Dict[str, Any]:
         return {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "url": "spead://239.0.0.0+7:7148",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
@@ -258,7 +258,7 @@ class TestDigRawAntennaVoltageStream:
         }
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
-        dig = DigRawAntennaVoltageStream.from_config(Options(), "m000h", config, [], {})
+        dig = DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.url == yarl.URL(config["url"])
         assert dig.adc_sample_rate == config["adc_sample_rate"]
         assert dig.centre_frequency == config["centre_frequency"]
@@ -268,13 +268,13 @@ class TestDigRawAntennaVoltageStream:
         assert dig.data_rate(1.0, 0) == 1712e7
 
 
-class TestSimDigRawAntennaVoltageStream:
-    """Test :class:`~.SimDigRawAntennaVoltageStream`."""
+class TestSimDigBasebandVoltageStream:
+    """Test :class:`~.SimDigBasebandVoltageStream`."""
 
     @pytest.fixture
     def config(self) -> Dict[str, Any]:
         return {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "band": "l",
@@ -282,7 +282,7 @@ class TestSimDigRawAntennaVoltageStream:
         }
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
-        dig = SimDigRawAntennaVoltageStream.from_config(Options(), "m000h", config, [], {})
+        dig = SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.adc_sample_rate == config["adc_sample_rate"]
         assert dig.centre_frequency == config["centre_frequency"]
         assert dig.band == config["band"]
@@ -295,11 +295,11 @@ class TestSimDigRawAntennaVoltageStream:
     def test_bad_antenna_description(self, config: Dict[str, Any]) -> None:
         with pytest.raises(ValueError, match="Invalid antenna description 'bad antenna': "):
             config["antenna"] = "bad antenna"
-            SimDigRawAntennaVoltageStream.from_config(Options(), "m000h", config, [], {})
+            SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
 
     def test_command_line_extra(self, config: Dict[str, Any]) -> None:
         config["command_line_extra"] = ["--extra-arg"]
-        dig = SimDigRawAntennaVoltageStream.from_config(Options(), "m000h", config, [], {})
+        dig = SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.command_line_extra == config["command_line_extra"]
 
 
@@ -337,14 +337,14 @@ class TestAntennaChannelisedVoltageStream:
         assert acv.instrument_dev_name == "narrow1"
 
 
-def make_dig_raw_antenna_voltage(name: str) -> DigRawAntennaVoltageStream:
+def make_dig_baseband_voltage(name: str) -> DigBasebandVoltageStream:
     urls = {
         "m000h": "spead2://239.1.2.0+7:7148",
         "m000v": "spead2://239.1.2.8+7:7148",
         "m002h": "spead2://239.1.2.16+7:7148",
         "m002v": "spead2://239.1.2.24+7:7148",
     }
-    return DigRawAntennaVoltageStream(
+    return DigBasebandVoltageStream(
         name,
         [],
         url=yarl.URL(urls[name]),
@@ -355,8 +355,8 @@ def make_dig_raw_antenna_voltage(name: str) -> DigRawAntennaVoltageStream:
     )
 
 
-def make_sim_dig_raw_antenna_voltage(name: str) -> SimDigRawAntennaVoltageStream:
-    return SimDigRawAntennaVoltageStream(
+def make_sim_dig_baseband_voltage(name: str) -> SimDigBasebandVoltageStream:
+    return SimDigBasebandVoltageStream(
         name,
         [],
         adc_sample_rate=1712000000.0,
@@ -378,19 +378,19 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         }
 
     @pytest.fixture
-    def src_streams(self, config: Dict[str, Any]) -> List[DigRawAntennaVoltageStreamBase]:
+    def src_streams(self, config: Dict[str, Any]) -> List[DigBasebandVoltageStreamBase]:
         # Use a real digitiser for one of them, to test mixing
         return [
             (
-                make_sim_dig_raw_antenna_voltage(name)
+                make_sim_dig_baseband_voltage(name)
                 if name != "m002h"
-                else make_dig_raw_antenna_voltage(name)
+                else make_dig_baseband_voltage(name)
             )
             for name in config["src_streams"]
         ]
 
     def test_from_config(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
             Options(), "wide1_acv", config, src_streams, {}
@@ -411,7 +411,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.command_line_extra == []
 
     def test_n_chans_not_power_of_two(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         for n_chans in [0, 3, 17]:
             with pytest.raises(ValueError):
@@ -421,7 +421,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
                 )
 
     def test_too_few_channels(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         with pytest.raises(ValueError):
             config["n_chans"] = 2
@@ -430,7 +430,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_src_streams_odd(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         with pytest.raises(ValueError, match="does not have an even number of elements"):
             del config["src_streams"][-1]
@@ -440,7 +440,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_band_mismatch(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         with pytest.raises(ValueError, match=r"Inconsistent bands \(both l and u\)"):
             src_streams[1].band = "u"
@@ -449,7 +449,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_adc_sample_rate_mismatch(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         with pytest.raises(
             ValueError, match=r"Inconsistent ADC sample rates \(both 1712000000\.0 and 1\.0\)"
@@ -460,7 +460,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_centre_frequency_mismatch(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         with pytest.raises(
             ValueError, match=r"Inconsistent centre frequencies \(both 1284000000\.0 and 1\.0\)"
@@ -471,7 +471,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_input_labels(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         config["input_labels"] = ["m900h", "m900v", "m901h", "m901v"]
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
@@ -480,7 +480,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.input_labels == config["input_labels"]
 
     def test_bad_input_labels(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         config["input_labels"] = ["m900h"]
         with pytest.raises(ValueError, match="input_labels has 1 elements, expected 4"):
@@ -494,7 +494,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             )
 
     def test_w_cutoff(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         config["w_cutoff"] = 0.9
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
@@ -503,7 +503,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.w_cutoff == 0.9
 
     def test_command_line_extra(
-        self, config: Dict[str, Any], src_streams: List[DigRawAntennaVoltageStreamBase]
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         config["command_line_extra"] = ["--extra-arg"]
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
@@ -587,7 +587,7 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
 
 def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
-        make_sim_dig_raw_antenna_voltage(name) for name in ["m000h", "m000v", "m001h", "m001v"]
+        make_sim_dig_baseband_voltage(name) for name in ["m000h", "m000v", "m001h", "m001v"]
     ]
     return GpucbfAntennaChannelisedVoltageStream("wide1_acv", src_streams, n_chans=4096)
 

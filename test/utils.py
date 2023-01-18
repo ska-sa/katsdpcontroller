@@ -27,28 +27,28 @@ CONFIG = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m900h": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m901v": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m901, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m901h": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
@@ -191,28 +191,28 @@ CONFIG_CBF_ONLY = """{
     "version": "3.1",
     "outputs": {
         "gpucbf_m900v": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m900h": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m900, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m901v": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "antenna": "m901, 0:0:0, 0:0:0, 0, 0"
         },
         "gpucbf_m901h": {
-            "type": "sim.dig.raw_antenna_voltage",
+            "type": "sim.dig.baseband_voltage",
             "band": "l",
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
