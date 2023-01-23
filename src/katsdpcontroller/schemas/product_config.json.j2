@@ -122,7 +122,7 @@
                         "type": {
                             "enum": [
 {% if version >= "3.1" %}
-                                "dig.raw_antenna_voltage",
+                                "dig.baseband_voltage",
 {% endif %}
                                 "cbf.antenna_channelised_voltage",
                                 "cbf.baseline_correlation_products",
@@ -139,7 +139,7 @@
                     "allOf": [
 {% if version >= "3.1" %}
                         {
-                            "if": {"properties": {"type": {"const": "dig.raw_antenna_voltage"}}},
+                            "if": {"properties": {"type": {"const": "dig.baseband_voltage"}}},
                             "then": {
                                 "properties": {
                                     "type": {},
@@ -283,7 +283,7 @@
                                 "sim.cbf.tied_array_channelised_voltage",
 {% endif %}
 {% if version >= "3.1" %}
-                                "sim.dig.raw_antenna_voltage",
+                                "sim.dig.baseband_voltage",
                                 "gpucbf.antenna_channelised_voltage",
                                 "gpucbf.baseline_correlation_products",
 {% endif %}
@@ -540,7 +540,7 @@
                             }
                         },
                         {
-                            "if": {"properties": {"type": {"const": "sim.dig.raw_antenna_voltage"}}},
+                            "if": {"properties": {"type": {"const": "sim.dig.baseband_voltage"}}},
                             "then": {
                                 "properties": {
                                     "type": {},
