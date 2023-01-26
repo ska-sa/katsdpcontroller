@@ -98,12 +98,21 @@ class HWLocParser:
         # cores and devices. We need to ascend the tree to find the container.
         parent_map = {child: parent for parent in self._tree.iter() for child in parent}
         for i in range(len(self._nodes)):
-            if int(self._nodes[i].get("os_index", 0)) != i:
+            node = self._nodes[i]
+            if int(node.get("os_index", 0)) != i:
                 raise RuntimeError("NUMA nodes are not numbered contiguously by the OS")
-            while not self._nodes[i].findall(".//object[@type='PU']") or not self._nodes[i].findall(
-                ".//object[@type='Bridge']"
+            while not node.findall(".//object[@type='PU']"):
+                node = parent_map[node]
+            # On a single-NUMA system this node doesn't contain the PCIe
+            # devices. Keep ascending until that would cause us to escape the
+            # local NUMA node.
+            n_cpus = len(node.findall(".//object[@type='PU']"))
+            while (
+                node in parent_map
+                and len(parent_map[node].findall(".//object[@type='PU']")) == n_cpus
             ):
-                self._nodes[i] = parent_map[self._nodes[i]]
+                node = parent_map[node]
+            self._nodes[i] = node
 
     def cpus_by_node(self):
         out = []
