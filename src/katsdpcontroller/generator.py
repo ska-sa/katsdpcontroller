@@ -1734,8 +1734,8 @@ def _make_cal(
     # This scale factor gives 34 total CPUs for 64A, 32K, 4+s integration, which
     # will get clamped down slightly.
     cpus = 2e-6 * effective_vis / effective_int / n_cal
-    # Always (except in development mode, with less_resources = True) have at least a whole CPU for the
-    # pipeline.
+    # Always (except in development mode, with less_resources = True)
+    # have at least a whole CPU for the pipeline.
     if not configuration.options.develop_opts.less_resources:
         cpus = max(cpus, 1)
     # Reserve a separate CPU for the accumulator
