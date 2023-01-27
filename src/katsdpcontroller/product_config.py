@@ -219,18 +219,41 @@ class ServiceOverride:
         )
 
 
+class DevelopOptions:
+    def __init__(
+        self, *, any_gpu: bool = True, disable_ibv: bool = True, less_resources: bool = True
+    ) -> None:
+        self.any_gpu = any_gpu
+        self.disable_ibv = disable_ibv
+        self.less_resources = less_resources
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
+        return cls(
+            any_gpu=config.get("any_gpu", True),
+            disable_ibv=config.get("disable_ibv", True),
+            less_resources=config.get("less_resources", True),
+        )
+
+
 class Options:
     def __init__(
         self,
         *,
         develop: bool = False,
+        develop_opts: Mapping[str, DevelopOptions] = {},
         wrapper: Optional[str] = None,
         image_tag: Optional[str] = None,
         image_overrides: Mapping[str, str] = {},
         service_overrides: Mapping[str, ServiceOverride] = {},
         interface_mode: bool = False,
     ) -> None:
-        self.develop = develop
+        if not develop:
+            self.develop_opts = DevelopOptions(
+                any_gpu=False, disable_ibv=False, less_resources=False
+            )
+        else:
+            self.develop_opts = DevelopOptions.from_config(develop_opts)
         self.wrapper = wrapper
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
@@ -247,6 +270,7 @@ class Options:
         }
         return cls(
             develop=config.get("develop", False),
+            develop_opts=config.get("develop_opts", {}),
             wrapper=config.get("wrapper"),
             image_tag=config.get("image_tag"),
             image_overrides=config.get("image_overrides", {}),
@@ -1309,7 +1333,7 @@ class VisStream(Stream):
             continuum_factor=config["continuum_factor"],
             excise=config.get("excise", True),
             archive=config["archive"],
-            n_servers=4 if not options.develop else 2,
+            n_servers=4 if not options.develop_opts.less_resources else 2,
         )
 
     def compatible(self, other: "VisStream") -> bool:

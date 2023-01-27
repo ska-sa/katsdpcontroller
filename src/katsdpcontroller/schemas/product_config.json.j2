@@ -611,6 +611,13 @@
             "additionalProperties": false,
             "properties": {
                 "develop": {"type": "boolean", "default": false},
+{% if version >= "3.2" %}
+		"develop_opts":{
+                    "any_gpu": {"type": "boolean", "default": true},
+                    "disable_ibverbs": {"type": "boolean", "default": true},
+                    "less_resources": {"type": "boolean", "default": true}
+                     },
+{% endif %}
                 "wrapper": {"type": "string", "format": "uri"},
                 "image_tag": {"type": "string" },
 {% if version >= "3.1" %}
