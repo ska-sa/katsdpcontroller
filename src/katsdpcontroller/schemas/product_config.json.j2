@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["2.4", "2.5", "2.6", "3.0", "3.1"]
+            "enum": ["2.4", "2.5", "2.6", "3.0", "3.1", "3.2"]
         }
     }
 }
@@ -612,11 +612,21 @@
             "properties": {
                 "develop": {"type": "boolean", "default": false},
 {% if version >= "3.2" %}
-		"develop_opts":{
-                    "any_gpu": {"type": "boolean", "default": true},
-                    "disable_ibverbs": {"type": "boolean", "default": true},
-                    "less_resources": {"type": "boolean", "default": true}
-                     },
+                "develop": {
+                    "oneOf": [
+                        {"type": "boolean"},
+                        {
+                            "type": "object",
+                                "properties": {
+                                "any_gpu": {"type": "boolean", "default": true},
+                                "disable_ibverbs": {"type": "boolean", "default": true},
+                                "less_resources": {"type": "boolean", "default": true}
+                            },
+                            "additionalProperties": false
+                        }
+                    ],
+                    "default": false
+                },
 {% endif %}
                 "wrapper": {"type": "string", "format": "uri"},
                 "image_tag": {"type": "string" },
