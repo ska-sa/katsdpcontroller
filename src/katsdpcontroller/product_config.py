@@ -221,7 +221,7 @@ class ServiceOverride:
 
 class DevelopOptions:
     def __init__(
-        self, *, any_gpu: bool = True, disable_ibv: bool = True, less_resources: bool = True
+        self, *, any_gpu: bool = False, disable_ibv: bool = False, less_resources: bool = False
     ) -> None:
         self.any_gpu = any_gpu
         self.disable_ibv = disable_ibv
@@ -230,9 +230,9 @@ class DevelopOptions:
     @classmethod
     def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
         return cls(
-            any_gpu=config.get("any_gpu", True),
-            disable_ibv=config.get("disable_ibv", True),
-            less_resources=config.get("less_resources", True),
+            any_gpu=config.get("any_gpu", False),
+            disable_ibv=config.get("disable_ibv", False),
+            less_resources=config.get("less_resources", False),
         )
 
     @classmethod
@@ -251,13 +251,12 @@ class Options:
         service_overrides: Mapping[str, ServiceOverride] = {},
         interface_mode: bool = False,
     ) -> None:
-        if type(develop) == bool:
+        if isinstance(develop, bool):
             self.develop = DevelopOptions.from_bool(develop)
         else:
             self.develop = DevelopOptions.from_config(develop)
         self.wrapper = wrapper
         self.image_tag = image_tag
-        self.image_overrides = dict(image_overrides)
         self.image_overrides = dict(image_overrides)
         self.service_overrides = dict(service_overrides)
         # Command line --interface mode - not set via config dict, but
@@ -2038,7 +2037,7 @@ def _upgrade(config):
         config["version"] = "3.0"
 
     # Upgrade to latest 3.x
-    config["version"] = "3.1"
+    config["version"] = "3.2"
 
     _validate(config)  # Should never fail if the input was valid
     return config

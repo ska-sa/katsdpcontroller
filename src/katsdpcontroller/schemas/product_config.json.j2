@@ -610,24 +610,24 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "develop": {"type": "boolean", "default": false},
-{% if version >= "3.2" %}
                 "develop": {
                     "oneOf": [
-                        {"type": "boolean"},
+                        {"type": "boolean", "default": false}
+{% if version >= "3.2" %}
+                    ,
                         {
                             "type": "object",
-                                "properties": {
-                                "any_gpu": {"type": "boolean", "default": true},
-                                "disable_ibverbs": {"type": "boolean", "default": true},
-                                "less_resources": {"type": "boolean", "default": true}
+                            "properties": {
+                                "any_gpu": {"type": "boolean", "default": false},
+                                "disable_ibverbs": {"type": "boolean", "default": false},
+                                "less_resources": {"type": "boolean", "default": false}
                             },
                             "additionalProperties": false
                         }
+{% endif %}
                     ],
                     "default": false
                 },
-{% endif %}
                 "wrapper": {"type": "string", "format": "uri"},
                 "image_tag": {"type": "string" },
 {% if version >= "3.1" %}
