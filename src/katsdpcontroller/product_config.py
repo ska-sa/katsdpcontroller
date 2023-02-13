@@ -219,18 +219,42 @@ class ServiceOverride:
         )
 
 
+class DevelopOptions:
+    def __init__(
+        self, *, any_gpu: bool = False, disable_ibv: bool = False, less_resources: bool = False
+    ) -> None:
+        self.any_gpu = any_gpu
+        self.disable_ibv = disable_ibv
+        self.less_resources = less_resources
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
+        return cls(
+            any_gpu=config.get("any_gpu", False),
+            disable_ibv=config.get("disable_ibv", False),
+            less_resources=config.get("less_resources", False),
+        )
+
+    @classmethod
+    def from_bool(cls, opt: bool) -> "DevelopOptions":
+        return cls(any_gpu=opt, disable_ibv=opt, less_resources=opt)
+
+
 class Options:
     def __init__(
         self,
         *,
-        develop: bool = False,
+        develop: Union[bool, Mapping[str, bool]] = False,
         wrapper: Optional[str] = None,
         image_tag: Optional[str] = None,
         image_overrides: Mapping[str, str] = {},
         service_overrides: Mapping[str, ServiceOverride] = {},
         interface_mode: bool = False,
     ) -> None:
-        self.develop = develop
+        if isinstance(develop, bool):
+            self.develop = DevelopOptions.from_bool(develop)
+        else:
+            self.develop = DevelopOptions.from_config(develop)
         self.wrapper = wrapper
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
@@ -1309,7 +1333,7 @@ class VisStream(Stream):
             continuum_factor=config["continuum_factor"],
             excise=config.get("excise", True),
             archive=config["archive"],
-            n_servers=4 if not options.develop else 2,
+            n_servers=4 if not options.develop.less_resources else 2,
         )
 
     def compatible(self, other: "VisStream") -> bool:
@@ -2013,7 +2037,7 @@ def _upgrade(config):
         config["version"] = "3.0"
 
     # Upgrade to latest 3.x
-    config["version"] = "3.1"
+    config["version"] = "3.2"
 
     _validate(config)  # Should never fail if the input was valid
     return config
