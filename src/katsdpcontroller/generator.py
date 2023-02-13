@@ -117,6 +117,8 @@ OBJ_DATA_VOL = scheduler.VolumeRequest("obj_data", "/var/kat/data", "RW")
 CONFIG_VOL = scheduler.VolumeRequest("config", "/var/kat/config", "RW")
 #: Number of components in a complex number
 COMPLEX = 2
+#: Autotune fallback behaviour
+KATSDPSIGPROC_TUNE_MATCH = defaults.KATSDPSIGPROC_TUNE_MATCH
 
 logger = logging.getLogger(__name__)
 
@@ -307,15 +309,19 @@ class TelstateTask(ProductPhysicalTask):
 
 class IngestTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph, image=None):
-        # In develop mode, the GPU can be anything, and we need to pick a
+        # In develop.any_gpu mode, the GPU can be anything, and we need to pick a
         # matching image.
         if image is None:
             gpu = self.agent.gpus[self.allocation.gpus[0].index]
             gpu_name = normalise_gpu_name(gpu.name)
             image = await resolver.image_resolver("katsdpingest_" + gpu_name)
             if gpu != defaults.INGEST_GPU_NAME:
-                logger.info("Develop mode: using %s for ingest", image.path)
+                logger.info("Develop.any_gpu mode: using %s for ingest", image.path)
         await super().resolve(resolver, graph, image)
+        parameters = self.taskinfo.container.docker.setdefault("parameters", [])
+        parameters.append(
+            {"key": "env", "value": f"KATSDPSIGPROC_TUNE_MATCH={KATSDPSIGPROC_TUNE_MATCH}"}
+        )
 
 
 def _mb(value):
@@ -1651,7 +1657,7 @@ def _make_ingest(
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         if develop.disable_ibv:
-            ingest.command = ["ingest.py"] 
+            ingest.command = ["ingest.py"]
         else:
             ingest.command = ["capambel", "-c", "cap_net_raw+p", "--", "ingest.py"]
             ingest.capabilities.append("NET_RAW")
