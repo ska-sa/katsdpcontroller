@@ -1651,7 +1651,7 @@ def _make_ingest(
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
         if develop.disable_ibv:
-            ingest.command = ["ingest.py"] 
+            ingest.command = ["ingest.py"]
         else:
             ingest.command = ["capambel", "-c", "cap_net_raw+p", "--", "ingest.py"]
             ingest.capabilities.append("NET_RAW")
