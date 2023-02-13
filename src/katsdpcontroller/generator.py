@@ -1650,7 +1650,11 @@ def _make_ingest(
             ingest.physical_factory = IngestTask
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
-        ingest.command = ["ingest.py"]
+        if develop.disable_ibv:
+            ingest.command = ["ingest.py"] 
+        else:
+            ingest.command = ["capambel", "-c", "cap_net_raw+p", "--", "ingest.py"]
+            ingest.capabilities.append("NET_RAW")
         ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
         ingest.wait_ports = ["port"]
         ingest.gpus = [scheduler.GPURequest()]
