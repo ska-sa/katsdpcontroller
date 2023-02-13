@@ -6,7 +6,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "enum": ["2.4", "2.5", "2.6", "3.0", "3.1"]
+            "enum": ["2.4", "2.5", "2.6", "3.0", "3.1", "3.2"]
         }
     }
 }
@@ -610,7 +610,23 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "develop": {"type": "boolean", "default": false},
+                "develop": {
+                    "oneOf": [
+{% if version >= "3.2" %}
+                        {
+                            "type": "object",
+                            "properties": {
+                                "any_gpu": {"type": "boolean", "default": false},
+                                "disable_ibverbs": {"type": "boolean", "default": false},
+                                "less_resources": {"type": "boolean", "default": false}
+                            },
+                            "additionalProperties": false
+                        },
+{% endif %}
+                        {"type": "boolean", "default": false}
+                    ],
+                    "default": false
+                },
                 "wrapper": {"type": "string", "format": "uri"},
                 "image_tag": {"type": "string" },
 {% if version >= "3.1" %}

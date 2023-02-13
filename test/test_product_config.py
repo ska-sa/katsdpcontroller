@@ -183,21 +183,39 @@ class TestServiceOverride:
 class TestOptions:
     """Test :class:`~.Options`."""
 
-    def test_from_config(self) -> None:
+    def test_from_config_dict(self) -> None:
+        config = {
+            "develop": {"disable_ibv": True, "less_resources": True},
+            "wrapper": "http://test.invalid/wrapper.sh",
+            "service_overrides": {"service1": {"host": "testhost"}},
+        }
+        options = Options.from_config(config)
+        assert options.develop.any_gpu is False
+        assert options.develop.disable_ibv is True
+        assert options.develop.less_resources is True
+        assert options.wrapper == config["wrapper"]
+        assert list(options.service_overrides.keys()) == ["service1"]
+        assert options.service_overrides["service1"].host == "testhost"
+
+    def test_from_config_bool(self) -> None:
         config = {
             "develop": True,
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
         }
         options = Options.from_config(config)
-        assert options.develop == config["develop"]
+        assert options.develop.any_gpu is True
+        assert options.develop.disable_ibv is True
+        assert options.develop.less_resources is True
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
 
     def test_defaults(self) -> None:
         options = Options.from_config({})
-        assert options.develop is False
+        assert options.develop.any_gpu is False
+        assert options.develop.disable_ibv is False
+        assert options.develop.less_resources is False
         assert options.wrapper is None
         assert options.service_overrides == {}
 
@@ -1302,7 +1320,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "3.1",
+        "version": "3.2",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1464,7 +1482,7 @@ def config_v2() -> Dict[str, Any]:
 @pytest.fixture
 def config_sim() -> Dict[str, Any]:
     return {
-        "version": "3.1",
+        "version": "3.2",
         "outputs": {
             "acv": {
                 "type": "sim.cbf.antenna_channelised_voltage",
