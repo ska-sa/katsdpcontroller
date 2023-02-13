@@ -612,9 +612,7 @@
             "properties": {
                 "develop": {
                     "oneOf": [
-                        {"type": "boolean", "default": false}
 {% if version >= "3.2" %}
-                    ,
                         {
                             "type": "object",
                             "properties": {
@@ -623,8 +621,9 @@
                                 "less_resources": {"type": "boolean", "default": false}
                             },
                             "additionalProperties": false
-                        }
+                        },
 {% endif %}
+                        {"type": "boolean", "default": false}
                     ],
                     "default": false
                 },
