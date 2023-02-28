@@ -9,7 +9,7 @@ services:
 
   mesos-master:
     network_mode: host
-    image: mesos/mesos-centos:1.8.x
+    image: mesos/mesos-centos:1.9.x
     depends_on:
       - exhibitor
     environment:
@@ -28,7 +28,7 @@ services:
   mesos-agent:
     network_mode: host
     pid: host
-    image: mesos/mesos-centos:1.8.x
+    image: mesos/mesos-centos:1.9.x
     depends_on:
       - exhibitor
     environment:
@@ -59,7 +59,7 @@ services:
 
   singularity:
     network_mode: host
-    image: hubspot/singularityservice:1.2.0
+    image: hubspot/singularityservice:1.4.0
     depends_on:
       - mesos-master
       - exhibitor
@@ -68,7 +68,7 @@ services:
 
   minio:
     network_mode: host
-    image: minio/minio:RELEASE.2020-06-12T00-06-19Z
+    image: minio/minio:RELEASE.2023-02-27T18-10-45Z
     command: server --address 127.0.0.1:9000 /data
     volumes:
       - ./minio-data:/data
@@ -89,7 +89,7 @@ services:
 
   grafana:
     network_mode: host
-    image: grafana/grafana:6.5.2
+    image: grafana/grafana:9.4.1
     depends_on:
       - prometheus
     environment:
@@ -105,7 +105,7 @@ services:
 
   logstash:
     network_mode: host
-    image: docker.elastic.co/logstash/logstash-oss:7.3.1
+    image: docker.elastic.co/logstash/logstash:7.17.9
     command: logstash -w 1 -f /etc/logstash.conf --http.host 127.0.0.1
     environment:
       - LS_HEAP_SIZE=2048m
@@ -116,7 +116,7 @@ services:
 
   elasticsearch:
     network_mode: host
-    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.1
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     environment:
       - discovery.type=single-node
       - network.host=127.0.0.1
@@ -136,7 +136,7 @@ services:
 
   consul:
     network_mode: host
-    image: consul:1.7.3
+    image: consul:1.15.0
     command: consul agent -dev -bind=127.0.0.1 -client=127.0.0.1 -config-dir=/etc/consul.d
     volumes:
       - ./etc/consul.d:/etc/consul.d:ro
@@ -148,7 +148,7 @@ services:
       - "127.0.0.1:9118:8080"
 
   registry:
-    image: registry:2.7.1
+    image: registry:2.8.1
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
