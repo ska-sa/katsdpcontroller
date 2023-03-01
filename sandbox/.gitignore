@@ -1,1 +1,3 @@
 sdp_image_tag
+etc/mesos-agent/attributes
+etc/mesos-agent/resources
