@@ -73,8 +73,8 @@ services:
     volumes:
       - ./minio-data:/data
     environment:
-      MINIO_ACCESS_KEY: minioaccesskey
-      MINIO_SECRET_KEY: miniosecretkey
+      MINIO_ROOT_USER: minioaccesskey
+      MINIO_ROOT_PASSWORD: miniosecretkey
 
   prometheus:
     network_mode: host
