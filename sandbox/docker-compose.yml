@@ -120,6 +120,7 @@ services:
     environment:
       - discovery.type=single-node
       - network.host=127.0.0.1
+      - ES_JAVA_OPTS=-Xmx2g -Xms2g
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
