@@ -2,8 +2,8 @@
 
 version: "2.3"
 services:
-  exhibitor:
-    image: netflixoss/exhibitor:1.5.2
+  zookeeper:
+    image: zookeeper:3.8.1
     ports:
       - "127.0.0.1:2181:2181"
 
@@ -11,7 +11,7 @@ services:
     network_mode: host
     image: avhost/mesos-mini:1.11.0-0.2.0-1
     depends_on:
-      - exhibitor
+      - zookeeper
     environment:
       MESOS_IP: 127.0.0.1
       MESOS_HOSTNAME: 127.0.0.1
@@ -30,7 +30,7 @@ services:
     pid: host
     image: avhost/mesos-mini:1.11.0-0.2.0-1
     depends_on:
-      - exhibitor
+      - zookeeper
     environment:
       MESOS_IP: 127.0.0.1
       MESOS_HOSTNAME: 127.0.0.1
@@ -62,7 +62,7 @@ services:
     image: hubspot/singularityservice:1.4.0
     depends_on:
       - mesos-master
-      - exhibitor
+      - zookeeper
     volumes:
       - ./etc/singularity/singularity.yaml:/etc/singularity/singularity.yaml:ro
 
