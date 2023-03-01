@@ -9,7 +9,7 @@ services:
 
   mesos-master:
     network_mode: host
-    image: mesos/mesos-centos:1.9.x
+    image: avhost/mesos-mini:1.11.0-0.2.0-1
     depends_on:
       - exhibitor
     environment:
@@ -28,7 +28,7 @@ services:
   mesos-agent:
     network_mode: host
     pid: host
-    image: mesos/mesos-centos:1.9.x
+    image: avhost/mesos-mini:1.11.0-0.2.0-1
     depends_on:
       - exhibitor
     environment:
@@ -36,7 +36,7 @@ services:
       MESOS_HOSTNAME: 127.0.0.1
       MESOS_PORT: 5051
       MESOS_MASTER: zk://127.0.0.1:2181/mesos
-      MESOS_CONTAINERIZERS: docker,mesos
+      MESOS_CONTAINERIZERS: docker
       MESOS_DOCKER_CONFIG: file:///etc/mesos/config.json
       MESOS_EXECUTOR_REGISTRATION_TIMEOUT: 5mins
       MESOS_WORK_DIR: /var/tmp/mesos
@@ -45,8 +45,8 @@ services:
       - "${HOME}/.docker/config.json:/etc/mesos/config.json:ro"
       - /var/run/docker.sock:/var/run/docker.sock
       - /sys:/sys
-      - /usr/bin/docker:/usr/local/bin/docker
       - ./etc/mesos-agent:/etc/mesos-agent:ro
+      - ./etc/default/mesos-agent:/etc/default/mesos-agent:ro
       # /var/tmp/mesos needs to be the same on the host and the container,
       # because mesos-agent writes to the sandbox and then tells the host
       # Docker to bind-mount it into the newly started container.
