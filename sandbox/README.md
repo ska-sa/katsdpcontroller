@@ -62,7 +62,7 @@ virtual environment, are:
 pip install -e .
 pip install docker
 cd sandbox
-docker-compose up -d registry
+docker compose up -d registry
 ./update-local-registry.py
 ```
 
@@ -90,7 +90,7 @@ which will be faster since it will avoid building a number of images.
    amount of memory or CPU that Mesos thinks it has so that you can simulate
    larger arrays (at the risk of gobbling up all the RAM in your machine!)
 
-2. Run `docker-compose up -d`. Use `docker-compose ps` to check that the
+2. Run `docker compose up -d`. Use `docker compose ps` to check that the
    processes are all starting up.
 
 3. After the system has been left to settle for a bit, run `./elk-setup.sh`.
@@ -108,7 +108,7 @@ which will be faster since it will avoid building a number of images.
 
 5. Sometimes Singularity doesn't realise that it should be the master if it is
    started too soon after Zookeeper. To be on the safe side, run
-   `docker-compose restart singularity` to get it going.
+   `docker compose restart singularity` to get it going.
 
 ## Preparing an image tag
 
