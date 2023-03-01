@@ -307,14 +307,10 @@ class TelstateTask(ProductPhysicalTask):
 
 class IngestTask(ProductPhysicalTask):
     async def resolve(self, resolver, graph, image=None):
-        # In develop mode, the GPU can be anything, and we need to pick a
-        # matching image.
         if image is None:
             gpu = self.agent.gpus[self.allocation.gpus[0].index]
-            gpu_name = normalise_gpu_name(gpu.name)
-            image = await resolver.image_resolver("katsdpingest_" + gpu_name)
-            if gpu != defaults.INGEST_GPU_NAME:
-                logger.info("Develop mode: using %s for ingest", image.path)
+            image = await resolver.image_resolver("katsdpingest_" + normalise_gpu_name(gpu.name))
+            logger.info("Using %s for ingest", image.path)
         await super().resolve(resolver, graph, image)
 
 
@@ -1655,6 +1651,9 @@ def _make_ingest(
         else:
             ingest.command = ["capambel", "-c", "cap_net_raw+p", "--", "ingest.py"]
             ingest.capabilities.append("NET_RAW")
+        ingest.taskinfo.command.environment.setdefault("variables", []).extend(
+            [{"name": "KATSDPSIGPROC_TUNE_MATCH", "value": defaults.KATSDPSIGPROC_TUNE_MATCH}]
+        )
         ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
         ingest.wait_ports = ["port"]
         ingest.gpus = [scheduler.GPURequest()]
