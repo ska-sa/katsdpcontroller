@@ -9,7 +9,7 @@ services:
 
   mesos-master:
     network_mode: host
-    image: avhost/mesos-mini:1.11.0-0.2.0-1
+    image: quay.io/ska-sa/mesos
     depends_on:
       - zookeeper
     environment:
@@ -28,7 +28,7 @@ services:
   mesos-agent:
     network_mode: host
     pid: host
-    image: avhost/mesos-mini:1.11.0-0.2.0-1
+    image: quay.io/ska-sa/mesos
     depends_on:
       - zookeeper
     environment:
