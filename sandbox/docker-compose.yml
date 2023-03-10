@@ -2,16 +2,16 @@
 
 version: "2.3"
 services:
-  exhibitor:
-    image: netflixoss/exhibitor:1.5.2
+  zookeeper:
+    image: zookeeper:3.8.1
     ports:
       - "127.0.0.1:2181:2181"
 
   mesos-master:
     network_mode: host
-    image: mesos/mesos-centos:1.8.x
+    image: quay.io/ska-sa/mesos
     depends_on:
-      - exhibitor
+      - zookeeper
     environment:
       MESOS_IP: 127.0.0.1
       MESOS_HOSTNAME: 127.0.0.1
@@ -28,15 +28,15 @@ services:
   mesos-agent:
     network_mode: host
     pid: host
-    image: mesos/mesos-centos:1.8.x
+    image: quay.io/ska-sa/mesos
     depends_on:
-      - exhibitor
+      - zookeeper
     environment:
       MESOS_IP: 127.0.0.1
       MESOS_HOSTNAME: 127.0.0.1
       MESOS_PORT: 5051
       MESOS_MASTER: zk://127.0.0.1:2181/mesos
-      MESOS_CONTAINERIZERS: docker,mesos
+      MESOS_CONTAINERIZERS: docker
       MESOS_DOCKER_CONFIG: file:///etc/mesos/config.json
       MESOS_EXECUTOR_REGISTRATION_TIMEOUT: 5mins
       MESOS_WORK_DIR: /var/tmp/mesos
@@ -45,8 +45,8 @@ services:
       - "${HOME}/.docker/config.json:/etc/mesos/config.json:ro"
       - /var/run/docker.sock:/var/run/docker.sock
       - /sys:/sys
-      - /usr/bin/docker:/usr/local/bin/docker
       - ./etc/mesos-agent:/etc/mesos-agent:ro
+      - ./etc/default/mesos-agent:/etc/default/mesos-agent:ro
       # /var/tmp/mesos needs to be the same on the host and the container,
       # because mesos-agent writes to the sandbox and then tells the host
       # Docker to bind-mount it into the newly started container.
@@ -59,22 +59,22 @@ services:
 
   singularity:
     network_mode: host
-    image: hubspot/singularityservice:1.2.0
+    image: hubspot/singularityservice:1.4.0
     depends_on:
       - mesos-master
-      - exhibitor
+      - zookeeper
     volumes:
       - ./etc/singularity/singularity.yaml:/etc/singularity/singularity.yaml:ro
 
   minio:
     network_mode: host
-    image: minio/minio:RELEASE.2020-06-12T00-06-19Z
+    image: minio/minio:RELEASE.2023-02-27T18-10-45Z
     command: server --address 127.0.0.1:9000 /data
     volumes:
       - ./minio-data:/data
     environment:
-      MINIO_ACCESS_KEY: minioaccesskey
-      MINIO_SECRET_KEY: miniosecretkey
+      MINIO_ROOT_USER: minioaccesskey
+      MINIO_ROOT_PASSWORD: miniosecretkey
 
   prometheus:
     network_mode: host
@@ -89,7 +89,7 @@ services:
 
   grafana:
     network_mode: host
-    image: grafana/grafana:6.5.2
+    image: grafana/grafana:9.4.1
     depends_on:
       - prometheus
     environment:
@@ -105,7 +105,7 @@ services:
 
   logstash:
     network_mode: host
-    image: docker.elastic.co/logstash/logstash-oss:7.3.1
+    image: docker.elastic.co/logstash/logstash:7.17.9
     command: logstash -w 1 -f /etc/logstash.conf --http.host 127.0.0.1
     environment:
       - LS_HEAP_SIZE=2048m
@@ -116,10 +116,11 @@ services:
 
   elasticsearch:
     network_mode: host
-    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.3.1
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     environment:
       - discovery.type=single-node
       - network.host=127.0.0.1
+      - ES_JAVA_OPTS=-Xmx2g -Xms2g
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
@@ -136,7 +137,7 @@ services:
 
   consul:
     network_mode: host
-    image: consul:1.7.3
+    image: consul:1.15.0
     command: consul agent -dev -bind=127.0.0.1 -client=127.0.0.1 -config-dir=/etc/consul.d
     volumes:
       - ./etc/consul.d:/etc/consul.d:ro
@@ -148,7 +149,7 @@ services:
       - "127.0.0.1:9118:8080"
 
   registry:
-    image: registry:2.7.1
+    image: registry:2.8.1
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
