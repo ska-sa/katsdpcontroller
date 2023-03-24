@@ -18,6 +18,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree
 from collections import OrderedDict
+from typing import List
 
 import netifaces
 import psutil
@@ -155,27 +156,25 @@ def infiniband_devices(interface):
     """Return a list of device paths associated with a kernel network
     interface, or an empty list if not an Infiniband device.
 
-    This is based on
-    https://github.com/amaumene/mlnx-en-dkms/blob/master/ofed_scripts/ibdev2netdev
-    plus inspection of /sys.
+    This is based on ibdev2netdev (installed with MLNX OFED) plus inspection of
+    /sys.
     """
     try:
-        with open(f"/sys/class/net/{interface}/device/resource") as f:
-            resource = f.read()
         for ibdev in os.listdir("/sys/class/infiniband"):
-            with open(f"/sys/class/infiniband/{ibdev}/device/resource") as f:
-                ib_resource = f.read()
-            if ib_resource == resource:
-                # Found the matching device. Identify device inodes
-                devices = ["/dev/infiniband/rdma_cm"]
-                for sub in ["infiniband_cm", "infiniband_mad", "infiniband_verbs"]:
-                    path = f"/sys/class/infiniband/{ibdev}/device/{sub}"
-                    if os.path.exists(path):
-                        for item in os.listdir(path):
-                            device = "/dev/infiniband/" + item
-                            if os.path.exists(device):
-                                devices.append(device)
-                return devices
+            for port in os.listdir(f"/sys/class/infiniband/{ibdev}/ports"):
+                with open(f"/sys/class/infiniband/{ibdev}/ports/{port}/gid_attrs/ndevs/0") as f:
+                    ndev = f.read().strip()
+                if ndev == interface:
+                    # Found the matching device. Identify device inodes
+                    devices = ["/dev/infiniband/rdma_cm"]
+                    for sub in ["infiniband_cm", "infiniband_mad", "infiniband_verbs"]:
+                        path = f"/sys/class/infiniband/{ibdev}/device/{sub}"
+                        if os.path.exists(path):
+                            for item in os.listdir(path):
+                                device = "/dev/infiniband/" + item
+                                if os.path.exists(device):
+                                    devices.append(device)
+                    return devices
     except OSError:
         pass
     return None
@@ -408,7 +407,7 @@ def write_dict(name, path, args, d, do_encode=False):
     return changed
 
 
-def main():
+def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -463,8 +462,11 @@ def main():
         default=[],
         help="Restrict agent to a subsystem (can be repeated)",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
+
+def main(argv: List[str]):
+    args = parse_args(argv)
     attributes, resources = attributes_resources(args)
     changed = False
     if write_dict("attributes", args.attributes_dir, args, attributes, do_encode=True):
@@ -476,4 +478,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
