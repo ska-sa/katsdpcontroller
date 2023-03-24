@@ -1,0 +1,141 @@
+"""Tests for agent_mkconfig script."""
+
+import pathlib
+from dataclasses import dataclass
+from typing import List, Optional
+
+import netifaces
+
+from katsdpcontroller import agent_mkconfig
+
+
+def mock_gpu(mocker) -> None:
+    pynvml = mocker.patch("katsdpcontroller.agent_mkconfig.pynvml")
+    pynvml.nvmlDeviceGetCount.return_value = 1
+    pynvml.nvmlDeviceGetCpuAffinity.return_value = [0xF0]
+    pynvml.nvmlDeviceGetMemoryInfo.return_value.total = 8589934592
+    pynvml.nvmlDeviceGetName.return_value = "NVIDIA GeForce RTX 3070 Ti"
+    pynvml.nvmlDeviceGetPciInfo.return_value.busId = b"0000:81:00.0"
+    pynvml.nvmlDeviceGetUUID.return_value = "GPU-2854ce83-bd19-0424-de81-c437df8f47a2"
+
+    pycuda = mocker.patch("katsdpcontroller.agent_mkconfig.pycuda")
+    device = pycuda.driver.Device.return_value
+    device.compute_capability.return_value = (8, 6)
+    device.get_attributes.return_value = {}
+
+
+@dataclass
+class FakeNic:
+    ifname: str
+    ipv4_address: str
+    speed: int  # Mb/s
+    #: Device number on /dev/infiniband/uverbsN etc
+    infiniband_index: Optional[int] = None
+
+
+def mock_nics(mocker, fs, nics: List[FakeNic]) -> None:
+    def ifaddresses(ifname: str) -> dict:
+        for nic in nics:
+            if nic.ifname == ifname:
+                return {netifaces.AF_INET: [{"addr": nic.ipv4_address}]}
+        raise ValueError("You must specify a valid interface name")
+
+    mocker.patch("netifaces.ifaddresses", side_effect=ifaddresses)
+    for nic in nics:
+        fs.create_file(f"/sys/class/net/{nic.ifname}/speed", contents=f"{nic.speed}\n")
+        if nic.infiniband_index is not None:
+            ibdev = f"mlx5_{nic.infiniband_index}"
+            uverbs = f"uverbs{nic.infiniband_index}"
+            fs.create_file(
+                f"/sys/class/infiniband/{ibdev}/ports/1/gid_attrs/ndevs/0",
+                contents=f"{nic.ifname}\n",
+            )
+            fs.create_dir(f"/sys/class/infiniband/{ibdev}/device/infiniband_verbs/{uverbs}")
+            fs.create_file(f"/dev/infiniband/{uverbs}")
+
+
+def mock_lstopo(mocker, basename: str) -> None:
+    lstopo_bytes = (pathlib.Path(__file__).parent / basename).read_bytes()
+    mocker.patch("subprocess.check_output", return_value=lstopo_bytes)
+
+
+def mock_mem(mocker) -> None:
+    vm = mocker.patch("psutil.virtual_memory")
+    vm.return_value.total = 64 * 1024**3
+
+
+def test_attributes_resources(mocker, fs) -> None:
+    args = agent_mkconfig.parse_args(
+        [
+            "--network=enp193s0f0np0:cbf:80",
+            "--network=eno1:cbf,sdp_10g",
+            "--volume=data:/foo/data",
+            "--volume=ramdisk:/mnt/ramdisk:1",
+        ]
+    )
+
+    fs.pause()
+    mock_lstopo(mocker, "lstopo-numa.xml")
+    fs.resume()
+    mock_gpu(mocker)
+    mock_mem(mocker)
+    mock_nics(
+        mocker,
+        fs,
+        [
+            FakeNic(
+                ifname="enp193s0f0np0", ipv4_address="10.100.1.1", speed=100000, infiniband_index=0
+            ),
+            FakeNic(ifname="eno1", ipv4_address="10.8.1.2", speed=1000),
+        ],
+    )
+    fs.create_dir("/foo/data")
+    fs.create_dir("/mnt/ramdisk")
+
+    attributes, resources = agent_mkconfig.attributes_resources(args)
+    assert attributes == {
+        "katsdpcontroller.interfaces": [
+            {
+                "name": "enp193s0f0np0",
+                "network": "cbf",
+                "ipv4_address": "10.100.1.1",
+                "numa_node": 0,
+                "infiniband_devices": [
+                    "/dev/infiniband/rdma_cm",
+                    "/dev/infiniband/uverbs0",
+                ],
+            },
+            {
+                "name": "eno1",
+                "network": ["cbf", "sdp_10g"],
+                "ipv4_address": "10.8.1.2",
+                "numa_node": 2,
+            },
+        ],
+        "katsdpcontroller.infiniband_devices": ["/dev/infiniband/uverbs0"],
+        "katsdpcontroller.volumes": [
+            {"host_path": "/foo/data", "name": "data"},
+            {"host_path": "/mnt/ramdisk", "name": "ramdisk", "numa_node": 1},
+        ],
+        "katsdpcontroller.gpus": [
+            {
+                "name": "NVIDIA GeForce RTX 3070 Ti",
+                "compute_capability": (8, 6),
+                "device_attributes": {},
+                "uuid": "GPU-2854ce83-bd19-0424-de81-c437df8f47a2",
+                "numa_node": 1,
+            }
+        ],
+        "katsdpcontroller.numa": [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
+    }
+    assert resources == {
+        "katsdpcontroller.gpu.0.compute": 1.0,
+        "katsdpcontroller.gpu.0.mem": 8192.0,
+        "katsdpcontroller.interface.0.bandwidth_in": 80e9,
+        "katsdpcontroller.interface.0.bandwidth_out": 80e9,
+        "katsdpcontroller.interface.1.bandwidth_in": 1e9,
+        "katsdpcontroller.interface.1.bandwidth_out": 1e9,
+        "cores": "[0-15]",
+        "cpus": 16.0,
+        "mem": 64512.0,
+    }
