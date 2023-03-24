@@ -3,7 +3,7 @@ set -e
 
 dir="$(realpath $(dirname $0))"
 mkdir -p "$dir/logs"
-"$dir/../scripts/agent_mkconfig.py" \
+PYTHONPATH="$dir/../src:$PYTHONPATH" python -m katsdpcontroller.agent_mkconfig \
     --attributes-dir "$dir/etc/mesos-agent/attributes" \
     --resources-dir "$dir/etc/mesos-agent/resources" \
     --network "lo:cbf" \

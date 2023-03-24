@@ -157,7 +157,7 @@ network interface. To ensure that this does not happen, you must
 
   - Add ``infiniband_multicast_loopback: false`` to the Mesos attributes for
     the interface (this is done automatically by the
-    :file:`scripts/agent_mkconfig.py` script defined below).
+    :mod:`katsdpcontroller.agent_mkconfig` module defined below).
   - Declare the multicast groups used by each task, using the `multicast_in`
     and `multicast_out` attributes of :class:`InterfaceRequest`.
 
@@ -189,8 +189,8 @@ conforming to :const:`katsdpcontroller.schemas.SUBSYSTEMS`.
 Setting up agents
 -----------------
 The previous sections list a number of resources and attributes that need to be
-configured on each agent. To simplify this, a script
-(:file:`scripts/agent_mkconfig.py`) is provided that will interrogate most of
+configured on each agent. To simplify this, an executable module
+(:mod:`katsdpcontroller.agent_mkconfig`) is provided that will interrogate most of
 the necessary information from the system. It assumes that Mesos is run with
 system wrappers that source arguments from :file:`/etc/mesos-slave/attributes`
 and :file:`/etc/mesos-slave/resources` (this is the case for the Ubuntu
