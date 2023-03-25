@@ -257,8 +257,8 @@ def test_encode_real() -> None:
     assert agent_mkconfig.encode(123.4) == "123.4"
 
 
-def test_write_dict_fresh(fs) -> None:
-    """Test :func:`.agent_mkconfig.write_dict` with no existing content."""
+def test_write_dict(fs) -> None:
+    """Test :func:`.agent_mkconfig.write_dict`."""
     args = argparse.Namespace(dry_run=False)
     d = {"foo": [1, 2, 3], "bar": "string"}
     changed = agent_mkconfig.write_dict(
@@ -274,3 +274,13 @@ def test_write_dict_fresh(fs) -> None:
         "attributes", "/etc/mesos-agent/attributes", args, d, do_encode=True
     )
     assert not changed
+
+    # Add a katsdpcontroller-prefixed attribute: it should be removed
+    fs.create_file("/etc/mesos-agent/attributes/katsdpcontroller.spam")
+    fs.create_file("/etc/mesos-agent/attributes/other")
+    changed = agent_mkconfig.write_dict(
+        "attributes", "/etc/mesos-agent/attributes", args, d, do_encode=True
+    )
+    assert changed
+    assert not (base / "katsdpcontroller.spam").exists()
+    assert (base / "other").is_file()
