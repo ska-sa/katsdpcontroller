@@ -64,7 +64,8 @@ def mock_mem(mocker) -> None:
     vm.return_value.total = 64 * 1024**3
 
 
-def test_attributes_resources(mocker, fs) -> None:
+def test_attributes_resources_numa(mocker, fs) -> None:
+    """Test :func:`.attributes_resources` with a mock NUMA machine."""
     args = agent_mkconfig.parse_args(
         [
             "--network=enp193s0f0np0:cbf:80",
@@ -138,4 +139,71 @@ def test_attributes_resources(mocker, fs) -> None:
         "cores": "[0-15]",
         "cpus": 16.0,
         "mem": 64512.0,
+    }
+
+
+def test_attributes_resources_no_numa(mocker, fs) -> None:
+    """Test :func:`.attributes_resources` for a machine without NUMA nodes.
+
+    lstopo has a different structure in this case, which is why it needs a
+    separate test. It also exercises some variations on the command-line
+    arguments.
+    """
+    args = agent_mkconfig.parse_args(
+        [
+            "--network=ens1:cbf",
+            "--network=enp5s0d1:sdp_10g",
+            "--reserve-cpu=1",
+            "--reserve-mem=2048",
+        ]
+    )
+
+    fs.pause()
+    mock_lstopo(mocker, "lstopo-no-numa.xml")
+    fs.resume()
+    mock_mem(mocker)
+    mock_nics(
+        mocker,
+        fs,
+        [
+            FakeNic(ifname="ens1", ipv4_address="10.100.1.1", speed=100000, infiniband_index=0),
+            FakeNic(ifname="enp5s0d1", ipv4_address="10.8.1.2", speed=10000),
+        ],
+    )
+    # Simulate NVML not being installed
+    mocker.patch("katsdpcontroller.agent_mkconfig.pynvml", None)
+
+    attributes, resources = agent_mkconfig.attributes_resources(args)
+    assert attributes == {
+        "katsdpcontroller.interfaces": [
+            {
+                "name": "ens1",
+                "network": "cbf",
+                "ipv4_address": "10.100.1.1",
+                "numa_node": 0,
+                "infiniband_devices": [
+                    "/dev/infiniband/rdma_cm",
+                    "/dev/infiniband/uverbs0",
+                ],
+            },
+            {
+                "name": "enp5s0d1",
+                "network": "sdp_10g",
+                "ipv4_address": "10.8.1.2",
+                "numa_node": 0,
+            },
+        ],
+        "katsdpcontroller.infiniband_devices": ["/dev/infiniband/uverbs0"],
+        "katsdpcontroller.volumes": [],
+        "katsdpcontroller.gpus": [],
+        "katsdpcontroller.numa": [[0, 1, 2, 3]],
+    }
+    assert resources == {
+        "katsdpcontroller.interface.0.bandwidth_in": 100e9,
+        "katsdpcontroller.interface.0.bandwidth_out": 100e9,
+        "katsdpcontroller.interface.1.bandwidth_in": 10e9,
+        "katsdpcontroller.interface.1.bandwidth_out": 10e9,
+        "cores": "[0-3]",
+        "cpus": 3.0,
+        "mem": 63488.0,
     }

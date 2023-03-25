@@ -1,0 +1,610 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topology SYSTEM "hwloc.dtd">
+<topology>
+  <object type="Machine" os_index="0" cpuset="0x0000000f" complete_cpuset="0x0000000f" online_cpuset="0x0000000f" allowed_cpuset="0x0000000f" local_memory="33566068736">
+    <page_type size="4096" count="8194841"/>
+    <page_type size="2097152" count="0"/>
+    <page_type size="1073741824" count="0"/>
+    <info name="DMIProductName" value="Super Server"/>
+    <info name="DMIProductVersion" value="0123456789"/>
+    <info name="DMIBoardVendor" value="Supermicro"/>
+    <info name="DMIBoardName" value="X10SRL-F"/>
+    <info name="DMIBoardVersion" value="1.01B"/>
+    <info name="DMIBoardAssetTag" value="To be filled by O.E.M."/>
+    <info name="DMIChassisVendor" value="Supermicro"/>
+    <info name="DMIChassisType" value="17"/>
+    <info name="DMIChassisVersion" value="0123456789"/>
+    <info name="DMIChassisAssetTag" value="To Be Filled By O.E.M."/>
+    <info name="DMIBIOSVendor" value="American Megatrends Inc."/>
+    <info name="DMIBIOSVersion" value="1.0c"/>
+    <info name="DMIBIOSDate" value="09/09/2015"/>
+    <info name="DMISysVendor" value="Supermicro"/>
+    <info name="Backend" value="Linux"/>
+    <info name="LinuxCgroup" value="/"/>
+    <info name="OSName" value="Linux"/>
+    <info name="OSRelease" value="5.4.0-42-generic"/>
+    <info name="OSVersion" value="#46~18.04.1-Ubuntu SMP Fri Jul 10 07:21:24 UTC 2020"/>
+    <info name="HostName" value="vbp1"/>
+    <info name="Architecture" value="x86_64"/>
+    <info name="hwlocVersion" value="1.11.9"/>
+    <info name="ProcessName" value="lstopo"/>
+    <object type="Package" os_index="0" cpuset="0x0000000f" complete_cpuset="0x0000000f" online_cpuset="0x0000000f" allowed_cpuset="0x0000000f">
+      <info name="CPUVendor" value="GenuineIntel"/>
+      <info name="CPUFamilyNumber" value="6"/>
+      <info name="CPUModelNumber" value="63"/>
+      <info name="CPUModel" value="Intel(R) Xeon(R) CPU E5-1630 v3 @ 3.70GHz"/>
+      <info name="CPUStepping" value="2"/>
+      <object type="Cache" cpuset="0x0000000f" complete_cpuset="0x0000000f" online_cpuset="0x0000000f" allowed_cpuset="0x0000000f" cache_size="10485760" depth="3" cache_linesize="64" cache_associativity="20" cache_type="0">
+        <info name="Inclusive" value="1"/>
+        <object type="Cache" cpuset="0x00000001" complete_cpuset="0x00000001" online_cpuset="0x00000001" allowed_cpuset="0x00000001" cache_size="262144" depth="2" cache_linesize="64" cache_associativity="8" cache_type="0">
+          <info name="Inclusive" value="0"/>
+          <object type="Cache" cpuset="0x00000001" complete_cpuset="0x00000001" online_cpuset="0x00000001" allowed_cpuset="0x00000001" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="1">
+            <info name="Inclusive" value="0"/>
+            <object type="Cache" cpuset="0x00000001" complete_cpuset="0x00000001" online_cpuset="0x00000001" allowed_cpuset="0x00000001" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="2">
+              <info name="Inclusive" value="0"/>
+              <object type="Core" os_index="0" cpuset="0x00000001" complete_cpuset="0x00000001" online_cpuset="0x00000001" allowed_cpuset="0x00000001">
+                <object type="PU" os_index="0" cpuset="0x00000001" complete_cpuset="0x00000001" online_cpuset="0x00000001" allowed_cpuset="0x00000001"/>
+              </object>
+            </object>
+          </object>
+        </object>
+        <object type="Cache" cpuset="0x00000002" complete_cpuset="0x00000002" online_cpuset="0x00000002" allowed_cpuset="0x00000002" cache_size="262144" depth="2" cache_linesize="64" cache_associativity="8" cache_type="0">
+          <info name="Inclusive" value="0"/>
+          <object type="Cache" cpuset="0x00000002" complete_cpuset="0x00000002" online_cpuset="0x00000002" allowed_cpuset="0x00000002" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="1">
+            <info name="Inclusive" value="0"/>
+            <object type="Cache" cpuset="0x00000002" complete_cpuset="0x00000002" online_cpuset="0x00000002" allowed_cpuset="0x00000002" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="2">
+              <info name="Inclusive" value="0"/>
+              <object type="Core" os_index="1" cpuset="0x00000002" complete_cpuset="0x00000002" online_cpuset="0x00000002" allowed_cpuset="0x00000002">
+                <object type="PU" os_index="1" cpuset="0x00000002" complete_cpuset="0x00000002" online_cpuset="0x00000002" allowed_cpuset="0x00000002"/>
+              </object>
+            </object>
+          </object>
+        </object>
+        <object type="Cache" cpuset="0x00000004" complete_cpuset="0x00000004" online_cpuset="0x00000004" allowed_cpuset="0x00000004" cache_size="262144" depth="2" cache_linesize="64" cache_associativity="8" cache_type="0">
+          <info name="Inclusive" value="0"/>
+          <object type="Cache" cpuset="0x00000004" complete_cpuset="0x00000004" online_cpuset="0x00000004" allowed_cpuset="0x00000004" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="1">
+            <info name="Inclusive" value="0"/>
+            <object type="Cache" cpuset="0x00000004" complete_cpuset="0x00000004" online_cpuset="0x00000004" allowed_cpuset="0x00000004" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="2">
+              <info name="Inclusive" value="0"/>
+              <object type="Core" os_index="2" cpuset="0x00000004" complete_cpuset="0x00000004" online_cpuset="0x00000004" allowed_cpuset="0x00000004">
+                <object type="PU" os_index="2" cpuset="0x00000004" complete_cpuset="0x00000004" online_cpuset="0x00000004" allowed_cpuset="0x00000004"/>
+              </object>
+            </object>
+          </object>
+        </object>
+        <object type="Cache" cpuset="0x00000008" complete_cpuset="0x00000008" online_cpuset="0x00000008" allowed_cpuset="0x00000008" cache_size="262144" depth="2" cache_linesize="64" cache_associativity="8" cache_type="0">
+          <info name="Inclusive" value="0"/>
+          <object type="Cache" cpuset="0x00000008" complete_cpuset="0x00000008" online_cpuset="0x00000008" allowed_cpuset="0x00000008" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="1">
+            <info name="Inclusive" value="0"/>
+            <object type="Cache" cpuset="0x00000008" complete_cpuset="0x00000008" online_cpuset="0x00000008" allowed_cpuset="0x00000008" cache_size="32768" depth="1" cache_linesize="64" cache_associativity="8" cache_type="2">
+              <info name="Inclusive" value="0"/>
+              <object type="Core" os_index="3" cpuset="0x00000008" complete_cpuset="0x00000008" online_cpuset="0x00000008" allowed_cpuset="0x00000008">
+                <object type="PU" os_index="3" cpuset="0x00000008" complete_cpuset="0x00000008" online_cpuset="0x00000008" allowed_cpuset="0x00000008"/>
+              </object>
+            </object>
+          </object>
+        </object>
+      </object>
+    </object>
+    <object type="Bridge" os_index="0" bridge_type="0-1" depth="0" bridge_pci="0000:[00-0a]">
+      <object type="Bridge" os_index="16" name="Intel Corporation Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 1" bridge_type="1-1" depth="1" bridge_pci="0000:[01-01]" pci_busid="0000:00:01.0" pci_type="0604 [8086:2f02] [0000:0000] 02" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 1"/>
+        <object type="PCIDev" os_index="4096" name="LSI Logic / Symbios Logic SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]" pci_busid="0000:01:00.0" pci_type="0107 [1000:0064] [1000:30c0] 02" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="LSI Logic / Symbios Logic"/>
+          <info name="PCIDevice" value="SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]"/>
+          <info name="PCISlot" value="11"/>
+          <object type="OSDev" name="sdh" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:112"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200407Y"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdf" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:80"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207653H"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdo" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:224"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207624W"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdd" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:48"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207636E"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdm" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:192"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207631L"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdb" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:16"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200402R"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdk" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:160"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200074X"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdi" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:128"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207640H"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdg" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:96"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200255J"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdp" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:240"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207650J"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sde" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:64"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207627M"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdn" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:208"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200405F"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdc" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:32"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200246T"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdl" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:176"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207649E"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sda" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:0"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200248R"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdj" osdev_type="0">
+            <info name="LinuxDeviceID" value="8:144"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207655P"/>
+            <info name="Type" value="Disk"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="32" name="Intel Corporation Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 2" bridge_type="1-1" depth="1" bridge_pci="0000:[02-02]" pci_busid="0000:00:02.0" pci_type="0604 [8086:2f04] [0000:0000] 02" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 2"/>
+        <object type="PCIDev" os_index="8192" name="LSI Logic / Symbios Logic SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]" pci_busid="0000:02:00.0" pci_type="0107 [1000:0064] [1000:30c0] 02" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="LSI Logic / Symbios Logic"/>
+          <info name="PCIDevice" value="SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]"/>
+          <info name="PCISlot" value="0"/>
+          <object type="OSDev" name="sdaa" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:160"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200404A"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdy" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:128"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200045F"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdw" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:96"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207621V"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdu" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:64"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207635Y"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdaf" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:240"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200239V"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sds" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:32"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207632A"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdad" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:208"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200258H"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdq" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:0"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200395T"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdab" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:176"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207716N"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdz" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:144"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207705K"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdx" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:112"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207634V"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdv" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:80"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200244D"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdt" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:48"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207648Y"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdae" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:224"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207620F"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdr" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:16"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207625Z"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdac" osdev_type="0">
+            <info name="LinuxDeviceID" value="65:192"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207629X"/>
+            <info name="Type" value="Disk"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="34" name="Intel Corporation Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 2" bridge_type="1-1" depth="1" bridge_pci="0000:[03-03]" pci_busid="0000:00:02.2" pci_type="0604 [8086:2f06] [0000:0000] 02" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 2"/>
+        <object type="PCIDev" os_index="12288" name="LSI Logic / Symbios Logic SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]" pci_busid="0000:03:00.0" pci_type="0107 [1000:0064] [1000:30c0] 02" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="LSI Logic / Symbios Logic"/>
+          <info name="PCIDevice" value="SAS2116 PCI-Express Fusion-MPT SAS-2 [Meteor]"/>
+          <info name="PCISlot" value="15"/>
+          <object type="OSDev" name="sdau" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:224"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207643R"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdaj" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:48"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200250Z"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdas" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:192"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200252M"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdah" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:16"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200247P"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdaq" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:160"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200073K"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdao" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:128"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207628K"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdam" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:96"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200862Z"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdav" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:240"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200253K"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdak" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:64"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207641T"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdat" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:208"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207642P"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdai" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:32"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207639N"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdar" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:176"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207633F"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdap" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:144"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M200261E"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdan" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:112"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207630R"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdaw" osdev_type="0">
+            <info name="LinuxDeviceID" value="67:0"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207637W"/>
+            <info name="Type" value="Disk"/>
+          </object>
+          <object type="OSDev" name="sdal" osdev_type="0">
+            <info name="LinuxDeviceID" value="66:80"/>
+            <info name="Vendor" value="Samsung"/>
+            <info name="Model" value="Samsung_SSD_860_EVO_1TB"/>
+            <info name="Revision" value="RVT02B6Q"/>
+            <info name="SerialNumber" value="S4BDNE0M207645A"/>
+            <info name="Type" value="Disk"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="48" name="Intel Corporation Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 3" bridge_type="1-1" depth="1" bridge_pci="0000:[04-04]" pci_busid="0000:00:03.0" pci_type="0604 [8086:2f08] [0000:0000] 02" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 3"/>
+        <object type="PCIDev" os_index="16384" name="Mellanox Technologies MT27800 Family [ConnectX-5]" pci_busid="0000:04:00.0" pci_type="0200 [15b3:1017] [15b3:0006] 00" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="Mellanox Technologies"/>
+          <info name="PCIDevice" value="MT27800 Family [ConnectX-5]"/>
+          <info name="PCISlot" value="1"/>
+          <object type="OSDev" name="ens1" osdev_type="2">
+            <info name="Address" value="98:03:9b:16:4b:0a"/>
+            <info name="Port" value="1"/>
+          </object>
+          <object type="OSDev" name="mlx5_0" osdev_type="3">
+            <info name="NodeGUID" value="9803:9b03:0016:4b0a"/>
+            <info name="SysImageGUID" value="9803:9b03:0016:4b0a"/>
+            <info name="Port1State" value="4"/>
+            <info name="Port1LID" value="0x0"/>
+            <info name="Port1LMC" value="0"/>
+            <info name="Port1GID0" value="fe80:0000:0000:0000:9a03:9bff:fe16:4b0a"/>
+            <info name="Port1GID1" value="fe80:0000:0000:0000:9a03:9bff:fe16:4b0a"/>
+            <info name="Port1GID2" value="0000:0000:0000:0000:0000:ffff:0a64:1731"/>
+            <info name="Port1GID3" value="0000:0000:0000:0000:0000:ffff:0a64:1731"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="50" name="Intel Corporation Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 3" bridge_type="1-1" depth="1" bridge_pci="0000:[05-05]" pci_busid="0000:00:03.2" pci_type="0604 [8086:2f0a] [0000:0000] 02" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="Xeon E7 v3/Xeon E5 v3/Core i7 PCI Express Root Port 3"/>
+        <object type="PCIDev" os_index="20480" name="Mellanox Technologies MT27500 Family [ConnectX-3]" pci_busid="0000:05:00.0" pci_type="0200 [15b3:1003] [15b3:0079] 00" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="Mellanox Technologies"/>
+          <info name="PCIDevice" value="MT27500 Family [ConnectX-3]"/>
+          <info name="PCISlot" value="0-1"/>
+          <object type="OSDev" name="enp5s0" osdev_type="2">
+            <info name="Address" value="f4:52:14:25:12:60"/>
+            <info name="Port" value="1"/>
+          </object>
+          <object type="OSDev" name="enp5s0d1" osdev_type="2">
+            <info name="Address" value="f4:52:14:25:12:61"/>
+            <info name="Port" value="1"/>
+          </object>
+          <object type="OSDev" name="mlx4_0" osdev_type="3">
+            <info name="NodeGUID" value="f452:1403:0025:1260"/>
+            <info name="SysImageGUID" value="f452:1403:0025:1260"/>
+            <info name="Port1State" value="4"/>
+            <info name="Port1LID" value="0x0"/>
+            <info name="Port1LMC" value="0"/>
+            <info name="Port1GID0" value="fe80:0000:0000:0000:f652:14ff:fe25:1260"/>
+            <info name="Port1GID1" value="0000:0000:0000:0000:0000:ffff:c0a8:0101"/>
+            <info name="Port2State" value="4"/>
+            <info name="Port2LID" value="0x0"/>
+            <info name="Port2LMC" value="0"/>
+            <info name="Port2GID0" value="fe80:0000:0000:0000:f652:14ff:fe25:1261"/>
+            <info name="Port2GID1" value="0000:0000:0000:0000:0000:ffff:0a62:0670"/>
+          </object>
+        </object>
+      </object>
+      <object type="PCIDev" os_index="276" name="Intel Corporation C610/X99 series chipset sSATA Controller [AHCI mode]" pci_busid="0000:00:11.4" pci_type="0106 [8086:8d62] [15d9:0832] 05" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="C610/X99 series chipset sSATA Controller [AHCI mode]"/>
+      </object>
+      <object type="Bridge" os_index="452" name="Intel Corporation C610/X99 series chipset PCI Express Root Port #5" bridge_type="1-1" depth="1" bridge_pci="0000:[07-07]" pci_busid="0000:00:1c.4" pci_type="0604 [8086:8d18] [0000:0000] d5" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="C610/X99 series chipset PCI Express Root Port #5"/>
+        <object type="PCIDev" os_index="28672" name="Intel Corporation I210 Gigabit Network Connection" pci_busid="0000:07:00.0" pci_type="0200 [8086:1533] [15d9:1533] 03" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="Intel Corporation"/>
+          <info name="PCIDevice" value="I210 Gigabit Network Connection"/>
+          <object type="OSDev" name="em1" osdev_type="2">
+            <info name="Address" value="0c:c4:7a:a8:84:02"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="453" name="Intel Corporation C610/X99 series chipset PCI Express Root Port #6" bridge_type="1-1" depth="1" bridge_pci="0000:[08-08]" pci_busid="0000:00:1c.5" pci_type="0604 [8086:8d1a] [0000:0000] d5" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="C610/X99 series chipset PCI Express Root Port #6"/>
+        <object type="PCIDev" os_index="32768" name="Intel Corporation I210 Gigabit Network Connection" pci_busid="0000:08:00.0" pci_type="0200 [8086:1533] [15d9:1533] 03" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="Intel Corporation"/>
+          <info name="PCIDevice" value="I210 Gigabit Network Connection"/>
+          <object type="OSDev" name="eno2" osdev_type="2">
+            <info name="Address" value="0c:c4:7a:a8:84:03"/>
+          </object>
+        </object>
+      </object>
+      <object type="Bridge" os_index="454" name="Intel Corporation C610/X99 series chipset PCI Express Root Port #7" bridge_type="1-1" depth="1" bridge_pci="0000:[09-0a]" pci_busid="0000:00:1c.6" pci_type="0604 [8086:8d1c] [0000:0000] d5" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="C610/X99 series chipset PCI Express Root Port #7"/>
+        <object type="Bridge" os_index="36864" name="ASPEED Technology, Inc. AST1150 PCI-to-PCI Bridge" bridge_type="1-1" depth="2" bridge_pci="0000:[0a-0a]" pci_busid="0000:09:00.0" pci_type="0604 [1a03:1150] [0000:0000] 03" pci_link_speed="0.000000">
+          <info name="PCIVendor" value="ASPEED Technology, Inc."/>
+          <info name="PCIDevice" value="AST1150 PCI-to-PCI Bridge"/>
+          <object type="PCIDev" os_index="40960" name="ASPEED Technology, Inc. ASPEED Graphics Family" pci_busid="0000:0a:00.0" pci_type="0300 [1a03:2000] [15d9:0832] 30" pci_link_speed="0.000000">
+            <info name="PCIVendor" value="ASPEED Technology, Inc."/>
+            <info name="PCIDevice" value="ASPEED Graphics Family"/>
+            <object type="OSDev" name="controlD64" osdev_type="1"/>
+            <object type="OSDev" name="card0" osdev_type="1"/>
+          </object>
+        </object>
+      </object>
+      <object type="PCIDev" os_index="498" name="Intel Corporation C610/X99 series chipset 6-Port SATA Controller [AHCI mode]" pci_busid="0000:00:1f.2" pci_type="0106 [8086:8d02] [15d9:0832] 05" pci_link_speed="0.000000">
+        <info name="PCIVendor" value="Intel Corporation"/>
+        <info name="PCIDevice" value="C610/X99 series chipset 6-Port SATA Controller [AHCI mode]"/>
+        <object type="OSDev" name="sdag" osdev_type="0">
+          <info name="LinuxDeviceID" value="66:0"/>
+          <info name="Vendor" value="Seagate"/>
+          <info name="Model" value="ST9250610NS"/>
+          <info name="Revision" value="AA63"/>
+          <info name="SerialNumber" value="9XE0MQ4Y"/>
+          <info name="Type" value="Disk"/>
+        </object>
+      </object>
+    </object>
+  </object>
+</topology>
