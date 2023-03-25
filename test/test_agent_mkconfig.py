@@ -1,10 +1,14 @@
 """Tests for agent_mkconfig script."""
 
+import base64
+import json
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
 import netifaces
+import pytest
 
 from katsdpcontroller import agent_mkconfig
 
@@ -224,3 +228,27 @@ def test_attributes_resources_no_numa(mocker, fs) -> None:
         "cpus": 3.0,
         "mem": 63488.0,
     }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [1, 2, 3],
+        {"foo": "x", "bar": 3.5, "spam": True, "list": []},
+        "string",
+        False,
+        None,
+    ],
+)
+def test_encode(content) -> None:
+    encoded = agent_mkconfig.encode(content)
+    # Legal character set for Mesos
+    # (https://mesos.apache.org/documentation/latest/attributes-resources/)
+    assert re.fullmatch("[A-Za-z0-9_/.-]*", encoded)
+    decoded = json.loads(base64.urlsafe_b64decode(encoded))
+    assert decoded == content
+
+
+def test_encode_real() -> None:
+    assert agent_mkconfig.encode(123) == "123.0"
+    assert agent_mkconfig.encode(123.4) == "123.4"
