@@ -17,7 +17,7 @@ import os.path
 import subprocess
 import sys
 import xml.etree.ElementTree
-from typing import List
+from typing import Any, Dict, Generator, Iterable, List, Mapping, Tuple
 
 import netifaces
 import psutil
@@ -31,8 +31,16 @@ except ImportError:
     pynvml = None
 
 
+def attr_get(elem: xml.etree.ElementTree.Element, attr: str) -> str:
+    """Get an attribute from an XML element, raising KeyError if not found."""
+    value = elem.get(attr)
+    if value is None:
+        raise KeyError(f"Attribute {attr} not found")
+    return value
+
+
 @contextlib.contextmanager
-def nvml_manager():
+def nvml_manager() -> Generator[Any, None, None]:
     """Context manager to initialise and shut down NVML."""
     global pynvml
     if pynvml:
@@ -47,7 +55,7 @@ def nvml_manager():
 
 
 class GPU:
-    def __init__(self, handle, cpu_to_node):
+    def __init__(self, handle: pynvml.c_nvmlDevice_t, cpu_to_node: Mapping[int, int]) -> None:
         node = None
         # TODO: use number of CPU cores to determine cpuset size
         # This is very hacky at the moment
@@ -84,13 +92,13 @@ class GPU:
                 self.device_attributes[str(key)] = value
 
 
-def _pus(node):
+def _pus(node: xml.etree.ElementTree.Element) -> List[xml.etree.ElementTree.Element]:
     """Return all the processing units under `node`."""
     return node.findall(".//object[@type='PU']")
 
 
 class HWLocParser:
-    def __init__(self):
+    def __init__(self) -> None:
         cmd = ["lstopo", "--output-format", "xml"]
         result = subprocess.check_output(cmd).decode("ascii")
         self._tree = xml.etree.ElementTree.fromstring(result)
@@ -116,30 +124,30 @@ class HWLocParser:
                 node = parent_map[node]
             self._nodes[i] = node
 
-    def cpus_by_node(self):
+    def cpus_by_node(self) -> List[List[int]]:
         out = []
         for node in self._nodes:
             pus = _pus(node)
-            out.append(sorted([int(pu.get("os_index")) for pu in pus]))
+            out.append(sorted([int(attr_get(pu, "os_index")) for pu in pus]))
         return out
 
-    def cpu_nodes(self):
+    def cpu_nodes(self) -> Mapping[int, int]:
         out = {}
         for i, node in enumerate(self.cpus_by_node()):
             for cpu in node:
                 out[cpu] = i
         return out
 
-    def interface_nodes(self):
+    def interface_nodes(self) -> Mapping[str, int]:
         out = {}
         for i, node in enumerate(self._nodes):
             # hwloc uses type 2 for network devices
             for device in node.iterfind(".//object[@type='OSDev'][@osdev_type='2']"):
-                out[device.get("name")] = i
+                out[attr_get(device, "name")] = i
         return out
 
-    def gpus(self):
-        out = []
+    def gpus(self) -> List[GPU]:
+        out: List[GPU] = []
         with nvml_manager():
             if not pynvml:
                 return out
@@ -151,7 +159,7 @@ class HWLocParser:
         return out
 
 
-def infiniband_devices(interface):
+def infiniband_devices(interface: str) -> List[str]:
     """Return a list of device paths associated with a kernel network
     interface, or an empty list if not an Infiniband device.
 
@@ -179,7 +187,7 @@ def infiniband_devices(interface):
     return []
 
 
-def collapse_ranges(values):
+def collapse_ranges(values: Iterable[int]) -> str:
     values = sorted(values)
     out = []
     pos = 0
@@ -195,10 +203,10 @@ def collapse_ranges(values):
     return "[" + ",".join(out) + "]"
 
 
-def attributes_resources(args):
+def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], Mapping[str, Any]]:
     hwloc = HWLocParser()
-    attributes = {}
-    resources = {}
+    attributes: Dict[str, Any] = {}
+    resources: Dict[str, Any] = {}
 
     interface_nodes = hwloc.interface_nodes()
     interfaces = []
@@ -254,12 +262,12 @@ def attributes_resources(args):
         interfaces.append(config)
         try:
             with open(f"/sys/class/net/{interface}/speed") as f:
-                speed = f.read().strip()
+                speed_str = f.read().strip()
                 # This dummy value has been observed on a NIC which had been
                 # configured but had no cable attached.
-                if speed == "4294967295" or float(speed) < 0:
+                if speed_str == "4294967295" or float(speed_str) < 0:
                     raise ValueError("cable unplugged?")
-                speed = float(speed) * 1e6  # /sys/class/net has speed in Mbps
+                speed = float(speed_str) * 1e6  # /sys/class/net has speed in Mbps
         except (OSError, ValueError) as error:
             if interface == "lo":
                 # Loopback interface speed is limited only by CPU power. Just
@@ -329,7 +337,7 @@ def attributes_resources(args):
     return attributes, resources
 
 
-def encode(d):
+def encode(d: Any) -> str:
     """Encode an object in a way that can be transported via Mesos attributes.
 
     The item is first encoded to JSON, then to base64url. The JSON string is
@@ -347,25 +355,27 @@ def encode(d):
         return base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii")
 
 
-def write_dict(name, path, args, d, do_encode=False):
+def write_dict(
+    name: str, path: str, args: argparse.Namespace, d: Mapping[str, Any], do_encode: bool = False
+) -> bool:
     """For each key in `d`, write the value to `path`/`key`.
 
     Parameters
     ----------
-    name : str
+    name
         Human-readable description of what is being written
-    path : str
+    path
         Base directory (created if it does not exist)
-    args : argparse.Namespace
+    args
         Command-line arguments
-    d : dict
+    d
         Values to write
-    do_encode : bool, optional
+    do_encode
         If true, values are first encoded with :func:`encode`
 
     Returns
     -------
-    changed : bool
+    changed
         Whether any files were modified
     """
     changed = False
@@ -468,7 +478,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str]):
+def main(argv: List[str]) -> None:
     args = parse_args(argv)
     attributes, resources = attributes_resources(args)
     changed = False
