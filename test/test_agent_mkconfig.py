@@ -31,6 +31,7 @@ class FakeNic:
     speed: int  # Mb/s
     #: Device number on /dev/infiniband/uverbsN etc
     infiniband_index: Optional[int] = None
+    loopback_disable: bool = False
 
 
 def mock_nics(mocker, fs, nics: List[FakeNic]) -> None:
@@ -52,6 +53,12 @@ def mock_nics(mocker, fs, nics: List[FakeNic]) -> None:
             )
             fs.create_dir(f"/sys/class/infiniband/{ibdev}/device/infiniband_verbs/{uverbs}")
             fs.create_file(f"/dev/infiniband/{uverbs}")
+            fs.create_file(
+                f"/sys/class/net/{nic.ifname}/settings/force_local_lb_disable",
+                contents=(
+                    f"Force local loopback disable is {'ON' if nic.loopback_disable else 'OFF'}\n"
+                ),
+            )
 
 
 def mock_lstopo(mocker, basename: str) -> None:
@@ -85,7 +92,11 @@ def test_attributes_resources_numa(mocker, fs) -> None:
         fs,
         [
             FakeNic(
-                ifname="enp193s0f0np0", ipv4_address="10.100.1.1", speed=100000, infiniband_index=0
+                ifname="enp193s0f0np0",
+                ipv4_address="10.100.1.1",
+                speed=100000,
+                infiniband_index=0,
+                loopback_disable=True,
             ),
             FakeNic(ifname="eno1", ipv4_address="10.8.1.2", speed=1000),
         ],
@@ -105,6 +116,7 @@ def test_attributes_resources_numa(mocker, fs) -> None:
                     "/dev/infiniband/rdma_cm",
                     "/dev/infiniband/uverbs0",
                 ],
+                "infiniband_multicast_loopback": False,
             },
             {
                 "name": "eno1",
