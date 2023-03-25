@@ -176,7 +176,7 @@ def infiniband_devices(interface):
                     return devices
     except OSError:
         pass
-    return None
+    return []
 
 
 def collapse_ranges(values):
