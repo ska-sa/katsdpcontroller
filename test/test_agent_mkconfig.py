@@ -1,5 +1,6 @@
 """Tests for agent_mkconfig script."""
 
+import argparse
 import base64
 import json
 import pathlib
@@ -241,6 +242,7 @@ def test_attributes_resources_no_numa(mocker, fs) -> None:
     ],
 )
 def test_encode(content) -> None:
+    """Test :func:`.agent_mkconfig.encode`."""
     encoded = agent_mkconfig.encode(content)
     # Legal character set for Mesos
     # (https://mesos.apache.org/documentation/latest/attributes-resources/)
@@ -250,5 +252,25 @@ def test_encode(content) -> None:
 
 
 def test_encode_real() -> None:
+    """Test :func:`.agent_mkconfig.encode` with real inputs."""
     assert agent_mkconfig.encode(123) == "123.0"
     assert agent_mkconfig.encode(123.4) == "123.4"
+
+
+def test_write_dict_fresh(fs) -> None:
+    """Test :func:`.agent_mkconfig.write_dict` with no existing content."""
+    args = argparse.Namespace(dry_run=False)
+    d = {"foo": [1, 2, 3], "bar": "string"}
+    changed = agent_mkconfig.write_dict(
+        "attributes", "/etc/mesos-agent/attributes", args, d, do_encode=True
+    )
+    assert changed
+    base = pathlib.Path("/etc/mesos-agent/attributes")
+    assert (base / "foo").read_text() == agent_mkconfig.encode([1, 2, 3]) + "\n"
+    assert (base / "bar").read_text() == agent_mkconfig.encode("string") + "\n"
+
+    # Do it again: should be no change
+    changed = agent_mkconfig.write_dict(
+        "attributes", "/etc/mesos-agent/attributes", args, d, do_encode=True
+    )
+    assert not changed
