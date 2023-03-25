@@ -330,9 +330,13 @@ def attributes_resources(args):
 
 
 def encode(d):
-    """Encode an object in a way that can be transported via Mesos attributes: first to
-    JSON, then to base64url. The JSON string is padded with spaces so that the base64
-    string has no = pad characters, which are outside the legal set for Mesos.
+    """Encode an object in a way that can be transported via Mesos attributes.
+
+    The item is first encoded to JSON, then to base64url. The JSON string is
+    padded with spaces so that the base64 string has no = pad characters, which
+    are outside the legal set for Mesos.
+
+    As a special case, real numbers are returned as strings.
     """
     if isinstance(d, numbers.Real) and not isinstance(d, bool):
         return repr(float(d))
