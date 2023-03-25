@@ -167,6 +167,9 @@ def test_attributes_resources_no_numa(mocker, fs) -> None:
             "--network=enp5s0d1:sdp_10g",
             "--reserve-cpu=1",
             "--reserve-mem=2048",
+            "--priority=110",
+            "--subsystem=cbf",
+            "--subsystem=sdp",
         ]
     )
 
@@ -209,6 +212,8 @@ def test_attributes_resources_no_numa(mocker, fs) -> None:
         "katsdpcontroller.volumes": [],
         "katsdpcontroller.gpus": [],
         "katsdpcontroller.numa": [[0, 1, 2, 3]],
+        "katsdpcontroller.subsystems": ["cbf", "sdp"],
+        "katsdpcontroller.priority": 110,
     }
     assert resources == {
         "katsdpcontroller.interface.0.bandwidth_in": 100e9,
