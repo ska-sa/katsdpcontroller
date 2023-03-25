@@ -17,7 +17,6 @@ import os.path
 import subprocess
 import sys
 import xml.etree.ElementTree
-from collections import OrderedDict
 from typing import List
 
 import netifaces
@@ -198,8 +197,8 @@ def collapse_ranges(values):
 
 def attributes_resources(args):
     hwloc = HWLocParser()
-    attributes = OrderedDict()
-    resources = OrderedDict()
+    attributes = {}
+    resources = {}
 
     interface_nodes = hwloc.interface_nodes()
     interfaces = []
