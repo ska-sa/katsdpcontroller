@@ -1,16 +1,5 @@
-{% macro validate_version() %}
-{
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "type": "object",
-    "required": ["version"],
-    "properties": {
-        "version": {
-            "type": "integer",
-            "minimum": 4,
-            "maximum": 5
-        }
-    }
-}
+{% macro versions() %}
+[4, 5]
 {% endmacro %}
 
 {% macro validate(version) %}

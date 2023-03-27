@@ -7,7 +7,6 @@ import logging
 import math
 import re
 from abc import ABC, abstractmethod
-from distutils.version import StrictVersion
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -31,6 +30,7 @@ import katportalclient
 import networkx
 import yarl
 from katsdptelstate.endpoint import endpoint_list_parser
+from packaging.version import Version
 
 from . import defaults, schemas
 
@@ -1850,7 +1850,7 @@ def _validate(config):
         if semantic constraints are violated
     """
     schemas.PRODUCT_CONFIG.validate(config)
-    version = StrictVersion(config["version"])
+    version = Version(config["version"])
     inputs = config.get("inputs", {})
     outputs = config.get("outputs", {})
     for name, stream in itertools.chain(inputs.items(), outputs.items()):
@@ -1900,7 +1900,7 @@ def _validate(config):
                     raise ValueError("sdp.cal output type no longer supports models")
 
             if output["type"] == "sdp.flags":
-                if version < "3.0":
+                if version < Version("3.0"):
                     calibration = output["calibration"][0]
                     if calibration not in outputs:
                         raise ValueError(f"calibration ({calibration}) does not exist")
@@ -1986,7 +1986,7 @@ def _upgrade(config):
     config.setdefault("inputs", {})
     config.setdefault("outputs", {})
     # Update to 3.0
-    if config["version"] < StrictVersion("3.0"):
+    if Version(config["version"]) < Version("3.0"):
         # Transfer only recognised stream types and parameters from inputs
         orig_inputs = config["inputs"]
         config["inputs"] = {}

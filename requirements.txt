@@ -31,6 +31,7 @@ nbformat==4.4.0            # via plotly
 netifaces
 networkx==2.0
 numpy
+packaging
 plotly==4.0.0              # via dash
 prometheus_async==18.1.0
 prometheus_client==0.3.1
