@@ -26,6 +26,11 @@ ARG dependencies
 RUN test -n "$dependencies" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
 LABEL za.ac.kat.sdp.image-depends $dependencies
 
+# Label the image with a list of supported product-configure schema versions
+ARG product_configure_versions
+RUN test -n "$product_configure_versions" || (echo "Please build with scripts/docker_build.sh" 1>&2; exit 1)
+LABEL za.ac.kat.sdp.katsdpcontroller.product-configure-versions $product_configure_versions
+
 # Install haproxy for --haproxy support and graphviz for --write-graphs
 USER root
 RUN apt-get update && \
