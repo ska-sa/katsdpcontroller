@@ -29,6 +29,7 @@ try:
     pycuda.driver.init()
 except ImportError:
     pynvml = None
+    pycuda = None
 
 
 def attr_get(elem: xml.etree.ElementTree.Element, attr: str) -> str:
@@ -55,7 +56,7 @@ def nvml_manager() -> Generator[Any, None, None]:
 
 
 class GPU:
-    def __init__(self, handle: pynvml.c_nvmlDevice_t, cpu_to_node: Mapping[int, int]) -> None:
+    def __init__(self, handle: "pynvml.c_nvmlDevice_t", cpu_to_node: Mapping[int, int]) -> None:
         node = None
         # TODO: use number of CPU cores to determine cpuset size
         # This is very hacky at the moment
