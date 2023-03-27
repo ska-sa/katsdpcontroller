@@ -5,6 +5,8 @@ async-solipsism==0.5
 coverage
 mypy
 open-mock-file==1.0.2
+psutil==5.9.4
+pyfakefs==5.1.0
 pytest
 pytest-asyncio==0.18.3
 pytest-cov
