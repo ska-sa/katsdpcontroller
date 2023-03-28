@@ -2502,9 +2502,13 @@ def build_logical_graph(
                 need_telstate = True
     if need_telstate:
         telstate: Optional[scheduler.LogicalNode] = _make_telstate(g, configuration)
-        meta_writer: Optional[scheduler.LogicalNode] = _make_meta_writer(g, configuration)
     else:
         telstate = None
+    # XXX Technically meta_writer expects archived streams of type sdp.vis,
+    # so this check is necessary but not sufficient (to skip RDB files in the lab)
+    if need_telstate and archived_streams:
+        meta_writer: Optional[scheduler.LogicalNode] = _make_meta_writer(g, configuration)
+    else:
         meta_writer = None
 
     # Count large allocations in telstate, which affects memory usage of
