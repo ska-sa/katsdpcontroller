@@ -532,6 +532,9 @@ def _make_fgpu(
     stream: product_config.GpucbfAntennaChannelisedVoltageStream,
     sync_time: int,
 ) -> scheduler.LogicalNode:
+    if stream.narrowband is not None:
+        raise NotImplementedError("narrowband support isn't implemented yet")
+
     ibv = not configuration.options.develop.disable_ibv
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f"fgpu.{stream.name}")

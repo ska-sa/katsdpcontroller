@@ -577,6 +577,21 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
         )
 
 
+class GpucbfNarrowbandConfig:
+    """Narrowband configuration for a gpucbf.antenna_channelised_voltage stream."""
+
+    def __init__(self, *, decimation_factor: int, centre_frequency: float) -> None:
+        self.decimation_factor = decimation_factor
+        self.centre_frequency = centre_frequency
+
+    @classmethod
+    def from_config(cls, config: dict) -> "GpucbfNarrowbandConfig":
+        return cls(
+            decimation_factor=config["decimation_factor"],
+            centre_frequency=config["centre_frequency"],
+        )
+
+
 class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
     """Real antenna-channelised-voltage stream (GPU correlator).
 
@@ -597,6 +612,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         n_chans: int,
         input_labels: Optional[Iterable[str]] = None,
         w_cutoff: float = 1.0,
+        narrowband: Optional[GpucbfNarrowbandConfig] = None,
         command_line_extra: Iterable[str] = (),
     ) -> None:
         if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
@@ -631,11 +647,27 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                     "Inconsistent centre frequencies "
                     f"(both {first.centre_frequency} and {src.centre_frequency})"
                 )
+        decimation_factor = 1
+        dig_bandwidth = first.adc_sample_rate / 2
+        bandwidth = dig_bandwidth
+        centre_frequency = first.centre_frequency
+        if narrowband is not None:
+            decimation_factor = narrowband.decimation_factor
+            bandwidth /= narrowband.decimation_factor
+            min_cf = bandwidth / 2
+            max_cf = dig_bandwidth - bandwidth / 2
+            if not (min_cf <= narrowband.centre_frequency <= max_cf):
+                raise ValueError(
+                    f"Narrowband centre frequency {narrowband.centre_frequency}"
+                    f" is outside the range [{min_cf}, {max_cf}]"
+                )
+            centre_frequency += narrowband.centre_frequency - dig_bandwidth / 2
+
         # Determine how fine to divide the stream, i.e., the number of xgpu
         # processes to run. The minimum is 4 since SDP expects to run 4 ingest
         # processes.
         n_substreams = 4
-        total_rate = first.adc_sample_rate * len(src_streams)
+        total_rate = first.adc_sample_rate * len(src_streams) / decimation_factor
         while n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE < total_rate:
             n_substreams *= 2
         if n_chans % n_substreams != 0:
@@ -647,15 +679,16 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             antennas=antenna_names,
             band=first.band,
             n_chans=n_chans,
-            bandwidth=first.adc_sample_rate * 0.5,
+            bandwidth=bandwidth,
             adc_sample_rate=first.adc_sample_rate,
-            centre_frequency=first.centre_frequency,
-            n_samples_between_spectra=2 * n_chans,
+            centre_frequency=centre_frequency,
+            n_samples_between_spectra=2 * n_chans * decimation_factor,
         )
         self.n_substreams = n_substreams
         self.bits_per_sample = 8
         self.pfb_taps = defaults.PFB_TAPS
         self.w_cutoff = w_cutoff
+        self.narrowband = narrowband
         self.command_line_extra = list(command_line_extra)
 
     @property
@@ -695,12 +728,16 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         src_streams: Sequence["Stream"],
         sensors: Mapping[str, Any],
     ) -> "GpucbfAntennaChannelisedVoltageStream":
+        narrowband = config.get("narrowband")
         return cls(
             name,
             src_streams,
             n_chans=config["n_chans"],
             input_labels=config.get("input_labels"),
             w_cutoff=config.get("w_cutoff", 1.0),
+            narrowband=(
+                GpucbfNarrowbandConfig.from_config(narrowband) if narrowband is not None else None
+            ),
             command_line_extra=config.get("command_line_extra", []),
         )
 
@@ -2037,7 +2074,7 @@ def _upgrade(config):
         config["version"] = "3.0"
 
     # Upgrade to latest 3.x
-    config["version"] = "3.2"
+    config["version"] = "3.3"
 
     _validate(config)  # Should never fail if the input was valid
     return config

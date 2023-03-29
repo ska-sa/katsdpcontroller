@@ -1,5 +1,5 @@
 {% macro versions() %}
-["2.4", "2.5", "2.6", "3.0", "3.1", "3.2"]
+["2.4", "2.5", "2.6", "3.0", "3.1", "3.2", "3.3"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -560,6 +560,17 @@
                                         "uniqueItems": true
                                     },
                                     "w_cutoff": {"$ref": "#/definitions/positive_number", "default": 1.0},
+{% if version >= "3.3" %}
+                                    "narrowband": {
+                                        "type": "object",
+                                        "properties": {
+                                            "decimation_factor": {"$ref": "#/definitions/positive_integer"},
+                                            "centre_frequency": {"$ref": "#/definitions/positive_number"}
+                                        },
+                                        "additionalProperties": false,
+                                        "required": ["decimation_factor", "centre_frequency"]
+                                    },
+{% endif %}
                                     "command_line_extra": {
                                         "type": "array",
                                         "items": {"type": "string"}
