@@ -806,6 +806,21 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
         position = self.logical_task.command.index(argument_name)
         return value_type(self.logical_task.command[position + 1])
 
+    def get_command_arguments(
+        self, value_type: Callable[[str], _T], argument_name: str
+    ) -> List[_T]:
+        """Return the values pass to the fake device as CLI parameters.
+
+        This is similar to :meth:`get_command_argument` (with the same
+        limitations), but supports arguments that can be passed multiple times,
+        returning a list of the values.
+        """
+        ret = []
+        for i, arg in enumerate(self.logical_task.command):
+            if arg == argument_name:
+                ret.append(value_type(self.logical_task.command[i + 1]))
+        return ret
+
 
 @asynccontextmanager
 async def wrap_katcp_server(
