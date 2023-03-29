@@ -737,6 +737,13 @@ def _make_fgpu(
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 1024  # Actual use is about 800MB, independent of channel count
+        wideband_config = {
+            "name": escape_format(stream.name),
+            "channels": stream.n_chans,
+            "taps": stream.pfb_taps,
+            "w_cutoff": stream.w_cutoff,
+            "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
+        }
         fgpu.command = (
             ["schedrr"]
             + taskset
@@ -754,14 +761,10 @@ def _make_fgpu(
                 str(i),
                 "--array-size",
                 str(n_engines),
-                "--channels",
-                str(stream.n_chans),
                 "--sync-epoch",
                 str(sync_time),
-                "--taps",
-                str(stream.pfb_taps),
-                "--w-cutoff",
-                str(stream.w_cutoff),
+                "--wideband",
+                ",".join(f"{key}={value}" for (key, value) in wideband_config.items()),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
@@ -818,7 +821,6 @@ def _make_fgpu(
             )
             fgpu.command.append(f"{{endpoints[multicast.{src.name}_spead]}}")
         g.add_edge(fgpu, dst_multicast, port="spead", depends_resolve=True)
-        fgpu.command.append(f"{{endpoints[multicast.{stream.name}_spead]}}")
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
