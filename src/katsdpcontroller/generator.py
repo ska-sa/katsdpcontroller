@@ -532,9 +532,6 @@ def _make_fgpu(
     stream: product_config.GpucbfAntennaChannelisedVoltageStream,
     sync_time: int,
 ) -> scheduler.LogicalNode:
-    if stream.narrowband is not None:
-        raise NotImplementedError("narrowband support isn't implemented yet")
-
     ibv = not configuration.options.develop.disable_ibv
     n_engines = len(stream.src_streams) // 2
     fgpu_group = LogicalGroup(f"fgpu.{stream.name}")
@@ -737,13 +734,19 @@ def _make_fgpu(
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 1024  # Actual use is about 800MB, independent of channel count
-        wideband_config = {
+        output_config = {
             "name": escape_format(stream.name),
             "channels": stream.n_chans,
             "taps": stream.pfb_taps,
             "w_cutoff": stream.w_cutoff,
             "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
         }
+        if stream.narrowband is not None:
+            output_config["decimation"] = stream.narrowband.decimation_factor
+            output_config["centre_frequency"] = stream.narrowband.centre_frequency
+            output_arg_name = "narrowband"
+        else:
+            output_arg_name = "wideband"
         fgpu.command = (
             ["schedrr"]
             + taskset
@@ -763,8 +766,8 @@ def _make_fgpu(
                 str(n_engines),
                 "--sync-epoch",
                 str(sync_time),
-                "--wideband",
-                ",".join(f"{key}={value}" for (key, value) in wideband_config.items()),
+                f"--{output_arg_name}",
+                ",".join(f"{key}={value}" for (key, value) in output_config.items()),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
