@@ -87,58 +87,71 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
     DEFAULT_GAIN = 1.0
 
+    @staticmethod
+    def _parse_key_val(value: str) -> Dict[str, str]:
+        """Turn ``"foo=a,bar=b"`` into ``{"foo": "a", "bar": b"}``."""
+        return dict(tuple(kv.split("=", 1)) for kv in value.split(","))  # type: ignore[misc]
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._gains = [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
         self._sync_epoch = self.get_command_argument(float, "--sync-epoch")
         self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
+        outputs = self.get_command_arguments(self._parse_key_val, "--wideband")
+        outputs += self.get_command_arguments(self._parse_key_val, "--narrowband")
+        output_names = [output["name"] for output in outputs]
+        # TODO: temporary workaround while implementing narrowband. The katcp
+        # requests that operate on outputs will be updated to take the output
+        # name explicitly.
+        self._default_output = output_names[0]
         for pol in range(self.N_POLS):
-            self.sensors.add(
-                Sensor(
-                    str,
-                    f"input{pol}.eq",
-                    "For this input, the complex, unitless, per-channel digital scaling factors "
-                    "implemented prior to requantisation",
-                    default="[1.0+0.0j]",
-                    initial_status=Sensor.Status.NOMINAL,
+            for output in output_names:
+                self.sensors.add(
+                    Sensor(
+                        str,
+                        f"{output}.input{pol}.eq",
+                        "For this input, the complex, unitless, per-channel "
+                        "digital scaling factors implemented prior to requantisation",
+                        default="[1.0+0.0j]",
+                        initial_status=Sensor.Status.NOMINAL,
+                    )
                 )
-            )
-            self.sensors.add(
-                Sensor(
-                    str,
-                    f"input{pol}.delay",
-                    "The delay settings for this input: (loadmcnt <ADC sample "
-                    "count when model was loaded>, delay <in seconds>, "
-                    "delay-rate <unit-less or, seconds-per-second>, "
-                    "phase <radians>, phase-rate <radians per second>).",
-                    default="(-1, 0.0, 0.0, 0.0, 0.0)",
-                    initial_status=Sensor.Status.NOMINAL,
+                self.sensors.add(
+                    Sensor(
+                        str,
+                        f"{output}.input{pol}.delay",
+                        "The delay settings for this input: (loadmcnt <ADC sample "
+                        "count when model was loaded>, delay <in seconds>, "
+                        "delay-rate <unit-less or, seconds-per-second>, "
+                        "phase <radians>, phase-rate <radians per second>).",
+                        default="(-1, 0.0, 0.0, 0.0, 0.0)",
+                        initial_status=Sensor.Status.NOMINAL,
+                    )
                 )
-            )
+                self.sensors.add(
+                    Sensor(
+                        float,
+                        f"{output}.input{pol}.dig-pwr-dbfs",
+                        "Digitiser ADC average power",
+                        units="dBFS",
+                        default=-25.0,
+                        initial_status=Sensor.Status.NOMINAL,
+                    )
+                )
+                self.sensors.add(
+                    Sensor(
+                        int,
+                        f"{output}.input{pol}.feng-clip-cnt",
+                        "Number of output samples that are saturated",
+                        default=0,
+                        initial_status=Sensor.Status.NOMINAL,
+                    )
+                )
             self.sensors.add(
                 Sensor(
                     int,
                     f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
-                    default=0,
-                    initial_status=Sensor.Status.NOMINAL,
-                )
-            )
-            self.sensors.add(
-                Sensor(
-                    float,
-                    f"input{pol}.dig-pwr-dbfs",
-                    "Digitiser ADC average power",
-                    units="dBFS",
-                    default=-25.0,
-                    initial_status=Sensor.Status.NOMINAL,
-                )
-            )
-            self.sensors.add(
-                Sensor(
-                    int,
-                    f"input{pol}.feng-clip-cnt",
-                    "Number of output samples that are saturated",
                     default=0,
                     initial_status=Sensor.Status.NOMINAL,
                 )
@@ -191,7 +204,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             delay, delay_rate = (float(x) for x in delay_args.split(","))
             phase, phase_rate = (float(x) for x in phase_args.split(","))
             value = f"({load_time}, {delay}, {delay_rate}, {phase}, {phase_rate})"
-            self.sensors[f"input{i}.delay"].value = value
+            self.sensors[f"{self._default_output}.input{i}.delay"].value = value
 
     async def request_gain(self, ctx, input: int, *values: str) -> Tuple[str, ...]:
         """Set or query the eq gains."""
@@ -202,7 +215,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 # Same value for all channels
                 cvalues = cvalues[:1]
             self._gains[input] = cvalues
-            self.sensors[f"input{input}.eq"].value = (
+            self.sensors[f"{self._default_output}.input{input}.eq"].value = (
                 "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
             )
         return tuple(_format_complex(v) for v in self._gains[input])
