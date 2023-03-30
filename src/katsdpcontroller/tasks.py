@@ -809,7 +809,7 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
     def get_command_arguments(
         self, value_type: Callable[[str], _T], argument_name: str
     ) -> List[_T]:
-        """Return the values pass to the fake device as CLI parameters.
+        """Return the values passed to the fake device as CLI parameters.
 
         This is similar to :meth:`get_command_argument` (with the same
         limitations), but supports arguments that can be passed multiple times,
