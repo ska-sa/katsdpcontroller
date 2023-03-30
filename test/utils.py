@@ -24,7 +24,7 @@ _T = TypeVar("_T")
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
 CONFIG = """{
-    "version": "3.2",
+    "version": "3.3",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
