@@ -1284,7 +1284,15 @@ class SubarrayProduct:
         msgs = []
         for i in range(n_inputs // 2):
             nodes.append(self._nodes[f"f.{stream.name}.{i}"])
-            msgs.append(("delays", timestamp, coefficient_sets[2 * i], coefficient_sets[2 * i + 1]))
+            msgs.append(
+                (
+                    "delays",
+                    stream_name,
+                    timestamp,
+                    coefficient_sets[2 * i],
+                    coefficient_sets[2 * i + 1],
+                )
+            )
         await self._multi_request(nodes, msgs)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
@@ -1310,7 +1318,7 @@ class SubarrayProduct:
         node = self._nodes[f"f.{stream.name}.{node_idx}"]
         if node.katcp_connection is None:
             raise FailReply(f"No katcp connection to {node.name}")
-        reply, _ = await node.katcp_connection.request("gain", idx % 2, *values)
+        reply, _ = await node.katcp_connection.request("gain", stream.name, idx % 2, *values)
         return reply
 
     async def gain_all(self, stream_name: str, values: Sequence[str]) -> None:
@@ -1331,7 +1339,7 @@ class SubarrayProduct:
                 raise FailReply(str(exc))
         await self._multi_request(
             self.find_nodes(task_type="f", streams=[stream]),
-            itertools.repeat(("gain-all",) + values),
+            itertools.repeat(("gain-all", stream_name) + values),
         )
 
     async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
