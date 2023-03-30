@@ -1,5 +1,5 @@
 {% macro versions() %}
-["2.4", "2.5", "2.6", "3.0", "3.1", "3.2", "3.3"]
+["2.4", "2.5", "2.6", "3.0", "3.1", "3.2", "3.3", "3.4"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -9,7 +9,11 @@
     "definitions": {
         "stream_name": {
             "type": "string",
+{% if version >= "3.4" %}
             "pattern": "^[-A-Za-z0-9_]+$"
+{% else %}
+            "pattern": "^[A-Za-z0-9_]+$"
+{% endif %}
         },
         "stream_type": {
             "type": "string",
