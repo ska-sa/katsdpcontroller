@@ -74,6 +74,7 @@ EXPECTED_REQUEST_LIST = [
     "product-deconfigure",
     "product-reconfigure",
     "product-list",
+    "product-configure-versions",
     "set-config-override",
     "sdp-shutdown",
     "capture-done",
