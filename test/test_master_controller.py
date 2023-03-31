@@ -38,6 +38,7 @@ from katsdpcontroller.master_controller import (
     SingularityProductManager,
     parse_args,
 )
+from katsdpcontroller.schemas import PRODUCT_CONFIG  # type: ignore
 
 from . import fake_singularity, fake_zk
 from .utils import (
@@ -202,6 +203,15 @@ class DummyProductController(aiokatcp.DeviceServer):
         return "telstate.invalid:31000"
 
 
+class DummyImageLookup(scheduler.SimpleImageLookup):
+    """Extend SimpleImageLookup to supply label for product-configure-versions."""
+
+    async def __call__(self, repo: str, tag: str) -> scheduler.Image:
+        image = await super().__call__(repo, tag)
+        image.labels["za.ac.kat.sdp.katsdpcontroller.product-configure-versions"] = "2.6 3.3"
+        return image
+
+
 async def quick_death_lifecycle(task: fake_singularity.Task) -> None:
     """Task dies instantly"""
     task.state = fake_singularity.TaskState.DEAD
@@ -261,7 +271,7 @@ class TestSingularityProductManager:
             self.args = args
             self.server = server
             self.singularity_server = singularity_server
-            image_lookup = scheduler.SimpleImageLookup("registry.invalid:5000")
+            image_lookup = DummyImageLookup("registry.invalid:5000")
             self.image_resolver_factory = make_image_resolver_factory(image_lookup, args)
             with mock.patch("aiozk.ZKClient", fake_zk.ZKClient):
                 self.manager = SingularityProductManager(
@@ -714,6 +724,12 @@ class TestSingularityProductManager:
         assert await product.get_state() == ProductState.DEAD
         assert await product.get_telstate_endpoint() == ""
 
+    async def test_product_configure_versions(
+        self, fix: "TestSingularityProductManager.Fixture"
+    ) -> None:
+        versions = await fix.manager.product_configure_versions()
+        assert versions == ["2.6", "3.3"]
+
 
 class TestDeviceServer:
     """Tests for :class:`.master_controller.DeviceServer`.
@@ -972,6 +988,13 @@ class TestDeviceServer:
         await client.request("product-configure", "product", CONFIG_CBF_ONLY)
         await client.request("product-deconfigure", "product")
         await client.request("product-configure", "product", CONFIG)
+
+    async def test_product_configure_versions(self, client: aiokatcp.Client) -> None:
+        reply, informs = await client.request("product-configure-versions")
+        assert reply == [aiokatcp.encode(len(informs))]
+        assert len(informs) == len(PRODUCT_CONFIG.versions)
+        for inform, version in zip(informs, PRODUCT_CONFIG.versions):
+            assert inform.arguments == [aiokatcp.encode(str(version))]
 
     async def test_help(self, client: aiokatcp.Client) -> None:
         reply, informs = await client.request("help")
