@@ -64,7 +64,7 @@ from .controller import (
 )
 from .defaults import LOCALHOST
 from .scheduler import decode_json_base64
-from .schemas import SUBSYSTEMS, ZK_STATE  # type: ignore
+from .schemas import PRODUCT_CONFIG, SUBSYSTEMS, ZK_STATE  # type: ignore
 
 ZK_STATE_VERSION = 5
 logger = logging.getLogger(__name__)
@@ -390,6 +390,14 @@ class ProductManagerBase(Generic[_P]):
         :meth:`add_product`.
         """
 
+    @abstractmethod
+    async def product_configure_versions(self) -> List[str]:
+        """Get the supported product-configure schema versions.
+
+        These versions will be valid only if the product controller is not
+        overridden.
+        """
+
     def _update_device_status(self) -> None:
         """Recompute the top-level device-status from the per-product device-status sensors."""
         status = DeviceStatus.OK
@@ -570,6 +578,9 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         product.task_state = Product.TaskState.STARTING
         self._connect(product, host, ipaddress.ip_address(host), {"katcp": port})
         return product
+
+    async def product_configure_versions(self) -> List[str]:
+        return [str(version) for version in PRODUCT_CONFIG.versions]
 
     async def kill_product(self, product: InternalProduct) -> None:
         await super().kill_product(product)
@@ -1101,6 +1112,27 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 # reach ACTIVE state and hence wasn't stored
         return product
 
+    async def product_configure_versions(self) -> List[str]:
+        # Creates a temporary ImageResolver so that we read the tag file now
+        # and throw away the cache immediately after this function.
+        try:
+            image_resolver = self._image_resolver_factory()
+        except Exception as exc:
+            raise ProductFailed(f"Could not load image tag file: {exc}") from exc
+
+        try:
+            image = await image_resolver("katsdpcontroller")
+        except (scheduler.ImageError, aiohttp.ClientError) as exc:
+            raise ProductFailed(f"Could not resolve katsdpcontroller image: {exc}") from exc
+
+        try:
+            versions = image.labels["za.ac.kat.sdp.katsdpcontroller.product-configure-versions"]
+            return versions.split(" ")
+        except KeyError:
+            raise ProductFailed(
+                "katsdpcontroller image does not contain the necessary label"
+            ) from None
+
     async def kill_product(self, product: SingularityProduct) -> None:
         await super().kill_product(product)
         if product.task_id is not None:
@@ -1531,6 +1563,19 @@ class DeviceServer(aiokatcp.DeviceServer):
         product = await self.product_configure(name, config_dict)
         assert product.host is not None and product.ports
         return product.name, str(product.host), product.ports["katcp"]
+
+    @time_request
+    async def request_product_configure_versions(self, ctx) -> None:
+        """Get a list of supported schema versions for ``?product-configure``.
+
+        Each version is returned as an inform, and the reply contains the
+        number of supported versions.
+        """
+        try:
+            versions = await self._manager.product_configure_versions()
+        except ProductFailed as exc:
+            raise FailReply(str(exc)) from exc
+        ctx.informs((version,) for version in versions)
 
     async def product_deconfigure(self, product: Product, force: bool = False) -> None:
         """Implementation of meth:`request_product_deconfigure`."""
