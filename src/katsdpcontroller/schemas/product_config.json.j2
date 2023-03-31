@@ -108,7 +108,11 @@
             "type": "object",
             "additionalProperties": false,
             "patternProperties": {
+{% if version >= "3.4" %}
+                "^[-A-Za-z0-9_]+$": {
+{% else %}
                 "^[A-Za-z0-9_]+$": {
+{% endif %}
                     "type": "object",
                     "required": ["type", "url"],
                     "properties": {
@@ -265,7 +269,11 @@
             "type": "object",
             "additionalProperties": false,
             "patternProperties": {
+{% if version >= "3.4" %}
+                "^[-A-Za-z0-9_]+$": {
+{% else %}
                 "^[A-Za-z0-9_]+$": {
+{% endif %}
                     "type": "object",
                     "required": ["type"],
                     "properties": {
