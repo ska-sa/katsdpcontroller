@@ -191,23 +191,25 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors, "The F-engine is receiving a good, clean digitiser stream"
         )
 
-    def _check_stream(self, stream: str) -> None:
+    def _check_stream_name(self, stream_name: str) -> None:
         """Validate that a stream name matches one of the outputs.
 
         Raises
         ------
         FailReply
-            If `stream` is invalid.
+            If `stream_name` is invalid.
         """
-        if stream not in self._output_names:
-            raise FailReply(f"no output stream called {stream!r}")
+        if stream_name not in self._output_names:
+            raise FailReply(f"no output stream called {stream_name!r}")
 
-    async def request_delays(self, ctx, stream: str, start_time: Timestamp, *delays: str) -> None:
+    async def request_delays(
+        self, ctx, stream_name: str, start_time: Timestamp, *delays: str
+    ) -> None:
         """Add a new first-order polynomial to the delay and fringe correction model."""
         # The real server only updates once the new model has gone into effect,
         # but since we're not simulating the data path we'll just update the
         # sensors immediately.
-        self._check_stream(stream)
+        self._check_stream_name(stream_name)
         assert len(delays) == self.N_POLS
         load_time = int((float(start_time) - self._sync_epoch) * self._adc_sample_rate)
         for i, delay_str in enumerate(delays):
@@ -215,31 +217,33 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             delay, delay_rate = (float(x) for x in delay_args.split(","))
             phase, phase_rate = (float(x) for x in phase_args.split(","))
             value = f"({load_time}, {delay}, {delay_rate}, {phase}, {phase_rate})"
-            self.sensors[f"{stream}.input{i}.delay"].value = value
+            self.sensors[f"{stream_name}.input{i}.delay"].value = value
 
-    async def request_gain(self, ctx, stream: str, input: int, *values: str) -> Tuple[str, ...]:
+    async def request_gain(
+        self, ctx, stream_name: str, input: int, *values: str
+    ) -> Tuple[str, ...]:
         """Set or query the eq gains."""
-        self._check_stream(stream)
+        self._check_stream_name(stream_name)
         # Validation is handled by the subarray product, so we just trust here.
         if values:
             cvalues = np.array([np.complex64(v) for v in values])
             if np.all(cvalues == cvalues[0]):
                 # Same value for all channels
                 cvalues = cvalues[:1]
-            self._gains[stream][input] = cvalues
-            self.sensors[f"{stream}.input{input}.eq"].value = (
+            self._gains[stream_name][input] = cvalues
+            self.sensors[f"{stream_name}.input{input}.eq"].value = (
                 "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
             )
-        return tuple(_format_complex(v) for v in self._gains[stream][input])
+        return tuple(_format_complex(v) for v in self._gains[stream_name][input])
 
-    async def request_gain_all(self, ctx, stream: str, *values: str) -> None:
+    async def request_gain_all(self, ctx, stream_name: str, *values: str) -> None:
         """Set the eq gains for all inputs."""
-        self._check_stream(stream)
+        self._check_stream_name(stream_name)
         for pol in range(self.N_POLS):
             if values == ("default",):
-                self._gains[stream][pol] = np.full((1,), self.DEFAULT_GAIN, np.complex64)
+                self._gains[stream_name][pol] = np.full((1,), self.DEFAULT_GAIN, np.complex64)
             else:
-                await self.request_gain(ctx, stream, pol, *values)
+                await self.request_gain(ctx, stream_name, pol, *values)
 
 
 class FakeXbgpuDeviceServer(FakeDeviceServer):
