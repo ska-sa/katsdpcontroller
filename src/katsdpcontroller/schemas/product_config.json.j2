@@ -4,16 +4,13 @@
 
 {% macro validate(version) %}
 {% set input_additional = "false" if version >= "3.0" else "true" %}
+{% set stream_name_pattern = "^[-A-Za-z0-9_]+$" if version >= "3.4" else "^[A-Za-z0-9_]+$" %}
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
         "stream_name": {
             "type": "string",
-{% if version >= "3.4" %}
-            "pattern": "^[-A-Za-z0-9_]+$"
-{% else %}
-            "pattern": "^[A-Za-z0-9_]+$"
-{% endif %}
+            "pattern": "{{ stream_name_pattern }}"
         },
         "stream_type": {
             "type": "string",
@@ -108,11 +105,7 @@
             "type": "object",
             "additionalProperties": false,
             "patternProperties": {
-{% if version >= "3.4" %}
-                "^[-A-Za-z0-9_]+$": {
-{% else %}
-                "^[A-Za-z0-9_]+$": {
-{% endif %}
+                "{{ stream_name_pattern }}": {
                     "type": "object",
                     "required": ["type", "url"],
                     "properties": {
@@ -269,11 +262,7 @@
             "type": "object",
             "additionalProperties": false,
             "patternProperties": {
-{% if version >= "3.4" %}
-                "^[-A-Za-z0-9_]+$": {
-{% else %}
-                "^[A-Za-z0-9_]+$": {
-{% endif %}
+                "{{ stream_name_pattern }}": {
                     "type": "object",
                     "required": ["type"],
                     "properties": {
