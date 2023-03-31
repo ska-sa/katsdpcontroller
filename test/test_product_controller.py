@@ -1695,7 +1695,9 @@ class TestController(BaseTestController):
         )
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("gain", 1, "1.0+2.0j")
+        katcp_client.request.assert_any_call(
+            "gain", "gpucbf_antenna_channelised_voltage", 1, "1.0+2.0j"
+        )
         assert reply == [b"1.0+2.0j"]
 
     async def test_gain_multi(
@@ -1710,7 +1712,9 @@ class TestController(BaseTestController):
         )
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("gain", 1, *[g.decode() for g in gains])
+        katcp_client.request.assert_any_call(
+            "gain", "gpucbf_antenna_channelised_voltage", 1, *[g.decode() for g in gains]
+        )
         assert reply == gains
 
     async def test_gain_all_bad_stream(self, client: aiokatcp.Client) -> None:
@@ -1743,7 +1747,9 @@ class TestController(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "1+2j")
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("gain-all", "1+2j")
+        katcp_client.request.assert_any_call(
+            "gain-all", "gpucbf_antenna_channelised_voltage", "1+2j"
+        )
 
     async def test_gain_all_multi(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test gain-all with a different gain for each channel."""
@@ -1752,7 +1758,9 @@ class TestController(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", *gains)
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("gain-all", *[g.decode() for g in gains])
+        katcp_client.request.assert_any_call(
+            "gain-all", "gpucbf_antenna_channelised_voltage", *[g.decode() for g in gains]
+        )
 
     async def test_gain_all_default(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test setting gains to default with gain-all."""
@@ -1760,7 +1768,9 @@ class TestController(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "default")
         # TODO: this doesn't check that it goes to the correct nodes
         katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("gain-all", "default")
+        katcp_client.request.assert_any_call(
+            "gain-all", "gpucbf_antenna_channelised_voltage", "default"
+        )
 
     async def test_delays_bad_stream(self, client: aiokatcp.Client) -> None:
         """Test delays with a stream that doesn't exist."""
@@ -1829,8 +1839,12 @@ class TestController(BaseTestController):
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call("delays", 1234567890.0, "0,0:0,0", "0,0:0,1")
-        katcp_client.request.assert_any_call("delays", 1234567890.0, "0,1:0,0", "0,1:0,1")
+        katcp_client.request.assert_any_call(
+            "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,0:0,0", "0,0:0,1"
+        )
+        katcp_client.request.assert_any_call(
+            "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,1:0,0", "0,1:0,1"
+        )
 
     async def test_capture_start(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test capture-start in the success case."""
