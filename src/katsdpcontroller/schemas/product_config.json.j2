@@ -4,7 +4,7 @@
 
 {% macro validate(version) %}
 {% set input_additional = "false" if version >= "3.0" else "true" %}
-{% set stream_name_pattern = "^[-A-Za-z0-9_]+$" if version >= "3.4" else "^[A-Za-z0-9_]+$" %}
+{% set stream_name_pattern = "^[A-Za-z0-9_-]+$" if version >= "3.4" else "^[A-Za-z0-9_]+$" %}
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
