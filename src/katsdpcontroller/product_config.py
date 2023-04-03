@@ -2074,7 +2074,7 @@ def _upgrade(config):
         config["version"] = "3.0"
 
     # Upgrade to latest 3.x
-    config["version"] = "3.3"
+    config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
 
     _validate(config)  # Should never fail if the input was valid
     return config
