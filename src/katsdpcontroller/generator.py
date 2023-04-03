@@ -790,16 +790,19 @@ def _make_fgpu(
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             fgpu.capabilities.append("NET_RAW")
-            # Use the core numbers as completion vectors. This ensures that
-            # multiple instances on a machine will use distinct vectors.
             fgpu.command += [
                 "--src-ibv",
-                "--src-comp-vector",
-                "{cores[src0]},{cores[src1]}",
                 "--dst-ibv",
-                "--dst-comp-vector",
-                "{cores[dst]}",
             ]
+            if not configuration.options.develop.less_resources:
+                # Use the core numbers as completion vectors. This ensures that
+                # multiple instances on a machine will use distinct vectors.
+                fgpu.command += [
+                    "--src-comp-vector",
+                    "{cores[src0]},{cores[src1]}",
+                    "--dst-comp-vector",
+                    "{cores[dst]}",
+                ]
         fgpu.command += stream.command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
         fgpu.katsdpservices_config = False
@@ -1140,16 +1143,19 @@ def _make_xbgpu(
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             xbgpu.capabilities.append("NET_RAW")
-            # Use the core number as completion vector. This ensures that
-            # multiple instances on a machine will use distinct vectors.
             xbgpu.command += [
                 "--src-ibv",
-                "--src-comp-vector",
-                "{cores[src]}",
                 "--dst-ibv",
-                "--dst-comp-vector",
-                "{cores[dst]}",
             ]
+            if not configuration.options.develop.less_resources:
+                # Use the core number as completion vector. This ensures that
+                # multiple instances on a machine will use distinct vectors.
+                xbgpu.command += [
+                    "--src-comp-vector",
+                    "{cores[src]}",
+                    "--dst-comp-vector",
+                    "{cores[dst]}",
+                ]
         xbgpu.command += stream.command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
         xbgpu.katsdpservices_config = False
