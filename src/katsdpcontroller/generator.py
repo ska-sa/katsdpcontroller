@@ -564,7 +564,7 @@ def _make_fgpu(
     stream_sensors = [
         Sensor(
             int,
-            "{stream.name}.adc-bits",
+            f"{stream.name}.adc-bits",
             "ADC sample bitwidth",
             default=adc_bits,
             initial_status=Sensor.Status.NOMINAL,
