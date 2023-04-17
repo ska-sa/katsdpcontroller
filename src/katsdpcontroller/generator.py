@@ -561,6 +561,13 @@ def _make_fgpu(
     if "adc-bits" in g.graph["stream_sensors"]:
         assert g.graph["stream_sensors"]["adc-bits"].value == adc_bits
 
+    if stream.narrowband is not None:
+        pfb_group_delay = (
+            -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
+        )
+    else:
+        pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
+
     stream_sensors = [
         Sensor(
             int,
@@ -656,7 +663,7 @@ def _make_fgpu(
             int,
             f"{stream.name}.pfb-group-delay",
             "PFB group delay, specified in number of samples",
-            default=-stream.n_chans * stream.pfb_taps,
+            default=round(pfb_group_delay),  # TODO: change the ICD from int to float?
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -672,7 +679,9 @@ def _make_fgpu(
             float,
             f"{stream.name}.center-freq",
             "The centre frequency of the digitised band",
-            default=stream.bandwidth / 2,
+            default=stream.narrowband.centre_frequency
+            if stream.narrowband is not None
+            else stream.bandwidth / 2,
             initial_status=Sensor.Status.NOMINAL,
         ),
         data_suspect_sensor,
