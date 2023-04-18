@@ -667,10 +667,10 @@ def _make_fgpu(
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
-            int,
+            float,
             f"{stream.name}.pfb-group-delay",
             "PFB group delay, specified in number of samples",
-            default=round(pfb_group_delay),  # TODO: change the ICD from int to float?
+            default=pfb_group_delay,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
