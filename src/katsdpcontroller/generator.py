@@ -592,6 +592,13 @@ def _make_fgpu(
             default=stream.bandwidth,
             initial_status=Sensor.Status.NOMINAL,
         ),
+        Sensor(
+            int,
+            f"{stream.name}.decimation-factor",
+            "The factor by which the bandwidth of the incoming digitiser stream is decimated",
+            default=stream.narrowband.decimation_factor if stream.narrowband else 1,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
         # The timestamps are simply ADC sample counts
         Sensor(
             float,
