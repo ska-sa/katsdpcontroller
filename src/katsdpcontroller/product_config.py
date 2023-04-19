@@ -593,10 +593,7 @@ class GpucbfNarrowbandConfig:
 
 
 class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
-    """Real antenna-channelised-voltage stream (GPU correlator).
-
-    It currently only supports wideband.
-    """
+    """Real antenna-channelised-voltage stream (GPU correlator)."""
 
     stream_type: ClassVar[str] = "gpucbf.antenna_channelised_voltage"
     _valid_src_types: ClassVar[_ValidTypes] = {
