@@ -10,6 +10,7 @@ import urllib.parse
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -526,191 +527,211 @@ def _make_dsim(
     return dsim
 
 
+def _fgpu_key(stream: product_config.GpucbfAntennaChannelisedVoltageStream) -> tuple:
+    """Comparison key for an antenna-channelised-voltage stream.
+
+    The keys for two streams should be the same if and only if they can run
+    in the same engine.
+    """
+    return (
+        [src.name for src in stream.src_streams],
+        stream.input_labels,
+        stream.command_line_extra,
+    )
+
+
 def _make_fgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    stream: product_config.GpucbfAntennaChannelisedVoltageStream,
+    streams: Iterable[product_config.GpucbfAntennaChannelisedVoltageStream],
     sync_time: int,
 ) -> scheduler.LogicalNode:
+    # streams needs to be a Sequence (not just an iterable that is consumed
+    # once), which `sorted` achieves. Put wideband first for consistency.
+    streams = sorted(streams, key=lambda stream: stream.narrowband is not None)
     ibv = not configuration.options.develop.disable_ibv
-    n_engines = len(stream.src_streams) // 2
-    fgpu_group = LogicalGroup(f"fgpu.{stream.name}")
+    n_engines = len(streams[0].src_streams) // 2
+    base_name = streams[0].name
+    fgpu_group = LogicalGroup(f"fgpu.{base_name}")
     g.add_node(fgpu_group)
 
-    dst_multicast = LogicalMulticast(
-        stream.name, stream.n_substreams, initial_transmit_state=TransmitState.UP
-    )
-    g.add_node(dst_multicast)
-    g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
-
-    # TODO: this list is not complete, and will need to be updated as the ICD evolves.
-    data_suspect_sensor = Sensor(
-        str,
-        f"{stream.name}.input-data-suspect",
-        "A bitmask of flags indicating for each input whether the data for "
-        "that input should be considered to be garbage. Input order matches "
-        "input labels.",
-        default="0" * len(stream.src_streams),
-        initial_status=Sensor.Status.NOMINAL,
-    )
-
-    if stream.narrowband is not None:
-        pfb_group_delay = (
-            -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
-        )
-    else:
-        pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
-
-    stream_sensors = [
-        Sensor(
-            int,
-            f"{stream.name}.adc-bits",
-            "ADC sample bitwidth",
-            default=stream.sources(0)[0].bits_per_sample,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.adc-sample-rate",
-            "Sample rate of the ADC",
-            "Hz",
-            default=stream.adc_sample_rate,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.bandwidth",
-            "The analogue bandwidth of the digitised band",
-            "Hz",
-            default=stream.bandwidth,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.decimation-factor",
-            "The factor by which the bandwidth of the incoming digitiser stream is decimated",
-            default=stream.narrowband.decimation_factor if stream.narrowband else 1,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        # The timestamps are simply ADC sample counts
-        Sensor(
-            float,
-            f"{stream.name}.scale-factor-timestamp",
-            "Factor by which to divide instrument timestamps to convert to unix seconds",
-            "Hz",
-            default=stream.adc_sample_rate,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.sync-time",
-            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-            "s",
-            default=float(sync_time),
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-ants",
-            "The number of antennas in the instrument",
-            default=len(stream.antennas),
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-inputs",
-            "The number of single polarisation inputs to the instrument",
-            default=len(stream.src_streams),
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-fengs",
-            "The number of F-engines in the instrument",
-            default=n_engines,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.feng-out-bits-per-sample",
-            "F-engine output bits per sample. Per number, not complex pair. "
-            "Real and imaginary parts are both this wide",
-            default=stream.bits_per_sample,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-chans",
-            "Number of channels in the output spectrum",
-            default=stream.n_chans,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-chans-per-substream",
-            "Number of channels in each substream for this f-engine stream",
-            default=stream.n_chans_per_substream,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-samples-between-spectra",
-            "Number of samples between spectra",
-            default=stream.n_samples_between_spectra,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.pfb-group-delay",
-            "PFB group delay, specified in number of samples",
-            default=pfb_group_delay,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.spectra-per-heap",
-            "Number of spectrum chunks per heap",
-            default=stream.n_spectra_per_heap,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        # Note: reports baseband centre frequency, not on-sky, and hence not
-        # stream.centre_frequency.
-        Sensor(
-            float,
-            f"{stream.name}.center-freq",
-            "The centre frequency of the digitised band",
-            default=stream.narrowband.centre_frequency
-            if stream.narrowband is not None
-            else stream.bandwidth / 2,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        data_suspect_sensor,
-    ]
-    for ss in stream_sensors:
-        g.graph["stream_sensors"].add(ss)
-
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
-    telstate_data = {
-        "instrument_dev_name": "gpucbf",  # Made-up instrument name
-        # Normally obtained from the CBF proxy or subarray controller
-        "input_labels": stream.input_labels,
-        # Copies of our own sensors, with transformations normally applied by cam2telstate
-        "adc_sample_rate": stream.adc_sample_rate,
-        "n_inputs": len(stream.src_streams),
-        "scale_factor_timestamp": stream.adc_sample_rate,
-        "sync_time": float(sync_time),
-        "ticks_between_spectra": stream.n_samples_between_spectra,
-        "n_chans": stream.n_chans,
-        "bandwidth": stream.bandwidth,
-        "center_freq": stream.centre_frequency,
-    }
-    for key, value in telstate_data.items():
-        init_telstate[(stream.name, key)] = value
+    data_suspect_sensors = []
+    for stream in streams:
+        dst_multicast = LogicalMulticast(
+            stream.name, stream.n_substreams, initial_transmit_state=TransmitState.UP
+        )
+        g.add_node(dst_multicast)
+        g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
+
+        # TODO: this list is not complete, and will need to be updated as the ICD evolves.
+        data_suspect_sensor = Sensor(
+            str,
+            f"{stream.name}.input-data-suspect",
+            "A bitmask of flags indicating for each input whether the data for "
+            "that input should be considered to be garbage. Input order matches "
+            "input labels.",
+            default="0" * len(stream.src_streams),
+            initial_status=Sensor.Status.NOMINAL,
+        )
+        data_suspect_sensors.append(data_suspect_sensor)
+
+        if stream.narrowband is not None:
+            pfb_group_delay = (
+                -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
+            )
+        else:
+            pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
+
+        stream_sensors = [
+            Sensor(
+                int,
+                f"{stream.name}.adc-bits",
+                "ADC sample bitwidth",
+                default=stream.sources(0)[0].bits_per_sample,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.adc-sample-rate",
+                "Sample rate of the ADC",
+                "Hz",
+                default=stream.adc_sample_rate,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.bandwidth",
+                "The analogue bandwidth of the digitised band",
+                "Hz",
+                default=stream.bandwidth,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.decimation-factor",
+                "The factor by which the bandwidth of the incoming digitiser stream is decimated",
+                default=stream.narrowband.decimation_factor if stream.narrowband else 1,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            # The timestamps are simply ADC sample counts
+            Sensor(
+                float,
+                f"{stream.name}.scale-factor-timestamp",
+                "Factor by which to divide instrument timestamps to convert to unix seconds",
+                "Hz",
+                default=stream.adc_sample_rate,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.sync-time",
+                "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+                "s",
+                default=float(sync_time),
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-ants",
+                "The number of antennas in the instrument",
+                default=len(stream.antennas),
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-inputs",
+                "The number of single polarisation inputs to the instrument",
+                default=len(stream.src_streams),
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-fengs",
+                "The number of F-engines in the instrument",
+                default=n_engines,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.feng-out-bits-per-sample",
+                "F-engine output bits per sample. Per number, not complex pair. "
+                "Real and imaginary parts are both this wide",
+                default=stream.bits_per_sample,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans",
+                "Number of channels in the output spectrum",
+                default=stream.n_chans,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans-per-substream",
+                "Number of channels in each substream for this f-engine stream",
+                default=stream.n_chans_per_substream,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-samples-between-spectra",
+                "Number of samples between spectra",
+                default=stream.n_samples_between_spectra,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.pfb-group-delay",
+                "PFB group delay, specified in number of samples",
+                default=pfb_group_delay,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.spectra-per-heap",
+                "Number of spectrum chunks per heap",
+                default=stream.n_spectra_per_heap,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            # Note: reports baseband centre frequency, not on-sky, and hence not
+            # stream.centre_frequency.
+            Sensor(
+                float,
+                f"{stream.name}.center-freq",
+                "The centre frequency of the digitised band",
+                default=stream.narrowband.centre_frequency
+                if stream.narrowband is not None
+                else stream.bandwidth / 2,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            data_suspect_sensor,
+        ]
+        for ss in stream_sensors:
+            g.graph["stream_sensors"].add(ss)
+
+        telstate_data = {
+            "instrument_dev_name": "gpucbf",  # Made-up instrument name
+            # Normally obtained from the CBF proxy or subarray controller
+            "input_labels": stream.input_labels,
+            # Copies of our own sensors, with transformations normally applied by cam2telstate
+            "adc_sample_rate": stream.adc_sample_rate,
+            "n_inputs": len(stream.src_streams),
+            "scale_factor_timestamp": stream.adc_sample_rate,
+            "sync_time": float(sync_time),
+            "ticks_between_spectra": stream.n_samples_between_spectra,
+            "n_chans": stream.n_chans,
+            "bandwidth": stream.bandwidth,
+            "center_freq": stream.centre_frequency,
+        }
+        for key, value in telstate_data.items():
+            init_telstate[(stream.name, key)] = value
 
     for i in range(0, n_engines):
-        srcs = stream.sources(i)
-        input_labels = (stream.input_labels[2 * i], stream.input_labels[2 * i + 1])
-        fgpu = ProductLogicalTask(f"f.{stream.name}.{i}", streams=[stream])
+        srcs = streams[0].sources(i)
+        input_labels = (streams[0].input_labels[2 * i], streams[0].input_labels[2 * i + 1])
+        fgpu = ProductLogicalTask(f"f.{base_name}.{i}", streams=streams)
         fgpu.subsystem = "cbf"
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
@@ -732,30 +753,17 @@ def _make_fgpu(
                 "cbf",
                 infiniband=ibv,
                 multicast_in={src.name for src in srcs},
-                multicast_out={stream.name},
+                multicast_out={stream.name for stream in streams},
             )
         ]
         fgpu.interfaces[0].bandwidth_in = sum(src.data_rate() for src in srcs)
         # stream.data_rate() is sum over all the engines
-        fgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+        fgpu.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams) / n_engines
         fgpu.gpus = [scheduler.GPURequest()]
         # Run at least 4 per GPU, scaling with bandwidth. This will
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
         fgpu.gpus[0].mem = 1024  # Actual use is about 800MB, independent of channel count
-        output_config = {
-            "name": escape_format(stream.name),
-            "channels": stream.n_chans,
-            "taps": stream.pfb_taps,
-            "w_cutoff": stream.w_cutoff,
-            "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
-        }
-        if stream.narrowband is not None:
-            output_config["decimation"] = stream.narrowband.decimation_factor
-            output_config["centre_frequency"] = stream.narrowband.centre_frequency
-            output_arg_name = "narrowband"
-        else:
-            output_arg_name = "wideband"
         fgpu.command = (
             ["schedrr"]
             + taskset
@@ -775,8 +783,6 @@ def _make_fgpu(
                 str(n_engines),
                 "--sync-epoch",
                 str(sync_time),
-                f"--{output_arg_name}",
-                ",".join(f"{key}={value}" for (key, value) in output_config.items()),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
@@ -788,6 +794,25 @@ def _make_fgpu(
                 "{ports[aioconsole]}",
             ]
         )
+        for stream in streams:
+            output_config = {
+                "name": escape_format(stream.name),
+                "channels": stream.n_chans,
+                "taps": stream.pfb_taps,
+                "w_cutoff": stream.w_cutoff,
+                "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
+            }
+            if stream.narrowband is not None:
+                output_config["decimation"] = stream.narrowband.decimation_factor
+                output_config["centre_frequency"] = stream.narrowband.centre_frequency
+                output_arg_name = "narrowband"
+            else:
+                output_arg_name = "wideband"
+            fgpu.command += [
+                f"--{output_arg_name}",
+                ",".join(f"{key}={value}" for (key, value) in output_config.items()),
+            ]
+
         if not configuration.options.develop.less_resources:
             fgpu.command += [
                 "--src-affinity",
@@ -812,11 +837,11 @@ def _make_fgpu(
                     "--dst-comp-vector",
                     "{cores[dst]}",
                 ]
-        fgpu.command += stream.command_line_extra
+        fgpu.command += streams[0].command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
         fgpu.katsdpservices_config = False
         fgpu.pass_telstate = False
-        fgpu.data_suspect_sensor = data_suspect_sensor
+        fgpu.data_suspect_sensors = data_suspect_sensors
         fgpu.data_suspect_range = (2 * i, 2 * i + 2)
         # Identify the antenna, if the input labels are consistent
         if input_labels[0][:-1] == input_labels[1][:-1]:
@@ -841,23 +866,27 @@ def _make_fgpu(
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
 
         # Rename sensors that are relevant to the stream rather than the process
-        for j, label in enumerate(input_labels):
-            for name in [
-                "dig-clip-cnt",
-                "rx.timestamp",
-                "rx.unixtime",
-                "rx.missing-unixtime",
-            ]:
-                fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
-            for name in [
-                "eq",
-                "delay",
-                "dig-pwr-dbfs",
-                "feng-clip-cnt",
-            ]:
-                fgpu.sensor_renames[
-                    f"{stream.name}.input{j}.{name}"
-                ] = f"{stream.name}.{label}.{name}"
+        for stream in streams:
+            for j, label in enumerate(input_labels):
+                for name in [
+                    "dig-clip-cnt",
+                    "rx.timestamp",
+                    "rx.unixtime",
+                    "rx.missing-unixtime",
+                ]:
+                    # TODO[nb]: this will only rename to the last stream. We
+                    # need to extend the renaming mechanism to support
+                    # cloning.
+                    fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
+                for name in [
+                    "eq",
+                    "delay",
+                    "dig-pwr-dbfs",
+                    "feng-clip-cnt",
+                ]:
+                    fgpu.sensor_renames[
+                        f"{stream.name}.input{j}.{name}"
+                    ] = f"{stream.name}.{label}.{name}"
         # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
@@ -1161,7 +1190,7 @@ def _make_xbgpu(
         # xbgpu doesn't use katsdpservices for configuration, or telstate
         xbgpu.katsdpservices_config = False
         xbgpu.pass_telstate = False
-        xbgpu.data_suspect_sensor = data_suspect_sensor
+        xbgpu.data_suspect_sensors = [data_suspect_sensor]
         xbgpu.data_suspect_range = (
             i * stream.n_chans_per_substream,
             (i + 1) * stream.n_chans_per_substream,
@@ -2350,6 +2379,17 @@ def _make_beamformer_engineering(
     return nodes
 
 
+def _groupby(items: Iterable[_T], key: Callable[[_T], Any]) -> Iterable[Iterable[_T]]:
+    """Group items that have a common property.
+
+    Unlike :func:`itertools.groupby`, this does not require the matching
+    items to be adjacent, because it sorts them by key (but this requires the
+    keys to be comparable). It also does not return the keys for the groups.
+    """
+    for _, group in itertools.groupby(sorted(items, key=key), key=key):
+        yield group
+
+
 def build_logical_graph(
     configuration: Configuration, config_dict: dict, sensors: SensorSet
 ) -> networkx.MultiDiGraph:
@@ -2405,19 +2445,20 @@ def build_logical_graph(
         return (stream.antenna.name, stream.adc_sample_rate)
 
     sync_time = int(time.time())
-    for _, streams in itertools.groupby(
-        sorted(configuration.by_class(product_config.SimDigBasebandVoltageStream), key=dsim_key),
-        key=dsim_key,
+    for dig_streams in _groupby(
+        configuration.by_class(product_config.SimDigBasebandVoltageStream), key=dsim_key
     ):
-        _make_dsim(g, configuration, streams, sync_time)
+        _make_dsim(g, configuration, dig_streams, sync_time)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
         _make_cbf_simulator(g, configuration, stream)
 
     # Correlator
-    for stream in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
-        _make_fgpu(g, configuration, stream, sync_time)
+    for fgpu_streams in _groupby(
+        configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream), key=_fgpu_key
+    ):
+        _make_fgpu(g, configuration, fgpu_streams, sync_time)
     for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
         _make_xbgpu(g, configuration, stream, sync_time, sensors)
 
