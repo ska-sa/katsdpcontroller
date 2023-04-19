@@ -554,13 +554,6 @@ def _make_fgpu(
         initial_status=Sensor.Status.NOMINAL,
     )
 
-    # Safety check that we don't have conflicting values for the adc-bits
-    # sensor, as it is not scoped to a stream. Currently MeerKAT+ only
-    # supports one value, so that shouldn't be an issue.
-    adc_bits = stream.sources(0)[0].bits_per_sample
-    if "adc-bits" in g.graph["stream_sensors"]:
-        assert g.graph["stream_sensors"]["adc-bits"].value == adc_bits
-
     if stream.narrowband is not None:
         pfb_group_delay = (
             -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
@@ -573,7 +566,7 @@ def _make_fgpu(
             int,
             f"{stream.name}.adc-bits",
             "ADC sample bitwidth",
-            default=adc_bits,
+            default=stream.sources(0)[0].bits_per_sample,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
