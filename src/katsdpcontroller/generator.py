@@ -561,6 +561,13 @@ def _make_fgpu(
     if "adc-bits" in g.graph["stream_sensors"]:
         assert g.graph["stream_sensors"]["adc-bits"].value == adc_bits
 
+    if stream.narrowband is not None:
+        pfb_group_delay = (
+            -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
+        )
+    else:
+        pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
+
     stream_sensors = [
         Sensor(
             int,
@@ -583,6 +590,13 @@ def _make_fgpu(
             "The analogue bandwidth of the digitised band",
             "Hz",
             default=stream.bandwidth,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.decimation-factor",
+            "The factor by which the bandwidth of the incoming digitiser stream is decimated",
+            default=stream.narrowband.decimation_factor if stream.narrowband else 1,
             initial_status=Sensor.Status.NOMINAL,
         ),
         # The timestamps are simply ADC sample counts
@@ -653,10 +667,10 @@ def _make_fgpu(
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
-            int,
+            float,
             f"{stream.name}.pfb-group-delay",
             "PFB group delay, specified in number of samples",
-            default=-stream.n_chans * stream.pfb_taps,
+            default=pfb_group_delay,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -672,7 +686,9 @@ def _make_fgpu(
             float,
             f"{stream.name}.center-freq",
             "The centre frequency of the digitised band",
-            default=stream.bandwidth / 2,
+            default=stream.narrowband.centre_frequency
+            if stream.narrowband is not None
+            else stream.bandwidth / 2,
             initial_status=Sensor.Status.NOMINAL,
         ),
         data_suspect_sensor,
@@ -980,14 +996,6 @@ def _make_xbgpu(
             f"{stream.name}.n-chans-per-substream",
             "Number of channels in each substream for this x-engine stream",
             default=stream.n_chans_per_substream,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.ddc-mix-freq",
-            "F-engine DDC mixer frequency, where used. 0 where n/a",
-            units="Hz",
-            default=0.0,
             initial_status=Sensor.Status.NOMINAL,
         ),
         SumSensor(
