@@ -46,6 +46,7 @@ def _add_sensors(sensors: SensorSet) -> None:
     sensors.add(Sensor(bool, "bool-sensor", "Boolean sensor"))
     sensors.add(Sensor(Address, "address-sensor", "Address sensor"))
     sensors.add(Sensor(MyEnum, "enum-sensor", "Enum sensor"))
+    sensors.add(Sensor(int, "broadcast-sensor", "Sensor that is mapped to multiple copies"))
     sensors["enum-sensor"].set_value(MyEnum.NO, timestamp=123456789)
 
 
@@ -97,7 +98,10 @@ class TestSensorProxyClient:
         client = SensorProxyClient(
             mirror,
             "prefix-",
-            renames={"bytes-sensor": "custom-bytes-sensor"},
+            renames={
+                "bytes-sensor": "custom-bytes-sensor",
+                "broadcast-sensor": ["copy01-broadcast-sensor", "copy02-broadcast-sensor"],
+            },
             host="127.0.0.1",
             port=port,
         )
@@ -110,23 +114,30 @@ class TestSensorProxyClient:
     def _check_sensors(self, mirror, server: DummyServer) -> None:
         """Compare the upstream sensors against the mirror"""
         for sensor in server.sensors.values():
-            qualname = "prefix-" + sensor.name
+            qualnames = ["prefix-" + sensor.name]
             if sensor.name == "bytes-sensor":
-                qualname = "custom-bytes-sensor"
-            assert qualname in mirror.sensors
-            sensor2 = mirror.sensors[qualname]
-            assert sensor.description == sensor2.description
-            assert sensor.type_name == sensor2.type_name
-            assert sensor.units == sensor2.units
-            # We compare the encoded values rather than the values themselves,
-            # because discretes have some special magic and it's the encoded
-            # value that matters.
-            assert aiokatcp.encode(sensor.value) == aiokatcp.encode(sensor2.value)
-            assert sensor.timestamp == sensor2.timestamp
-            assert sensor.status == sensor2.status
+                qualnames = ["custom-bytes-sensor"]
+            elif sensor.name == "broadcast-sensor":
+                qualnames = ["copy01-broadcast-sensor", "copy02-broadcast-sensor"]
+            for qualname in qualnames:
+                assert qualname in mirror.sensors
+                sensor2 = mirror.sensors[qualname]
+                assert sensor.description == sensor2.description
+                assert sensor.type_name == sensor2.type_name
+                assert sensor.units == sensor2.units
+                # We compare the encoded values rather than the values themselves,
+                # because discretes have some special magic and it's the encoded
+                # value that matters.
+                assert aiokatcp.encode(sensor.value) == aiokatcp.encode(sensor2.value)
+                assert sensor.timestamp == sensor2.timestamp
+                assert sensor.status == sensor2.status
         # Check that we don't have any we shouldn't
         for sensor2 in mirror.sensors.values():
-            assert sensor2.name.startswith("prefix-") or sensor2.name == "custom-bytes-sensor"
+            assert sensor2.name.startswith("prefix-") or sensor2.name in {
+                "custom-bytes-sensor",
+                "copy01-broadcast-sensor",
+                "copy02-broadcast-sensor",
+            }
             base_name = sensor2.name[7:]
             assert base_name in server.sensors
         assert "prefix-bytes-sensor" not in mirror.sensors

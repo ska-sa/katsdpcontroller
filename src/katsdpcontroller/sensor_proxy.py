@@ -46,7 +46,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         prefix: str,
         rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
-        renames: Optional[Mapping[str, str]] = None,
+        renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
@@ -63,57 +63,61 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         # Whether we need to do an interface-changed at the end of the batch
         self._interface_changed = False
 
-    def rewrite_name(self, name: str) -> str:
-        return self.renames.get(name, self.prefix + name)
+    def rewrite_name(self, name: str) -> Sequence[str]:
+        names = self.renames.get(name, self.prefix + name)
+        if isinstance(names, str):
+            names = [names]
+        return names
 
     def sensor_added(
         self, name: str, description: str, units: str, type_name: str, *args: bytes
     ) -> None:
         """Add a new or replaced sensor with unqualified name `name`."""
         super().sensor_added(name, description, units, type_name, *args)
-        sensor = self.sensors[self.rewrite_name(name)]
-        self.orig_sensors.add(sensor)
-        if (
-            self.rewrite_gui_urls is not None
-            and sensor.name.endswith(".gui-urls")
-            and sensor.stype is bytes
-        ):
-            new_value = self.rewrite_gui_urls(sensor)
-            sensor = aiokatcp.Sensor(
-                sensor.stype,
-                sensor.name,
-                sensor.description,
-                sensor.units,
-                new_value,
-                sensor.status,
-            )
-        self.server.sensors.add(sensor)
+        for rewritten_name in self.rewrite_name(name):
+            sensor = self.sensors[rewritten_name]
+            self.orig_sensors.add(sensor)
+            if (
+                self.rewrite_gui_urls is not None
+                and sensor.name.endswith(".gui-urls")
+                and sensor.stype is bytes
+            ):
+                new_value = self.rewrite_gui_urls(sensor)
+                sensor = aiokatcp.Sensor(
+                    sensor.stype,
+                    sensor.name,
+                    sensor.description,
+                    sensor.units,
+                    new_value,
+                    sensor.status,
+                )
+            self.server.sensors.add(sensor)
         self._interface_changed = True
 
     def _sensor_removed(self, name: str) -> None:
-        """Like :meth:`sensor_removed`, but takes the prefixed name"""
+        """Like :meth:`sensor_removed`, but takes the rewritten name"""
         self.server.sensors.pop(name, None)
         self.orig_sensors.pop(name, None)
         self._interface_changed = True
 
     def sensor_removed(self, name: str) -> None:
         super().sensor_removed(name)
-        rewritten = self.rewrite_name(name)
-        self._sensor_removed(rewritten)
+        for rewritten_name in self.rewrite_name(name):
+            self._sensor_removed(rewritten_name)
 
     def sensor_updated(
         self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
     ) -> None:
         super().sensor_updated(name, value, status, timestamp)
-        rewritten_name = self.rewrite_name(name)
-        sensor = self.sensors[rewritten_name]
-        if (
-            self.rewrite_gui_urls is not None
-            and rewritten_name.endswith(".gui-urls")
-            and sensor.stype is bytes
-        ):
-            value = self.rewrite_gui_urls(sensor)
-            self.server.sensors[rewritten_name].set_value(value, status, timestamp)
+        for rewritten_name in self.rewrite_name(name):
+            sensor = self.sensors[rewritten_name]
+            if (
+                self.rewrite_gui_urls is not None
+                and rewritten_name.endswith(".gui-urls")
+                and sensor.stype is bytes
+            ):
+                value = self.rewrite_gui_urls(sensor)
+                self.server.sensors[rewritten_name].set_value(value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
@@ -149,6 +153,8 @@ class SensorProxyClient(aiokatcp.Client):
     renames
         Mapping from the remote server's sensor names to sensor names for
         `server`. Sensors found in this mapping do not have `prefix` applied.
+        The values may also be lists of strings, in which case the sensor
+        will be duplicated under each of these names.
     kwargs
         Passed to the base class
     """
@@ -159,7 +165,7 @@ class SensorProxyClient(aiokatcp.Client):
         prefix: str,
         rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
-        renames: Optional[Mapping[str, str]] = None,
+        renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
