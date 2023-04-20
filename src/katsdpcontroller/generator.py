@@ -557,12 +557,14 @@ def _make_fgpu(
 
     init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
     data_suspect_sensors = []
+    dst_multicasts = []
     for stream in streams:
         dst_multicast = LogicalMulticast(
             stream.name, stream.n_substreams, initial_transmit_state=TransmitState.UP
         )
         g.add_node(dst_multicast)
         g.add_edge(dst_multicast, fgpu_group, depends_init=True, depends_ready=True)
+        dst_multicasts.append(dst_multicast)
 
         # TODO: this list is not complete, and will need to be updated as the ICD evolves.
         data_suspect_sensor = Sensor(
@@ -861,7 +863,8 @@ def _make_fgpu(
                 depends_ready=True,
             )
             fgpu.command.append(f"{{endpoints[multicast.{src.name}_spead]}}")
-        g.add_edge(fgpu, dst_multicast, port="spead", depends_resolve=True)
+        for dst_multicast in dst_multicasts:
+            g.add_edge(fgpu, dst_multicast, port="spead", depends_resolve=True)
 
         # Link it to the group, so that downstream tasks need only depend on the group.
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
