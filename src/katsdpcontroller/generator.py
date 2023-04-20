@@ -577,10 +577,11 @@ def _make_fgpu(
         data_suspect_sensors.append(data_suspect_sensor)
 
         if stream.narrowband is not None:
-            pfb_group_delay = (
-                -(stream.n_chans * stream.pfb_taps - 1) / 2 * (stream.narrowband.decimation_factor * 2)
-            )
+            subsampling = stream.narrowband.decimation_factor * 2
+            # Complex-to-complex PFB
+            pfb_group_delay = -(stream.n_chans * stream.pfb_taps - 1) / 2 * subsampling
         else:
+            # Real-to-complex PFB
             pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
 
         stream_sensors = [
