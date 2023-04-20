@@ -870,18 +870,18 @@ def _make_fgpu(
         g.add_edge(fgpu_group, fgpu, depends_ready=True, depends_init=True)
 
         # Rename sensors that are relevant to the stream rather than the process
-        for stream in streams:
-            for j, label in enumerate(input_labels):
-                for name in [
-                    "dig-clip-cnt",
-                    "rx.timestamp",
-                    "rx.unixtime",
-                    "rx.missing-unixtime",
-                ]:
-                    # TODO[nb]: this will only rename to the last stream. We
-                    # need to extend the renaming mechanism to support
-                    # cloning.
-                    fgpu.sensor_renames[f"input{j}.{name}"] = f"{stream.name}.{label}.{name}"
+        for j, label in enumerate(input_labels):
+            for name in [
+                "dig-clip-cnt",
+                "rx.timestamp",
+                "rx.unixtime",
+                "rx.missing-unixtime",
+            ]:
+                # These engine-level sensors get replicated to all the corresponding streams
+                fgpu.sensor_renames[f"input{j}.{name}"] = [
+                    f"{stream.name}.{label}.{name}" for stream in streams
+                ]
+            for stream in streams:
                 for name in [
                     "eq",
                     "delay",
