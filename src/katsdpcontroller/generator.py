@@ -457,6 +457,7 @@ def _make_dsim(
     telstate_data = {"observer": streams[0].antenna.description}
     for key, value in telstate_data.items():
         init_telstate[(streams[0].antenna.name, key)] = value
+    init_telstate[("sub", "band")] = streams[0].band
 
     # Generate a unique name. The caller groups streams by
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
