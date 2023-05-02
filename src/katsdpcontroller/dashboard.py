@@ -152,7 +152,7 @@ class Dashboard:
                                                     {"name": "Host", "id": "host"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             ),
                                             html.Div(id="task-details"),
                                         ]
@@ -172,7 +172,7 @@ class Dashboard:
                                                     {"name": "State", "id": "state"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             )
                                         ]
                                     ),
@@ -195,7 +195,7 @@ class Dashboard:
                                                     {"name": "Runtime", "id": "runtime"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             ),
                                             html.Div(id="batch-details"),
                                         ]
