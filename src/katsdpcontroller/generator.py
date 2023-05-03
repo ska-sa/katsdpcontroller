@@ -886,7 +886,7 @@ def _make_fgpu(
                 for name in [
                     "eq",
                     "delay",
-                    "dig-pwr-dbfs",
+                    "dig-rms-dbfs",
                     "feng-clip-cnt",
                 ]:
                     fgpu.sensor_renames[
