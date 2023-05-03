@@ -130,7 +130,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 self.sensors.add(
                     Sensor(
                         float,
-                        f"{output}.input{pol}.dig-pwr-dbfs",
+                        f"{output}.input{pol}.dig-rms-dbfs",
                         "Digitiser ADC average power",
                         units="dBFS",
                         default=-25.0,
