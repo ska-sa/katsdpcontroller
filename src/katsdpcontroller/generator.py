@@ -740,7 +740,7 @@ def _make_fgpu(
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
-        fgpu.mem = 1024  # Actual use is currently around 700 MB
+        fgpu.mem = 1024  # Actual use is currently around 700-800 MB, depending on narrowband
         if not configuration.options.develop.less_resources:
             fgpu.cores = ["src0", "src1", "dst", "python"]
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
