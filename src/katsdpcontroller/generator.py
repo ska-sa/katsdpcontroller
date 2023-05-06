@@ -740,7 +740,7 @@ def _make_fgpu(
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.cpus = 4
-        fgpu.mem = 1024  # Actual use is currently around 700-800 MB, depending on narrowband
+        fgpu.mem = 1200  # Actual use is currently around 1GB when using narrowband
         if not configuration.options.develop.less_resources:
             fgpu.cores = ["src0", "src1", "dst", "python"]
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
@@ -767,7 +767,7 @@ def _make_fgpu(
         # Run at least 4 per GPU, scaling with bandwidth. This will
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-        fgpu.gpus[0].mem = 1024  # Actual use is about 800MB, independent of channel count
+        fgpu.gpus[0].mem = 1536  # With 1/16 narrowband, actual use is around 1.3GB
         fgpu.command = (
             ["schedrr"]
             + taskset
