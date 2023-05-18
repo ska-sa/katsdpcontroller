@@ -129,16 +129,6 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 )
                 self.sensors.add(
                     Sensor(
-                        float,
-                        f"{output}.input{pol}.dig-rms-dbfs",
-                        "Digitiser ADC average power",
-                        units="dBFS",
-                        default=-25.0,
-                        initial_status=Sensor.Status.NOMINAL,
-                    )
-                )
-                self.sensors.add(
-                    Sensor(
                         int,
                         f"{output}.input{pol}.feng-clip-cnt",
                         "Number of output samples that are saturated",
@@ -152,6 +142,16 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    float,
+                    f"input{pol}.dig-rms-dbfs",
+                    "Digitiser ADC average power",
+                    units="dBFS",
+                    default=-25.0,
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )

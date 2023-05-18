@@ -874,6 +874,7 @@ def _make_fgpu(
         for j, label in enumerate(input_labels):
             for name in [
                 "dig-clip-cnt",
+                "dig-rms-dbfs",
                 "rx.timestamp",
                 "rx.unixtime",
                 "rx.missing-unixtime",
@@ -886,7 +887,6 @@ def _make_fgpu(
                 for name in [
                     "eq",
                     "delay",
-                    "dig-rms-dbfs",
                     "feng-clip-cnt",
                 ]:
                     fgpu.sensor_renames[
