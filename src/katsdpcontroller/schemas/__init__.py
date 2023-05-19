@@ -1,11 +1,10 @@
 """Makes packaged JSON schemas available."""
 
-import codecs
 import json
 
+import importlib_resources
 import jinja2
 import jsonschema
-import pkg_resources
 from packaging.version import Version
 
 _env = jinja2.Environment(loader=jinja2.PackageLoader(__name__, "."))
@@ -86,10 +85,10 @@ class MultiVersionValidator:
         validator.validate(doc)
 
 
-for name in pkg_resources.resource_listdir(__name__, "."):
+for entry in importlib_resources.files(__name__).iterdir():
+    name = entry.name
     if name.endswith(".json"):
-        with codecs.getreader("utf-8")(pkg_resources.resource_stream(__name__, name)) as reader:
-            schema = json.load(reader)
+        schema = json.loads(entry.read_text())
         globals()[name[:-5].upper()] = _make_validator(schema)
     elif name.endswith(".json.j2"):
         globals()[name[:-8].upper()] = MultiVersionValidator(name)

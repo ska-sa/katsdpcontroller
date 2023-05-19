@@ -232,9 +232,9 @@ from typing import AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple
 
 import aiohttp.web
 import docker
+import importlib_resources
 import jsonschema
 import networkx
-import pkg_resources
 import pymesos
 import www_authenticate
 from addict import Dict
@@ -3112,9 +3112,7 @@ class SchedulerBase:
         app = aiohttp.web.Application()
         app["katsdpcontroller_scheduler"] = self
         app.router.add_get("/tasks/{id}/wait_start", wait_start_handler)
-        app.router.add_static(
-            "/static", pkg_resources.resource_filename("katsdpcontroller", "static")
-        )
+        app.router.add_static("/static", importlib_resources.files("katsdpcontroller") / "static")
         self.app = app
         if runner_kwargs is None:
             runner_kwargs = {}
