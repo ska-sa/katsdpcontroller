@@ -20,6 +20,7 @@ flask==2.3.2               # via dash
 hiredis                    # speeds up katsdptelstate
 http-parser==0.9.0         # via pymesos
 importlib-metadata==6.6.0  # via flask
+importlib-resources==5.12.0
 itsdangerous==2.1.2        # via flask
 jinja2==3.1.2              # override old version in katsdpdockerbase
 jsonschema

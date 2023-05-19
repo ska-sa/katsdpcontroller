@@ -24,8 +24,8 @@ import weakref
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp_jinja2
+import importlib_resources
 import jinja2
-import pkg_resources
 import yarl
 from aiohttp import WSMsgType, web
 from aiokatcp import Reading, Sensor
@@ -356,7 +356,7 @@ def make_app(
             web.get("/rotate", _rotate_handler),
             web.post("/gui/{product}/{path:.*}/_dash-update-component", _block_dashboard),
             web.route("*", "/gui/{product}/{service}/{gui}{path:.*}", _missing_gui_handler),
-            web.static("/static", pkg_resources.resource_filename("katsdpcontroller", "static")),
+            web.static("/static", importlib_resources.files("katsdpcontroller") / "static"),
         ]
     )
     aiohttp_jinja2.setup(
