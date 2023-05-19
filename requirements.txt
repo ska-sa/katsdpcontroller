@@ -20,7 +20,7 @@ flask==2.3.2               # via dash
 hiredis                    # speeds up katsdptelstate
 http-parser==0.9.0         # via pymesos
 importlib-metadata==6.6.0  # via flask
-importlib-resources==5.12.0
+importlib-resources
 itsdangerous==2.1.2        # via flask
 jinja2==3.1.2              # override old version in katsdpdockerbase
 jsonschema
@@ -44,7 +44,7 @@ werkzeug==2.3.3            # via flask
 wrapt==1.10.11             # via prometheus_async
 www-authenticate==0.9.2
 yarl
-zipp==3.15.0               # via importlib-metadata
+zipp                       # via importlib-metadata, importlib-resources
 
 katpoint @ git+https://github.com/ska-sa/katpoint
 katdal @ git+https://github.com/ska-sa/katdal
