@@ -13,7 +13,6 @@ import dash_core_components as dcc
 import dash_html_components as html
 import dash_table
 import jinja2
-import networkx
 from dash.dependencies import Input, Output
 from dash_dangerously_set_inner_html import DangerouslySetInnerHTML
 
@@ -41,12 +40,59 @@ JINJA_ENV.filters["timestamp_utc"] = timestamp_utc
 JINJA_ENV.filters["timespan"] = timespan
 
 
+def _task_name_key(name):
+    parts = name.split(".")
+    # If we just turn numeric strings into numbers, we may get errors later
+    # if we try to compare a number to a string. Instead, use tuples that
+    # ensure numbers sort before strings.
+    out = []
+    for part in parts:
+        try:
+            num = int(part)
+        except ValueError:
+            out.append((1, part))
+        else:
+            out.append((0, num))
+    return tuple(out)
+
+
+def _common_prefix(key1, key2):
+    ans = 0
+    for part1, part2 in zip(key1, key2):
+        if part1 == part2:
+            ans += 1
+        else:
+            break
+    return ans
+
+
 def _get_tasks(product):
+    # We want to sort so that
+    # - Tasks with the same prefix are grouped together
+    # - Tasks earlier in the pipeline occur earlier
+    # - Numerical components of task names sort numerically rather than
+    #   lexically (so that 10 > 2).
+    # To do that, we perform a topological sort, breaking ties by
+    # - first, maximising the number of components shared with the previous entry
+    # - next, by the name
     order_graph = scheduler.subgraph(product.physical_graph, scheduler.DEPENDS_READY)
-    tasks = networkx.lexicographical_topological_sort(
-        order_graph.reverse(), key=lambda node: node.name
-    )
-    tasks = [task for task in tasks if isinstance(task, ProductPhysicalTask)]
+    deg = {v: d for v, d in order_graph.out_degree()}
+    ready = {v for v, d in deg.items() if d == 0}
+    tasks = []
+    last_key = ()
+    while ready:
+        common = [_common_prefix(last_key, _task_name_key(v.name)) for v in ready]
+        max_common = max(common)
+        candidates = [v for v, c in zip(ready, common) if c == max_common]
+        task = min(candidates, key=lambda v: _task_name_key(v.name))
+        if isinstance(task, ProductPhysicalTask):
+            tasks.append(task)
+            last_key = _task_name_key(task.name)
+        ready.remove(task)
+        for v in order_graph.predecessors(task):
+            deg[v] -= 1
+            if deg[v] == 0:
+                ready.add(v)
     return tasks
 
 
@@ -152,7 +198,7 @@ class Dashboard:
                                                     {"name": "Host", "id": "host"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             ),
                                             html.Div(id="task-details"),
                                         ]
@@ -172,7 +218,7 @@ class Dashboard:
                                                     {"name": "State", "id": "state"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             )
                                         ]
                                     ),
@@ -195,7 +241,7 @@ class Dashboard:
                                                     {"name": "Runtime", "id": "runtime"},
                                                 ],
                                                 style_cell={"textAlign": "left"},
-                                                sort_action=True,
+                                                sort_action="native",
                                             ),
                                             html.Div(id="batch-details"),
                                         ]
