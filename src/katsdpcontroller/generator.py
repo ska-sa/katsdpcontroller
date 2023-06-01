@@ -767,7 +767,7 @@ def _make_fgpu(
         # Run at least 4 per GPU, scaling with bandwidth. This will
         # likely need to be revised based on the GPU model selected.
         fgpu.gpus[0].compute = 0.25 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
-        fgpu.gpus[0].mem = 1536  # With 1/16 narrowband, actual use is around 1.3GB
+        fgpu.gpus[0].mem = 1600  # With 1/8 narrowband, actual use is 1572 MiB
         fgpu.command = (
             ["schedrr"]
             + taskset
