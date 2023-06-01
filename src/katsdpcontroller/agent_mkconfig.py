@@ -422,6 +422,12 @@ def write_dict(
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
+    if os.path.isdir("/etc/mesos-agent"):
+        attributes_dir = "/etc/mesos-agent/attributes"
+        resources_dir = "/etc/mesos-agent/resources"
+    else:
+        attributes_dir = "/etc/mesos-slave/attributes"
+        resources_dir = "/etc/mesos-slave/resources"
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -432,12 +438,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--attributes-dir",
-        default="/etc/mesos-slave/attributes",
+        default=attributes_dir,
         help="Directory for attributes [%(default)s]",
     )
     parser.add_argument(
         "--resources-dir",
-        default="/etc/mesos-slave/resources",
+        default=resources_dir,
         help="Directory for resources [%(default)s]",
     )
     parser.add_argument(
