@@ -1157,8 +1157,6 @@ def _make_xbgpu(
                 "{interfaces[cbf].name}",
                 "--dst-interface",
                 "{interfaces[cbf].name}",
-                "--heap-accumulation-threshold",
-                str(round(stream.int_time / heap_time)),
                 "--sync-epoch",
                 str(sync_time),
                 "--katcp-port",
@@ -1172,6 +1170,15 @@ def _make_xbgpu(
                 "{ports[aioconsole]}",
             ]
         )
+        output_config = {
+            "name": escape_format(stream.name),
+            "heap_accumulation_threshold": round(stream.int_time / heap_time),
+            "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
+        }
+        xbgpu.command += [
+            "--corrprod",
+            ",".join(f"{key}={value}" for (key, value) in output_config.items()),
+        ]
         if not configuration.options.develop.less_resources:
             xbgpu.command += ["--src-affinity", "{cores[src]}", "--dst-affinity", "{cores[dst]}"]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
@@ -1215,7 +1222,6 @@ def _make_xbgpu(
         g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
         xbgpu.command += [
             f"{{endpoints_vector[multicast.{acv.name}_spead][{i}]}}",
-            f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
         ]
 
         # Link it to the group, so that downstream tasks need only depend on the group.
