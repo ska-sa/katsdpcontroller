@@ -1172,7 +1172,7 @@ def _make_xbgpu(
         )
         output_config = {
             "name": escape_format(stream.name),
-            "heap_accumulation_threshold": str(round(stream.int_time / heap_time)),
+            "heap_accumulation_threshold": round(stream.int_time / heap_time),
             "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
         }
         xbgpu.command += [
