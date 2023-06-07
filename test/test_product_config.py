@@ -449,7 +449,8 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.band == src_streams[0].band
         assert acv.n_chans == narrowband_config["n_chans"]
         assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / 8
-        assert acv.centre_frequency == 1056e6
+        # It won't be exact because of quantisation of the narrowband centre frequency
+        assert acv.centre_frequency == pytest.approx(1056e6, abs=1e-2)
         assert acv.adc_sample_rate == src_streams[0].adc_sample_rate
         assert (
             acv.n_samples_between_spectra
@@ -569,8 +570,10 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         self, narrowband_config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
     ) -> None:
         narrowband_config["narrowband"]["centre_frequency"] = 50e6
+        # The error reports the quantised centre frequency
         with pytest.raises(
-            ValueError, match=r"50000000.0 is outside the range \[53500000\.0, 802500000\.0\]"
+            ValueError,
+            match=r"50000000.01117587 is outside the range \[53500000\.0, 802500000\.0\]",
         ):
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), "narrow1_acv", narrowband_config, src_streams, {}

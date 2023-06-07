@@ -653,6 +653,13 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             bandwidth /= narrowband.decimation_factor
             min_cf = bandwidth / 2
             max_cf = dig_bandwidth - bandwidth / 2
+            # katgpucbf quantises the centre frequency. Perform the matching
+            # quantisation here so that we have the true value.
+            narrowband = copy.copy(narrowband)  # Don't modify the caller's copy
+            cf_resolution = bandwidth / 2**32
+            narrowband.centre_frequency = (
+                round(narrowband.centre_frequency / cf_resolution) * cf_resolution
+            )
             if not (min_cf <= narrowband.centre_frequency <= max_cf):
                 raise ValueError(
                     f"Narrowband centre frequency {narrowband.centre_frequency}"
