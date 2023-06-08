@@ -144,10 +144,11 @@ class KatcpTransition:
 
 
 class ProductLogicalTask(scheduler.LogicalTask):
-    def __init__(self, name, streams=()):
+    def __init__(self, name, streams=(), index=None):
         super().__init__(name)
         self.task_type = name.split(".", 1)[0]
         self.streams = list(streams)
+        self.index = index
         self.stream_names = frozenset(stream.name for stream in streams)
         self.physical_factory = ProductPhysicalTask
         self.fake_katcp_server_cls: Type[FakeDeviceServer] = FakeDeviceServer

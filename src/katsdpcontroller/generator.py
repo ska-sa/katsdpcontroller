@@ -735,7 +735,7 @@ def _make_fgpu(
     for i in range(0, n_engines):
         srcs = streams[0].sources(i)
         input_labels = (streams[0].input_labels[2 * i], streams[0].input_labels[2 * i + 1])
-        fgpu = ProductLogicalTask(f"f.{base_name}.{i}", streams=streams)
+        fgpu = ProductLogicalTask(f"f.{base_name}.{i}", streams=streams, index=i)
         fgpu.subsystem = "cbf"
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
@@ -1096,7 +1096,7 @@ def _make_xbgpu(
     send_buffer = vis_size * 5  # Magic number is default in XSend class
 
     for i in range(0, stream.n_substreams):
-        xbgpu = ProductLogicalTask(f"xb.{stream.name}.{i}", streams=[stream])
+        xbgpu = ProductLogicalTask(f"xb.{stream.name}.{i}", streams=[stream], index=i)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
@@ -1311,7 +1311,7 @@ def _make_cbf_simulator(
     init_telstate[("sub", "band")] = stream.antenna_channelised_voltage.band
 
     for i in range(n_sim):
-        sim = ProductLogicalTask(f"sim.{stream.name}.{i + 1}", streams=[stream])
+        sim = ProductLogicalTask(f"sim.{stream.name}.{i + 1}", streams=[stream], index=i)
         sim.subsystem = "sdp"
         sim.image = "katcbfsim"
         # create-*-stream is passed on the command-line instead of telstate
@@ -1698,7 +1698,7 @@ def _make_ingest(
     )
 
     for i in range(1, n_ingest + 1):
-        ingest = ProductLogicalTask(f"ingest.{name}.{i}", streams=streams)
+        ingest = ProductLogicalTask(f"ingest.{name}.{i}", streams=streams, index=i - 1)
         ingest.subsystem = "sdp"
         if configuration.options.interface_mode:
             ingest.physical_factory = ProductFakePhysicalTask
@@ -1888,7 +1888,9 @@ def _make_cal(
 
     dask_prefix = "/gui/{0.subarray_product.subarray_product_id}/{0.name}/cal-diagnostics"
     for i in range(1, n_cal + 1):
-        cal = ProductLogicalTask(f"{stream.name}.{i}", streams=(stream,) + tuple(flags_streams))
+        cal = ProductLogicalTask(
+            f"{stream.name}.{i}", streams=(stream,) + tuple(flags_streams), index=i - 1
+        )
         cal.subsystem = "sdp"
         cal.fake_katcp_server_cls = FakeCalDeviceServer
         cal.image = "katsdpcal"
@@ -2893,6 +2895,7 @@ async def _make_spectral_imager(
                     stream.name, first_channel, last_channel, target_name
                 ),
                 streams=[stream],
+                index=i,
             )
             imager.subsystem = "sdp"
             imager.cpus = _spectral_imager_cpus(configuration)
