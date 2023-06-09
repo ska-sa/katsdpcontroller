@@ -616,6 +616,7 @@ class SubarrayProduct:
         *,
         task_type: Optional[str] = None,
         streams: Optional[Iterable[product_config.Stream]] = None,
+        indices: Optional[Iterable[int]] = None,
     ) -> Generator[tasks.ProductAnyPhysicalTask, None, None]:
         """Find physical nodes matching given criteria.
 
@@ -629,6 +630,9 @@ class SubarrayProduct:
             attribute of the logical node. To match, there must be at least
             one stream name in the intersection (only the names are matched,
             not the identity). If ``None``, any node can match.
+        indices
+            Indices to match against the :attr:`.ProductLogicalTask.index`
+            attribute of the logical node. If ``None``, any node can match.
         """
         stream_names = frozenset(stream.name for stream in streams) if streams is not None else None
         for node in self.physical_graph:
@@ -640,6 +644,8 @@ class SubarrayProduct:
             if stream_names is not None and not stream_names.intersection(
                 logical_node.stream_names
             ):
+                continue
+            if indices is not None and logical_node.index not in indices:
                 continue
             yield node
 
@@ -1277,22 +1283,17 @@ class SubarrayProduct:
                 raise FailReply(f"Invalid coefficient-set {coefficient_set!r}")
 
         # Looks valid, now make the requests
-        n_inputs = len(stream.src_streams)
-        # Can't use find_nodes because we need to ensure we match the right nodes
-        # to the right coefficients.
-        nodes = []
-        msgs = []
-        for i in range(n_inputs // 2):
-            nodes.append(self._nodes[f"f.{stream.name}.{i}"])
-            msgs.append(
-                (
-                    "delays",
-                    stream_name,
-                    timestamp,
-                    coefficient_sets[2 * i],
-                    coefficient_sets[2 * i + 1],
-                )
+        nodes = list(self.find_nodes(task_type="f", streams=[stream]))
+        msgs = [
+            (
+                "delays",
+                stream_name,
+                timestamp,
+                coefficient_sets[2 * node.logical_node.index],
+                coefficient_sets[2 * node.logical_node.index + 1],
             )
+            for node in nodes
+        ]
         await self._multi_request(nodes, msgs)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
@@ -1315,7 +1316,9 @@ class SubarrayProduct:
         # Looks valid, now make the request
         idx = stream.input_labels.index(input)
         node_idx = idx // 2
-        node = self._nodes[f"f.{stream.name}.{node_idx}"]
+        nodes = list(self.find_nodes(task_type="f", streams=[stream], indices=[node_idx]))
+        assert len(nodes) == 1
+        node = nodes[0]
         if node.katcp_connection is None:
             raise FailReply(f"No katcp connection to {node.name}")
         reply, _ = await node.katcp_connection.request("gain", stream.name, idx % 2, *values)
