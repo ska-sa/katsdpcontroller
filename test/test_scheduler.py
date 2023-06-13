@@ -1696,10 +1696,10 @@ class TestDiagnoseInsufficient:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.cores_agent], [self.physical_task, self.physical_task2]
             )
-        assert cm.value.resource == "cpus"
+        assert cm.value.requesters_desc == "all sdp tasks"
+        assert cm.value.resource == InsufficientResource("cpus", ResourceGroup.GLOBAL)
         assert cm.value.needed == 33
         assert cm.value.available == 32
-        assert cm.value.subsystem == "sdp"
 
     def test_generic(self):
         """A group of tasks can't fit, but no simpler explanation is available"""

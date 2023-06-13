@@ -228,7 +228,17 @@ from decimal import Decimal
 from enum import Enum
 
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple, Type, Union
+from typing import (
+    AsyncContextManager,
+    Callable,
+    ClassVar,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 
 import aiohttp.web
 import docker
@@ -3158,6 +3168,27 @@ class SchedulerBase:
             pass
 
     @classmethod
+    def _diagnose_check_subset(
+        cls, g: networkx.DiGraph, task_filter: Callable[["PhysicalTask"], bool]
+    ) -> Tuple[list, Union[int, Decimal], Union[int, Decimal]]:
+        """Check the required and available resources for a subset of graph nodes.
+
+        Returns
+        -------
+        lhs
+            The graph nodes corresponding to the task filter
+        needed
+            The resources required by the nodes in `nodes`
+        available
+            The resources available on all the nodes reachable from `nodes`
+        """
+        lhs = [node for node in g.successors("src") if task_filter(g.nodes[node]["requester"].task)]
+        needed = sum(capacity for _, _, capacity in g.in_edges(lhs, data="capacity"))
+        rhs = set(n for _, n in g.out_edges(lhs, data=False))
+        available = sum(capacity for _, _, capacity in g.out_edges(rhs, data="capacity"))
+        return lhs, needed, available
+
+    @classmethod
     def _diagnose_insufficient_filter(cls, agents, tasks, agent_filter):
         """Implement :meth:`_diagnose_insufficient` with a specific edge filter.
 
@@ -3281,6 +3312,25 @@ class SchedulerBase:
                 if need > have_max:
                     requester = g.nodes[lhs]["requester"]
                     raise TaskInsufficientResourcesError(requester, resource, need, have_max)
+
+        # Next, consider some fixed sets
+        sets = []
+        subsystems = {task.logical_node.subsystem for task in tasks}
+        subsystems.discard(None)  # Only want specific subsystems
+        for subsystem in sorted(subsystems):  # Sort just for reproducibility
+            sets.append(
+                (f"all {subsystem} tasks", lambda task: task.logical_node.subsystem == subsystem)
+            )
+        sets.append(("all tasks", lambda task: True))
+        for set_name, set_filter in sets:
+            for g in graphs:
+                lhs, need, have = cls._diagnose_check_subset(g, set_filter)
+                if need > have:
+                    resource = g.graph["resource"]
+                    requesters = [g.nodes[item]["requester"] for item in lhs]
+                    raise GroupInsufficientResourcesError(
+                        requesters, set_name, resource, need, have
+                    )
 
         # Now try to find a set of tasks that cannot be allocated, using the
         # maxflow-mincut theorem.
