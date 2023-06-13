@@ -3200,6 +3200,209 @@ class SchedulerBase:
             pass
 
     @classmethod
+    def _diagnose_insufficient_filter(cls, agents, tasks, agent_filter):
+        """Implement :meth:`_diagnose_insufficient` with a specific edge filter.
+
+        The caller is responsible for setting DECIMAL_CONTEXT and excluding
+        non-tasks from the nodes.
+        """
+        graphs = []
+        # Global resources
+        for r, rcls in GLOBAL_RESOURCES.items():
+            g = networkx.DiGraph(resource_class=rcls, resource=r)
+            graphs.append(g)
+            g.add_nodes_from(["src", "sink"])
+            for task in tasks:
+                logical_task = task.logical_node
+                need = logical_task.requests[r].amount
+                if need > rcls.ZERO:
+                    g.add_node(task)
+                    g.add_edge("src", task, capacity=need)
+
+            if r == "cores":
+                numas = [(agent, i) for agent in agents for i in range(len(agent.numa_cores))]
+                for numa in numas:
+                    agent, numa_idx = numa
+                    have = agent.numa_cores[numa_idx].available
+                    if have > rcls.ZERO:
+                        g.add_node(numa)
+                        g.add_edge(numa, "sink", capacity=have)
+                        for task in tasks:
+                            if agent_filter(agent, task):  # TODO: use a numa_filter?
+                                g.add_edge(task, numa)
+            else:
+                for agent in agents:
+                    have = agent.resources[r].available
+                    if have > rcls.ZERO:
+                        g.add_node(agent)
+                        g.add_edge(agent, "sink", capacity=have)
+                        for task in tasks:
+                            if agent_filter(agent, task):
+                                g.add_edge(task, agent)  # Infinity capacity
+
+        # GPU resources
+        for r, rcls in GPU_RESOURCES.items():
+            g = networkx.DiGraph(resource_class=rcls, resource=r)
+            graphs.append(g)
+            g.add_nodes_from(["src", "sink"])
+            for task in tasks:
+                for i, req in enumerate(task.logical_node.gpus):
+                    need = req.requests[r].amount
+                    if need > rcls.ZERO:
+                        g.add_node(req, task=task, index=i)
+                        g.add_edge("src", req, capacity=need)
+            for agent in agents:
+                for gpu in agent.gpus:
+                    have = gpu.resources[r].available
+                    if have > rcls.ZERO:
+                        g.add_node(gpu)
+                        g.add_edge(gpu, "sink", capacity=have)
+                        for task in tasks:
+                            if agent_filter(agent, task):
+                                for req in task.logical_node.gpus:
+                                    if req.matches(gpu, None):  # TODO: NUMA awareness
+                                        g.add_edge(req, gpu)  # Infinity capacity
+
+        # Network resources
+        # Start by identifying the networks
+        networks = set()
+        for task in tasks:
+            for req in task.logical_node.interfaces:
+                networks.add(req.network)
+        for agent in agents:
+            for interface in agent.interfaces:
+                for network in interface.networks:
+                    networks.add(network)
+
+        for r, rcls in INTERFACE_RESOURCES.items():
+            gs = {}
+            for network in networks:
+                g = networkx.DiGraph(resource_class=rcls, resource=r, network=network)
+                graphs.append(g)
+                g.add_nodes_from(["src", "sink"])
+                gs[network] = g
+            for task in tasks:
+                for i, req in enumerate(task.logical_node.interfaces):
+                    need = req.requests[r].amount
+                    if need > rcls.ZERO:
+                        g = gs[req.network]
+                        g.add_node(req, task=task, index=i)
+                        g.add_edge("src", req, capacity=need)
+            for agent in agents:
+                for interface in agent.interfaces:
+                    have = interface.resources[r].available
+                    if have > rcls.ZERO:
+                        for network in interface.networks:
+                            g = gs[network]
+                            g.add_node(interface)
+                            g.add_edge(interface, "sink", capacity=have)
+                        for task in tasks:
+                            if agent_filter(agent, task):
+                                for req in task.logical_node.interfaces:
+                                    if req.matches(interface, None):  # TODO: NUMA awareness
+                                        g = gs[req.network]
+                                        g.add_edge(req, interface)  # Infinity capacity
+
+        # TODO: volumes
+
+        # First check if there is a singleton that cannot be allocated anywhere.
+        for g in graphs:
+            r = g.graph["resource"]
+            rcls = g.graph["resource_class"]
+            for (_, lhs, need) in g.out_edges("src", data="capacity"):
+                have_max = rcls.ZERO
+                for (_, rhs) in g.out_edges(lhs, data=False):
+                    have_max = max(have_max, g.edges[rhs, "sink"]["capacity"])
+                if need > have_max:
+                    if isinstance(lhs, GPURequest):
+                        raise TaskInsufficientGPUResourcesError(
+                            g.nodes[lhs]["task"], g.nodes[lhs]["index"], r, need, have_max
+                        )
+                    elif isinstance(lhs, InterfaceRequest):
+                        raise TaskInsufficientInterfaceResourcesError(
+                            g.nodes[lhs]["task"], lhs, r, need, have_max
+                        )
+                    else:
+                        raise TaskInsufficientResourcesError(lhs, r, need, have_max)
+
+        # Now try to find a set of tasks that cannot be allocated, using the
+        # maxflow-mincut theorem.
+        for g in graphs:
+            total_need = sum(capacity for (_, _, capacity) in g.out_edges("src", data="capacity"))
+            cut_value, partition = networkx.minimum_cut(g, "src", "sink")
+            if cut_value < total_need:
+                # Maximum flow couldn't satisfy all the requirements. The
+                # tasks in the src side of the partition are unsatisfiable.
+                bad = [item for item in g.successors("src") if item in partition[0]]
+                need = sum(capacity for (_, _, capacity) in g.in_edges(bad, data="capacity"))
+                have = need - (total_need - cut_value)
+                r = g.graph["resource"]
+                if isinstance(bad[0], GPURequest):
+                    raise GroupInsufficientGPUResourcesError(r, need, have)
+                elif isinstance(bad[0], InterfaceRequest):
+                    raise GroupInsufficientInterfaceResourcesError(
+                        g.graph["network"], r, need, have
+                    )
+                else:
+                    raise GroupInsufficientResourcesError(r, need, have)
+
+    @classmethod
+    def _diagnose_insufficient(cls, agents, nodes):
+        """Try to determine *why* offers are insufficient.
+
+        This function does not return, instead raising an instance of
+        :exc:`InsufficientResourcesError` or a subclass.
+
+        Parameters
+        ----------
+        agents : list
+            :class:`Agent`s from which allocation was attempted
+        nodes : list
+            :class:`PhysicalNode`s for which allocation failed. This may
+            include non-tasks, which will be ignored.
+        """
+        with decimal.localcontext(DECIMAL_CONTEXT):
+            # Non-tasks aren't relevant, so filter them out.
+            tasks = [node for node in nodes if isinstance(node, PhysicalTask)]
+
+            cls._diagnose_insufficient_filter(
+                agents, tasks, lambda agent, task: task.logical_node.valid_agent(agent)
+            )
+            # Check for a task that doesn't fit anywhere
+            for task in tasks:
+                logical_task = task.logical_node
+                if not any(agent.can_allocate(logical_task) for agent in agents):
+                    # Check if there is an interface/volume/GPU request that
+                    # doesn't match anywhere.
+                    for request in logical_task.interfaces:
+                        if not any(
+                            request.matches(interface, None)
+                            for agent in agents
+                            for interface in agent.interfaces
+                        ):
+                            raise TaskNoInterfaceError(task, request)
+                    for request in logical_task.volumes:
+                        if not any(
+                            request.matches(volume, None)
+                            for agent in agents
+                            for volume in agent.volumes
+                        ):
+                            raise TaskNoVolumeError(task, request)
+                    for i, request in enumerate(logical_task.gpus):
+                        if not any(
+                            request.matches(gpu, None) for agent in agents for gpu in agent.gpus
+                        ):
+                            raise TaskNoGPUError(task, i)
+                    raise TaskNoAgentError(task)
+
+            # Try the mincut algorithm again, but now with a stronger filter
+            cls._diagnose_insufficient_filter(
+                agents, tasks, lambda agent, task: agent.can_allocate(task.logical_node)
+            )
+            # Not a simple error e.g. due to packing problems
+            raise InsufficientResourcesError("Insufficient resources to launch all tasks")
+
+    @classmethod
     def _diagnose_insufficient_subsystem(cls, agents, nodes):
         """Implementation of :meth:`_diagnose_insufficient` for a single subsystem.
 
@@ -3342,7 +3545,7 @@ class SchedulerBase:
                         )
 
     @classmethod
-    def _diagnose_insufficient(cls, agents, nodes):
+    def _diagnose_insufficient_old(cls, agents, nodes):
         """Try to determine *why* offers are insufficient.
 
         This function does not return, instead raising an instance of
