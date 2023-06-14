@@ -1495,44 +1495,42 @@ class TestDiagnoseInsufficient:
         self.volume_agent = scheduler.Agent(
             [self._make_offer({"cpus": 1.0, "mem": 1, "disk": 1}, 8, [volume_attr])]
         )
-        # Create a template logical and physical task
-        self.logical_task = scheduler.LogicalTask("logical")
-        self.physical_task = self.logical_task.physical_factory(self.logical_task)
-        self.logical_task2 = scheduler.LogicalTask("logical2")
-        self.physical_task2 = self.logical_task2.physical_factory(self.logical_task2)
+        # Create some template logical and physical tasks
+        self.logical_tasks = [scheduler.LogicalTask(f"logical{i}") for i in range(3)]
+        self.physical_tasks = [task.physical_factory(task) for task in self.logical_tasks]
 
     def test_task_insufficient_scalar_resource(self):
         """A task requests more of a scalar resource than any agent has"""
-        self.logical_task.cpus = 4
+        self.logical_tasks[0].cpus = 4
         with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.disk_agent], [self.physical_task]
+                [self.mem_agent, self.disk_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         assert cm.value.resource == InsufficientResource("cpus", ResourceGroup.GLOBAL)
         assert cm.value.needed == 4
         assert cm.value.available == 1.5
 
     def test_task_insufficient_range_resource(self):
         """A task requests more of a range resource than any agent has"""
-        self.logical_task.ports = ["a", "b", "c"]
+        self.logical_tasks[0].ports = ["a", "b", "c"]
         with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.disk_agent], [self.physical_task]
+                [self.mem_agent, self.disk_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         assert cm.value.resource == InsufficientResource("ports", ResourceGroup.GLOBAL)
         assert cm.value.needed == 3
         assert cm.value.available == 0
 
     def test_task_insufficient_cores(self):
         """A task requests more cores than are available on a single NUMA node"""
-        self.logical_task.cores = ["a", "b", "c", "d"]
+        self.logical_tasks[0].cores = ["a", "b", "c", "d"]
         with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.cores_agent], [self.physical_task]
+                [self.mem_agent, self.cores_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         assert cm.value.resource == InsufficientResource("cores", ResourceGroup.GLOBAL)
         assert cm.value.needed == 4
         assert cm.value.available == 3
@@ -1541,13 +1539,13 @@ class TestDiagnoseInsufficient:
         """A task requests more of a GPU scalar resource than any agent has"""
         req = scheduler.GPURequest()
         req.mem = 2048
-        self.logical_task.gpus = [req]
+        self.logical_tasks[0].gpus = [req]
         with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.gpu_compute_agent], [self.physical_task]
+                [self.mem_agent, self.gpu_compute_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
-        assert cm.value.requester == InsufficientRequesterGPU(self.physical_task, 0)
+        assert cm.value.task is self.physical_tasks[0]
+        assert cm.value.requester == InsufficientRequesterGPU(self.physical_tasks[0], 0)
         assert cm.value.resource == InsufficientResource("mem", ResourceGroup.GPU)
         assert cm.value.needed == 2048
         assert cm.value.available == 2.25
@@ -1556,13 +1554,13 @@ class TestDiagnoseInsufficient:
         """A task requests more of an interface scalar resource than any agent has"""
         req = scheduler.InterfaceRequest("net0")
         req.bandwidth_in = 5e9
-        self.logical_task.interfaces = [req]
+        self.logical_tasks[0].interfaces = [req]
         with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.interface_agent], [self.physical_task]
+                [self.mem_agent, self.interface_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
-        assert cm.value.requester == InsufficientRequesterInterface(self.physical_task, req)
+        assert cm.value.task is self.physical_tasks[0]
+        assert cm.value.requester == InsufficientRequesterInterface(self.physical_tasks[0], req)
         assert cm.value.resource == InsufficientResource(
             "bandwidth_in", ResourceGroup.INTERFACE, "net0"
         )
@@ -1571,66 +1569,66 @@ class TestDiagnoseInsufficient:
 
     def test_task_no_interface(self):
         """A task requests a network interface that is not available on any agent"""
-        self.logical_task.interfaces = [
+        self.logical_tasks[0].interfaces = [
             scheduler.InterfaceRequest("net0"),
             scheduler.InterfaceRequest("badnet"),
         ]
         with pytest.raises(scheduler.TaskNoDeviceError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.interface_agent], [self.physical_task]
+                [self.mem_agent, self.interface_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         assert cm.value.requester == InsufficientRequesterInterface(
-            self.physical_task, self.logical_task.interfaces[1]
+            self.physical_tasks[0], self.logical_tasks[0].interfaces[1]
         )
 
     def test_task_no_volume(self):
         """A task requests a volume that is not available on any agent"""
-        self.logical_task.volumes = [
+        self.logical_tasks[0].volumes = [
             scheduler.VolumeRequest("vol0", "/vol0", "RW"),
             scheduler.VolumeRequest("badvol", "/badvol", "RO"),
         ]
         with pytest.raises(scheduler.TaskNoDeviceError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.volume_agent], [self.physical_task]
+                [self.mem_agent, self.volume_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         assert cm.value.requester == InsufficientRequesterVolume(
-            self.physical_task, self.logical_task.volumes[1]
+            self.physical_tasks[0], self.logical_tasks[0].volumes[1]
         )
 
     def test_task_no_gpu(self):
         """A task requests a GPU that is not available on any agent"""
         req = scheduler.GPURequest()
         req.name = "GPU that does not exist"
-        self.logical_task.gpus = [req]
+        self.logical_tasks[0].gpus = [req]
         with pytest.raises(scheduler.TaskNoDeviceError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.gpu_compute_agent], [self.physical_task]
+                [self.mem_agent, self.gpu_compute_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task == self.physical_task
-        assert cm.value.requester == InsufficientRequesterGPU(self.physical_task, 0)
+        assert cm.value.task == self.physical_tasks[0]
+        assert cm.value.requester == InsufficientRequesterGPU(self.physical_tasks[0], 0)
 
     def test_task_no_agent(self):
         """A task does not fit on any agent, but not due to a single reason"""
         # Ask for more combined cpu+ports than is available on one agent
-        self.logical_task.cpus = 8
-        self.logical_task.ports = ["a", "b", "c"]
+        self.logical_tasks[0].cpus = 8
+        self.logical_tasks[0].ports = ["a", "b", "c"]
         with pytest.raises(scheduler.TaskNoAgentError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.ports_agent], [self.physical_task]
+                [self.cpus_agent, self.ports_agent], [self.physical_tasks[0]]
             )
-        assert cm.value.task is self.physical_task
+        assert cm.value.task is self.physical_tasks[0]
         # Make sure that it didn't incorrectly return a subclass
         assert cm.type == scheduler.TaskNoAgentError
 
     def test_group_insufficient_scalar_resource(self):
         """A group of tasks require more of a scalar resource than available"""
-        self.logical_task.cpus = 24
-        self.logical_task2.cpus = 16
+        self.logical_tasks[0].cpus = 24
+        self.logical_tasks[1].cpus = 16
         with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.mem_agent], [self.physical_task, self.physical_task2]
+                [self.cpus_agent, self.mem_agent], self.physical_tasks[:2]
             )
         assert cm.value.resource == InsufficientResource("cpus", ResourceGroup.GLOBAL)
         assert cm.value.needed == 40
@@ -1638,26 +1636,24 @@ class TestDiagnoseInsufficient:
 
     def test_group_insufficient_range_resource(self):
         """A group of tasks require more of a range resource than available"""
-        self.logical_task.ports = ["a", "b", "c"]
-        self.logical_task2.ports = ["d", "e", "f"]
+        self.logical_tasks[0].ports = ["a", "b", "c"]
+        self.logical_tasks[1].ports = ["d", "e", "f"]
         with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.ports_agent], [self.physical_task, self.physical_task2]
-            )
+            scheduler.Scheduler._diagnose_insufficient([self.ports_agent], self.physical_tasks[:2])
         assert cm.value.resource == InsufficientResource("ports", ResourceGroup.GLOBAL)
         assert cm.value.needed == 6
         assert cm.value.available == 5
 
     def test_group_insufficient_gpu_scalar_resources(self):
         """A group of tasks require more of a GPU scalar resource than available"""
-        self.logical_task.gpus = [scheduler.GPURequest()]
-        self.logical_task.gpus[-1].compute = 0.75
-        self.logical_task2.gpus = [scheduler.GPURequest()]
-        self.logical_task2.gpus[-1].compute = 0.5
+        self.logical_tasks[0].gpus = [scheduler.GPURequest()]
+        self.logical_tasks[0].gpus[-1].compute = 0.75
+        self.logical_tasks[1].gpus = [scheduler.GPURequest()]
+        self.logical_tasks[1].gpus[-1].compute = 0.5
         with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.gpu_compute_agent, self.gpu_mem_agent],
-                [self.physical_task, self.physical_task2],
+                self.physical_tasks[:2],
             )
         assert cm.value.resource == InsufficientResource("compute", ResourceGroup.GPU)
         assert cm.value.needed == 1.25
@@ -1665,19 +1661,20 @@ class TestDiagnoseInsufficient:
 
     def test_group_insufficient_interface_scalar_resources(self):
         """A group of tasks require more of a network resource than available"""
-        self.logical_task.interfaces = [
+        self.logical_tasks[0].interfaces = [
             scheduler.InterfaceRequest("net0"),
             scheduler.InterfaceRequest("net1"),
         ]
-        self.logical_task.interfaces[0].bandwidth_in = 800e6
+        self.logical_tasks[0].interfaces[0].bandwidth_in = 800e6
         # An amount that must not be added to the needed value reported
-        self.logical_task.interfaces[1].bandwidth_in = 50e6
-        self.logical_task2.interfaces = [scheduler.InterfaceRequest("net0")]
-        self.logical_task2.interfaces[0].bandwidth_in = 700e6
+        self.logical_tasks[0].interfaces[1].bandwidth_in = 50e6
+        self.logical_tasks[1].interfaces = [scheduler.InterfaceRequest("net0")]
+        self.logical_tasks[1].interfaces[0].bandwidth_in = 700e6
         with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.interface_agent], [self.physical_task, self.physical_task2]
+                [self.interface_agent], self.physical_tasks[:2]
             )
+        assert cm.value.requesters_desc == "all tasks"
         assert cm.value.resource == InsufficientResource(
             "bandwidth_in", ResourceGroup.INTERFACE, "net0"
         )
@@ -1686,19 +1683,34 @@ class TestDiagnoseInsufficient:
 
     def test_subsystem(self):
         """A subsystem has insufficient resources, although the system has enough."""
-        self.logical_task.subsystem = "sdp"
-        self.logical_task.cpus = 32  # Consumes all of cpus_agent
-        self.logical_task2.subsystem = "sdp"
-        self.logical_task2.cpus = 1
+        self.logical_tasks[0].subsystem = "sdp"
+        self.logical_tasks[0].cpus = 32  # Consumes all of cpus_agent
+        self.logical_tasks[1].subsystem = "sdp"
+        self.logical_tasks[1].cpus = 1
         self.cpus_agent.subsystems = {"sdp"}
         self.cores_agent.subsystems = {"cbf", "other"}
         with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.cores_agent], [self.physical_task, self.physical_task2]
+                [self.cpus_agent, self.cores_agent], self.physical_tasks[:2]
             )
         assert cm.value.requesters_desc == "all sdp tasks"
         assert cm.value.resource == InsufficientResource("cpus", ResourceGroup.GLOBAL)
         assert cm.value.needed == 33
+        assert cm.value.available == 32
+
+    def test_subset(self):
+        """A subset of the tasks has insufficient resources, although the system has enough."""
+        # Tasks 1 and 2 can each only run on cpus_agent, but can't both fit
+        self.logical_tasks[0].cpus = 17
+        self.logical_tasks[1].cpus = 17
+        self.logical_tasks[2].cpus = 1
+        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
+            scheduler.Scheduler._diagnose_insufficient(
+                [self.cpus_agent, self.cores_agent], self.physical_tasks[:3]
+            )
+        assert cm.value.requesters_desc == "logical0, logical1"
+        assert cm.value.resource == InsufficientResource("cpus", ResourceGroup.GLOBAL)
+        assert cm.value.needed == 34
         assert cm.value.available == 32
 
     def test_generic(self):
@@ -1706,12 +1718,12 @@ class TestDiagnoseInsufficient:
         # Create a task that uses just too much memory for the
         # low-memory agents, forcing it to consume memory from the
         # big-memory agent and not leaving enough for the big-memory task.
-        self.logical_task.mem = 5
-        self.logical_task2.mem = 251
+        self.logical_tasks[0].mem = 5
+        self.logical_tasks[1].mem = 251
         with pytest.raises(scheduler.InsufficientResourcesError) as cm:
             scheduler.Scheduler._diagnose_insufficient(
                 [self.cpus_agent, self.mem_agent, self.disk_agent],
-                [self.physical_task, self.physical_task2],
+                self.physical_tasks[:2],
             )
         # Check that it wasn't a subclass raised
         assert cm.type == scheduler.InsufficientResourcesError
