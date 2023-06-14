@@ -234,7 +234,9 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             self.sensors[f"{stream_name}.input{input}.eq"].value = (
                 "[" + ", ".join(_format_complex(gain) for gain in cvalues) + "]"
             )
-        return tuple(_format_complex(v) for v in self._gains[stream_name][input])
+            return ()
+        else:
+            return tuple(_format_complex(v) for v in self._gains[stream_name][input])
 
     async def request_gain_all(self, ctx, stream_name: str, *values: str) -> None:
         """Set the eq gains for all inputs."""

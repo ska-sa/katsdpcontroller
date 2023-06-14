@@ -1892,7 +1892,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         -------
         values
             A complex gain per channel, or a single value that is used for all
-            channels.
+            channels, or nothing if gains were being set.
         """
         return tuple(await self._get_product().gain(stream, input, values))
 
