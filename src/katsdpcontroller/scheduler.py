@@ -2663,7 +2663,7 @@ class _LaunchGroup:
         A future that is set once the resources are acquired. The value is
         ``None``, so it is only useful to get completion (it is not used
         for exceptions; see :attr:`last_insufficient` instead).
-    last_insufficient : :class:`InsufficientResourcesError`
+    last_insufficient : :exc:`InsufficientResourcesError`
         An exception describing in more detail why there were insufficient
         resources. It is set to ``None`` once the resources are acquired.
     future : :class:`asyncio.Future`
