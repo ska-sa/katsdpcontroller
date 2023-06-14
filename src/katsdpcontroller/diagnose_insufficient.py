@@ -1,3 +1,68 @@
+"""
+Diagnose why a set of tasks could not be launched.
+
+When the necessary resources were not found to launch a group of tasks,
+:func:`diagnose_insufficient` provides an exception with an error message that
+helps the operator determine which tasks are causing the problem and which
+resources are missing.
+
+Algorithm
+---------
+Job allocation is an NP-complete multi-commodity multi-knapsack problem.
+The scheduler uses heuristics to try to do a reasonable job in a short time,
+but there will be cases where placement is actually possible and the scheduler
+just didn't find the solution. Thus, it won't always be possible to give a
+meaningful and helpful error. This module similarly uses heuristics to
+identify some common cases:
+
+- A task requires a GPU/interface/volume that simply isn't available in the
+  cluster.
+- A task required more of some resource than is available on any one agent in
+  the cluster.
+- A set of tasks requires more of some resource than is available on the
+  agents where that set of tasks could run.
+
+Conflicts between different resources are not explicitly diagnosed e.g. if a
+task requires a GPU and 8 CPUs, and there are agents with GPUs and agents with
+8 CPUs but not both.
+
+Each resource is represented by a bipartite graph. On the left-hand side are
+the requesters of that resource (tasks for host-level resources, GPU requests
+for GPU resources, or interface requests for interface resources). The
+right-hand side contains providers of that resource (agents, NUMA nodes, GPUs
+or interfaces). Edges connect the sides if a requester and a provider are
+considered compatible. The graph also encodes the quantities, in a manner
+whose purpose will become clear later. Two extra nodes are added to each
+graph: a "src" node is connected to every requester, with a capacity
+indicating the requested amount, and a "sink" node is connected to every
+provider, with a similar capacity indicating the provided amount.
+
+Consider a set of requesters R. We can construct P, the set of providers
+connected to at least one requester in R. If the total request for R is
+greater than the total provided by P, then this set of requesters clearly
+cannot be scheduled. To make errors more meaningful we test several
+constructed sets R, but we'd also like to know whether any subset R has this
+property. Testing all subsets is prohibitively expensive, but we can find such
+a set (if one exists) from the minimum cut.
+
+Let A be the total requested resource and B be the total provided resource.
+Let the minimum cut consist of a capacity of C from the left-hand side and D
+from the right-hand side (the requester-provider edges have infinite capacity
+so are never cut). If C + D < A then we can construct a set R, by taking all
+the requesters that remain connected to the source. These have a total request
+of A - C, but the matching providers can provide at most D, and D < A - C.
+
+Conversely, if the minimum cut has weight of at least A, then by the
+mincut-maxflow theorem, it is possible to satisfy all the requests, albeit by
+splitting requests across multiple providers.
+
+Graph attributes
+----------------
+Each graph has `resource` and `resource_class` attributes indicating the name
+and type of the resource. Each requester has a `requester` attribute
+describing itself, and edges with finite capacity have a `capacity` attribute.
+"""
+
 import decimal
 from dataclasses import dataclass
 from decimal import Decimal
@@ -343,7 +408,7 @@ def _diagnose_insufficient_filter(
     tasks: Sequence[PhysicalTask],
     agent_filter: Callable[[Agent, PhysicalTask], bool],
 ) -> None:
-    """Implement :meth:`_diagnose_insufficient` with a specific edge filter.
+    """Implement :func:`diagnose_insufficient` with a specific edge filter.
 
     This either raises a subclass of :exc:`InsufficientResourcesError`,
     or it returns if it couldn't identify a bottleneck. The `agent_filter`
