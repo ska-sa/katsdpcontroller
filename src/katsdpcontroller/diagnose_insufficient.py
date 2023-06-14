@@ -302,7 +302,7 @@ def _gpu_graphs(
                     for task in tasks:
                         if agent_filter(agent, task):
                             for req in task.logical_node.gpus:
-                                if req.matches(gpu, None):  # TODO: NUMA awareness
+                                if req.matches(gpu, None):  # TODO: NUMA awareness?
                                     g.add_edge(req, gpu)  # Infinity capacity
         yield g
 
@@ -349,7 +349,7 @@ def _interface_graphs(
                     for task in tasks:
                         if agent_filter(agent, task):
                             for req in task.logical_node.interfaces:
-                                if req.matches(interface, None):  # TODO: NUMA awareness
+                                if req.matches(interface, None):  # TODO: NUMA awareness?
                                     g = gs[req.network]
                                     g.add_edge(req, interface)  # Infinity capacity
         yield from gs.values()
@@ -421,7 +421,7 @@ def _diagnose_insufficient_filter(
     graphs.extend(_global_graphs(agents, tasks, agent_filter))
     graphs.extend(_gpu_graphs(agents, tasks, agent_filter))
     graphs.extend(_interface_graphs(agents, tasks, agent_filter))
-    # TODO: volumes? Not sure if they're needed
+    # volumes don't have resources, so nothing is needed for them here
 
     for g in graphs:
         _check_singletons(g)
