@@ -1432,7 +1432,7 @@ class InsufficientRequester:
 
 @dataclass
 class InsufficientRequesterGPU(InsufficientRequester):
-    request_index: GPURequest
+    request_index: int
 
     def __str__(self) -> str:
         return f"{self.task.name} (GPU request #{self.request_index})"
