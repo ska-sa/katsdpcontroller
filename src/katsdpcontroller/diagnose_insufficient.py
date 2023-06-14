@@ -469,6 +469,10 @@ def diagnose_insufficient(
         # Non-tasks aren't relevant, so filter them out.
         tasks = [node for node in nodes if isinstance(node, PhysicalTask)]
 
+        # First use a weak filter. This avoids an error saying that a task
+        # require more than zero of a resource of which zero was available,
+        # if the actual problem is that the task has some device requirement
+        # that no agent fulfills.
         _diagnose_insufficient_filter(
             agents, tasks, lambda agent, task: task.logical_node.valid_agent(agent)
         )
