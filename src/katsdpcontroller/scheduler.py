@@ -1402,7 +1402,7 @@ class ResourceGroup(Enum):
 
 @dataclass
 class InsufficientResource:
-    """Describes the resource that is unsatisfiable in InsufficientResourcesError."""
+    """A resource that is unsatisfiable in :class:`InsufficientResourcesError`."""
 
     resource: str  # Name of the resource
     resource_group: ResourceGroup
@@ -1422,7 +1422,7 @@ class InsufficientResource:
 
 @dataclass
 class InsufficientRequester:
-    """Describes the requestor that need too much of a resource."""
+    """A requester that need too much of a resource in :class:`InsufficientResourcesError`."""
 
     task: "PhysicalTask"
 
@@ -1513,7 +1513,11 @@ class TaskNoDeviceError(TaskNoAgentError):
 
 
 class GroupInsufficientResourcesError(InsufficientResourcesError):
-    """A group of tasks collectively required more of some resource than available."""
+    """A group of tasks collectively required more of some resource than available.
+
+    If `requesters_desc` is provided, it is a human-readable summary of the
+    requesters. If set to None, a description is generated.
+    """
 
     def __init__(
         self,
@@ -3171,16 +3175,16 @@ class SchedulerBase:
     def _diagnose_check_subset(
         cls, g: networkx.DiGraph, task_filter: Callable[["PhysicalTask"], bool]
     ) -> Tuple[list, Union[int, Decimal], Union[int, Decimal]]:
-        """Check the required and available resources for a subset of graph nodes.
+        """Measure the required and available resources for a subset of graph nodes.
 
         Returns
         -------
         lhs
             The graph nodes corresponding to the task filter
         needed
-            The resources required by the nodes in `nodes`
+            The resources required by the nodes in `lhs`
         available
-            The resources available on all the nodes reachable from `nodes`
+            The resources available on all the nodes reachable from `lhs`
         """
         lhs = [node for node in g.successors("src") if task_filter(g.nodes[node]["requester"].task)]
         needed = sum(capacity for _, _, capacity in g.in_edges(lhs, data="capacity"))
