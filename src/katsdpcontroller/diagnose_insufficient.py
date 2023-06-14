@@ -103,7 +103,7 @@ class InsufficientResource:
 
 @dataclass
 class InsufficientRequester:
-    """A requester that need too much of a resource in :exc:`InsufficientResourcesError`."""
+    """A requester that needs too much of a resource in :exc:`InsufficientResourcesError`."""
 
     task: PhysicalTask
 
@@ -241,7 +241,7 @@ def _global_graphs(
     tasks: Sequence[PhysicalTask],
     agent_filter: Callable[[Agent, PhysicalTask], bool],
 ) -> Iterable[networkx.DiGraph]:
-    # Global resources
+    """Construct flow graphs for each global resource."""
     for r, rcls in scheduler.GLOBAL_RESOURCES.items():
         g = networkx.DiGraph(
             resource_class=rcls, resource=InsufficientResource(r, ResourceGroup.GLOBAL)
@@ -282,6 +282,7 @@ def _gpu_graphs(
     tasks: Sequence[PhysicalTask],
     agent_filter: Callable[[Agent, PhysicalTask], bool],
 ) -> Iterable[networkx.DiGraph]:
+    """Construct flow graphs for each per-GPU resource."""
     for r, rcls in scheduler.GPU_RESOURCES.items():
         g = networkx.DiGraph(
             resource_class=rcls, resource=InsufficientResource(r, ResourceGroup.GPU)
@@ -312,6 +313,10 @@ def _interface_graphs(
     tasks: Sequence[PhysicalTask],
     agent_filter: Callable[[Agent, PhysicalTask], bool],
 ) -> Iterable[networkx.DiGraph]:
+    """Construct flow graphs for each interface resource.
+
+    A separate graph is generated for each network name.
+    """
     # Start by identifying the networks
     networks = set()
     for task in tasks:
@@ -470,7 +475,7 @@ def diagnose_insufficient(
         tasks = [node for node in nodes if isinstance(node, PhysicalTask)]
 
         # First use a weak filter. This avoids an error saying that a task
-        # require more than zero of a resource of which zero was available,
+        # requires more than zero of a resource of which zero was available,
         # if the actual problem is that the task has some device requirement
         # that no agent fulfills.
         _diagnose_insufficient_filter(
