@@ -581,6 +581,10 @@ class TestControllerInterface(BaseTestController):
         reply, _ = await client.request(
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", "1+2j"
         )
+        assert reply == []
+        reply, _ = await client.request(
+            "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h"
+        )
         assert reply == [b"1.0+2.0j"]
         await assert_sensor_value(
             client, "gpucbf_antenna_channelised_voltage.gpucbf_m901h.eq", "[1.0+2.0j]"
@@ -593,6 +597,10 @@ class TestControllerInterface(BaseTestController):
         gains = [b"%d.0+2.0j" % i for i in range(4096)]
         reply, _ = await client.request(
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", *gains
+        )
+        assert reply == []
+        reply, _ = await client.request(
+            "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h"
         )
         assert reply == gains
         await assert_sensor_value(
