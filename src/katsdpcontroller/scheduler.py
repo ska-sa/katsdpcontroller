@@ -221,7 +221,7 @@ import time
 import typing
 import urllib
 from abc import ABC, abstractmethod
-from collections import defaultdict, deque, namedtuple
+from collections import deque, namedtuple
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -1385,191 +1385,13 @@ class Resolver:
 
 
 class InsufficientResourcesError(RuntimeError):
-    """Indicates that there are insufficient resources to launch a task. This
-    is also used for internal operations when trying to allocate a specific
-    task to a specific agent.
+    """There are insufficient resources to launch a task or tasks.
+
+    This is also used for internal operations when trying to allocate a
+    specific task to a specific agent.
     """
 
-    def __init__(self, *args, subsystem: Optional[str] = None) -> None:
-        super().__init__(*args)
-        self.subsystem = subsystem
-
-    def _subsystem_str(self) -> str:
-        if self.subsystem is None:
-            return ""
-        else:
-            return f" (subsystem {self.subsystem})"
-
-
-class TaskNoAgentError(InsufficientResourcesError):
-    """Indicates that no agent was suitable for a task. Where possible, a
-    sub-class is used to indicate a more specific error.
-    """
-
-    def __init__(self, node, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(subsystem=subsystem)
-        self.node = node
-
-    def __str__(self):
-        return f"No agent was found suitable for {self.node.name}{self._subsystem_str()}"
-
-
-class TaskInsufficientResourcesError(TaskNoAgentError):
-    """Indicates that a specific task required more of some resource than
-    were available on any agent."""
-
-    def __init__(
-        self, node, resource, needed, available, *, subsystem: Optional[str] = None
-    ) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Not enough {self.resource} for {self.node.name} on any agent "
-            f"({self.needed} > {self.available}){self._subsystem_str()}"
-        )
-
-
-class TaskInsufficientGPUResourcesError(TaskNoAgentError):
-    """Indicates that a specific task GPU request needed more of some resource
-    than was available on any agent GPU."""
-
-    def __init__(
-        self, node, request_index, resource, needed, available, *, subsystem: Optional[str] = None
-    ) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.request_index = request_index
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Not enough GPU {self.resource} for {self.node.name} "
-            f"(request #{self.request_index}) on any agent "
-            f"({self.needed} > {self.available}){self._subsystem_str()}"
-        )
-
-
-class TaskInsufficientInterfaceResourcesError(TaskNoAgentError):
-    """Indicates that a specific task interface request needed more of some
-    resource than was available on any agent interface."""
-
-    def __init__(
-        self, node, request, resource, needed, available, *, subsystem: Optional[str] = None
-    ) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.request = request
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Not enough interface {self.resource} on {self.request.network} for "
-            f"{self.node.name} on any agent "
-            f"({self.needed} > {self.available}){self._subsystem_str()}"
-        )
-
-
-class TaskNoInterfaceError(TaskNoAgentError):
-    """Indicates that a task required a network interface that was not present on any agent."""
-
-    def __init__(self, node, request, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.request = request
-
-    def __str__(self):
-        infiniband = "Infiniband " if self.request.infiniband else ""
-        return (
-            f"No agent matches {infiniband}network request for {self.request.network} from "
-            f"task {self.node.name}{self._subsystem_str()}"
-        )
-
-
-class TaskNoVolumeError(TaskNoAgentError):
-    """Indicates that a task required a volume that was not present on any agent."""
-
-    def __init__(self, node, request, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.request = request
-
-    def __str__(self):
-        return (
-            f"No agent matches volume request for {self.request.name} "
-            f"from {self.node.name}{self._subsystem_str()}"
-        )
-
-
-class TaskNoGPUError(TaskNoAgentError):
-    """Indicates that a task required a GPU that did not match any agent"""
-
-    def __init__(self, node, request_index, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(node, subsystem=subsystem)
-        self.request_index = request_index
-
-    def __str__(self):
-        return (
-            f"No agent matches GPU request #{self.request_index} "
-            f"from {self.node.name}{self._subsystem_str()}"
-        )
-
-
-class GroupInsufficientResourcesError(InsufficientResourcesError):
-    """Indicates that a group of tasks collectively required more of some
-    resource than were available between all the agents."""
-
-    def __init__(self, resource, needed, available, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(subsystem=subsystem)
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Insufficient total {self.resource} to launch all tasks "
-            f"({self.needed} > {self.available}){self._subsystem_str()}"
-        )
-
-
-class GroupInsufficientGPUResourcesError(InsufficientResourcesError):
-    """Indicates that a group of tasks collectively required more of some
-    GPU resource than were available between all the agents."""
-
-    def __init__(self, resource, needed, available, *, subsystem: Optional[str] = None) -> None:
-        super().__init__(subsystem=subsystem)
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Insufficient total GPU {self.resource} to launch all tasks "
-            f"({self.needed} > {self.available}){self._subsystem_str()}"
-        )
-
-
-class GroupInsufficientInterfaceResourcesError(InsufficientResourcesError):
-    """Indicates that a group of tasks collectively required more of some
-    interface resource than were available between all the agents."""
-
-    def __init__(
-        self, network, resource, needed, available, *, subsystem: Optional[str] = None
-    ) -> None:
-        super().__init__(subsystem=subsystem)
-        self.network = network
-        self.resource = resource
-        self.needed = needed
-        self.available = available
-
-    def __str__(self):
-        return (
-            f"Insufficient total interface {self.resource} on network {self.network} "
-            f"to launch all tasks ({self.needed} > {self.available}){self._subsystem_str()}"
-        )
+    pass
 
 
 class QueueBusyError(InsufficientResourcesError):
@@ -2841,7 +2663,7 @@ class _LaunchGroup:
         A future that is set once the resources are acquired. The value is
         ``None``, so it is only useful to get completion (it is not used
         for exceptions; see :attr:`last_insufficient` instead).
-    last_insufficient : :class:`InsufficientResourcesError`
+    last_insufficient : :exc:`InsufficientResourcesError`
         An exception describing in more detail why there were insufficient
         resources. It is set to ``None`` once the resources are acquired.
     future : :class:`asyncio.Future`
@@ -3199,189 +3021,6 @@ class SchedulerBase:
             # crash).
             pass
 
-    @classmethod
-    def _diagnose_insufficient_subsystem(cls, agents, nodes):
-        """Implementation of :meth:`_diagnose_insufficient` for a single subsystem.
-
-        This function either raises a subclass of :exc:`InsufficientResourcesError`,
-        or returns if it could not identify a bottleneck. It does not populate the
-        `subsystem` attribute of the exception; the caller does that.
-
-        Parameters
-        ----------
-        agents : list
-            :class:`Agent`s from which allocation was attempted
-        nodes : list
-            :class:`PhysicalNode`s for which allocation failed. This may
-            include non-tasks, which will be ignored.
-        """
-        with decimal.localcontext(DECIMAL_CONTEXT):
-            # Non-tasks aren't relevant, so filter them out.
-            nodes = [node for node in nodes if isinstance(node, PhysicalTask)]
-            # Pre-compute the maximum resources of each type on any agent,
-            # and the total amount of each resource.
-            max_resources = {}
-            max_gpu_resources = {}
-            max_interface_resources = {}  # Double-hash, indexed by network then resource
-            total_resources = {}
-            total_gpu_resources = {}
-            total_interface_resources = {}  # Double-hash, indexed by network then resource
-            for r, cls in GLOBAL_RESOURCES.items():
-                # Cores are special because only the cores on a single NUMA node
-                # can be allocated together
-                if r == "cores":
-                    available = [cores.available for agent in agents for cores in agent.numa_cores]
-                else:
-                    available = [agent.resources[r].available for agent in agents]
-                max_resources[r] = max(available) if available else cls.ZERO
-                total_resources[r] = sum(available, cls.ZERO)
-            for r, cls in GPU_RESOURCES.items():
-                available = [gpu.resources[r].available for agent in agents for gpu in agent.gpus]
-                max_gpu_resources[r] = max(available) if available else cls.ZERO
-                total_gpu_resources[r] = sum(available, cls.ZERO)
-
-            # Collect together all interfaces on the same network
-            networks = {}
-            for agent in agents:
-                for interface in agent.interfaces:
-                    for network in interface.networks:
-                        networks.setdefault(network, []).append(interface)
-            for network, interfaces in networks.items():
-                max_interface_resources[network] = {}
-                total_interface_resources[network] = {}
-                for r in INTERFACE_RESOURCES:
-                    available = [interface.resources[r].available for interface in interfaces]
-                    max_interface_resources[network][r] = max(available)
-                    total_interface_resources[network][r] = sum(available)
-
-            # Check if there is a single node that won't run anywhere
-            for node in nodes:
-                logical_task = node.logical_node
-                if not any(agent.can_allocate(logical_task) for agent in agents):
-                    # Check if there is an interface/volume/GPU request that
-                    # doesn't match anywhere.
-                    for request in logical_task.interfaces:
-                        if not any(
-                            request.matches(interface, None)
-                            for agent in agents
-                            for interface in agent.interfaces
-                        ):
-                            raise TaskNoInterfaceError(node, request)
-                    for request in logical_task.volumes:
-                        if not any(
-                            request.matches(volume, None)
-                            for agent in agents
-                            for volume in agent.volumes
-                        ):
-                            raise TaskNoVolumeError(node, request)
-                    for i, request in enumerate(logical_task.gpus):
-                        if not any(
-                            request.matches(gpu, None) for agent in agents for gpu in agent.gpus
-                        ):
-                            raise TaskNoGPUError(node, i)
-                    # Check if there is some specific resource that is lacking.
-                    for r in GLOBAL_RESOURCES:
-                        need = logical_task.requests[r].amount
-                        if need > max_resources[r]:
-                            raise TaskInsufficientResourcesError(node, r, need, max_resources[r])
-                    for i, request in enumerate(logical_task.gpus):
-                        for r in GPU_RESOURCES:
-                            need = request.requests[r].amount
-                            if need > max_gpu_resources[r]:
-                                raise TaskInsufficientGPUResourcesError(
-                                    node, i, r, need, max_gpu_resources[r]
-                                )
-                    for request in logical_task.interfaces:
-                        for r in INTERFACE_RESOURCES:
-                            need = request.requests[r].amount
-                            if need > max_interface_resources[request.network][r]:
-                                raise TaskInsufficientInterfaceResourcesError(
-                                    node,
-                                    request,
-                                    r,
-                                    need,
-                                    max_interface_resources[request.network][r],
-                                )
-                    # This node doesn't fit but the reason is more complex e.g.
-                    # there is enough of each resource individually but not all on
-                    # the same agent or NUMA node.
-                    raise TaskNoAgentError(node)
-
-            # Nodes are all individually launchable, but we weren't able to launch
-            # all of them due to some contention. Check if any one resource is
-            # over-subscribed.
-            for r, cls in GLOBAL_RESOURCES.items():
-                need = sum((node.logical_node.requests[r].amount for node in nodes), cls.ZERO)
-                if need > total_resources[r]:
-                    raise GroupInsufficientResourcesError(r, need, total_resources[r])
-            for r, cls in GPU_RESOURCES.items():
-                need = sum(
-                    (
-                        request.requests[r].amount
-                        for node in nodes
-                        for request in node.logical_node.gpus
-                    ),
-                    cls.ZERO,
-                )
-                if need > total_gpu_resources[r]:
-                    raise GroupInsufficientGPUResourcesError(r, need, total_gpu_resources[r])
-            for network in networks:
-                for r, cls in INTERFACE_RESOURCES.items():
-                    need = sum(
-                        (
-                            request.requests[r].amount
-                            for node in nodes
-                            for request in node.logical_node.interfaces
-                            if request.network == network
-                        ),
-                        cls.ZERO,
-                    )
-                    if need > total_interface_resources[network][r]:
-                        raise GroupInsufficientInterfaceResourcesError(
-                            network, r, need, total_interface_resources[network][r]
-                        )
-
-    @classmethod
-    def _diagnose_insufficient(cls, agents, nodes):
-        """Try to determine *why* offers are insufficient.
-
-        This function does not return, instead raising an instance of
-        :exc:`InsufficientResourcesError` or a subclass.
-
-        Parameters
-        ----------
-        agents : list
-            :class:`Agent`s from which allocation was attempted
-        nodes : list
-            :class:`PhysicalNode`s for which allocation failed. This may
-            include non-tasks, which will be ignored.
-        """
-        # First see if the failure can be isolated to contention within a
-        # particular subsystem.
-        nodes_by_subsystem = defaultdict(list)
-        for node in nodes:
-            if (
-                isinstance(node.logical_node, LogicalTask)
-                and node.logical_node.subsystem is not None
-            ):
-                nodes_by_subsystem[node.logical_node.subsystem].append(node)
-        for subsystem, sub_nodes in nodes_by_subsystem.items():
-            sub_agents = []
-            for agent in agents:
-                if subsystem in agent.subsystems:
-                    sub_agents.append(agent)
-            # Will raise if it finds a bottleneck
-            try:
-                cls._diagnose_insufficient_subsystem(sub_agents, sub_nodes)
-            except InsufficientResourcesError as exc:
-                exc.subsystem = subsystem
-                raise
-
-        cls._diagnose_insufficient_subsystem(agents, nodes)
-
-        # Not a simple error e.g. due to packing problems
-        raise InsufficientResourcesError("Insufficient resources to launch all tasks")
-
     def _update_agents_multicast(self, agents):
         """Update the multicast group information for a freshly minted set of :class:`Agent` s."""
         # The agent objects in active tasks are not the same Python objects
@@ -3464,7 +3103,9 @@ class SchedulerBase:
                         allocations.append((node, allocation))
                 if insufficient:
                     # Raises an InsufficientResourcesError
-                    self._diagnose_insufficient(orig_agents, nodes)
+                    from .diagnose_insufficient import diagnose_insufficient
+
+                    diagnose_insufficient(orig_agents, nodes)
             except InsufficientResourcesError as error:
                 logger.debug("Could not yet launch graph: %s", error)
                 group.last_insufficient = error
@@ -4242,16 +3883,6 @@ __all__ = [
     "GPUResources",
     "InterfaceResources",
     "InsufficientResourcesError",
-    "TaskNoAgentError",
-    "TaskInsufficientResourcesError",
-    "TaskInsufficientGPUResourcesError",
-    "TaskInsufficientInterfaceResourcesError",
-    "TaskNoInterfaceError",
-    "TaskNoVolumeError",
-    "TaskNoGPUError",
-    "GroupInsufficientResourcesError",
-    "GroupInsufficientGPUResourcesError",
-    "GroupInsufficientInterfaceResourcesError",
     "InterfaceRequest",
     "GPURequest",
     "Image",

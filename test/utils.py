@@ -1,6 +1,9 @@
 """Utilities for unit tests"""
 
 import asyncio
+import base64
+import json
+import uuid
 from types import TracebackType
 from typing import (
     Any,
@@ -18,6 +21,7 @@ from unittest import mock
 
 import aiokatcp
 import pytest
+from addict import Dict
 
 _T = TypeVar("_T")
 
@@ -479,3 +483,69 @@ async def exhaust_callbacks():
     loop = asyncio.get_running_loop()
     while loop._ready:
         await asyncio.sleep(0)
+
+
+class AnyOrderList(list):
+    """Used for asserting that a list is present in a call, but without
+    constraining the order. It does not require the elements to be hashable.
+    """
+
+    def __eq__(self, other):
+        if isinstance(other, list):
+            if len(self) != len(other):
+                return False
+            tmp = list(other)
+            for item in self:
+                try:
+                    tmp.remove(item)
+                except ValueError:
+                    return False
+            return True
+        return NotImplemented
+
+    def __ne__(self, other):
+        if isinstance(other, list):
+            return not (self == other)
+        return NotImplemented
+
+
+def make_resources(resources, role="default"):
+    out = AnyOrderList()
+    for name, value in resources.items():
+        resource = Dict()
+        resource.name = name
+        resource.allocation_info.role = role
+        if isinstance(value, (int, float)):
+            resource.type = "SCALAR"
+            resource.scalar.value = float(value)
+        else:
+            resource.type = "RANGES"
+            resource.ranges.range = []
+            for start, stop in value:
+                resource.ranges.range.append(Dict(begin=start, end=stop - 1))
+        out.append(resource)
+    return out
+
+
+def make_offer(framework_id, agent_id, host, resources, attrs=(), role="default"):
+    offer = Dict()
+    offer.id.value = uuid.uuid4().hex
+    offer.framework_id.value = framework_id
+    offer.agent_id.value = agent_id
+    offer.allocation_info.role = role
+    offer.hostname = host
+    offer.resources = make_resources(resources, role)
+    offer.attributes = attrs
+    return offer
+
+
+def make_text_attr(name, value):
+    attr = Dict()
+    attr.name = name
+    attr.type = "TEXT"
+    attr.text.value = value
+    return attr
+
+
+def make_json_attr(name, value):
+    return make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode("utf-8")))

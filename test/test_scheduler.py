@@ -1,11 +1,9 @@
 import asyncio
 import base64
 import ipaddress
-import json
 import logging
 import socket
 import time
-import uuid
 from collections import Counter
 from decimal import Decimal
 from typing import Any, AsyncGenerator, Callable, Generator, Optional
@@ -22,33 +20,18 @@ from addict import Dict
 from yarl import URL
 
 from katsdpcontroller import scheduler
+from katsdpcontroller.diagnose_insufficient import TaskInsufficientResourcesError
 from katsdpcontroller.scheduler import TaskState
 
-from .utils import exhaust_callbacks, future_return
-
-
-class AnyOrderList(list):
-    """Used for asserting that a list is present in a call, but without
-    constraining the order. It does not require the elements to be hashable.
-    """
-
-    def __eq__(self, other):
-        if isinstance(other, list):
-            if len(self) != len(other):
-                return False
-            tmp = list(other)
-            for item in self:
-                try:
-                    tmp.remove(item)
-                except ValueError:
-                    return False
-            return True
-        return NotImplemented
-
-    def __ne__(self, other):
-        if isinstance(other, list):
-            return not (self == other)
-        return NotImplemented
+from .utils import (
+    AnyOrderList,
+    exhaust_callbacks,
+    future_return,
+    make_json_attr,
+    make_offer,
+    make_resources,
+    make_text_attr,
+)
 
 
 class SimpleTaskStats(scheduler.TaskStats):
@@ -714,48 +697,6 @@ class TestTaskIDAllocator:
         assert tid1 == "test-baz-00000001"
 
 
-def _make_resources(resources, role="default"):
-    out = AnyOrderList()
-    for name, value in resources.items():
-        resource = Dict()
-        resource.name = name
-        resource.allocation_info.role = role
-        if isinstance(value, (int, float)):
-            resource.type = "SCALAR"
-            resource.scalar.value = float(value)
-        else:
-            resource.type = "RANGES"
-            resource.ranges.range = []
-            for start, stop in value:
-                resource.ranges.range.append(Dict(begin=start, end=stop - 1))
-        out.append(resource)
-    return out
-
-
-def _make_text_attr(name, value):
-    attr = Dict()
-    attr.name = name
-    attr.type = "TEXT"
-    attr.text.value = value
-    return attr
-
-
-def _make_json_attr(name, value):
-    return _make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode("utf-8")))
-
-
-def _make_offer(framework_id, agent_id, host, resources, attrs=(), role="default"):
-    offer = Dict()
-    offer.id.value = uuid.uuid4().hex
-    offer.framework_id.value = framework_id
-    offer.agent_id.value = agent_id
-    offer.allocation_info.role = role
-    offer.hostname = host
-    offer.resources = _make_resources(resources, role)
-    offer.attributes = attrs
-    return offer
-
-
 def _make_status(task_id, state):
     status = Dict()
     status.task_id.value = task_id
@@ -766,14 +707,14 @@ def _make_status(task_id, state):
 class TestAgent:
     """Tests for :class:`katsdpcontroller.scheduler.Agent`."""
 
-    def _make_offer(self, resources, attrs=()):
-        return _make_offer(self.framework_id, self.agent_id, self.host, resources, attrs)
+    def make_offer(self, resources, attrs=()):
+        return make_offer(self.framework_id, self.agent_id, self.host, resources, attrs)
 
     def setup_method(self):
         self.agent_id = "agentid"
         self.host = "agenthostname"
         self.framework_id = "framework"
-        self.if_attr = _make_json_attr(
+        self.if_attr = make_json_attr(
             "katsdpcontroller.interfaces",
             [
                 {
@@ -787,7 +728,7 @@ class TestAgent:
             ],
         )
         # Same as if_attr but without infiniband_multicast_loopback
-        self.if_attr_loopback = _make_json_attr(
+        self.if_attr_loopback = make_json_attr(
             "katsdpcontroller.interfaces",
             [
                 {
@@ -799,18 +740,18 @@ class TestAgent:
                 }
             ],
         )
-        self.if_attr_bad_json = _make_text_attr(
+        self.if_attr_bad_json = make_text_attr(
             "katsdpcontroller.interfaces", base64.urlsafe_b64encode(b"{not valid json")
         )
-        self.if_attr_bad_schema = _make_json_attr("katsdpcontroller.interfaces", [{"name": "eth1"}])
-        self.volume_attr = _make_json_attr(
+        self.if_attr_bad_schema = make_json_attr("katsdpcontroller.interfaces", [{"name": "eth1"}])
+        self.volume_attr = make_json_attr(
             "katsdpcontroller.volumes",
             [
                 {"name": "vol1", "host_path": "/host1"},
                 {"name": "vol2", "host_path": "/host2", "numa_node": 1},
             ],
         )
-        self.gpu_attr = _make_json_attr(
+        self.gpu_attr = make_json_attr(
             "katsdpcontroller.gpus",
             [
                 {
@@ -829,8 +770,8 @@ class TestAgent:
                 },
             ],
         )
-        self.numa_attr = _make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]])
-        self.subsystem_attr = _make_json_attr(
+        self.numa_attr = make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.subsystem_attr = make_json_attr(
             "katsdpcontroller.subsystems", ["subsystem1", "subsystem2"]
         )
         self.priority_attr = Dict()
@@ -842,11 +783,11 @@ class TestAgent:
         """Construct an agent from some offers"""
         attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr, self.priority_attr]
         offers = [
-            self._make_offer(
+            self.make_offer(
                 {"cpus": 4.0, "mem": 1024.0, "ports": [(100, 200), (300, 350)], "cores": [(0, 7)]},
                 attrs,
             ),
-            self._make_offer(
+            self.make_offer(
                 {
                     "cpus": 0.5,
                     "mem": 123.5,
@@ -859,7 +800,7 @@ class TestAgent:
                 },
                 attrs,
             ),
-            self._make_offer(
+            self.make_offer(
                 {
                     "katsdpcontroller.gpu.0.compute": 0.5,
                     "katsdpcontroller.gpu.0.mem": 1024.0,
@@ -906,7 +847,7 @@ class TestAgent:
     def test_construct_implicit_priority(self):
         """Test computation of priority when none is given"""
         attrs = [self.if_attr, self.volume_attr, self.gpu_attr, self.numa_attr]
-        offers = [self._make_offer({"cpus": 0.5, "mem": 123.5, "disk": 1024.5}, attrs)]
+        offers = [self.make_offer({"cpus": 0.5, "mem": 123.5, "disk": 1024.5}, attrs)]
         agent = scheduler.Agent(offers)
         assert agent.priority == 5
 
@@ -917,7 +858,7 @@ class TestAgent:
 
     def test_special_disk_resource(self):
         """A resource for a non-root disk is ignored"""
-        offers = [self._make_offer({"disk": 1024})]
+        offers = [self.make_offer({"disk": 1024})]
         # Example from https://mesos.apache.org/documentation/latest/multiple-disk/
         offers[0].resources[0].disk.source.type = "PATH"
         offers[0].resources[0].disk.source.path.root = "/mnt/data"
@@ -926,7 +867,7 @@ class TestAgent:
 
     def test_bad_json(self, caplog):
         """A warning must be printed if an interface description is not valid JSON"""
-        offers = [self._make_offer({}, [self.if_attr_bad_json])]
+        offers = [self.make_offer({}, [self.if_attr_bad_json])]
         with caplog.at_level(logging.WARNING, logger="katsdpcontroller.scheduler"):
             agent = scheduler.Agent(offers)
         assert "Could not parse" in caplog.text
@@ -934,7 +875,7 @@ class TestAgent:
 
     def test_bad_schema(self, caplog):
         """A warning must be printed if an interface description does not conform to the schema"""
-        offers = [self._make_offer({}, [self.if_attr_bad_schema])]
+        offers = [self.make_offer({}, [self.if_attr_bad_schema])]
         with caplog.at_level(logging.WARNING, logger="katsdpcontroller.scheduler"):
             agent = scheduler.Agent(offers)
         assert "Validation error" in caplog.text
@@ -944,7 +885,7 @@ class TestAgent:
         """allocate raises if the task does not accept the agent"""
         task = scheduler.LogicalTask("task")
         task.valid_agent = lambda x: False
-        agent = scheduler.Agent([self._make_offer({}, [])])
+        agent = scheduler.Agent([self.make_offer({}, [])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -952,7 +893,7 @@ class TestAgent:
         """allocate raises if the task is owned by a subsystem not valid on the agent"""
         task = scheduler.LogicalTask("task")
         task.subsystem = "foo"
-        agent = scheduler.Agent([self._make_offer({}, [self.subsystem_attr])])
+        agent = scheduler.Agent([self.make_offer({}, [self.subsystem_attr])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -960,7 +901,7 @@ class TestAgent:
         """allocate raises if the task requires too much of a scalar resource"""
         task = scheduler.LogicalTask("task")
         task.cpus = 4.0
-        agent = scheduler.Agent([self._make_offer({"cpus": 2.0}, [])])
+        agent = scheduler.Agent([self.make_offer({"cpus": 2.0}, [])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -968,7 +909,7 @@ class TestAgent:
         """allocate raises if the task requires too much of a range resource"""
         task = scheduler.LogicalTask("task")
         task.cores = [None] * 3
-        agent = scheduler.Agent([self._make_offer({"cores": [(4, 6)]}, [])])
+        agent = scheduler.Agent([self.make_offer({"cores": [(4, 6)]}, [])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -976,7 +917,7 @@ class TestAgent:
         """allocate raises if the task requires a network that is not present"""
         task = scheduler.LogicalTask("task")
         task.interfaces = [scheduler.InterfaceRequest("net0"), scheduler.InterfaceRequest("net1")]
-        agent = scheduler.Agent([self._make_offer({}, [self.if_attr])])
+        agent = scheduler.Agent([self.make_offer({}, [self.if_attr])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -984,7 +925,7 @@ class TestAgent:
         """allocate raises if the task requires a volume that is not present"""
         task = scheduler.LogicalTask("task")
         task.volumes = [scheduler.VolumeRequest("vol-missing", "/container-path", "RW")]
-        agent = scheduler.Agent([self._make_offer({}, [self.volume_attr])])
+        agent = scheduler.Agent([self.make_offer({}, [self.volume_attr])])
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
 
@@ -996,7 +937,7 @@ class TestAgent:
         task.gpus[-1].mem = 3000.0
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.gpu.0.compute": 1.0,
                         "katsdpcontroller.gpu.0.mem": 2048.0,
@@ -1017,7 +958,7 @@ class TestAgent:
         task.interfaces[-1].bandwidth_in = 1200e6
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.interface.0.bandwidth_in": 1000e6,
                         "katsdpcontroller.interface.0.bandwidth_out": 2000e6,
@@ -1039,7 +980,7 @@ class TestAgent:
         task.interfaces[-1].multicast_out |= {"mc"}
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.interface.0.bandwidth_in": 1000e6,
                         "katsdpcontroller.interface.0.bandwidth_out": 2000e6,
@@ -1062,7 +1003,7 @@ class TestAgent:
         task.interfaces[-1].multicast_in |= {"mc"}
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.interface.0.bandwidth_in": 1000e6,
                         "katsdpcontroller.interface.0.bandwidth_out": 2000e6,
@@ -1082,7 +1023,7 @@ class TestAgent:
         task.interfaces[-1].multicast_out |= {"mc"}
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.interface.0.bandwidth_in": 1000e6,
                         "katsdpcontroller.interface.0.bandwidth_out": 2000e6,
@@ -1102,7 +1043,7 @@ class TestAgent:
         task.interfaces[-1].multicast_out |= {"mc"}
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "katsdpcontroller.interface.0.bandwidth_in": 1000e6,
                         "katsdpcontroller.interface.0.bandwidth_out": 2000e6,
@@ -1123,7 +1064,7 @@ class TestAgent:
         task.cores = ["a", "b", None]
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "cpus": 5.0,
                         "mem": 200.0,
@@ -1149,7 +1090,7 @@ class TestAgent:
         task.gpus[-1].affinity = True
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "cpus": 5.0,
                         "mem": 200.0,
@@ -1176,7 +1117,7 @@ class TestAgent:
         task.interfaces.append(scheduler.InterfaceRequest("net0", affinity=True))
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {"cpus": 5.0, "mem": 200.0, "cores": [(0, 5)]}, [self.if_attr, self.numa_attr]
                 )
             ]
@@ -1191,7 +1132,7 @@ class TestAgent:
         task.cpus = 1.0
         task.mem = 128.0
         task.interfaces.append(scheduler.InterfaceRequest("net0", infiniband=True))
-        if_attr = _make_json_attr(
+        if_attr = make_json_attr(
             "katsdpcontroller.interfaces",
             [
                 {
@@ -1204,7 +1145,7 @@ class TestAgent:
             ],
         )
         agent = scheduler.Agent(
-            [self._make_offer({"cpus": 5.0, "mem": 200.0, "cores": [(0, 5)]}, [if_attr])]
+            [self.make_offer({"cpus": 5.0, "mem": 200.0, "cores": [(0, 5)]}, [if_attr])]
         )
         with pytest.raises(scheduler.InsufficientResourcesError):
             agent.allocate(task)
@@ -1219,7 +1160,7 @@ class TestAgent:
         task.volumes.append(scheduler.VolumeRequest("vol2", "/container-path", "RW", affinity=True))
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {"cpus": 5.0, "mem": 200.0, "cores": [(0, 5)]},
                     [self.volume_attr, self.numa_attr],
                 )
@@ -1246,7 +1187,7 @@ class TestAgent:
         task.gpus[1].affinity = True
         agent = scheduler.Agent(
             [
-                self._make_offer(
+                self.make_offer(
                     {
                         "cpus": 4.0,
                         "mem": 200.0,
@@ -1313,21 +1254,21 @@ class TestPhysicalTask:
         self.eth1.bandwidth_out = 200e6
         self.vol0 = scheduler.Volume("vol0", "/host0", numa_node=1)
         attributes = [
-            _make_json_attr(
+            make_json_attr(
                 "katsdpcontroller.interfaces",
                 [
                     {"name": "eth0", "network": "net0", "ipv4_address": "192.168.1.1"},
                     {"name": "eth1", "network": "net1", "ipv4_address": "192.168.2.1"},
                 ],
             ),
-            _make_json_attr(
+            make_json_attr(
                 "katsdpcontroller.volumes",
                 [{"name": "vol0", "host_path": "/host0", "numa_node": 1}],
             ),
-            _make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]]),
+            make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]]),
         ]
         offers = [
-            _make_offer(
+            make_offer(
                 "framework",
                 "agentid",
                 "agenthost",
@@ -1379,328 +1320,6 @@ class TestPhysicalTask:
         assert physical_task.ports["port2"] in range(30000, 31001)
         assert physical_task.ports["port1"] != physical_task.ports["port2"]
         assert physical_task.cores == {"core1": 2, "core2": 4, "core3": 6}
-
-
-class TestDiagnoseInsufficient:
-    """Test :class:`katsdpcontroller.scheduler.Scheduler._diagnose_insufficient.
-
-    This is split out from TestScheduler to make it easier to set up fixtures.
-    """
-
-    def _make_offer(self, resources, agent_num=0, attrs=()):
-        return _make_offer(
-            "frameworkid", f"agentid{agent_num}", f"agenthost{agent_num}", resources, attrs
-        )
-
-    def setup_method(self):
-        # Create a number of agents, each of which has a large quantity of
-        # some resource but not much of others. This makes it easier to
-        # control which resources are plentiful in the simulated cluster.
-        numa_attr = _make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]])
-        gpu_attr = _make_json_attr(
-            "katsdpcontroller.gpus",
-            [
-                {
-                    "name": "Dummy GPU",
-                    "device_attributes": {},
-                    "compute_capability": (5, 2),
-                    "numa_node": 1,
-                    "uuid": "GPU-123",
-                }
-            ],
-        )
-        interface_attr = _make_json_attr(
-            "katsdpcontroller.interfaces",
-            [
-                {
-                    "name": "eth0",
-                    "network": "net0",
-                    "ipv4_address": "192.168.1.1",
-                    "infiniband_devices": ["/dev/infiniband/rdma_cm", "/dev/infiniband/uverbs0"],
-                },
-                {"name": "eth1", "network": "net1", "ipv4_address": "192.168.1.2"},
-            ],
-        )
-        volume_attr = _make_json_attr(
-            "katsdpcontroller.volumes", [{"name": "vol0", "host_path": "/host0"}]
-        )
-
-        self.cpus_agent = scheduler.Agent([self._make_offer({"cpus": 32, "mem": 2, "disk": 7}, 0)])
-        self.mem_agent = scheduler.Agent(
-            [self._make_offer({"cpus": 1.25, "mem": 256, "disk": 8}, 1)]
-        )
-        self.disk_agent = scheduler.Agent(
-            [self._make_offer({"cpus": 1.5, "mem": 3, "disk": 1024}, 2)]
-        )
-        self.ports_agent = scheduler.Agent(
-            [self._make_offer({"cpus": 1.75, "mem": 4, "disk": 9, "ports": [(30000, 30005)]}, 3)]
-        )
-        self.cores_agent = scheduler.Agent(
-            [self._make_offer({"cpus": 6, "mem": 5, "disk": 10, "cores": [(0, 6)]}, 4, [numa_attr])]
-        )
-        self.gpu_compute_agent = scheduler.Agent(
-            [
-                self._make_offer(
-                    {
-                        "cpus": 0.75,
-                        "mem": 6,
-                        "disk": 11,
-                        "katsdpcontroller.gpu.0.compute": 1.0,
-                        "katsdpcontroller.gpu.0.mem": 2.25,
-                    },
-                    5,
-                    [numa_attr, gpu_attr],
-                )
-            ]
-        )
-        self.gpu_mem_agent = scheduler.Agent(
-            [
-                self._make_offer(
-                    {
-                        "cpus": 1.0,
-                        "mem": 7,
-                        "disk": 11,
-                        "katsdpcontroller.gpu.0.compute": 0.125,
-                        "katsdpcontroller.gpu.0.mem": 256.0,
-                    },
-                    6,
-                    [numa_attr, gpu_attr],
-                )
-            ]
-        )
-        self.interface_agent = scheduler.Agent(
-            [
-                self._make_offer(
-                    {
-                        "cpus": 1.0,
-                        "mem": 1,
-                        "disk": 1,
-                        "katsdpcontroller.interface.0.bandwidth_in": 1e9,
-                        "katsdpcontroller.interface.0.bandwidth_out": 1e9,
-                        "katsdpcontroller.interface.1.bandwidth_in": 1e9,
-                        "katsdpcontroller.interface.1.bandwidth_out": 1e9,
-                    },
-                    7,
-                    [interface_attr],
-                )
-            ]
-        )
-        self.volume_agent = scheduler.Agent(
-            [self._make_offer({"cpus": 1.0, "mem": 1, "disk": 1}, 8, [volume_attr])]
-        )
-        # Create a template logical and physical task
-        self.logical_task = scheduler.LogicalTask("logical")
-        self.physical_task = self.logical_task.physical_factory(self.logical_task)
-        self.logical_task2 = scheduler.LogicalTask("logical2")
-        self.physical_task2 = self.logical_task2.physical_factory(self.logical_task2)
-
-    def test_task_insufficient_scalar_resource(self):
-        """A task requests more of a scalar resource than any agent has"""
-        self.logical_task.cpus = 4
-        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.disk_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.resource == "cpus"
-        assert cm.value.needed == 4
-        assert cm.value.available == 1.5
-
-    def test_task_insufficient_range_resource(self):
-        """A task requests more of a range resource than any agent has"""
-        self.logical_task.ports = ["a", "b", "c"]
-        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.disk_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.resource == "ports"
-        assert cm.value.needed == 3
-        assert cm.value.available == 0
-
-    def test_task_insufficient_cores(self):
-        """A task requests more cores than are available on a single NUMA node"""
-        self.logical_task.cores = ["a", "b", "c", "d"]
-        with pytest.raises(scheduler.TaskInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.cores_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.resource == "cores"
-        assert cm.value.needed == 4
-        assert cm.value.available == 3
-
-    def test_task_insufficient_gpu_scalar_resource(self):
-        """A task requests more of a GPU scalar resource than any agent has"""
-        req = scheduler.GPURequest()
-        req.mem = 2048
-        self.logical_task.gpus = [req]
-        with pytest.raises(scheduler.TaskInsufficientGPUResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.gpu_compute_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.request_index == 0
-        assert cm.value.resource == "mem"
-        assert cm.value.needed == 2048
-        assert cm.value.available == 2.25
-
-    def test_task_insufficient_interface_scalar_resources(self):
-        """A task requests more of an interface scalar resource than any agent has"""
-        req = scheduler.InterfaceRequest("net0")
-        req.bandwidth_in = 5e9
-        self.logical_task.interfaces = [req]
-        with pytest.raises(scheduler.TaskInsufficientInterfaceResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.interface_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.request == req
-        assert cm.value.resource == "bandwidth_in"
-        assert cm.value.needed == 5e9
-        assert cm.value.available == 1e9
-
-    def test_task_no_interface(self):
-        """A task requests a network interface that is not available on any agent"""
-        self.logical_task.interfaces = [
-            scheduler.InterfaceRequest("net0"),
-            scheduler.InterfaceRequest("badnet"),
-        ]
-        with pytest.raises(scheduler.TaskNoInterfaceError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.interface_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.request is self.logical_task.interfaces[1]
-
-    def test_task_no_volume(self):
-        """A task requests a volume that is not available on any agent"""
-        self.logical_task.volumes = [
-            scheduler.VolumeRequest("vol0", "/vol0", "RW"),
-            scheduler.VolumeRequest("badvol", "/badvol", "RO"),
-        ]
-        with pytest.raises(scheduler.TaskNoVolumeError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.volume_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        assert cm.value.request is self.logical_task.volumes[1]
-
-    def test_task_no_gpu(self):
-        """A task requests a GPU that is not available on any agent"""
-        req = scheduler.GPURequest()
-        req.name = "GPU that does not exist"
-        self.logical_task.gpus = [req]
-        with pytest.raises(scheduler.TaskNoGPUError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.mem_agent, self.gpu_compute_agent], [self.physical_task]
-            )
-        assert cm.value.node == self.physical_task
-        assert cm.value.request_index == 0
-
-    def test_task_no_agent(self):
-        """A task does not fit on any agent, but not due to a single reason"""
-        # Ask for more combined cpu+ports than is available on one agent
-        self.logical_task.cpus = 8
-        self.logical_task.ports = ["a", "b", "c"]
-        with pytest.raises(scheduler.TaskNoAgentError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.ports_agent], [self.physical_task]
-            )
-        assert cm.value.node is self.physical_task
-        # Make sure that it didn't incorrectly return a subclass
-        assert cm.type == scheduler.TaskNoAgentError
-
-    def test_group_insufficient_scalar_resource(self):
-        """A group of tasks require more of a scalar resource than available"""
-        self.logical_task.cpus = 24
-        self.logical_task2.cpus = 16
-        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.mem_agent], [self.physical_task, self.physical_task2]
-            )
-        assert cm.value.resource == "cpus"
-        assert cm.value.needed == 40
-        assert cm.value.available == 33.25
-
-    def test_group_insufficient_range_resource(self):
-        """A group of tasks require more of a range resource than available"""
-        self.logical_task.ports = ["a", "b", "c"]
-        self.logical_task2.ports = ["d", "e", "f"]
-        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.ports_agent], [self.physical_task, self.physical_task2]
-            )
-        assert cm.value.resource == "ports"
-        assert cm.value.needed == 6
-        assert cm.value.available == 5
-
-    def test_group_insufficient_gpu_scalar_resources(self):
-        """A group of tasks require more of a GPU scalar resource than available"""
-        self.logical_task.gpus = [scheduler.GPURequest()]
-        self.logical_task.gpus[-1].compute = 0.75
-        self.logical_task2.gpus = [scheduler.GPURequest()]
-        self.logical_task2.gpus[-1].compute = 0.5
-        with pytest.raises(scheduler.GroupInsufficientGPUResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.gpu_compute_agent, self.gpu_mem_agent],
-                [self.physical_task, self.physical_task2],
-            )
-        assert cm.value.resource == "compute"
-        assert cm.value.needed == 1.25
-        assert cm.value.available == 1.125
-
-    def test_group_insufficient_interface_scalar_resources(self):
-        """A group of tasks require more of a network resource than available"""
-        self.logical_task.interfaces = [
-            scheduler.InterfaceRequest("net0"),
-            scheduler.InterfaceRequest("net1"),
-        ]
-        self.logical_task.interfaces[0].bandwidth_in = 800e6
-        # An amount that must not be added to the needed value reported
-        self.logical_task.interfaces[1].bandwidth_in = 50e6
-        self.logical_task2.interfaces = [scheduler.InterfaceRequest("net0")]
-        self.logical_task2.interfaces[0].bandwidth_in = 700e6
-        with pytest.raises(scheduler.GroupInsufficientInterfaceResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.interface_agent], [self.physical_task, self.physical_task2]
-            )
-        assert cm.value.network == "net0"
-        assert cm.value.resource == "bandwidth_in"
-        assert cm.value.needed == 1500e6
-        assert cm.value.available == 1000e6
-
-    def test_subsystem(self):
-        """A subsystem has insufficient resources, although the system has enough."""
-        self.logical_task.subsystem = "sdp"
-        self.logical_task.cpus = 32  # Consumes all of cpus_agent
-        self.logical_task2.subsystem = "sdp"
-        self.logical_task2.cpus = 1
-        self.cpus_agent.subsystems = {"sdp"}
-        self.cores_agent.subsystems = {"cbf", "other"}
-        with pytest.raises(scheduler.GroupInsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.cores_agent], [self.physical_task, self.physical_task2]
-            )
-        assert cm.value.resource == "cpus"
-        assert cm.value.needed == 33
-        assert cm.value.available == 32
-        assert cm.value.subsystem == "sdp"
-
-    def test_generic(self):
-        """A group of tasks can't fit, but no simpler explanation is available"""
-        # Create a task that uses just too much memory for the
-        # low-memory agents, forcing them to consume memory from the
-        # big-memory agent and not leaving enough for the big-memory task.
-        self.logical_task.mem = 5
-        self.logical_task2.mem = 251
-        with pytest.raises(scheduler.InsufficientResourcesError) as cm:
-            scheduler.Scheduler._diagnose_insufficient(
-                [self.cpus_agent, self.mem_agent, self.disk_agent],
-                [self.physical_task, self.physical_task2],
-            )
-        # Check that it wasn't a subclass raised
-        assert cm.type == scheduler.InsufficientResourcesError
 
 
 class TestSubgraph:
@@ -1811,9 +1430,9 @@ class TestScheduler:
             self.logical_batch_graph.add_node(batch_nodes[0])
             self.logical_batch_graph.add_node(batch_nodes[1])
             self.logical_batch_graph.add_edge(batch_nodes[1], batch_nodes[0], depends_finished=True)
-            self.numa_attr = _make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]])
+            self.numa_attr = make_json_attr("katsdpcontroller.numa", [[0, 2, 4, 6], [1, 3, 5, 7]])
             self.agent0_attrs = [
-                _make_json_attr(
+                make_json_attr(
                     "katsdpcontroller.gpus",
                     [
                         {
@@ -1830,10 +1449,10 @@ class TestScheduler:
                         },
                     ],
                 ),
-                _make_json_attr(
+                make_json_attr(
                     "katsdpcontroller.volumes", [{"name": "vol0", "host_path": "/host0"}]
                 ),
-                _make_json_attr(
+                make_json_attr(
                     "katsdpcontroller.interfaces",
                     [
                         {
@@ -1865,7 +1484,7 @@ class TestScheduler:
             self.sched.registered(self.driver, "framework", mock.sentinel.master_info)
 
         def make_offer(self, resources, agent_num=0, attrs=()):
-            return _make_offer(
+            return make_offer(
                 self.framework_id, f"agentid{agent_num}", f"agenthost{agent_num}", resources, attrs
             )
 
@@ -2120,7 +1739,7 @@ class TestScheduler:
         volume.host_path = "/host0"
         volume.container_path = "/container-path"
         expected_taskinfo0.container.volumes = [volume]
-        expected_taskinfo0.resources = _make_resources(
+        expected_taskinfo0.resources = make_resources(
             {
                 "cpus": 1.0,
                 "ports": [(30000, 30001)],
@@ -2153,7 +1772,7 @@ class TestScheduler:
         expected_taskinfo1.container.type = "DOCKER"
         expected_taskinfo1.container.docker.image = "sdp/image1:latest"
         expected_taskinfo1.container.docker.parameters = [{"key": "cpuset-cpus", "value": "0,2"}]
-        expected_taskinfo1.resources = _make_resources({"cpus": 0.5, "cores": [(0, 1), (2, 3)]})
+        expected_taskinfo1.resources = make_resources({"cpus": 0.5, "cores": [(0, 1), (2, 3)]})
         expected_taskinfo1.discovery.visibility = "EXTERNAL"
         expected_taskinfo1.discovery.name = "node1"
         expected_taskinfo1.discovery.ports.ports = []
@@ -2599,7 +2218,7 @@ class TestScheduler:
         )
         await asyncio.sleep(30)
         results = await task
-        with pytest.raises(scheduler.TaskInsufficientResourcesError):
+        with pytest.raises(TaskInsufficientResourcesError):
             raise next(iter(results.values()))
         assert fix.task_stats.batch_created == 1
         assert fix.task_stats.batch_started == 1
