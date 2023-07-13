@@ -757,12 +757,12 @@ def _make_fgpu(
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.mem = 1700  # Actual use is currently around 1.6GB when using narrowband
         if not configuration.options.develop.less_resources:
-            fgpu.cpus = 4
-            fgpu.cores = ["src0", "src1", "dst", "python"]
+            fgpu.cpus = 3
+            fgpu.cores = ["src", "dst", "python"]
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[python]}"]
         else:
-            fgpu.cpus = 4 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+            fgpu.cpus = 3 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
             taskset = []
         fgpu.ports = ["port", "prometheus", "aiomonitor", "aioconsole"]
         fgpu.wait_ports = ["port", "prometheus"]
@@ -837,7 +837,7 @@ def _make_fgpu(
         if not configuration.options.develop.less_resources:
             fgpu.command += [
                 "--src-affinity",
-                "{cores[src0]},{cores[src1]}",
+                "{cores[src]}",
                 "--dst-affinity",
                 "{cores[dst]}",
             ]
@@ -854,7 +854,7 @@ def _make_fgpu(
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
                     "--src-comp-vector",
-                    "{cores[src0]},{cores[src1]}",
+                    "{cores[src]}",
                     "--dst-comp-vector",
                     "{cores[dst]}",
                 ]
