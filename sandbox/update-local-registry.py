@@ -159,6 +159,11 @@ def parse_args() -> argparse.Namespace:
         metavar="URL",
         help="Local mirror for fetching large files [none]",
     )
+    parser.add_argument(
+        "--skopeo",
+        action="store_true",
+        help="Use skopeo to copy images between repositories rather than local Docker [no]",
+    )
     args = parser.parse_args()
     args.include = expand_special(args.include)
     args.exclude = expand_special(args.exclude)
@@ -247,13 +252,26 @@ def build_image(name: str, args: argparse.Namespace) -> None:
 def copy_image(name: str, args: argparse.Namespace) -> None:
     upstream_image = upstream_path(name, args)
     downstream_image = downstream_path(name, args)
-    logging.info("Pulling %s", upstream_image)
-    docker_cmd("pull", upstream_image)
-    logging.info("Tagging %s -> %s", upstream_image, downstream_image)
-    docker_cmd("tag", upstream_image, downstream_image)
-    logging.info("Pushing %s", downstream_image)
-    docker_cmd("push", downstream_image)
-    logging.info("%s pushed", downstream_image)
+    if args.skopeo:
+        logging.info("Copying %s -> %s with skopeo", upstream_image, downstream_image)
+        skopeo_options = [f"docker://{upstream_image}", f"docker://{downstream_image}"]
+        # Skopeo assumes https by default, but the sandbox registry on
+        # localhost is http.
+        if downstream_image.startswith("localhost:5000"):
+            skopeo_options.insert(0, "--dest-tls-verify=false")
+        subprocess.run(
+            ["skopeo", "copy"] + skopeo_options,
+            stdin=subprocess.DEVNULL,
+            check=True,
+        )
+    else:
+        logging.info("Pulling %s", upstream_image)
+        docker_cmd("pull", upstream_image)
+        logging.info("Tagging %s -> %s", upstream_image, downstream_image)
+        docker_cmd("tag", upstream_image, downstream_image)
+        logging.info("Pushing %s", downstream_image)
+        docker_cmd("push", downstream_image)
+        logging.info("%s pushed", downstream_image)
 
 
 def tune_image(name: str, args: argparse.Namespace) -> None:

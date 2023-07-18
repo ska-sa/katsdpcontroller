@@ -80,6 +80,11 @@ authenticate to the registry), you can replace the last step with
 ```
 which will be faster since it will avoid building a number of images.
 
+If you have [skopeo](https://github.com/containers/skopeo), you can pass
+`--skopeo` to use that for copying images between registries, rather than
+pulling to your local Docker daemon. If you need to authenticate to the
+upstream registry, use `skopeo login` rather than `docker login`.
+
 ## Starting up the sandbox
 
 1. Run `./prepare.sh`. This will query your system for information
