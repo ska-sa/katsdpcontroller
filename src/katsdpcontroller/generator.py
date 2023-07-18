@@ -867,6 +867,7 @@ def _make_fgpu(
         # Identify the antenna, if the input labels are consistent
         if input_labels[0][:-1] == input_labels[1][:-1]:
             fgpu.consul_meta["antenna"] = input_labels[0][:-1]
+        fgpu.critical = False  # Can survive losing individual engines
         g.add_node(fgpu)
 
         # Wire it up to the multicast streams
@@ -1226,6 +1227,7 @@ def _make_xbgpu(
             i * stream.n_chans_per_substream,
             (i + 1) * stream.n_chans_per_substream,
         )
+        xbgpu.critical = False  # Can survive losing individual engines
         g.add_node(xbgpu)
 
         # Wire it up to the multicast streams
