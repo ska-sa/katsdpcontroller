@@ -201,13 +201,13 @@ class TestOptions:
 
     def test_from_config_dict(self) -> None:
         config = {
-            "develop": {"disable_ibv": True, "less_resources": True},
+            "develop": {"disable_ibverbs": True, "less_resources": True},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
         }
         options = Options.from_config(config)
         assert options.develop.any_gpu is False
-        assert options.develop.disable_ibv is True
+        assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
@@ -221,7 +221,7 @@ class TestOptions:
         }
         options = Options.from_config(config)
         assert options.develop.any_gpu is True
-        assert options.develop.disable_ibv is True
+        assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
@@ -230,7 +230,7 @@ class TestOptions:
     def test_defaults(self) -> None:
         options = Options.from_config({})
         assert options.develop.any_gpu is False
-        assert options.develop.disable_ibv is False
+        assert options.develop.disable_ibverbs is False
         assert options.develop.less_resources is False
         assert options.wrapper is None
         assert options.service_overrides == {}

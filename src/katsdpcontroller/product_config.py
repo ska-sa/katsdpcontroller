@@ -237,23 +237,23 @@ class ServiceOverride:
 
 class DevelopOptions:
     def __init__(
-        self, *, any_gpu: bool = False, disable_ibv: bool = False, less_resources: bool = False
+        self, *, any_gpu: bool = False, disable_ibverbs: bool = False, less_resources: bool = False
     ) -> None:
         self.any_gpu = any_gpu
-        self.disable_ibv = disable_ibv
+        self.disable_ibverbs = disable_ibverbs
         self.less_resources = less_resources
 
     @classmethod
     def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
         return cls(
             any_gpu=config.get("any_gpu", False),
-            disable_ibv=config.get("disable_ibv", False),
+            disable_ibverbs=config.get("disable_ibverbs", False),
             less_resources=config.get("less_resources", False),
         )
 
     @classmethod
     def from_bool(cls, opt: bool) -> "DevelopOptions":
-        return cls(any_gpu=opt, disable_ibv=opt, less_resources=opt)
+        return cls(any_gpu=opt, disable_ibverbs=opt, less_resources=opt)
 
 
 class Options:

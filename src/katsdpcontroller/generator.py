@@ -460,7 +460,7 @@ def _make_dsim(
     An antenna has a separate stream per polarisation, so `streams` will
     normally have two elements.
     """
-    ibv = not configuration.options.develop.disable_ibv
+    ibv = not configuration.options.develop.disable_ibverbs
     # dsim assigns digitiser IDs positionally. According to M1000-0001-053,
     # the least significant bit is the polarization ID with 0 = vertical, so
     # sort by reverse of name so that if the streams are, for example,
@@ -566,7 +566,7 @@ def _make_fgpu(
     # streams needs to be a Sequence (not just an iterable that is consumed
     # once), which `sorted` achieves. Put wideband first for consistency.
     streams = sorted(streams, key=lambda stream: stream.narrowband is not None)
-    ibv = not configuration.options.develop.disable_ibv
+    ibv = not configuration.options.develop.disable_ibverbs
     n_engines = len(streams[0].src_streams) // 2
     base_name = streams[0].name
     fgpu_group = LogicalGroup(f"fgpu.{base_name}")
@@ -927,7 +927,7 @@ def _make_xbgpu(
     sync_time: int,
     sensors: SensorSet,
 ) -> scheduler.LogicalNode:
-    ibv = not configuration.options.develop.disable_ibv
+    ibv = not configuration.options.develop.disable_ibverbs
     acv = stream.antenna_channelised_voltage
     n_engines = stream.n_substreams
     n_inputs = len(acv.src_streams)
@@ -1278,7 +1278,7 @@ def _make_cbf_simulator(
     if isinstance(stream, product_config.SimBaselineCorrelationProductsStream):
         while stream.n_vis / n_sim > _N32_32:
             n_sim *= 2
-    ibv = not configuration.options.develop.disable_ibv
+    ibv = not configuration.options.develop.disable_ibverbs
 
     def make_cbf_simulator_config(
         task: ProductPhysicalTask, resolver: "product_controller.Resolver"
@@ -1653,7 +1653,7 @@ def _make_ingest(
         "continuum_factor": continuum.continuum_factor if continuum is not None else 1,
         "sd_continuum_factor": sd_continuum_factor,
         "sd_spead_rate": sd_spead_rate,
-        "cbf_ibv": not develop.disable_ibv,
+        "cbf_ibv": not develop.disable_ibverbs,
         "cbf_name": src.name,
         "servers": n_ingest,
         "antenna_mask": primary.antennas,
@@ -1725,7 +1725,7 @@ def _make_ingest(
             ingest.physical_factory = IngestTask
         ingest.fake_katcp_server_cls = FakeIngestDeviceServer
         ingest.image = "katsdpingest_" + normalise_gpu_name(defaults.INGEST_GPU_NAME)
-        if develop.disable_ibv:
+        if develop.disable_ibverbs:
             ingest.command = ["ingest.py"]
         else:
             ingest.command = ["capambel", "-c", "cap_net_raw+p", "--", "ingest.py"]
@@ -1758,8 +1758,8 @@ def _make_ingest(
         ingest.interfaces = [
             scheduler.InterfaceRequest(
                 "cbf",
-                affinity=not develop.disable_ibv,
-                infiniband=not develop.disable_ibv,
+                affinity=not develop.disable_ibverbs,
+                infiniband=not develop.disable_ibverbs,
             ),
             scheduler.InterfaceRequest("sdp_10g"),
         ]
@@ -2327,7 +2327,7 @@ def _make_beamformer_engineering_pol(
     bf_ingest.interfaces = [
         scheduler.InterfaceRequest(
             "cbf",
-            infiniband=not configuration.options.develop.disable_ibv,
+            infiniband=not configuration.options.develop.disable_ibverbs,
             affinity=timeplot or not ram,
         )
     ]
@@ -2353,7 +2353,7 @@ def _make_beamformer_engineering_pol(
         config = {
             "affinity": [task.cores["disk"], task.cores["network"]],
             "interface": task.interfaces["cbf"].name,
-            "ibv": not configuration.options.develop.disable_ibv,
+            "ibv": not configuration.options.develop.disable_ibverbs,
             "stream_name": src_stream.name,
             "aiomonitor": True,
         }
