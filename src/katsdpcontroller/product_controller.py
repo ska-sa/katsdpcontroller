@@ -769,9 +769,10 @@ class SubarrayProduct:
     ) -> None:
         """Send katcp requests for multiple nodes in parallel.
 
-        If any of the nodes has no current katcp connection, abort before
-        sending any of the messages. Otherwise, send the messages and wait
-        for all of them to complete (even if some of them fail). If any fail,
+        If any of the critical nodes has no current katcp connection, abort
+        before sending any of the messages. Otherwise, send the messages and
+        wait for all of them to complete (even if some of them fail). If any
+        fail, or if there is a non-critical node with no katcp connection,
         raise the first failure.
 
         Each message is given as an iterable of arguments (starting with the
@@ -781,10 +782,15 @@ class SubarrayProduct:
         """
         reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
         messages_iter = iter(messages)
+        non_critical = []
         for node in nodes:
-            if node.katcp_connection is None:
+            message = next(messages_iter)
+            if node.katcp_connection is not None:
+                reqs.append((node.katcp_connection, message))
+            elif node.logical_node.critical:
                 raise FailReply(f"No katcp connection to {node.name}")
-            reqs.append((node.katcp_connection, next(messages_iter)))
+            else:
+                non_critical.append(node.name)
         # Now that we've validated things, send the messages
         futures = []
         for conn, msg in reqs:
@@ -794,6 +800,8 @@ class SubarrayProduct:
             for result in results:
                 if isinstance(result, Exception):
                     raise result
+        if non_critical:
+            raise FailReply(f"No katcp connection to some nodes: {non_critical}")
 
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.
