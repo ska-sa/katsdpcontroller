@@ -370,9 +370,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         else:
             self.name = ".".join([capture_block_id, logical_task.name])
         self.gui_urls: List[dict] = []
-        # dict of exposed KATCP sensors. This excludes the state sensors, which
-        # are present even when the process is not running.
-        self.sensors: typing.Dict[str, aiokatcp.Sensor] = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
@@ -497,30 +494,12 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     await asyncio.sleep(1.0)
         return True
 
-    def _add_sensor(self, sensor):
-        """Add the supplied Sensor object to the top level device and track it locally."""
-        self.sensors[sensor.name] = sensor
-        self.sdp_controller.sensors.add(sensor)
-
-    def _remove_sensors(self):
-        """Removes all attached sensors. It does *not* send an
-        ``interface-changed`` inform; that is left to the caller.
-        """
-        for sensor_name in self.sensors:
-            self.logger.debug("Removing sensor %s", sensor_name)
-            del self.sdp_controller.sensors[sensor_name]
-        self.sensors = {}
-
     def _disconnect(self):
         """Clean up when killing the task or when it has died.
 
         This must be idempotent, because it will be called when the task is
         killed and again when it actually dies.
         """
-        need_inform = False
-        if self.sensors:
-            self._remove_sensors()
-            need_inform = True
         for sensor in self.logical_node.data_suspect_sensors:
             data_suspect = sensor.value
             a, b = self.logical_node.data_suspect_range
@@ -533,7 +512,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()
-                need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
                 self.logger.error("Failed to shut down katcp connection to %s", self.name)
             self.katcp_connection = None
@@ -543,8 +521,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
-        if need_inform:
-            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     def kill(self, driver, **kwargs):
         force = kwargs.pop("force", False)
@@ -570,7 +546,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if gui_urls:
             gui_urls_sensor = Sensor(str, self.name + ".gui-urls", "URLs for GUIs")
             gui_urls_sensor.set_value(json.dumps(gui_urls))
-            self._add_sensor(gui_urls_sensor)
+            self.subarray_product.add_sensor(gui_urls_sensor)
             sensors_added = True
 
         self._host_sensor.value = self.host
@@ -587,7 +563,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 endpoint_sensor.set_value(
                     aiokatcp.Address(ipaddress.IPv4Address("0.0.0.0")), status=Sensor.Status.FAILURE
                 )
-            self._add_sensor(endpoint_sensor)
+            self.subarray_product.add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
             self.sdp_controller.mass_inform("interface-changed", "sensor-list")

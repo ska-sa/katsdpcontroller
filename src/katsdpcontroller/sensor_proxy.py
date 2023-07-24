@@ -18,6 +18,7 @@
 
 import enum
 import logging
+import time
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 import aiokatcp
@@ -141,13 +142,20 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.server.mass_inform("interface-changed", "sensor-list")
         self._interface_changed = False
 
+    def _mark_unreachable(self, sensor: aiokatcp.Sensor) -> None:
+        reading = sensor.reading
+        if reading.status != aiokatcp.Sensor.Status.UNREACHABLE:
+            sensor.set_value(
+                reading.value, timestamp=time.time(), status=aiokatcp.Sensor.Status.UNREACHABLE
+            )
+
     def state_updated(self, state: aiokatcp.SyncState) -> None:
         super().state_updated(state)
-        # TODO: move this into aiokatcp itself?
         if state == aiokatcp.SyncState.CLOSED:
             self.batch_start()
             for name in self.sensors.keys():
-                self._sensor_removed(name)
+                self._mark_unreachable(self.server.sensors[name])
+                self._mark_unreachable(self.orig_sensors[name])
             self.batch_stop()
 
 
