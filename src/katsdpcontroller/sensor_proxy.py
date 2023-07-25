@@ -18,7 +18,6 @@
 
 import enum
 import logging
-import time
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 import aiokatcp
@@ -152,11 +151,19 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         self._interface_changed = False
 
     def _mark_unreachable(self, sensor: aiokatcp.Sensor) -> None:
+        # Special case for device-status sensors: if we can no longer
+        # communicate with the device, treat it as failed.
+        if sensor.name in self.rewrite_name("device-status") and sensor.type_name == "discrete":
+            try:
+                fail_value = sensor.stype(b"fail")
+            except ValueError:
+                pass
+            else:
+                sensor.set_value(fail_value, status=aiokatcp.Sensor.Status.ERROR)
+                return
         reading = sensor.reading
         if reading.status != aiokatcp.Sensor.Status.UNREACHABLE:
-            sensor.set_value(
-                reading.value, timestamp=time.time(), status=aiokatcp.Sensor.Status.UNREACHABLE
-            )
+            sensor.set_value(reading.value, status=aiokatcp.Sensor.Status.UNREACHABLE)
 
     def state_updated(self, state: aiokatcp.SyncState) -> None:
         super().state_updated(state)
