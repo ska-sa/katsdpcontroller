@@ -50,6 +50,13 @@ def _reading_to_float(reading: aiokatcp.Reading) -> float:
         return float(reading.value)
 
 
+class CloseAction(enum.Enum):
+    """Action to take on sensors when a :class:`SensorWatcher` is closed."""
+
+    REMOVE = 1  #: Remove the sensors from the server
+    UNREACHABLE = 2  #: Change the sensor statuses to unreachable
+
+
 class SensorWatcher(aiokatcp.SensorWatcher):
     """Mirrors sensors from a client into a server.
 
@@ -64,6 +71,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
+        close_action: CloseAction = CloseAction.REMOVE,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
@@ -77,6 +85,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.orig_sensors = aiokatcp.SensorSet()
 
         self.rewrite_gui_urls = rewrite_gui_urls
+        self.close_action = close_action
         # Whether we need to do an interface-changed at the end of the batch
         self._interface_changed = False
 
@@ -154,8 +163,11 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         if state == aiokatcp.SyncState.CLOSED:
             self.batch_start()
             for name in self.sensors.keys():
-                self._mark_unreachable(self.server.sensors[name])
-                self._mark_unreachable(self.orig_sensors[name])
+                if self.close_action == CloseAction.UNREACHABLE:
+                    self._mark_unreachable(self.server.sensors[name])
+                    self._mark_unreachable(self.orig_sensors[name])
+                elif self.close_action == CloseAction.REMOVE:
+                    self._sensor_removed(name)
             self.batch_stop()
 
 
@@ -179,6 +191,8 @@ class SensorProxyClient(aiokatcp.Client):
         `server`. Sensors found in this mapping do not have `prefix` applied.
         The values may also be lists of strings, in which case the sensor
         will be duplicated under each of these names.
+    close_action
+        Defines what to do with the sensors when the connection is closed.
     kwargs
         Passed to the base class
     """
@@ -190,10 +204,13 @@ class SensorProxyClient(aiokatcp.Client):
         rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
+        close_action: CloseAction = CloseAction.REMOVE,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        watcher = SensorWatcher(self, server, prefix, rewrite_gui_urls, renames=renames)
+        watcher = SensorWatcher(
+            self, server, prefix, rewrite_gui_urls, renames=renames, close_action=close_action
+        )
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
 

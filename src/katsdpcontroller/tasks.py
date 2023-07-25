@@ -460,6 +460,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     self.sdp_controller,
                     prefix,
                     renames=self.logical_node.sensor_renames,
+                    close_action=sensor_proxy.CloseAction.UNREACHABLE,
                     host=self.host,
                     port=self.ports["port"],
                 )

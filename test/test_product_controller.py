@@ -553,7 +553,6 @@ class TestControllerInterface(BaseTestController):
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
         await client.request("product-deconfigure")
-        interface_changed_callback.assert_called_with(b"sensor-list")
         await client.wait_disconnected()
         client.remove_inform_callback("interface-changed", interface_changed_callback)
 
