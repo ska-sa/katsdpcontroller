@@ -711,6 +711,19 @@ class TestControllerInterface(BaseTestController):
             b"0011",
             status=Sensor.Status.WARN,
         )
+        # Check that the engine's sensors are modified appropriately
+        await assert_sensor_value(
+            client,
+            "f.gpucbf_antenna_channelised_voltage.1.time.esterror",
+            mock.ANY,
+            status=Sensor.Status.UNREACHABLE,
+        )
+        await assert_sensor_value(
+            client,
+            "f.gpucbf_antenna_channelised_voltage.1.device-status",
+            b"fail",
+            status=Sensor.Status.ERROR,
+        )
         # Kill off the other, to check that the sensor goes into ERROR
         server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
         await assert_sensor_value(
@@ -735,6 +748,19 @@ class TestControllerInterface(BaseTestController):
             "gpucbf_baseline_correlation_products.channel-data-suspect",
             b"0" * 1024 + b"1" * 1024 + b"0" * 2048,
             status=Sensor.Status.WARN,
+        )
+        # Check that the engine's sensors have been modified appropriately
+        await assert_sensor_value(
+            client,
+            "xb.gpucbf_baseline_correlation_products.1.xeng-clip-cnt",
+            mock.ANY,
+            status=Sensor.Status.UNREACHABLE,
+        )
+        await assert_sensor_value(
+            client,
+            "xb.gpucbf_baseline_correlation_products.1.device-status",
+            b"fail",
+            status=Sensor.Status.ERROR,
         )
 
 
