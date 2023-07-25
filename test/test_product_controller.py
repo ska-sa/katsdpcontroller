@@ -63,9 +63,10 @@ from aioresponses import aioresponses
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import CollectorRegistry
 
-from katsdpcontroller import scheduler, sensor_proxy
+from katsdpcontroller import product_controller, scheduler, sensor_proxy
 from katsdpcontroller.consul import ConsulService
 from katsdpcontroller.controller import device_server_sockname
+from katsdpcontroller.fake_servers import FakeFgpuDeviceServer
 from katsdpcontroller.product_controller import (
     DeviceServer,
     DeviceStatus,
@@ -674,6 +675,37 @@ class TestControllerInterface(BaseTestController):
         # Check that the other engine still had its gains set
         await assert_sensor_value(
             client, "gpucbf_antenna_channelised_voltage.gpucbf_m901v.eq", b"[3.0+0.0j]"
+        )
+
+    async def test_gain_all_timeout_engine(
+        self, client: aiokatcp.Client, server: DeviceServer, monkeypatch
+    ) -> None:
+        """Test setting all gains when one of the engines doesn't respond."""
+
+        async def mock_gain_all(self, ctx, msg) -> None:
+            if self.logical_task.name == "f.gpucbf_antenna_channelised_voltage.0":
+                await asyncio.Future()  # Will never return
+            else:
+                await orig_gain_all(self, ctx, msg)
+
+        # Speed up the test by reducing the timeout
+        monkeypatch.setattr(product_controller, "GAIN_TIMEOUT", 0.1)
+        # Make the request take forever (TODO: this is depending on aiokatcp internals)
+        orig_gain_all = FakeFgpuDeviceServer._request_handlers["gain-all"]
+        monkeypatch.setitem(FakeFgpuDeviceServer._request_handlers, "gain-all", mock_gain_all)
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        with pytest.raises(
+            FailReply,
+            match=r"Failed to issue req gain-all to node f\.gpucbf_antenna_channelised_voltage\.0. "
+            r"Timed out after 0\.1 s\.",
+        ):
+            await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "3.0")
+        # Check that the affected node is marked as suspect
+        await assert_sensor_value(
+            client,
+            "gpucbf_antenna_channelised_voltage.input-data-suspect",
+            b"1100",
+            status=Sensor.Status.WARN,
         )
 
     async def test_delays(self, client: aiokatcp.Client) -> None:
