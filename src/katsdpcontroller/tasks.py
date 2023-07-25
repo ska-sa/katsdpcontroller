@@ -425,10 +425,13 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
-        message is printed and FailReply is raised.
+        message is printed, a FailReply is raised, and (if defined),
+        data-suspect flags are set.
         """
         if self.katcp_connection is None:
-            raise ValueError("Cannot issue request without a katcp connection")
+            raise FailReply(
+                f"Cannot issue request {req} to node {self.name} without a katcp connection"
+            )
         self.logger.info(
             "Issuing request %s %s to node %s (timeout %gs)", req, args, self.name, timeout
         )
@@ -439,8 +442,13 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self.logger.info("Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
-            msg = f"Failed to issue req {req} to node {self.name}. {error}"
+            if isinstance(error, asyncio.TimeoutError):
+                error_msg = f"Timed out after {timeout} s."
+            else:
+                error_msg = str(error)
+            msg = f"Failed to issue req {req} to node {self.name}. {error_msg}"
             self.logger.warning("%s", msg)
+            self.mark_suspect()
             raise FailReply(msg) from error
 
     async def wait_ready(self):
@@ -495,11 +503,12 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     await asyncio.sleep(1.0)
         return True
 
-    def _disconnect(self):
-        """Clean up when killing the task or when it has died.
+    def mark_suspect(self):
+        """Mark a task as producing suspect data.
 
-        This must be idempotent, because it will be called when the task is
-        killed and again when it actually dies.
+        This updates product-level sensors according to the
+        :attr:`data_suspect_sensors` and :attr:`data_suspect_range`
+        attributes.
         """
         for sensor in self.logical_node.data_suspect_sensors:
             data_suspect = sensor.value
@@ -510,6 +519,14 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 data_suspect,
                 status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR,
             )
+
+    def _disconnect(self):
+        """Clean up when killing the task or when it has died.
+
+        This must be idempotent, because it will be called when the task is
+        killed and again when it actually dies.
+        """
+        self.mark_suspect()
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()

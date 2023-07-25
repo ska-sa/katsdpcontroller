@@ -36,6 +36,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    Union,
 )
 
 import addict
@@ -74,6 +75,8 @@ from .tasks import (
 
 BATCH_PRIORITY = 1  #: Scheduler priority for batch queues
 BATCH_RESOURCES_TIMEOUT = 7 * 86400  # A week
+GAIN_TIMEOUT = 10.0  # Gains have a large payload, so give them plenty of time
+DELAYS_TIMEOUT = 1.0  # Delays are time-sensitive, so require them to be set fast
 _HINT_RE = re.compile(
     r"\bprometheus: *(?P<type>[a-z]+)(?:\((?P<args>[^)]*)\)|\b)"
     r"(?: +labels: *(?P<labels>[a-z,]+))?",
@@ -765,7 +768,10 @@ class SubarrayProduct:
                     raise result
 
     async def _multi_request(
-        self, nodes: Iterable[tasks.ProductAnyPhysicalTask], messages: Iterable[Iterable]
+        self,
+        nodes: Iterable[tasks.ProductAnyPhysicalTask],
+        messages: Iterable[Iterable],
+        timeout: Union[float, None] = None,
     ) -> None:
         """Send katcp requests for multiple nodes in parallel.
 
@@ -780,21 +786,21 @@ class SubarrayProduct:
         longer than the node list. In particular, :meth:`itertools.repeat`
         can be used to replicate a single message to every node.
         """
-        reqs: List[Tuple[aiokatcp.Client, Iterable]] = []
+        reqs: List[Tuple[tasks.ProductAnyPhysicalTask, tuple]] = []
         messages_iter = iter(messages)
         non_critical = []
         for node in nodes:
             message = next(messages_iter)
             if node.katcp_connection is not None:
-                reqs.append((node.katcp_connection, message))
+                reqs.append((node, tuple(message)))
             elif node.logical_node.critical:
                 raise FailReply(f"No katcp connection to {node.name}")
             else:
                 non_critical.append(node.name)
         # Now that we've validated things, send the messages
         futures = []
-        for conn, msg in reqs:
-            futures.append(conn.request(*msg))
+        for node, msg in reqs:
+            futures.append(node.issue_req(msg[0], msg[1:], timeout=timeout))
         if futures:  # gather doesn't like having zero futures
             results = await asyncio.gather(*futures, return_exceptions=True)
             for result in results:
@@ -1318,7 +1324,7 @@ class SubarrayProduct:
             )
             for node in nodes
         ]
-        await self._multi_request(nodes, msgs)
+        await self._multi_request(nodes, msgs, timeout=DELAYS_TIMEOUT)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
         """Set F-engine gains."""
@@ -1343,9 +1349,9 @@ class SubarrayProduct:
         nodes = list(self.find_nodes(task_type="f", streams=[stream], indices=[node_idx]))
         assert len(nodes) == 1
         node = nodes[0]
-        if node.katcp_connection is None:
-            raise FailReply(f"No katcp connection to {node.name}")
-        reply, _ = await node.katcp_connection.request("gain", stream.name, idx % 2, *values)
+        reply, _ = await node.issue_req(
+            "gain", (stream.name, idx % 2) + tuple(values), timeout=GAIN_TIMEOUT
+        )
         return reply
 
     async def gain_all(self, stream_name: str, values: Sequence[str]) -> None:
@@ -1367,6 +1373,7 @@ class SubarrayProduct:
         await self._multi_request(
             self.find_nodes(task_type="f", streams=[stream]),
             itertools.repeat(("gain-all", stream_name) + values),
+            timeout=GAIN_TIMEOUT,
         )
 
     async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
