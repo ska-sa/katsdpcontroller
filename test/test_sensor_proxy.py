@@ -35,8 +35,13 @@ import pytest
 from aiokatcp import Address, Sensor, SensorSet
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
-from katsdpcontroller.controller import device_server_sockname
-from katsdpcontroller.sensor_proxy import PrometheusInfo, PrometheusWatcher, SensorProxyClient
+from katsdpcontroller.controller import DeviceStatus, device_server_sockname
+from katsdpcontroller.sensor_proxy import (
+    CloseAction,
+    PrometheusInfo,
+    PrometheusWatcher,
+    SensorProxyClient,
+)
 
 
 class MyEnum(enum.Enum):
@@ -63,6 +68,7 @@ def _add_sensors(sensors: SensorSet) -> None:
     sensors.add(Sensor(Address, "address-sensor", "Address sensor"))
     sensors.add(Sensor(MyEnum, "enum-sensor", "Enum sensor"))
     sensors.add(Sensor(int, "broadcast-sensor", "Sensor that is mapped to multiple copies"))
+    sensors.add(Sensor(DeviceStatus, "device-status", "Device status"))
     sensors["enum-sensor"].set_value(MyEnum.NO, timestamp=123456789)
 
 
@@ -108,8 +114,14 @@ class TestSensorProxyClient:
         yield server
         await server.stop()
 
+    @pytest.fixture
+    def close_action(self) -> CloseAction:
+        return CloseAction.REMOVE
+
     @pytest.fixture(autouse=True)
-    async def client(self, mirror, server: DummyServer) -> AsyncGenerator[SensorProxyClient, None]:
+    async def client(
+        self, mirror, server: DummyServer, close_action: CloseAction
+    ) -> AsyncGenerator[SensorProxyClient, None]:
         port = device_server_sockname(server)[1]
         client = SensorProxyClient(
             mirror,
@@ -118,6 +130,7 @@ class TestSensorProxyClient:
                 "bytes-sensor": "custom-bytes-sensor",
                 "broadcast-sensor": ["copy01-broadcast-sensor", "copy02-broadcast-sensor"],
             },
+            close_action=close_action,
             host="127.0.0.1",
             port=port,
         )
@@ -207,6 +220,17 @@ class TestSensorProxyClient:
         await client.wait_disconnected()
         await client.wait_synced()
         self._check_sensors(mirror, server)
+
+    async def test_close_action_remove(self, client: SensorProxyClient, mirror) -> None:
+        client.close()
+        assert list(mirror.sensors) == []
+
+    @pytest.mark.parametrize("close_action", [CloseAction.UNREACHABLE])
+    async def test_close_action_unreachable(self, client: SensorProxyClient, mirror) -> None:
+        client.close()
+        assert mirror.sensors["custom-bytes-sensor"].status == Sensor.Status.UNREACHABLE
+        assert mirror.sensors["prefix-device-status"].status == Sensor.Status.ERROR
+        assert mirror.sensors["prefix-device-status"].value.value == b"fail"
 
 
 class TestPrometheusWatcher:
