@@ -658,6 +658,24 @@ class TestControllerInterface(BaseTestController):
             )
         await client.request("product-deconfigure")
 
+    async def test_gain_all_failed_engine(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
+        """Test setting all gains when one of the engines has died."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        assert server.product is not None  # Keeps mypy happy
+        server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
+        with pytest.raises(
+            FailReply,
+            match=r"No katcp connection to some nodes: "
+            r"\['f.gpucbf_antenna_channelised_voltage.0'\]",
+        ):
+            await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "3.0")
+        # Check that the other engine still had its gains set
+        await assert_sensor_value(
+            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901v.eq", b"[3.0+0.0j]"
+        )
+
     async def test_delays(self, client: aiokatcp.Client) -> None:
         """Test setting delays and retrieving the sensor."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
@@ -696,6 +714,34 @@ class TestControllerInterface(BaseTestController):
             "(4280000000, 0.0, 0.0, 0.0, 1.0)",
         )
         await client.request("product-deconfigure")
+
+    async def test_delays_failed_engine(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
+        """Test setting delays when one of the engines has died."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        assert server.product is not None  # Keeps mypy happy
+        server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
+        with pytest.raises(
+            FailReply,
+            match=r"No katcp connection to some nodes: "
+            r"\['f.gpucbf_antenna_channelised_voltage.0'\]",
+        ):
+            await client.request(
+                "delays",
+                "gpucbf_antenna_channelised_voltage",
+                "123456791.5",
+                "0.5,0.0:0.0,0.0",
+                "0.0,0.125:0.0,0.0",
+                "0.0,0.0:0.25,0.0",
+                "0.0,0.0:0.0,1.0",
+            )
+        # Check that delay setting still happens
+        await assert_sensor_value(
+            client,
+            "gpucbf_antenna_channelised_voltage.gpucbf_m901v.delay",
+            "(4280000000, 0.0, 0.0, 0.25, 0.0)",
+        )
 
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
