@@ -778,8 +778,7 @@ class SubarrayProduct:
         If any of the critical nodes has no current katcp connection, abort
         before sending any of the messages. Otherwise, send the messages and
         wait for all of them to complete (even if some of them fail). If any
-        fail, or if there is a non-critical node with no katcp connection,
-        raise the first failure.
+        fail, raise the first failure.
 
         Each message is given as an iterable of arguments (starting with the
         request name). It is acceptable for the messages iterator to be
@@ -807,7 +806,7 @@ class SubarrayProduct:
                 if isinstance(result, Exception):
                     raise result
         if non_critical:
-            raise FailReply(f"No katcp connection to some nodes: {non_critical}")
+            logger.debug("multi_request: no katcp connection to some nodes: %s", non_critical)
 
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.
