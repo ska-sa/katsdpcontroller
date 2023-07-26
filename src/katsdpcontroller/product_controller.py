@@ -772,6 +772,7 @@ class SubarrayProduct:
         nodes: Iterable[tasks.ProductAnyPhysicalTask],
         messages: Iterable[Iterable],
         timeout: Union[float, None] = None,
+        log_level: int = logging.INFO,
     ) -> None:
         """Send katcp requests for multiple nodes in parallel.
 
@@ -799,7 +800,7 @@ class SubarrayProduct:
         # Now that we've validated things, send the messages
         futures = []
         for node, msg in reqs:
-            futures.append(node.issue_req(msg[0], msg[1:], timeout=timeout))
+            futures.append(node.issue_req(msg[0], msg[1:], timeout=timeout, log_level=log_level))
         if futures:  # gather doesn't like having zero futures
             results = await asyncio.gather(*futures, return_exceptions=True)
             for result in results:
@@ -1323,7 +1324,8 @@ class SubarrayProduct:
             )
             for node in nodes
         ]
-        await self._multi_request(nodes, msgs, timeout=DELAYS_TIMEOUT)
+        # Use debug-level logging because we expect to get this request every few seconds
+        await self._multi_request(nodes, msgs, timeout=DELAYS_TIMEOUT, log_level=logging.DEBUG)
 
     async def gain(self, stream_name: str, input: str, values: Sequence[str]) -> Sequence[str]:
         """Set F-engine gains."""

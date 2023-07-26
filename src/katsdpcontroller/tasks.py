@@ -421,7 +421,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         """Get state transition actions"""
         return self.logical_node.transitions.get(state, [])
 
-    async def issue_req(self, req, args=(), timeout=None):
+    async def issue_req(self, req, args=(), timeout=None, log_level=logging.INFO):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
@@ -432,14 +432,19 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             raise FailReply(
                 f"Cannot issue request {req} to node {self.name} without a katcp connection"
             )
-        self.logger.info(
-            "Issuing request %s %s to node %s (timeout %gs)", req, args, self.name, timeout
+        self.logger.log(
+            log_level,
+            "Issuing request %s %s to node %s (timeout %gs)",
+            req,
+            args,
+            self.name,
+            timeout,
         )
         try:
             async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
                 reply, informs = await self.katcp_connection.request(req, *args)
-            self.logger.info("Request %s %s to node %s successful", req, args, self.name)
+            self.logger.log(log_level, "Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
             if isinstance(error, asyncio.TimeoutError):
