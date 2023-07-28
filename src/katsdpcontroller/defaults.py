@@ -19,7 +19,7 @@
 #: Unlike "localhost", guaranteed to be IPv4, which is more compatible with Docker
 LOCALHOST = "127.0.0.1"
 #: GPU to target when not running develop mode
-INGEST_GPU_NAME = "GeForce GTX TITAN X"
+INGEST_GPU_NAME = "A30"
 #: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 256
 #: Target size of objects in the object store
