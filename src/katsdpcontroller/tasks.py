@@ -400,6 +400,13 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             str, self.name + ".revision", "Version control revision for the container"
         )
         self._host_sensor = Sensor(str, self.name + ".host", "Host running the task")
+        self._interface_sensors = {}
+        for request in self.logical_node.interfaces:
+            self._interface_sensors[request.network] = Sensor(
+                str,
+                self.name + f".interfaces.{request.network}.name",
+                "Network interface for connection to the '{request.network}' network",
+            )
         if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
             # so that they don't get removed when the task dies. The sensors
@@ -411,6 +418,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self.subarray_product.add_sensor(self._source_sensor)
             self.subarray_product.add_sensor(self._revision_sensor)
             self.subarray_product.add_sensor(self._host_sensor)
+            for sensor in self._interface_sensors.values():
+                self.subarray_product.add_sensor(sensor)
 
         self.katcp_connection = None
         self.capture_block_state_observer = None
@@ -574,6 +583,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             sensors_added = True
 
         self._host_sensor.value = self.host
+        for key, value in self.interfaces.items():
+            self._interface_sensors[key].value = value.name
         for key, value in self.ports.items():
             endpoint_sensor = Sensor(
                 aiokatcp.Address, f"{self.name}.{key}", f"IP endpoint for {key}"
