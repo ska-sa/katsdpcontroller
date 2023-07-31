@@ -2551,9 +2551,10 @@ class FakePhysicalTask(PhysicalNode):
         super().__init__(logical_task)
         self.queue = None
         self.host = LOCALHOST
+        self.interfaces: typing.Dict[str, AgentInterface] = {}  # Never actually populated
         self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
         self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
-        self._sockets: Dict[str, socket.socket] = {}  # Pre-created sockets
+        self._sockets: typing.Dict[str, socket.socket] = {}  # Pre-created sockets
 
         # Sockets have to be created now rather than in _run because we
         # need to populate ports. For PhysicalTask this is done during
