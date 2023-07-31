@@ -425,8 +425,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
-        message is printed, a FailReply is raised, and (if defined),
-        data-suspect flags are set.
+        message is printed, a FailReply is raised. If the failure is due to
+        a timeout or an OSError, the data-suspect flags are set.
         """
         if self.katcp_connection is None:
             raise FailReply(
@@ -453,7 +453,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 error_msg = str(error)
             msg = f"Failed to issue req {req} to node {self.name}. {error_msg}"
             self.logger.warning("%s", msg)
-            self.mark_suspect()
+            if not isinstance(error, (FailReply, InvalidReply)):
+                self.mark_suspect()
             raise FailReply(msg) from error
 
     async def wait_ready(self):
