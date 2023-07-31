@@ -63,9 +63,10 @@ from aioresponses import aioresponses
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import CollectorRegistry
 
-from katsdpcontroller import scheduler, sensor_proxy
+from katsdpcontroller import product_controller, scheduler, sensor_proxy
 from katsdpcontroller.consul import ConsulService
 from katsdpcontroller.controller import device_server_sockname
+from katsdpcontroller.fake_servers import FakeFgpuDeviceServer
 from katsdpcontroller.product_controller import (
     DeviceServer,
     DeviceStatus,
@@ -553,7 +554,6 @@ class TestControllerInterface(BaseTestController):
         # Deconfigure and check that the server shuts down
         interface_changed_callback.reset_mock()
         await client.request("product-deconfigure")
-        interface_changed_callback.assert_called_with(b"sensor-list")
         await client.wait_disconnected()
         client.remove_inform_callback("interface-changed", interface_changed_callback)
 
@@ -659,6 +659,50 @@ class TestControllerInterface(BaseTestController):
             )
         await client.request("product-deconfigure")
 
+    async def test_gain_all_failed_engine(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
+        """Test setting all gains when one of the engines has died."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        assert server.product is not None  # Keeps mypy happy
+        server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
+        await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "3.0")
+        # Check that the other engine still had its gains set
+        await assert_sensor_value(
+            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901v.eq", b"[3.0+0.0j]"
+        )
+
+    async def test_gain_all_timeout_engine(
+        self, client: aiokatcp.Client, server: DeviceServer, monkeypatch
+    ) -> None:
+        """Test setting all gains when one of the engines doesn't respond."""
+
+        async def mock_gain_all(self, ctx, msg) -> None:
+            if self.logical_task.name == "f.gpucbf_antenna_channelised_voltage.0":
+                await asyncio.Future()  # Will never return
+            else:
+                await orig_gain_all(self, ctx, msg)
+
+        # Speed up the test by reducing the timeout
+        monkeypatch.setattr(product_controller, "GAIN_TIMEOUT", 0.1)
+        # Make the request take forever (TODO: this is depending on aiokatcp internals)
+        orig_gain_all = FakeFgpuDeviceServer._request_handlers["gain-all"]
+        monkeypatch.setitem(FakeFgpuDeviceServer._request_handlers, "gain-all", mock_gain_all)
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        with pytest.raises(
+            FailReply,
+            match=r"Failed to issue req gain-all to node f\.gpucbf_antenna_channelised_voltage\.0. "
+            r"Timed out after 0\.1 s\.",
+        ):
+            await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "3.0")
+        # Check that the affected node is marked as suspect
+        await assert_sensor_value(
+            client,
+            "gpucbf_antenna_channelised_voltage.input-data-suspect",
+            b"1100",
+            status=Sensor.Status.WARN,
+        )
+
     async def test_delays(self, client: aiokatcp.Client) -> None:
         """Test setting delays and retrieving the sensor."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
@@ -698,6 +742,29 @@ class TestControllerInterface(BaseTestController):
         )
         await client.request("product-deconfigure")
 
+    async def test_delays_failed_engine(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
+        """Test setting delays when one of the engines has died."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        assert server.product is not None  # Keeps mypy happy
+        server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
+        await client.request(
+            "delays",
+            "gpucbf_antenna_channelised_voltage",
+            "123456791.5",
+            "0.5,0.0:0.0,0.0",
+            "0.0,0.125:0.0,0.0",
+            "0.0,0.0:0.25,0.0",
+            "0.0,0.0:0.0,1.0",
+        )
+        # Check that delay setting still happens on the non-failed engine
+        await assert_sensor_value(
+            client,
+            "gpucbf_antenna_channelised_voltage.gpucbf_m901v.delay",
+            "(4280000000, 0.0, 0.0, 0.25, 0.0)",
+        )
+
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await assert_sensor_value(
@@ -711,6 +778,19 @@ class TestControllerInterface(BaseTestController):
             "gpucbf_antenna_channelised_voltage.input-data-suspect",
             b"0011",
             status=Sensor.Status.WARN,
+        )
+        # Check that the engine's sensors are modified appropriately
+        await assert_sensor_value(
+            client,
+            "f.gpucbf_antenna_channelised_voltage.1.time.esterror",
+            mock.ANY,
+            status=Sensor.Status.UNREACHABLE,
+        )
+        await assert_sensor_value(
+            client,
+            "f.gpucbf_antenna_channelised_voltage.1.device-status",
+            b"fail",
+            status=Sensor.Status.ERROR,
         )
         # Kill off the other, to check that the sensor goes into ERROR
         server.product._nodes["f.gpucbf_antenna_channelised_voltage.0"].kill(None)
@@ -736,6 +816,19 @@ class TestControllerInterface(BaseTestController):
             "gpucbf_baseline_correlation_products.channel-data-suspect",
             b"0" * 1024 + b"1" * 1024 + b"0" * 2048,
             status=Sensor.Status.WARN,
+        )
+        # Check that the engine's sensors have been modified appropriately
+        await assert_sensor_value(
+            client,
+            "xb.gpucbf_baseline_correlation_products.1.xeng-clip-cnt",
+            mock.ANY,
+            status=Sensor.Status.UNREACHABLE,
+        )
+        await assert_sensor_value(
+            client,
+            "xb.gpucbf_baseline_correlation_products.1.device-status",
+            b"fail",
+            status=Sensor.Status.ERROR,
         )
 
 

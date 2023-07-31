@@ -348,7 +348,7 @@ async def assert_sensor_value(
     value: Any,
     status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.NOMINAL,
 ) -> None:
-    encoded = aiokatcp.encode(value)
+    encoded = mock.ANY if value is mock.ANY else aiokatcp.encode(value)
     reply, informs = await client.request("sensor-value", name)
     assert informs[0].arguments[4] == encoded
     assert informs[0].arguments[3] == aiokatcp.encode(status)

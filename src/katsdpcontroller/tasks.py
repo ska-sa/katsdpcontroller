@@ -370,9 +370,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         else:
             self.name = ".".join([capture_block_id, logical_task.name])
         self.gui_urls: List[dict] = []
-        # dict of exposed KATCP sensors. This excludes the state sensors, which
-        # are present even when the process is not running.
-        self.sensors: typing.Dict[str, aiokatcp.Sensor] = {}
         # Capture block names for CBs that haven't terminated on this node yet.
         # Names are used rather than the objects to reduce the number of cyclic
         # references.
@@ -433,26 +430,40 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         """Get state transition actions"""
         return self.logical_node.transitions.get(state, [])
 
-    async def issue_req(self, req, args=(), timeout=None):
+    async def issue_req(self, req, args=(), timeout=None, log_level=logging.INFO):
         """Issue a request to the katcp connection.
 
         The reply and informs are returned. If the request failed, a log
-        message is printed and FailReply is raised.
+        message is printed, a FailReply is raised. If the failure is due to
+        a timeout or an OSError, the data-suspect flags are set.
         """
         if self.katcp_connection is None:
-            raise ValueError("Cannot issue request without a katcp connection")
-        self.logger.info(
-            "Issuing request %s %s to node %s (timeout %gs)", req, args, self.name, timeout
+            raise FailReply(
+                f"Cannot issue request {req} to node {self.name} without a katcp connection"
+            )
+        self.logger.log(
+            log_level,
+            "Issuing request %s %s to node %s (timeout %gs)",
+            req,
+            args,
+            self.name,
+            timeout,
         )
         try:
             async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
                 reply, informs = await self.katcp_connection.request(req, *args)
-            self.logger.info("Request %s %s to node %s successful", req, args, self.name)
+            self.logger.log(log_level, "Request %s %s to node %s successful", req, args, self.name)
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
-            msg = f"Failed to issue req {req} to node {self.name}. {error}"
+            if isinstance(error, asyncio.TimeoutError):
+                error_msg = f"Timed out after {timeout} s."
+            else:
+                error_msg = str(error)
+            msg = f"Failed to issue req {req} to node {self.name}. {error_msg}"
             self.logger.warning("%s", msg)
+            if not isinstance(error, (FailReply, InvalidReply)):
+                self.mark_suspect()
             raise FailReply(msg) from error
 
     async def wait_ready(self):
@@ -472,6 +483,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     self.sdp_controller,
                     prefix,
                     renames=self.logical_node.sensor_renames,
+                    close_action=sensor_proxy.CloseAction.UNREACHABLE,
                     host=self.host,
                     port=self.ports["port"],
                 )
@@ -506,30 +518,13 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     await asyncio.sleep(1.0)
         return True
 
-    def _add_sensor(self, sensor):
-        """Add the supplied Sensor object to the top level device and track it locally."""
-        self.sensors[sensor.name] = sensor
-        self.sdp_controller.sensors.add(sensor)
+    def mark_suspect(self):
+        """Mark a task as producing suspect data.
 
-    def _remove_sensors(self):
-        """Removes all attached sensors. It does *not* send an
-        ``interface-changed`` inform; that is left to the caller.
+        This updates product-level sensors according to the
+        :attr:`data_suspect_sensors` and :attr:`data_suspect_range`
+        attributes.
         """
-        for sensor_name in self.sensors:
-            self.logger.debug("Removing sensor %s", sensor_name)
-            del self.sdp_controller.sensors[sensor_name]
-        self.sensors = {}
-
-    def _disconnect(self):
-        """Clean up when killing the task or when it has died.
-
-        This must be idempotent, because it will be called when the task is
-        killed and again when it actually dies.
-        """
-        need_inform = False
-        if self.sensors:
-            self._remove_sensors()
-            need_inform = True
         for sensor in self.logical_node.data_suspect_sensors:
             data_suspect = sensor.value
             a, b = self.logical_node.data_suspect_range
@@ -539,10 +534,17 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 data_suspect,
                 status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR,
             )
+
+    def _disconnect(self):
+        """Clean up when killing the task or when it has died.
+
+        This must be idempotent, because it will be called when the task is
+        killed and again when it actually dies.
+        """
+        self.mark_suspect()
         if self.katcp_connection is not None:
             try:
                 self.katcp_connection.close()
-                need_inform = False  # katcp_connection.close() sends an inform itself
             except RuntimeError:
                 self.logger.error("Failed to shut down katcp connection to %s", self.name)
             self.katcp_connection = None
@@ -552,8 +554,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
-        if need_inform:
-            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     def kill(self, driver, **kwargs):
         force = kwargs.pop("force", False)
@@ -579,7 +579,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if gui_urls:
             gui_urls_sensor = Sensor(str, self.name + ".gui-urls", "URLs for GUIs")
             gui_urls_sensor.set_value(json.dumps(gui_urls))
-            self._add_sensor(gui_urls_sensor)
+            self.subarray_product.add_sensor(gui_urls_sensor)
             sensors_added = True
 
         self._host_sensor.value = self.host
@@ -598,7 +598,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 endpoint_sensor.set_value(
                     aiokatcp.Address(ipaddress.IPv4Address("0.0.0.0")), status=Sensor.Status.FAILURE
                 )
-            self._add_sensor(endpoint_sensor)
+            self.subarray_product.add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
             self.sdp_controller.mass_inform("interface-changed", "sensor-list")
