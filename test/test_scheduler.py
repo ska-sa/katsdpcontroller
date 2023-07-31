@@ -1561,8 +1561,12 @@ class TestScheduler:
                     resp.raise_for_status()
                     await resp.read()
 
-        def driver_calls(self):
+        async def driver_calls(self):
             """self.driver.mock_calls, with reconcileTasks filtered out."""
+            # Driver calls are posted to an executor. Block until the executor
+            # has processed them all.
+            if self.sched._driver is not None:
+                await self.sched._driver.async_flush()
             return [call for call in self.driver.mock_calls if call[0] != "reconcileTasks"]
 
         async def transition_node0(self, target_state, nodes=None, ports=None):
@@ -1611,6 +1615,7 @@ class TestScheduler:
                                 if target_state > TaskState.KILLING:
                                     self.status_update(task_id, "TASK_KILLED")
                                 await exhaust_callbacks()
+            await self.driver_calls()  # For side-effect of AsyncDriver.async_flush
             self.driver.reset_mock()
             assert self.nodes[0].state == target_state
             return (launch, kill)
@@ -1644,6 +1649,7 @@ class TestScheduler:
             await exhaust_callbacks()
             assert launch.done()  # Ensures the next line won't hang the test
             await launch
+            await self.driver_calls()  # For side-effect of AsyncDriver.async_flush
             self.driver.reset_mock()
 
     @pytest.fixture(autouse=True)
@@ -1669,7 +1675,7 @@ class TestScheduler:
         ]
         fix.sched.resourceOffers(fix.driver, offers)
         await exhaust_callbacks()
-        assert fix.driver_calls() == AnyOrderList(
+        assert await fix.driver_calls() == AnyOrderList(
             [
                 mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id, offers[2].id])),
                 mock.call.suppressOffers({"default"}),
@@ -1802,13 +1808,13 @@ class TestScheduler:
             assert not node.ready_event.is_set()
             assert not node.dead_event.is_set()
         assert fix.task_stats.state_counts == {TaskState.STARTING: 2}
-        assert fix.driver_calls() == [mock.call.reviveOffers({"default"})]
+        assert await fix.driver_calls() == [mock.call.reviveOffers({"default"})]
         fix.driver.reset_mock()
         # Now provide an offer that is suitable for node1 but not node0.
         # Nothing should happen, because we don't yet have enough resources.
         fix.sched.resourceOffers(fix.driver, [offer1])
         await exhaust_callbacks()
-        assert fix.driver_calls() == []
+        assert await fix.driver_calls() == []
         for node in fix.nodes:
             assert node.state == TaskState.STARTING
             assert not node.ready_event.is_set()
@@ -1832,7 +1838,7 @@ class TestScheduler:
         assert fix.nodes[1].state == TaskState.STARTED
 
         assert fix.nodes[2].state == TaskState.READY
-        assert fix.driver_calls() == AnyOrderList(
+        assert await fix.driver_calls() == AnyOrderList(
             [
                 mock.call.launchTasks([offer0.id], [expected_taskinfo0]),
                 mock.call.launchTasks([offer1.id], [expected_taskinfo1]),
@@ -1848,7 +1854,7 @@ class TestScheduler:
         await exhaust_callbacks()
         assert fix.nodes[1].state == TaskState.RUNNING
         assert fix.nodes[1].status == status
-        assert fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
+        assert await fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
         fix.driver.reset_mock()
         assert fix.task_stats.state_counts == {TaskState.STARTED: 1, TaskState.RUNNING: 1}
 
@@ -1866,7 +1872,7 @@ class TestScheduler:
             await exhaust_callbacks()
             assert fix.nodes[0].state == TaskState.RUNNING
             assert fix.nodes[0].status == status
-            assert fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
+            assert await fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
             fix.driver.reset_mock()
             poll_ports.assert_called_once_with("agenthost0", [30000])
         assert fix.task_stats.state_counts == {TaskState.RUNNING: 2}
@@ -1973,7 +1979,7 @@ class TestScheduler:
         assert fix.nodes[1].state == TaskState.NOT_READY
         assert fix.nodes[2].state == TaskState.NOT_READY
         # Once we abort, we should no longer be interested in offers
-        assert fix.driver_calls() == [mock.call.suppressOffers({"default"})]
+        assert await fix.driver_calls() == [mock.call.suppressOffers({"default"})]
 
     async def test_launch_queue_busy(self, fix: "TestScheduler.Fixture") -> None:
         """Test a launch failing due to tasks ahead of it blocking the queue."""
@@ -2044,7 +2050,7 @@ class TestScheduler:
         with pytest.raises(ValueError, match="Testing"):
             await launch
         # The offers must be returned to Mesos
-        assert fix.driver_calls() == AnyOrderList(
+        assert await fix.driver_calls() == AnyOrderList(
             [
                 mock.call.declineOffer(AnyOrderList([offers[0].id, offers[1].id])),
                 mock.call.suppressOffers({"default"}),
@@ -2071,7 +2077,7 @@ class TestScheduler:
         offer2 = fix.make_offer({"cpus": 0.8, "mem": 128.0, "ports": [(31000, 32000)]}, 1)
         fix.sched.offerRescinded(fix.driver, offer2.id)
         await exhaust_callbacks()
-        assert fix.driver_calls() == []
+        assert await fix.driver_calls() == []
         launch.cancel()
 
     async def test_decline_unneeded_offers(self, fix: "TestScheduler.Fixture") -> None:
@@ -2083,7 +2089,7 @@ class TestScheduler:
         fix.sched.resourceOffers(fix.driver, offers)
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTING
-        assert fix.driver_calls() == [mock.call.declineOffer([offers[0].id])]
+        assert await fix.driver_calls() == [mock.call.declineOffer([offers[0].id])]
         launch.cancel()
 
     @pytest.mark.parametrize("end_time", [True, False])
@@ -2098,7 +2104,7 @@ class TestScheduler:
         fix.sched.resourceOffers(fix.driver, [offer0])
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTING
-        assert fix.driver_calls() == [mock.call.declineOffer([offer0.id])]
+        assert await fix.driver_calls() == [mock.call.declineOffer([offer0.id])]
         launch.cancel()
 
     async def test_unavailability_past(self, fix: "TestScheduler.Fixture") -> None:
@@ -2111,7 +2117,7 @@ class TestScheduler:
         fix.sched.resourceOffers(fix.driver, [offer0])
         await exhaust_callbacks()
         assert fix.nodes[0].state == TaskState.STARTED
-        assert fix.driver_calls() == [
+        assert await fix.driver_calls() == [
             mock.call.launchTasks([offer0.id], mock.ANY),
             mock.call.suppressOffers({"default"}),
         ]
@@ -2167,7 +2173,7 @@ class TestScheduler:
         # Now kill it. node1 must be dead before node0, node2 get killed
         kill = asyncio.ensure_future(fix.sched.kill(fix.physical_graph))
         await exhaust_callbacks()
-        assert fix.driver_calls() == [mock.call.killTask(fix.nodes[1].taskinfo.task_id)]
+        assert await fix.driver_calls() == [mock.call.killTask(fix.nodes[1].taskinfo.task_id)]
         assert fix.nodes[0].state == TaskState.READY
         assert fix.nodes[1].state == TaskState.KILLING
         assert fix.nodes[2].state == TaskState.READY
@@ -2175,7 +2181,7 @@ class TestScheduler:
         # node1 now dies, and node0 and node2 should be killed
         status = fix.status_update(fix.nodes[1].taskinfo.task_id.value, "TASK_KILLED")
         await exhaust_callbacks()
-        assert fix.driver_calls() == AnyOrderList(
+        assert await fix.driver_calls() == AnyOrderList(
             [
                 mock.call.killTask(fix.nodes[0].taskinfo.task_id),
                 mock.call.acknowledgeStatusUpdate(status),
@@ -2393,7 +2399,7 @@ class TestScheduler:
         # The timing of suppressOffers is undefined, because it depends on the
         # order in which the graphs are killed. However, it must occur
         # after the initial reviveOffers and before stopping the driver.
-        driver_calls = fix.driver_calls()
+        driver_calls = await fix.driver_calls()
         assert mock.call.suppressOffers({"default"}) in driver_calls
         pos = driver_calls.index(mock.call.suppressOffers({"default"}))
         assert 1 <= pos < len(driver_calls) - 2
@@ -2418,6 +2424,7 @@ class TestScheduler:
         fix.status_update("test-01234567", "TASK_LOST")
         fix.status_update("test-12345678", "TASK_RUNNING")
         await exhaust_callbacks()
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.killTask.assert_called_once_with({"value": "test-12345678"})
 
     async def test_retry_kill(self, fix: "TestScheduler.Fixture") -> None:
@@ -2425,6 +2432,7 @@ class TestScheduler:
         await fix.ready_graph()
         kill = asyncio.ensure_future(fix.sched.kill(fix.physical_graph, [fix.nodes[0]]))
         await exhaust_callbacks()
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.killTask.assert_called_once_with(fix.nodes[0].taskinfo.task_id)
         fix.driver.killTask.reset_mock()
         # Send a task status update in less than the kill timeout. It must not
@@ -2432,19 +2440,23 @@ class TestScheduler:
         await asyncio.sleep(1.0)
         fix.status_update(fix.task_ids[0], "TASK_RUNNING")
         await exhaust_callbacks()
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.killTask.assert_not_called()
 
         # Give time for reconciliation requests to occur
         await asyncio.sleep(70.0)
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.reconcileTasks.assert_called()
         fix.status_update(fix.task_ids[0], "TASK_RUNNING")
         await exhaust_callbacks()
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.killTask.assert_called_once_with(fix.nodes[0].taskinfo.task_id)
 
         # Send an update for TASK_KILLING state: must not trigger another attempt
         fix.driver.killTask.reset_mock()
         fix.status_update(fix.task_ids[0], "TASK_KILLING")
         await exhaust_callbacks()
+        await fix.driver_calls()  # For side-effect of AsyncDriver.async_flush
         fix.driver.killTask.assert_not_called()
 
         # Let it die so that we can clean up the async task
