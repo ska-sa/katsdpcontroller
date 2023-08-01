@@ -223,6 +223,7 @@ import base64
 import contextlib
 import copy
 import decimal
+import functools
 import io
 import ipaddress
 import json
@@ -238,13 +239,14 @@ import typing
 import urllib
 from abc import ABC, abstractmethod
 from collections import deque, namedtuple
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple, Type, Union
+from typing import Any, AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple, Type, Union
 
 import aiohttp.web
 import docker
@@ -2157,7 +2159,7 @@ class PhysicalNode:
 
         Parameters
         ----------
-        driver : :class:`pymesos.MesosSchedulerDriver`
+        driver : :class:`AsyncDriver`
             Scheduler driver
         kwargs : dict
             Extra arguments passed to :meth:`.Scheduler.kill`.
@@ -3164,8 +3166,6 @@ class SchedulerBase:
                             # will remove them.
                             continue
                         offer_ids = [offer.id for offer in agent.offers]
-                        # TODO: does this need to use run_in_executor? Is it
-                        # thread-safe to do so?
                         # TODO: if there are more pending in the queue then we
                         # should use a filter to be re-offered remaining
                         # resources of this agent more quickly.
@@ -3675,6 +3675,45 @@ class SchedulerBase:
             return None
 
 
+class AsyncDriver:
+    """Wrap :class:`pymesos.MesosSchedulerDriver` to make it more async-safe.
+
+    Calls to methods on the base class are deferred to a worker thread, in
+    a fire-and-forget fashion.
+    """
+
+    def __init__(self, base: pymesos.MesosSchedulerDriver) -> None:
+        self.base = base
+        # Use a single-threaded executor, so that requests to Mesos will be
+        # made in the order they're posted. pymesos uses a lock so there is
+        # no point in having more concurrency.
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="async-driver-")
+
+    def __getattr__(self, name: str) -> Any:
+        orig = getattr(self.base, name)
+        if callable(orig):
+
+            def wrapper(*args, **kwargs):
+                return self._executor.submit(functools.partial(orig, *args, **kwargs))
+
+            return wrapper
+        else:
+            return orig
+
+    async def async_flush(self) -> None:
+        """Wait for all previous calls to complete."""
+        # Since the executor only has one thread, if we post some work and
+        # wait for it to complete, we are guaranteed that the previous work
+        # has completed too.
+        await asyncio.get_event_loop().run_in_executor(self._executor, lambda: None)
+
+    async def join(self) -> None:
+        # Runs the base's join, but also waits for everything in the executor
+        await asyncio.get_event_loop().run_in_executor(self._executor, self.base.join)
+        await self.async_flush()
+        self._executor.shutdown()  # Should not block, thanks to the async_flush above
+
+
 class Scheduler(SchedulerBase, pymesos.Scheduler):
     """Top-level scheduler implementing the Mesos Scheduler API.
 
@@ -3715,7 +3754,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 self._driver.declineOffer(to_decline)
 
     def set_driver(self, driver):
-        self._driver = driver
+        self._driver = AsyncDriver(driver)
 
     def registered(self, driver, framework_id, master_info):
         pass
@@ -3871,12 +3910,10 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
         await super().close()
         await _cleanup_task(self._reconciliation_task)
         self._reconciliation_task = None
-        self._driver.stop()
-        # If self._driver is a mock, then asyncio incorrectly complains about passing
-        # self._driver.join directly, due to
-        # https://github.com/python/asyncio/issues/458. So we wrap it in a lambda.
-        status = await self._loop.run_in_executor(None, lambda: self._driver.join())
-        return status
+        if self._driver is not None:
+            self._driver.stop()
+            await self._driver.join()
+            self._driver = None
 
 
 __all__ = [
