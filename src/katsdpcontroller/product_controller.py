@@ -1385,10 +1385,15 @@ class SubarrayProduct:
         if not isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        command = "capture-start" if start else "capture-stop"
+        # TODO: Still need to get the Pipeline within the stream
+        # For now, baseline-correlation-products stream has a
+        # single XPipeline with name baseline-correlation-products
+        pipeline_name = stream_name
+        command = f"capture-start {pipeline_name}" if start else f"capture-stop {pipeline_name}"
         await self._multi_request(
             self.find_nodes(task_type="xb", streams=[stream]), itertools.repeat((command,))
         )
+        # TODO: Clarify if/how the Pipeline-level abstraction affects the node.logical_name
         for node in self.physical_graph.nodes:
             if (
                 isinstance(node, generator.PhysicalMulticast)
