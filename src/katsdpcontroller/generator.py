@@ -1260,6 +1260,16 @@ def _make_xbgpu(
         ]:
             xbgpu.sensor_renames[name] = f"{stream.name}.{i}.{name}"
 
+        # Rename sensors that are relevant to the Engine rather than the Pipeline
+        for name in [
+            "chan-range",
+            "rx.synchronised",
+            "xeng-clip-cnt",
+        ]:
+            xbgpu.sensor_renames[
+                f"{stream.name}.{i}.{stream.name}.{name}"
+            ] = f"{stream.name}.{i}.{name}"
+
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
             / (acv.n_samples_between_spectra * acv.n_spectra_per_heap)
