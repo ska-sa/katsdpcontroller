@@ -1389,9 +1389,10 @@ class SubarrayProduct:
         # For now, baseline-correlation-products stream has a
         # single XPipeline with name baseline-correlation-products
         pipeline_name = stream_name
-        command = f"capture-start {pipeline_name}" if start else f"capture-stop {pipeline_name}"
+        command = f"capture-start" if start else f"capture-stop"
         await self._multi_request(
-            self.find_nodes(task_type="xb", streams=[stream]), itertools.repeat((command,))
+            self.find_nodes(task_type="xb", streams=[stream]),
+            itertools.repeat((command, pipeline_name)),
         )
         # TODO: Clarify if/how the Pipeline-level abstraction affects the node.logical_name
         for node in self.physical_graph.nodes:
