@@ -1971,7 +1971,9 @@ class TestController(BaseTestController):
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call("capture-start gpucbf_baseline_correlation_products")
+        katcp_client.request.assert_any_call(
+            "capture-start", "gpucbf_baseline_correlation_products"
+        )
 
     async def test_capture_start_bad_stream(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1989,7 +1991,7 @@ class TestController(BaseTestController):
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call("capture-stop gpucbf_baseline_correlation_products")
+        katcp_client.request.assert_any_call("capture-stop", "gpucbf_baseline_correlation_products")
         # Check that the state changed to down in capture-list
         _, informs = await client.request("capture-list", "gpucbf_baseline_correlation_products")
         assert len(informs) == 1
