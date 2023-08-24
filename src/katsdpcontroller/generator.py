@@ -1256,7 +1256,7 @@ def _make_xbgpu(
         ]:
             xbgpu.sensor_renames[name] = f"{stream.name}.{i}.{name}"
 
-        # Rename sensors that are relevant to the Engine rather than the Pipeline
+        # Rename sensors that are relevant to the stream rather than the Pipeline
         for name in [
             "chan-range",
             "rx.synchronised",
