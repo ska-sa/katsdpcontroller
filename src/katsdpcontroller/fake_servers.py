@@ -34,6 +34,11 @@ def _format_complex(value: numbers.Complex) -> str:
     return f"{value.real}{value.imag:+}j"
 
 
+def _parse_key_val(value: str) -> Dict[str, str]:
+    """Turn ``"foo=a,bar=b"`` into ``{"foo": "a", "bar": b"}``."""
+    return dict(tuple(kv.split("=", 1)) for kv in value.split(","))  # type: ignore[misc]
+
+
 def _add_device_status_sensor(sensors: SensorSet) -> None:
     sensors.add(
         Sensor(
@@ -103,17 +108,12 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
     DEFAULT_GAIN = 1.0
 
-    @staticmethod
-    def _parse_key_val(value: str) -> Dict[str, str]:
-        """Turn ``"foo=a,bar=b"`` into ``{"foo": "a", "bar": b"}``."""
-        return dict(tuple(kv.split("=", 1)) for kv in value.split(","))  # type: ignore[misc]
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._sync_epoch = self.get_command_argument(float, "--sync-epoch")
         self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
-        outputs = self.get_command_arguments(self._parse_key_val, "--wideband")
-        outputs += self.get_command_arguments(self._parse_key_val, "--narrowband")
+        outputs = self.get_command_arguments(_parse_key_val, "--wideband")
+        outputs += self.get_command_arguments(_parse_key_val, "--narrowband")
         self._output_names = [output["name"] for output in outputs]
         self._gains = {
             output: [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
@@ -269,33 +269,36 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         super().__init__(*args, **kwargs)
         channel_offset = self.get_command_argument(int, "--channel-offset-value")
         channels_per_substream = self.get_command_argument(int, "--channels-per-substream")
-        self.sensors.add(
-            Sensor(
-                bool,
-                "rx.synchronised",
-                "For the latest accumulation, was data present from all F-Engines.",
-                default=True,
-                initial_status=Sensor.Status.NOMINAL,
+        corrprod_outputs = self.get_command_arguments(_parse_key_val, "--corrprod")
+        corrprod_names = [corrprod["name"] for corrprod in corrprod_outputs]
+        for corrprod_name in corrprod_names:
+            self.sensors.add(
+                Sensor(
+                    bool,
+                    f"{corrprod_name}.rx.synchronised",
+                    "For the latest accumulation, was data present from all F-Engines.",
+                    default=True,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
             )
-        )
-        self.sensors.add(
-            Sensor(
-                int,
-                "xeng-clip-cnt",
-                "Number of visibilities that saturated",
-                default=0,
-                initial_status=Sensor.Status.NOMINAL,
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"{corrprod_name}.xeng-clip-cnt",
+                    "Number of visibilities that saturated",
+                    default=0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
             )
-        )
-        self.sensors.add(
-            Sensor(
-                str,
-                "chan-range",
-                "The range of channels processed by this XB-engine, inclusive",
-                default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
-                initial_status=Sensor.Status.NOMINAL,
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{corrprod_name}.chan-range",
+                    "The range of channels processed by this XB-engine, inclusive",
+                    default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
             )
-        )
         self.sensors.add(
             Sensor(
                 int,

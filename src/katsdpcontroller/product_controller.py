@@ -1387,8 +1387,10 @@ class SubarrayProduct:
 
         command = "capture-start" if start else "capture-stop"
         await self._multi_request(
-            self.find_nodes(task_type="xb", streams=[stream]), itertools.repeat((command,))
+            self.find_nodes(task_type="xb", streams=[stream]),
+            itertools.repeat((command, stream_name)),
         )
+
         for node in self.physical_graph.nodes:
             if (
                 isinstance(node, generator.PhysicalMulticast)
