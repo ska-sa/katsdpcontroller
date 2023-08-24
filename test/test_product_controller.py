@@ -820,8 +820,7 @@ class TestControllerInterface(BaseTestController):
         # Check that the engine's sensors have been modified appropriately
         await assert_sensor_value(
             client,
-            "xb.gpucbf_baseline_correlation_products.1."
-            "gpucbf_baseline_correlation_products.xeng-clip-cnt",
+            "gpucbf_baseline_correlation_products.1.xeng-clip-cnt",
             mock.ANY,
             status=Sensor.Status.UNREACHABLE,
         )
