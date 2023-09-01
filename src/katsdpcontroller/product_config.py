@@ -641,7 +641,11 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             )
         if len(set(self.input_labels)) != len(src_streams):
             raise ValueError("input labels are not unique")
-        antenna_names = list(set([inp[:-1] for inp in self.input_labels]))
+        antenna_names = []
+        for inp in self.input_labels:
+            antenna_name = inp[:-1]
+            if antenna_name not in antenna_names:
+                antenna_names.append(antenna_name)
         first = src_streams[0]
         assert isinstance(first, DigBasebandVoltageStreamBase)
         for src in src_streams:
