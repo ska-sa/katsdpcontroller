@@ -2311,6 +2311,7 @@ def _make_beamformer_engineering_pol(
     timeplot = stream is None
     src_multicast = find_node(g, "multicast." + src_stream.name)
     assert isinstance(src_multicast, LogicalMulticast)
+    ibv = not configuration.options.develop.disable_ibverbs
 
     bf_ingest = ProductLogicalTask(node_name, streams=[stream] if stream is not None else [])
     bf_ingest.subsystem = "sdp"
@@ -2336,9 +2337,7 @@ def _make_beamformer_engineering_pol(
     # regions.
     bf_ingest.interfaces = [
         scheduler.InterfaceRequest(
-            "cbf",
-            infiniband=not configuration.options.develop.disable_ibverbs,
-            affinity=timeplot or not ram,
+            "cbf", infiniband=ibv, affinity=timeplot or not ram
         )
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator
@@ -2363,7 +2362,7 @@ def _make_beamformer_engineering_pol(
         config = {
             "affinity": [task.cores["disk"], task.cores["network"]],
             "interface": task.interfaces["cbf"].name,
-            "ibv": not configuration.options.develop.disable_ibverbs,
+            "ibv": ibv,
             "stream_name": src_stream.name,
             "aiomonitor": True,
         }
