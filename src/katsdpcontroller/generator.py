@@ -2320,6 +2320,9 @@ def _make_beamformer_engineering_pol(
     bf_ingest.cpus = 2
     bf_ingest.cores = ["disk", "network"]
     bf_ingest.capabilities.append("SYS_NICE")
+    if ibv:
+        bf_ingest.command = ["capambel", "-c", "cap_net_raw+p", "--"] + bf_ingest.command
+        bf_ingest.capabilities.append("NET_RAW")  # For ibverbs raw QPs
     if timeplot or not ram:
         # Actual usage is about 600MB, more-or-less independent of the
         # parameters.
