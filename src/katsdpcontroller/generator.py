@@ -2339,9 +2339,7 @@ def _make_beamformer_engineering_pol(
     # can't have affinity to both the (single) NIC and to both memory
     # regions.
     bf_ingest.interfaces = [
-        scheduler.InterfaceRequest(
-            "cbf", infiniband=ibv, affinity=timeplot or not ram
-        )
+        scheduler.InterfaceRequest("cbf", infiniband=ibv, affinity=timeplot or not ram)
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
