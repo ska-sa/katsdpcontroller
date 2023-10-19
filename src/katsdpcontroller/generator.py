@@ -2311,6 +2311,7 @@ def _make_beamformer_engineering_pol(
     timeplot = stream is None
     src_multicast = find_node(g, "multicast." + src_stream.name)
     assert isinstance(src_multicast, LogicalMulticast)
+    ibv = not configuration.options.develop.disable_ibverbs
 
     bf_ingest = ProductLogicalTask(node_name, streams=[stream] if stream is not None else [])
     bf_ingest.subsystem = "sdp"
@@ -2319,6 +2320,9 @@ def _make_beamformer_engineering_pol(
     bf_ingest.cpus = 2
     bf_ingest.cores = ["disk", "network"]
     bf_ingest.capabilities.append("SYS_NICE")
+    if ibv:
+        bf_ingest.command = ["capambel", "-c", "cap_net_raw+p", "--"] + bf_ingest.command
+        bf_ingest.capabilities.append("NET_RAW")  # For ibverbs raw QPs
     if timeplot or not ram:
         # Actual usage is about 600MB, more-or-less independent of the
         # parameters.
@@ -2335,11 +2339,7 @@ def _make_beamformer_engineering_pol(
     # can't have affinity to both the (single) NIC and to both memory
     # regions.
     bf_ingest.interfaces = [
-        scheduler.InterfaceRequest(
-            "cbf",
-            infiniband=not configuration.options.develop.disable_ibverbs,
-            affinity=timeplot or not ram,
-        )
+        scheduler.InterfaceRequest("cbf", infiniband=ibv, affinity=timeplot or not ram)
     ]
     # XXX Even when there is enough network bandwidth, sharing a node with correlator
     # ingest seems to cause lots of dropped packets for both. Just force the
@@ -2363,7 +2363,7 @@ def _make_beamformer_engineering_pol(
         config = {
             "affinity": [task.cores["disk"], task.cores["network"]],
             "interface": task.interfaces["cbf"].name,
-            "ibv": not configuration.options.develop.disable_ibverbs,
+            "ibv": ibv,
             "stream_name": src_stream.name,
             "aiomonitor": True,
         }
