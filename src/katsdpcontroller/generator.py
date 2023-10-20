@@ -2316,7 +2316,7 @@ def _make_beamformer_engineering_pol(
     bf_ingest = ProductLogicalTask(node_name, streams=[stream] if stream is not None else [])
     bf_ingest.subsystem = "sdp"
     bf_ingest.image = "katsdpbfingest"
-    bf_ingest.command = ["schedrr", "bf_ingest.py"]
+    bf_ingest.command = ["bf_ingest.py"]
     bf_ingest.cpus = 2
     bf_ingest.cores = ["disk", "network"]
     bf_ingest.capabilities.append("SYS_NICE")
