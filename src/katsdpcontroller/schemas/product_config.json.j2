@@ -1,5 +1,5 @@
 {% macro versions() %}
-["2.4", "2.5", "2.6", "3.0", "3.1", "3.2", "3.3", "3.4"]
+["2.4", "2.5", "2.6", "3.0", "3.1", "3.2", "3.3", "3.4", "3.5"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -277,6 +277,9 @@
                                 "sim.dig.baseband_voltage",
                                 "gpucbf.antenna_channelised_voltage",
                                 "gpucbf.baseline_correlation_products",
+{% endif %}
+{% if verison >= "3.5" %}
+                                "gpucbf.tied_array_channelised_voltage",
 {% endif %}
                                 "sdp.vis",
                                 "sdp.cal",
@@ -602,6 +605,24 @@
                                 },
                                 "additionalProperties": false,
                                 "required": ["src_streams", "int_time"]
+                            }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "gpucbf.tied_array_channelised_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/singleton"},
+                                    // TODO: Clarify `positive_integer` vs `positive_number`. It's likely
+                                    // `positive_number` allows for float-type values - which we don't need.
+                                    "src_pol": {"$ref": "#/definitions/positive_integer"},
+                                    "command_line_extra": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
+                                },
+                                "additionalProperties": false,
+                                "required": ["src_streams", "src_pol"]
                             }
                         }
                     ]
