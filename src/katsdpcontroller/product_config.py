@@ -1226,6 +1226,55 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
             instrument_dev_name=config["instrument_dev_name"],
         )
 
+class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
+    """Real tied-array-channelised-voltage stream (GPU beamformer)."""
+
+    stream_type: ClassVar[str] = "gpucbf.tied_array_channelised_voltage"
+    _valid_src_types: ClassVar[_ValidTypes] = {"gpucbf.antenna_channelised_voltage"}
+
+    def __init__(
+        self,
+        name: str,
+        src_streams: Sequence[Stream],
+        *,
+        src_pol: int,
+        command_line_extra: Iterable[str] = (),
+    ) -> None:
+        acv = src_streams[0]
+        assert isinstance(acv, GpucbfAntennaChannelisedVoltageStream)
+        super().__init__(
+            name,
+            src_streams,
+            n_endpoints=acv.n_substreams,
+            n_chans_per_substream=acv.n_chans_per_substream,
+            spectra_per_heap=acv.n_spectra_per_heap,
+            bits_per_sample=8,
+        )
+        self.src_pol = src_pol
+        self.command_line_extra = list(command_line_extra)
+
+    if TYPE_CHECKING:   # pragma: nocover
+        # Refine the return type for mypy
+        @property
+        def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStreamBase:
+            ...
+
+    @classmethod
+    def from_config(
+        cls: type[_S],
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any]
+    ) -> "GpucbfTiedArrayChannelisedVoltageStream":
+        return cls(
+            name,
+            src_streams,
+            src_pol=config["src_pol"],
+            command_line_extra=config.get("command_line_extra", []),
+        )
+
 
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
@@ -1411,6 +1460,7 @@ class BeamformerStreamBase(Stream):
 
     _valid_src_types: ClassVar[_ValidTypes] = {
         "cbf.tied_array_channelised_voltage",
+        "gpucbf.tied_array_channelised_voltage",
         "sim.cbf.tied_array_channelised_voltage",
     }
 
@@ -1731,6 +1781,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "dig.baseband_voltage": DigBasebandVoltageStream,
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,
+    "gpucbf.tied_array_channelised_voltage": GpucbfTiedArrayChannelisedVoltageStream,
     "sim.cbf.antenna_channelised_voltage": SimAntennaChannelisedVoltageStream,
     "sim.cbf.tied_array_channelised_voltage": SimTiedArrayChannelisedVoltageStream,
     "sim.cbf.baseline_correlation_products": SimBaselineCorrelationProductsStream,
