@@ -34,11 +34,10 @@ import async_solipsism
 import open_file_mock
 import pytest
 import yarl
-from aiokatcp import Client, Sensor
+from aiokatcp import Client, DeviceStatus, Sensor
 
 from katsdpcontroller import scheduler
 from katsdpcontroller.controller import (
-    DeviceStatus,
     ProductState,
     device_server_sockname,
     device_status_to_sensor_status,

@@ -181,17 +181,11 @@ class ProductState(scheduler.OrderedEnum):
     POSTPROCESSING = 6
 
 
-class DeviceStatus(scheduler.OrderedEnum):
-    OK = 1
-    DEGRADED = 2
-    FAIL = 3
-
-
-def device_status_to_sensor_status(status: DeviceStatus) -> aiokatcp.Sensor.Status:
+def device_status_to_sensor_status(status: aiokatcp.DeviceStatus) -> aiokatcp.Sensor.Status:
     mapping = {
-        DeviceStatus.OK: aiokatcp.Sensor.Status.NOMINAL,
-        DeviceStatus.DEGRADED: aiokatcp.Sensor.Status.WARN,
-        DeviceStatus.FAIL: aiokatcp.Sensor.Status.ERROR,
+        aiokatcp.DeviceStatus.OK: aiokatcp.Sensor.Status.NOMINAL,
+        aiokatcp.DeviceStatus.DEGRADED: aiokatcp.Sensor.Status.WARN,
+        aiokatcp.DeviceStatus.FAIL: aiokatcp.Sensor.Status.ERROR,
     }
     return mapping[status]
 

@@ -47,7 +47,7 @@ import katsdptelstate.aio.memory
 import katsdptelstate.aio.redis
 import networkx
 import yarl
-from aiokatcp import FailReply, Sensor
+from aiokatcp import DeviceStatus, FailReply, Sensor
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, Histogram
 
@@ -56,7 +56,6 @@ import katsdpcontroller
 from . import generator, product_config, scheduler, sensor_proxy, tasks
 from .consul import ConsulService
 from .controller import (
-    DeviceStatus,
     ProductState,
     device_status_to_sensor_status,
     load_json_dict,
