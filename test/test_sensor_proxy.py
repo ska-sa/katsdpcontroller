@@ -32,10 +32,10 @@ from unittest import mock
 
 import aiokatcp
 import pytest
-from aiokatcp import Address, Sensor, SensorSet
+from aiokatcp import Address, DeviceStatus, Sensor, SensorSet
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
-from katsdpcontroller.controller import DeviceStatus, device_server_sockname
+from katsdpcontroller.controller import device_server_sockname
 from katsdpcontroller.sensor_proxy import (
     CloseAction,
     PrometheusInfo,

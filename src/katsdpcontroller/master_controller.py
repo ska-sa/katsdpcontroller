@@ -61,13 +61,12 @@ import async_timeout
 import jsonschema
 import katsdpservices
 import yarl
-from aiokatcp import Address, FailReply, Sensor, SensorSet
+from aiokatcp import Address, DeviceStatus, FailReply, Sensor, SensorSet
 
 import katsdpcontroller
 
 from . import product_config, product_controller, scheduler, sensor_proxy, singularity
 from .controller import (
-    DeviceStatus,
     ProductState,
     add_shared_options,
     device_server_sockname,
@@ -419,7 +418,11 @@ class ProductManagerBase(Generic[_P]):
         status = DeviceStatus.OK
         for name in self.products.keys():
             sensor = self._server.sensors.get(f"{name}.device-status")
-            if sensor is not None and sensor.status.valid_value() and sensor.value > status:
+            if (
+                sensor is not None
+                and sensor.status.valid_value()
+                and sensor.value.value > status.value
+            ):
                 status = sensor.value
         self._server.sensors["device-status"].value = status
 
