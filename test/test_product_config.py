@@ -43,6 +43,7 @@ from katsdpcontroller.product_config import (
     FlagsStream,
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
+    GpucbfTiedArrayChannelisedVoltageStream,
     Options,
     ServiceOverride,
     SimAntennaChannelisedVoltageStream,
@@ -879,6 +880,45 @@ class TestTiedArrayChannelisedVoltageStream:
         assert tacv.bandwidth == 107e6
         assert tacv.antennas == ["m000", "another_antenna"]
         assert round(abs(tacv.int_time * 1712e6 - 524288 * 256), 7) == 0
+
+
+class TestGpucbfTiedArrayChannelisedVoltageStream:
+    """Test :class:`~.GpucbfTiedArrayChannelisedVoltageStream`.
+
+    This is not as thorough as :class:`TestTiedArrayChannelisedVoltageStream`
+    because that test covers the important base class components already.
+    """
+
+    @pytest.fixture
+    def acv(self) -> GpucbfAntennaChannelisedVoltageStream:
+        return make_gpucbf_antenna_channelised_voltage()
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": "wide1_acv",
+            "src_pol": 0,
+        }
+
+    def test_from_config(
+        self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        tacv = GpucbfTiedArrayChannelisedVoltageStream.from_config(
+            Options(), "wide2_tacv", config, [acv], {}
+        )
+        assert tacv.n_chans_per_substream == 1024
+        assert tacv.src_pol == 0
+        assert tacv.command_line_extra == []
+
+    def test_command_line_extra(
+        self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        config["command_line_extra"] = ["--extra-arg"]
+        tacv = GpucbfTiedArrayChannelisedVoltageStream.from_config(
+            Options(), "wide2_tacv", config, [acv], {}
+        )
+        assert tacv.command_line_extra == config["command_line_extra"]
 
 
 class TestSimTiedArrayChannelisedVoltageStream:
