@@ -1226,6 +1226,7 @@ class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageSt
             instrument_dev_name=config["instrument_dev_name"],
         )
 
+
 class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Real tied-array-channelised-voltage stream (GPU beamformer)."""
 
@@ -1253,7 +1254,7 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
         self.src_pol = src_pol
         self.command_line_extra = list(command_line_extra)
 
-    if TYPE_CHECKING:   # pragma: nocover
+    if TYPE_CHECKING:  # pragma: nocover
         # Refine the return type for mypy
         @property
         def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStreamBase:
@@ -1261,12 +1262,12 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
 
     @classmethod
     def from_config(
-        cls: type[_S],
+        cls,
         options: Options,
         name: str,
         config: Mapping[str, Any],
         src_streams: Sequence[Stream],
-        sensors: Mapping[str, Any]
+        sensors: Mapping[str, Any],
     ) -> "GpucbfTiedArrayChannelisedVoltageStream":
         return cls(
             name,
