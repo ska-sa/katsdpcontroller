@@ -1426,7 +1426,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "3.4",
+        "version": "3.5",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1588,7 +1588,7 @@ def config_v2() -> Dict[str, Any]:
 @pytest.fixture
 def config_sim() -> Dict[str, Any]:
     return {
-        "version": "3.4",
+        "version": "3.5",
         "outputs": {
             "acv": {
                 "type": "sim.cbf.antenna_channelised_voltage",
