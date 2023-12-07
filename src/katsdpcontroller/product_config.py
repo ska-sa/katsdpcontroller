@@ -1257,7 +1257,7 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
     if TYPE_CHECKING:  # pragma: nocover
         # Refine the return type for mypy
         @property
-        def antenna_channelised_voltage(self) -> AntennaChannelisedVoltageStreamBase:
+        def antenna_channelised_voltage(self) -> GpucbfAntennaChannelisedVoltageStream:
             ...
 
     @classmethod
