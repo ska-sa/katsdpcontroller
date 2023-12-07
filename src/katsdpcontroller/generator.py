@@ -2503,6 +2503,10 @@ def build_logical_graph(
         _make_fgpu(g, configuration, fgpu_streams, sync_time)
     for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
         _make_xbgpu(g, configuration, stream, sync_time, sensors)
+    for stream in configuration.by_class(product_config.GpucbfTiedArrayChannelisedVoltageStream):
+        # TODO: NGC-1116 might change make_xbgpu's function signature,
+        # iterating (and raising) separately for now.
+        raise NotImplementedError("beamformer isn't supported yet")
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
