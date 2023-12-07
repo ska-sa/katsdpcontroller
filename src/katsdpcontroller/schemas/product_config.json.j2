@@ -613,7 +613,7 @@
                                 "properties": {
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
-                                    "src_pol": {"$ref": "#/definitions/positive_integer"},
+                                    "src_pol": {"type": { "enum": [0, 1] }},
                                     "command_line_extra": {
                                         "type": "array",
                                         "items": {"type": "string"}
