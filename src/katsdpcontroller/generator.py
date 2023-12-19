@@ -2590,7 +2590,7 @@ def build_logical_graph(
             g,
             configuration,
             xstream=stream,
-            bstreams=bstreams,
+            bstreams=list(bstreams),
             sync_time=sync_time,
             sensors=sensors,
         )
