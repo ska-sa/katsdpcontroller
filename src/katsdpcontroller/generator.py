@@ -926,8 +926,8 @@ def _make_xbgpu(
     configuration: Configuration,
     sync_time: int,
     sensors: SensorSet,
-    xstream: product_config.GpucbfBaselineCorrelationProductsStream | None,
-    bstreams: List[product_config.GpucbfTiedArrayChannelisedVoltageStream] | None,
+    bstreams: List[product_config.GpucbfTiedArrayChannelisedVoltageStream],
+    xstream: Optional[product_config.GpucbfBaselineCorrelationProductsStream] = None,
 ) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop.disable_ibverbs
     # TODO: Clarify type annotation of `bstreams`
