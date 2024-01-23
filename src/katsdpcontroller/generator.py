@@ -924,10 +924,10 @@ def _make_fgpu(
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    xstream: product_config.GpucbfBaselineCorrelationProductsStream,
-    bstreams: List[product_config.GpucbfTiedArrayChannelisedVoltageStream],
     sync_time: int,
     sensors: SensorSet,
+    xstream: product_config.GpucbfBaselineCorrelationProductsStream | None,
+    bstreams: List[product_config.GpucbfTiedArrayChannelisedVoltageStream] | None,
 ) -> scheduler.LogicalNode:
     ibv = not configuration.options.develop.disable_ibverbs
     # TODO: Clarify type annotation of `bstreams`
@@ -2585,11 +2585,22 @@ def build_logical_graph(
         _make_fgpu(g, configuration, fgpu_streams, sync_time)
     # TODO: Use a key for concurrent scheduling
     bstreams = configuration.by_class(product_config.GpucbfTiedArrayChannelisedVoltageStream)
-    for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
+    xstreams = configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream)
+    if xstreams:
+        for stream in xstreams:
+            _make_xbgpu(
+                g,
+                configuration,
+                xstream=stream,
+                bstreams=list(bstreams),
+                sync_time=sync_time,
+                sensors=sensors,
+            )
+    else:
         _make_xbgpu(
             g,
             configuration,
-            xstream=stream,
+            xstream=None,
             bstreams=list(bstreams),
             sync_time=sync_time,
             sensors=sensors,
