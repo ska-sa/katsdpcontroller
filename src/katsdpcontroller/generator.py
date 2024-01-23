@@ -935,6 +935,7 @@ def _make_xbgpu(
         Union[
             product_config.GpucbfBaselineCorrelationProductsStream,
             product_config.GpucbfTiedArrayChannelisedVoltageStream,
+            None,
         ]
     ] = [xstream] + bstreams
     acv = all_streams[0].antenna_channelised_voltage
@@ -961,7 +962,7 @@ def _make_xbgpu(
             f"{stream.name}.channel-data-suspect",
             "A bitmask of flags indicating whether each channel should be considered "
             "to be garbage.",
-            default="0" * xstream.n_chans,
+            default="0" * xstream.n_chans,  # type: ignore
             initial_status=Sensor.Status.NOMINAL,
         )
 
@@ -1014,7 +1015,9 @@ def _make_xbgpu(
                         for p2 in range(2):
                             idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
                             bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
-            n_accs = round(xstream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
+            n_accs = round(
+                xstream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra
+            )  # type: ignore
 
             xstream_sensors: List[Sensor] = [
                 Sensor(
