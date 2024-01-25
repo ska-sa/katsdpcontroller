@@ -1147,7 +1147,7 @@ def _make_xbgpu(
     # Memory allocated for buffering and reordering incoming data
     recv_buffer = free_chunks * chunk_size
 
-    for stream in bstreams:
+    for stream in all_streams:
         send_buffer = 0
         if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
             # Compute how much memory to provide for output
