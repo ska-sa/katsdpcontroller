@@ -2338,6 +2338,15 @@ class PhysicalTask(PhysicalNode):
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
+
+        logger.error("Args to parse:")
+        for key, value in args.items():
+            logger.info(f"Param {key} has value {value}")
+
+        logger.error(f"Logical_node.command type: {type(self.logical_node.command)}")
+        for command in self.logical_node.command:
+            logger.info(f"Command to run: {command}")
+
         command = [x.format(**args) for x in self.logical_node.command]
         if self.logical_node.wrapper is not None:
             uri = Dict()
