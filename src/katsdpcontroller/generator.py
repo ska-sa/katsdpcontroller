@@ -937,11 +937,11 @@ def _make_xbgpu(
             product_config.GpucbfTiedArrayChannelisedVoltageStream,
         ]
     ]
-    if bstreams:
-        all_streams = bstreams
-    else:
-        all_streams = [xstream]
-    # all_streams = [xstream] + bstreams
+    # if bstreams:
+    #     all_streams = bstreams
+    # else:
+    #     all_streams = [xstream]
+    all_streams = [xstream, *bstreams]
     acv = all_streams[0].antenna_channelised_voltage
     n_engines = all_streams[0].n_substreams
     n_inputs = len(acv.src_streams)
@@ -1177,6 +1177,7 @@ def _make_xbgpu(
 
         # TODO: Increment the final octet of the dst address
         for i in range(0, stream.n_substreams):
+            # One Process per section of the band
             xbgpu = ProductLogicalTask(f"xb.{stream.name}.{i}", streams=[stream], index=i)
             xbgpu.subsystem = "cbf"
             xbgpu.image = "katgpucbf"
