@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -26,7 +26,6 @@ import base64
 import contextlib
 import glob
 import json
-import math
 import numbers
 import os
 import os.path
@@ -235,9 +234,9 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
             interface, networks = parts[:2]
             networks = networks.split(",")
             if len(parts) >= 3:
-                max_speed = float(parts[2]) * 1e9
+                speed = float(parts[2]) * 1e9
             else:
-                max_speed = math.inf
+                speed = None
         except ValueError:
             raise RuntimeError(
                 f"Error: --network argument {network_spec} does not have the format "
@@ -277,23 +276,25 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
         except KeyError:
             pass
         interfaces.append(config)
-        try:
-            with open(f"/sys/class/net/{interface}/speed") as f:
-                speed_str = f.read().strip()
-                # This dummy value has been observed on a NIC which had been
-                # configured but had no cable attached.
-                if speed_str == "4294967295" or float(speed_str) < 0:
-                    raise ValueError("cable unplugged?")
-                speed = float(speed_str) * 1e6  # /sys/class/net has speed in Mbps
-        except (OSError, ValueError) as error:
-            if interface == "lo":
-                # Loopback interface speed is limited only by CPU power. Just
-                # pick a large number - this will only be used for testing
-                # anyway.
-                speed = 40e9
-            else:
-                raise RuntimeError(f"Could not determine speed of interface {interface}: {error}")
-        speed = min(speed, max_speed)
+        if speed is None:
+            try:
+                with open(f"/sys/class/net/{interface}/speed") as f:
+                    speed_str = f.read().strip()
+                    # This dummy value has been observed on a NIC which had been
+                    # configured but had no cable attached.
+                    if speed_str == "4294967295" or float(speed_str) < 0:
+                        raise ValueError("cable unplugged?")
+                    speed = float(speed_str) * 1e6  # /sys/class/net has speed in Mbps
+            except (OSError, ValueError) as error:
+                if interface == "lo":
+                    # Loopback interface speed is limited only by CPU power. Just
+                    # pick a large number - this will only be used for testing
+                    # anyway.
+                    speed = 100e9
+                else:
+                    raise RuntimeError(
+                        f"Could not determine speed of interface {interface}: {error}"
+                    )
         resources[f"katsdpcontroller.interface.{i}.bandwidth_in"] = speed
         resources[f"katsdpcontroller.interface.{i}.bandwidth_out"] = speed
     attributes["katsdpcontroller.interfaces"] = interfaces
@@ -322,19 +323,20 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
     attributes["katsdpcontroller.volumes"] = volumes
 
     gpus = []
-    for i, gpu in enumerate(hwloc.gpus()):
-        config = {
-            "name": gpu.name,
-            "compute_capability": gpu.compute_capability,
-            "device_attributes": gpu.device_attributes,
-            "uuid": gpu.uuid,
-        }
-        if gpu.node is not None:
-            config["numa_node"] = gpu.node
-        gpus.append(config)
-        resources[f"katsdpcontroller.gpu.{i}.compute"] = 1.0
-        # Convert memory to MiB, for consistency with Mesos' other resources
-        resources[f"katsdpcontroller.gpu.{i}.mem"] = float(gpu.mem) / 2**20
+    if not args.ignore_gpus:
+        for i, gpu in enumerate(hwloc.gpus()):
+            config = {
+                "name": gpu.name,
+                "compute_capability": gpu.compute_capability,
+                "device_attributes": gpu.device_attributes,
+                "uuid": gpu.uuid,
+            }
+            if gpu.node is not None:
+                config["numa_node"] = gpu.node
+            gpus.append(config)
+            resources[f"katsdpcontroller.gpu.{i}.compute"] = 1.0
+            # Convert memory to MiB, for consistency with Mesos' other resources
+            resources[f"katsdpcontroller.gpu.{i}.mem"] = float(gpu.mem) / 2**20
     attributes["katsdpcontroller.gpus"] = gpus
 
     if args.priority is not None:
@@ -497,6 +499,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         action="append",
         default=[],
         help="Restrict agent to a subsystem (can be repeated)",
+    )
+    parser.add_argument(
+        "--ignore-gpus",
+        action="store_true",
+        help="Don't make GPUs in this machine available for Mesos tasks",
     )
     return parser.parse_args(argv)
 
