@@ -951,10 +951,10 @@ def _make_xbgpu(
     ants = np.array(acv.input_labels).reshape(-1, 2)
     n_ants = ants.shape[0]
 
+    base_name = "base-name-placeholder"
+    xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
+    g.add_node(xbgpu_group)
     for stream in all_streams:
-        xbgpu_group = LogicalGroup(f"xbgpu.{stream.name}")
-        g.add_node(xbgpu_group)
-
         dst_multicast = LogicalMulticast(
             stream.name, stream.n_substreams, initial_transmit_state=TransmitState.DOWN
         )
