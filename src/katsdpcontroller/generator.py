@@ -953,12 +953,14 @@ def _make_xbgpu(
 
     base_name = "base-name-placeholder"
     xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
+    dst_multicasts = []
     g.add_node(xbgpu_group)
     for stream in all_streams:
         dst_multicast = LogicalMulticast(
             stream.name, stream.n_substreams, initial_transmit_state=TransmitState.DOWN
         )
         g.add_node(dst_multicast)
+        dst_multicasts.append(dst_multicast)
         g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
         data_suspect_sensor = Sensor(
@@ -1331,7 +1333,8 @@ def _make_xbgpu(
                 depends_init=True,
                 depends_ready=True,
             )
-            g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
+            for dst_multicast in dst_multicasts:
+                g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
             xbgpu.command += [
                 f"{{endpoints_vector[multicast.{acv.name}_spead][{i}]}}",
             ]
