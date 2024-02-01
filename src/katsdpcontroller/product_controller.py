@@ -1381,7 +1381,13 @@ class SubarrayProduct:
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot start or stop streams in state {self.state}")
         stream = self._find_stream(stream_name)
-        if not isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+        if not isinstance(
+            stream,
+            (
+                product_config.GpucbfBaselineCorrelationProductsStream,
+                product_config.GpucbfTiedArrayChannelisedVoltageStream,
+            ),
+        ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
         command = "capture-start" if start else "capture-stop"
