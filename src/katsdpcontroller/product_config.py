@@ -1809,7 +1809,7 @@ class Configuration:
         for stream in streams:
             self._by_class.setdefault(type(stream), []).append(stream)
 
-    def by_class(self, stream_cls: Type[_S]) -> Sequence[_S]:
+    def by_class(self, stream_cls: Type[_S]) -> List[_S]:
         return self._by_class.get(stream_cls, [])  # type: ignore
 
     @classmethod
