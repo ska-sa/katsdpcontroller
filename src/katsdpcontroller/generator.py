@@ -1144,6 +1144,7 @@ def _make_xbgpu(
         // 8
     )
     bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
+    logger.info(f"Input rate: {input_rate} | BW Scale: {bw_scale}")
 
     # Compute how much memory to provide for input
 
@@ -1173,7 +1174,10 @@ def _make_xbgpu(
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         # Affects relative share, between processes
         # All this is mainly about packing alongside each othere
+
+        # This is just the number of cores
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
+        logger.info(f"xbgpu.cpus: {xbgpu.cpus}")
         xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
             xbgpu.cores = ["src", "dst"]
@@ -1236,6 +1240,7 @@ def _make_xbgpu(
                 )
                 xbgpu.mem += _mb(beam_size * 2)  # Magic number default for xbgpu
 
+        logger.info(f"CPU Memory: {xbgpu.mem} MB")
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = (
@@ -1368,7 +1373,7 @@ def _make_xbgpu(
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
-            elif isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+            elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 renames = ["chan-range", "beng-clip-cnt"]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
