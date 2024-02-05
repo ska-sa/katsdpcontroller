@@ -87,12 +87,12 @@ CONFIG = """{
         "gpucbf_tied_array_channelised_voltage_0x": {
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
-            "src_pol": 0,
+            "src_pol": 0
         },
         "gpucbf_tied_array_channelised_voltage_0y": {
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
-            "src_pol": 1,
+            "src_pol": 1
         },
 
         "i0_antenna_channelised_voltage": {
@@ -261,12 +261,12 @@ CONFIG_CBF_ONLY = """{
         "gpucbf_tied_array_channelised_voltage_0x": {
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
-            "src_pol": 0,
+            "src_pol": 0
         },
         "gpucbf_tied_array_channelised_voltage_0y": {
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
-            "src_pol": 1,
+            "src_pol": 1
         }
     },
     "config": {}
