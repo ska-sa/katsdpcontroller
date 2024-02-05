@@ -1108,6 +1108,7 @@ def _make_xbgpu(
             for xsensor in xstream_sensors:
                 stream_sensors.append(xsensor)
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            # TODO: NGC-447
             pass
 
         # Add all sensors for all streams
@@ -1177,7 +1178,6 @@ def _make_xbgpu(
 
         # This is just the number of cores
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
-        logger.info(f"xbgpu.cpus: {xbgpu.cpus}")
         xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
             xbgpu.cores = ["src", "dst"]
@@ -1228,10 +1228,6 @@ def _make_xbgpu(
                 xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 # TODO: Update xbgpu.mem and xbgpu.gpus[0].mem
-                # TODO: How big does this data size need to be? Maybe the buffer needs to
-                # accommodate for len(bstreams), but not `beam_size` itself?
-                # But also, we get rid of the beam dimension when actually sending data
-                # TODO: Rename this variable
                 beam_size = (
                     batches_per_chunk
                     * stream.n_chans_per_substream
@@ -1240,7 +1236,6 @@ def _make_xbgpu(
                 )
                 xbgpu.mem += _mb(beam_size * 2)  # Magic number default for xbgpu
 
-        logger.info(f"CPU Memory: {xbgpu.mem} MB")
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = (
