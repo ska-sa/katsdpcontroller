@@ -1145,7 +1145,6 @@ def _make_xbgpu(
         // 8
     )
     bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
-    logger.info(f"Input rate: {input_rate} | BW Scale: {bw_scale}")
 
     # Compute how much memory to provide for input
 
@@ -1227,7 +1226,7 @@ def _make_xbgpu(
                 min_compute_capability = {4: (7, 3), 8: (7, 2), 16: (7, 0)}
                 xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-                # TODO: Update xbgpu.mem and xbgpu.gpus[0].mem
+                # TODO: NGC-1222 Update xbgpu.mem and xbgpu.gpus[0].mem
                 beam_size = (
                     batches_per_chunk
                     * stream.n_chans_per_substream
