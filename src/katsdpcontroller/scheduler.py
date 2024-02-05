@@ -2338,7 +2338,6 @@ class PhysicalTask(PhysicalNode):
         taskinfo.name = self.name
         taskinfo.task_id.value = resolver.task_id_allocator()
         args = self.subst_args(resolver)
-
         command = [x.format(**args) for x in self.logical_node.command]
         if self.logical_node.wrapper is not None:
             uri = Dict()
