@@ -1128,7 +1128,7 @@ def _make_xbgpu(
             }
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
             telstate_data = {
-                "src_streams": [stream.antenna_channelised_voltage],
+                "src_streams": [stream.antenna_channelised_voltage.name],
                 "instrument_dev_name": "gpucbf",  # Made-up instrument name
                 "bandwidth": acv.bandwidth,
                 "n_chans_per_substream": stream.n_chans_per_substream,
