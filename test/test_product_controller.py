@@ -1999,11 +1999,23 @@ class TestController(BaseTestController):
     async def test_capture_list_no_args(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         _, informs = await client.request("capture-list")
-        assert len(informs) == 2
+        assert len(informs) == 4
         assert informs[0].arguments == [b"gpucbf_antenna_channelised_voltage", mock.ANY, b"up"]
         assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[0].arguments[1])
         assert informs[1].arguments == [b"gpucbf_baseline_correlation_products", mock.ANY, b"down"]
         assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[1].arguments[1])
+        assert informs[2].arguments == [
+            b"gpucbf_tied_array_channelised_voltage_0x",
+            mock.ANY,
+            b"down",
+        ]
+        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[2].arguments[1])
+        assert informs[2].arguments == [
+            b"gpucbf_tied_array_channelised_voltage_0y",
+            mock.ANY,
+            b"down",
+        ]
+        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[3].arguments[1])
 
     async def test_capture_list_explicit_stream(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
