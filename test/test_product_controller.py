@@ -2010,7 +2010,7 @@ class TestController(BaseTestController):
             b"down",
         ]
         assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[2].arguments[1])
-        assert informs[2].arguments == [
+        assert informs[3].arguments == [
             b"gpucbf_tied_array_channelised_voltage_0y",
             mock.ANY,
             b"down",
