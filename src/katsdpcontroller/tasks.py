@@ -441,14 +441,23 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             raise FailReply(
                 f"Cannot issue request {req} to node {self.name} without a katcp connection"
             )
-        self.logger.log(
-            log_level,
-            "Issuing request %s %s to node %s (timeout %gs)",
-            req,
-            args,
-            self.name,
-            timeout,
-        )
+        if timeout is None:
+            self.logger.log(
+                log_level,
+                "Issuing request %s %s to node %s (no timeout)",
+                req,
+                args,
+                self.name,
+            )
+        else:
+            self.logger.log(
+                log_level,
+                "Issuing request %s %s to node %s (timeout %gs)",
+                req,
+                args,
+                self.name,
+                timeout,
+            )
         try:
             async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
