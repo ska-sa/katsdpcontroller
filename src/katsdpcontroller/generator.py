@@ -968,8 +968,8 @@ def _make_xbgpu(
 
     base_name = streams[0].name
     xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
-    dst_multicasts = []
     g.add_node(xbgpu_group)
+    dst_multicasts = []
     data_suspect_sensors = []
     for stream in streams:
         dst_multicast = LogicalMulticast(
@@ -984,7 +984,7 @@ def _make_xbgpu(
             f"{stream.name}.channel-data-suspect",
             "A bitmask of flags indicating whether each channel should be considered "
             "to be garbage.",
-            default="0" * streams[0].n_chans,  # type: ignore
+            default="0" * stream.n_chans,  # type: ignore
             initial_status=Sensor.Status.NOMINAL,
         )
         data_suspect_sensors.append(data_suspect_sensor)
@@ -1004,20 +1004,6 @@ def _make_xbgpu(
                 "The analogue bandwidth of the digitised band",
                 "Hz",
                 default=acv.bandwidth,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.n-chans",
-                "The number of frequency channels in an integration",
-                default=stream.n_chans,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.n-chans-per-substream",
-                "Number of channels in each substream for this x-engine stream",
-                default=stream.n_chans_per_substream,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             data_suspect_sensor,
@@ -1089,6 +1075,20 @@ def _make_xbgpu(
                     default=stream.n_baselines,
                     initial_status=Sensor.Status.NOMINAL,
                 ),
+                Sensor(
+                    int,
+                    f"{stream.name}.n-chans",
+                    "The number of frequency channels in an integration",
+                    default=stream.n_chans,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.n-chans-per-substream",
+                    "Number of channels in each substream for this X-engine stream",
+                    default=stream.n_chans_per_substream,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
                 SumSensor(
                     sensors,
                     f"{stream.name}.xeng-clip-cnt",
@@ -1116,23 +1116,21 @@ def _make_xbgpu(
             g.graph["stream_sensors"].add(ss)
 
         init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
+        telstate_data = {
+            "src_streams": [stream.antenna_channelised_voltage.name],
+            "instrument_dev_name": "gpucbf",  # Made-up instrument name
+            "bandwidth": acv.bandwidth,
+            "n_chans_per_substream": stream.n_chans_per_substream,
+        }
         if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
-            telstate_data = {
-                "src_streams": [stream.antenna_channelised_voltage.name],
-                "instrument_dev_name": "gpucbf",  # Made-up instrument name
-                "bandwidth": acv.bandwidth,
-                "bls_ordering": bls_ordering,
-                "int_time": stream.int_time,
-                "n_accs": n_accs,
-                "n_chans_per_substream": stream.n_chans_per_substream,
-            }
+            telstate_data.update(
+                bls_ordering=bls_ordering,
+                int_time=stream.int_time,
+                n_accs=n_accs,
+            )
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-            telstate_data = {
-                "src_streams": [stream.antenna_channelised_voltage.name],
-                "instrument_dev_name": "gpucbf",  # Made-up instrument name
-                "bandwidth": acv.bandwidth,
-                "n_chans_per_substream": stream.n_chans_per_substream,
-            }
+            # TODO: NGC-1225
+            pass
         for key, value in telstate_data.items():
             init_telstate[(stream.name, key)] = value
 
@@ -1167,15 +1165,11 @@ def _make_xbgpu(
     recv_buffer = free_chunks * chunk_size
 
     for i in range(n_engines):
-        # One Process per section of the band
+        # One engine per section of the band
         xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
-        # Affects relative share, between processes
-        # All this is mainly about packing alongside each othere
-
-        # This is just the number of cores
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
@@ -1205,7 +1199,7 @@ def _make_xbgpu(
         xbgpu.gpus = [scheduler.GPURequest()]
         xbgpu.gpus[0].compute = (
             0.15 * bw_scale
-        )  # TODO: update depending on number and type of streams
+        )  # TODO: NGC-1222 update depending on number and type of streams
         xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size)
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
@@ -1301,12 +1295,7 @@ def _make_xbgpu(
                 ]
 
         if not configuration.options.develop.less_resources:
-            xbgpu.command += [
-                "--src-affinity",
-                "{cores[src]}",
-                "--dst-affinity",
-                "{cores[dst]}",
-            ]
+            xbgpu.command += ["--src-affinity", "{cores[src]}", "--dst-affinity", "{cores[dst]}"]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
