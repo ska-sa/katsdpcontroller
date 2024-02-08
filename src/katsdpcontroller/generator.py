@@ -984,7 +984,7 @@ def _make_xbgpu(
             f"{stream.name}.channel-data-suspect",
             "A bitmask of flags indicating whether each channel should be considered "
             "to be garbage.",
-            default="0" * stream.n_chans,  # type: ignore
+            default="0" * stream.n_chans,
             initial_status=Sensor.Status.NOMINAL,
         )
         data_suspect_sensors.append(data_suspect_sensor)
@@ -1004,6 +1004,20 @@ def _make_xbgpu(
                 "The analogue bandwidth of the digitised band",
                 "Hz",
                 default=acv.bandwidth,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans",
+                "The number of frequency channels in this stream's overall output",
+                default=stream.n_chans,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans-per-substream",
+                "Number of channels in each substream for this data stream",
+                default=stream.n_chans_per_substream,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             data_suspect_sensor,
@@ -1073,20 +1087,6 @@ def _make_xbgpu(
                     f"{stream.name}.n-bls",
                     "The number of baselines produced by this correlator instrument.",
                     default=stream.n_baselines,
-                    initial_status=Sensor.Status.NOMINAL,
-                ),
-                Sensor(
-                    int,
-                    f"{stream.name}.n-chans",
-                    "The number of frequency channels in an integration",
-                    default=stream.n_chans,
-                    initial_status=Sensor.Status.NOMINAL,
-                ),
-                Sensor(
-                    int,
-                    f"{stream.name}.n-chans-per-substream",
-                    "Number of channels in each substream for this X-engine stream",
-                    default=stream.n_chans_per_substream,
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
