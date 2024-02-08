@@ -78,6 +78,10 @@ if TYPE_CHECKING:
 
 
 _T = TypeVar("_T")
+GpucbfXBStream = Union[
+    product_config.GpucbfBaselineCorrelationProductsStream,
+    product_config.GpucbfTiedArrayChannelisedVoltageStream,
+]
 
 
 def normalise_gpu_name(name):
@@ -557,6 +561,18 @@ def _fgpu_key(stream: product_config.GpucbfAntennaChannelisedVoltageStream) -> t
     )
 
 
+def _xbgpu_key(stream: GpucbfXBStream) -> tuple:
+    """Comparison key for an X/B stream.
+
+    The keys for two streams should be the same if and only if they can run
+    in the same engine.
+    """
+    return (
+        stream.antenna_channelised_voltage.name,
+        stream.command_line_extra,
+    )
+
+
 def _make_fgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
@@ -924,158 +940,199 @@ def _make_fgpu(
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    stream: product_config.GpucbfBaselineCorrelationProductsStream,
     sync_time: int,
     sensors: SensorSet,
+    streams: Iterable[GpucbfXBStream],
 ) -> scheduler.LogicalNode:
-    ibv = not configuration.options.develop.disable_ibverbs
-    acv = stream.antenna_channelised_voltage
-    n_engines = stream.n_substreams
-    n_inputs = len(acv.src_streams)
-    xbgpu_group = LogicalGroup(f"xbgpu.{stream.name}")
-    g.add_node(xbgpu_group)
-
-    dst_multicast = LogicalMulticast(
-        stream.name, stream.n_substreams, initial_transmit_state=TransmitState.DOWN
+    # Ensure that streams is a sequence, not just an iterable. Also put
+    # baseline correlation products first (typically there will just be one,
+    # and this will ensure it becomes base_name below) and sort by name after
+    # that.
+    streams = sorted(
+        streams,
+        key=lambda stream: (
+            not isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream),
+            stream.name,
+        ),
     )
-    g.add_node(dst_multicast)
-    g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
+
+    ibv = not configuration.options.develop.disable_ibverbs
+    acv = streams[0].antenna_channelised_voltage
+    n_engines = streams[0].n_substreams
+    n_inputs = len(acv.src_streams)
 
     # Input labels list `h` and `v` pols separately so the reshape is to
     # make the process a bit smoother.
     ants = np.array(acv.input_labels).reshape(-1, 2)
     n_ants = ants.shape[0]
 
-    def get_baseline_index(a1, a2):
-        return a2 * (a2 + 1) // 2 + a1
+    base_name = streams[0].name
+    xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
+    g.add_node(xbgpu_group)
+    dst_multicasts = []
+    data_suspect_sensors = []
+    for stream in streams:
+        dst_multicast = LogicalMulticast(
+            stream.name, stream.n_substreams, initial_transmit_state=TransmitState.DOWN
+        )
+        g.add_node(dst_multicast)
+        dst_multicasts.append(dst_multicast)
+        g.add_edge(dst_multicast, xbgpu_group, depends_init=True, depends_ready=True)
 
-    # Calculating the inputs given the index is hard. So we iterate through
-    # combinations of inputs instead, and calculate the index, and update the
-    # relevant entry in a LUT.
-    bls_ordering = [None] * stream.n_baselines
-    for a2 in range(n_ants):
-        for a1 in range(a2 + 1):
-            for p1 in range(2):
-                for p2 in range(2):
-                    idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
-                    bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
-    n_accs = round(stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra)
-    data_suspect_sensor = Sensor(
-        str,
-        f"{stream.name}.channel-data-suspect",
-        "A bitmask of flags indicating whether each channel should be considered to be garbage.",
-        default="0" * stream.n_chans,
-        initial_status=Sensor.Status.NOMINAL,
-    )
-
-    stream_sensors = [
-        Sensor(
-            float,
-            f"{stream.name}.sync-time",
-            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-            "s",
-            default=float(sync_time),
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.bandwidth",
-            "The analogue bandwidth of the digitised band",
-            "Hz",
-            default=acv.bandwidth,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-xengs",
-            "The number of X-engines in the instrument",
-            default=n_engines,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-accs",
-            "The number of spectra that are accumulated per X-engine output",
-            default=n_accs,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.int-time",
-            "The time, in seconds, for which the X-engines accumulate.",
-            "s",
-            default=stream.int_time,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.xeng-out-bits-per-sample",
-            "X-engine output bits per sample. Per number, not complex pair- "
-            "Real and imaginary parts are both this wide",
-            default=stream.bits_per_sample,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
+        data_suspect_sensor = Sensor(
             str,
-            f"{stream.name}.bls-ordering",
-            "A string showing the output ordering of baseline data "
-            "produced by the X-engines in this instrument, as a list "
-            "of correlation pairs given by input label.",
-            default=str(bls_ordering),
+            f"{stream.name}.channel-data-suspect",
+            "A bitmask of flags indicating whether each channel should be considered "
+            "to be garbage.",
+            default="0" * stream.n_chans,
             initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-bls",
-            "The number of baselines produced by this correlator instrument.",
-            default=stream.n_baselines,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-chans",
-            "The number of frequency channels in an integration",
-            default=stream.n_chans,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            int,
-            f"{stream.name}.n-chans-per-substream",
-            "Number of channels in each substream for this x-engine stream",
-            default=stream.n_chans_per_substream,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        SumSensor(
-            sensors,
-            f"{stream.name}.xeng-clip-cnt",
-            "Number of visibilities that saturated",
-            name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
-            n_children=stream.n_substreams,
-        ),
-        SyncSensor(
-            sensors,
-            f"{stream.name}.xengs-synchronised",
-            "For the latest accumulation, was data present from all F-Engines for all X-Engines",
-            name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.rx.synchronised"),
-            n_children=stream.n_substreams,
-        ),
-        data_suspect_sensor,
-    ]
-    for ss in stream_sensors:
-        g.graph["stream_sensors"].add(ss)
+        )
+        data_suspect_sensors.append(data_suspect_sensor)
 
-    init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
-    telstate_data = {
-        "src_streams": [stream.antenna_channelised_voltage.name],
-        "instrument_dev_name": "gpucbf",  # Made-up instrument name
-        "bandwidth": acv.bandwidth,
-        "bls_ordering": bls_ordering,
-        "int_time": stream.int_time,
-        "n_accs": n_accs,
-        "n_chans_per_substream": stream.n_chans_per_substream,
-    }
-    for key, value in telstate_data.items():
-        init_telstate[(stream.name, key)] = value
+        stream_sensors: List[Sensor] = [
+            Sensor(
+                float,
+                f"{stream.name}.sync-time",
+                "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+                "s",
+                default=float(sync_time),
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.bandwidth",
+                "The analogue bandwidth of the digitised band",
+                "Hz",
+                default=acv.bandwidth,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans",
+                "The number of frequency channels in this stream's overall output",
+                default=stream.n_chans,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.n-chans-per-substream",
+                "Number of channels in each substream for this data stream",
+                default=stream.n_chans_per_substream,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            data_suspect_sensor,
+        ]
+
+        if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+
+            def get_baseline_index(a1, a2):
+                return a2 * (a2 + 1) // 2 + a1
+
+            # Calculating the inputs given the index is hard. So we iterate through
+            # combinations of inputs instead, and calculate the index, and update the
+            # relevant entry in a LUT.
+            bls_ordering = [None] * stream.n_baselines
+            for a2 in range(n_ants):
+                for a1 in range(a2 + 1):
+                    for p1 in range(2):
+                        for p2 in range(2):
+                            idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
+                            bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
+            n_accs = round(
+                stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra
+            )  # type: ignore
+
+            xstream_sensors: List[Sensor] = [
+                Sensor(
+                    int,
+                    f"{stream.name}.n-xengs",
+                    "The number of X-engines in the instrument",
+                    default=n_engines,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.n-accs",
+                    "The number of spectra that are accumulated per X-engine output",
+                    default=n_accs,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    float,
+                    f"{stream.name}.int-time",
+                    "The time, in seconds, for which the X-engines accumulate.",
+                    "s",
+                    default=stream.int_time,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.xeng-out-bits-per-sample",
+                    "X-engine output bits per sample. Per number, not complex pair- "
+                    "Real and imaginary parts are both this wide",
+                    default=stream.bits_per_sample,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    str,
+                    f"{stream.name}.bls-ordering",
+                    "A string showing the output ordering of baseline data "
+                    "produced by the X-engines in this instrument, as a list "
+                    "of correlation pairs given by input label.",
+                    default=str(bls_ordering),
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.n-bls",
+                    "The number of baselines produced by this correlator instrument.",
+                    default=stream.n_baselines,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                SumSensor(
+                    sensors,
+                    f"{stream.name}.xeng-clip-cnt",
+                    "Number of visibilities that saturated",
+                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
+                    n_children=stream.n_substreams,
+                ),
+                SyncSensor(
+                    sensors,
+                    f"{stream.name}.xengs-synchronised",
+                    "For the latest accumulation, was data present from all F-Engines "
+                    "for all X-Engines",
+                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.rx.synchronised"),
+                    n_children=stream.n_substreams,
+                ),
+            ]
+            for xsensor in xstream_sensors:
+                stream_sensors.append(xsensor)
+        elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            # TODO: NGC-447
+            pass
+
+        # Add all sensors for all streams
+        for ss in stream_sensors:
+            g.graph["stream_sensors"].add(ss)
+
+        init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
+        telstate_data = {
+            "src_streams": [stream.antenna_channelised_voltage.name],
+            "instrument_dev_name": "gpucbf",  # Made-up instrument name
+            "bandwidth": acv.bandwidth,
+            "n_chans_per_substream": stream.n_chans_per_substream,
+        }
+        if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+            telstate_data.update(
+                bls_ordering=bls_ordering,
+                int_time=stream.int_time,
+                n_accs=n_accs,
+            )
+        elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            # TODO: NGC-1225
+            pass
+        for key, value in telstate_data.items():
+            init_telstate[(stream.name, key)] = value
 
     input_rate = (
         sum(
@@ -1107,21 +1164,14 @@ def _make_xbgpu(
     # Memory allocated for buffering and reordering incoming data
     recv_buffer = free_chunks * chunk_size
 
-    # Compute how much memory to provide for output
-    vis_size = (
-        stream.n_baselines * stream.n_chans_per_substream * stream.bits_per_sample // 8 * COMPLEX
-    )
-    # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
-    mid_vis_size = batches_per_chunk * vis_size * 2
-    send_buffer = vis_size * 5  # Magic number is default in XSend class
-
-    for i in range(0, stream.n_substreams):
-        xbgpu = ProductLogicalTask(f"xb.{stream.name}.{i}", streams=[stream], index=i)
+    for i in range(n_engines):
+        # One engine per section of the band
+        xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
-        xbgpu.mem = 512 + _mb(recv_buffer + send_buffer)
+        xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
             xbgpu.cores = ["src", "dst"]
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
@@ -1136,18 +1186,49 @@ def _make_xbgpu(
         # the destination it is more useful.
         xbgpu.interfaces = [
             scheduler.InterfaceRequest(
-                "cbf", infiniband=ibv, multicast_in={acv.name}, multicast_out={(stream, i)}
+                "cbf",
+                infiniband=ibv,
+                multicast_in={acv.name},
+                multicast_out={(stream, i) for stream in streams},
             )
         ]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
-        xbgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+        xbgpu.interfaces[0].bandwidth_out = (
+            sum(stream.data_rate() for stream in streams) / n_engines
+        )
         xbgpu.gpus = [scheduler.GPURequest()]
-        xbgpu.gpus[0].compute = 0.15 * bw_scale
-        xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size + 2 * vis_size + mid_vis_size)
-        # Minimum capability as a function of bits-per-sample, based on
-        # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
-        min_compute_capability = {4: (7, 3), 8: (7, 2), 16: (7, 0)}
-        xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
+        xbgpu.gpus[0].compute = (
+            0.15 * bw_scale
+        )  # TODO: NGC-1222 update depending on number and type of streams
+        xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size)
+        for stream in streams:
+            if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+                # Compute how much memory to provide for output
+                vis_size = (
+                    stream.n_baselines
+                    * stream.n_chans_per_substream
+                    * stream.bits_per_sample
+                    // 8
+                    * COMPLEX
+                )
+                # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
+                mid_vis_size = batches_per_chunk * vis_size * 2
+                xbgpu.mem += _mb(vis_size * 5)  # Magic number is default in XSend class
+                xbgpu.gpus[0].mem += _mb(2 * vis_size + mid_vis_size)
+                # Minimum capability as a function of bits-per-sample, based on
+                # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
+                min_compute_capability = {4: (7, 3), 8: (7, 2), 16: (7, 0)}
+                xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
+            elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+                # TODO: NGC-1222 Update xbgpu.mem and xbgpu.gpus[0].mem
+                beam_size = (
+                    batches_per_chunk
+                    * stream.n_chans_per_substream
+                    * stream.spectra_per_heap
+                    * COMPLEX
+                )
+                xbgpu.mem += _mb(beam_size * 2)  # Magic number default for xbgpu
+
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
         xbgpu.command = (
@@ -1160,9 +1241,9 @@ def _make_xbgpu(
                 "--array-size",
                 str(len(acv.src_streams) // 2),  # 2 pols per antenna
                 "--channels",
-                str(stream.n_chans),
+                str(acv.n_chans),
                 "--channels-per-substream",
-                str(stream.n_chans_per_substream),
+                str(acv.n_chans_per_substream),
                 "--samples-between-spectra",
                 str(acv.n_samples_between_spectra),
                 "--spectra-per-heap",
@@ -1170,7 +1251,7 @@ def _make_xbgpu(
                 "--heaps-per-fengine-per-chunk",
                 str(batches_per_chunk),
                 "--channel-offset-value",
-                str(i * stream.n_chans_per_substream),
+                str(i * acv.n_chans_per_substream),
                 "--sample-bits",
                 str(acv.bits_per_sample),
                 "--src-interface",
@@ -1190,15 +1271,29 @@ def _make_xbgpu(
                 "{ports[aioconsole]}",
             ]
         )
-        output_config = {
-            "name": escape_format(stream.name),
-            "heap_accumulation_threshold": round(stream.int_time / heap_time),
-            "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
-        }
-        xbgpu.command += [
-            "--corrprod",
-            ",".join(f"{key}={value}" for (key, value) in output_config.items()),
-        ]
+
+        for stream in streams:
+            if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+                output_config = {
+                    "name": escape_format(stream.name),
+                    "heap_accumulation_threshold": round(stream.int_time / heap_time),
+                    "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
+                }
+                xbgpu.command += [
+                    "--corrprod",
+                    ",".join(f"{key}={value}" for (key, value) in output_config.items()),
+                ]
+            elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+                output_config = {
+                    "name": escape_format(stream.name),
+                    "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
+                    "pol": stream.src_pol,
+                }
+                xbgpu.command += [
+                    "--beam",
+                    ",".join(f"{key}={value}" for (key, value) in output_config.items()),
+                ]
+
         if not configuration.options.develop.less_resources:
             xbgpu.command += ["--src-affinity", "{cores[src]}", "--dst-affinity", "{cores[dst]}"]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
@@ -1218,14 +1313,14 @@ def _make_xbgpu(
                     "--dst-comp-vector",
                     "{cores[dst]}",
                 ]
-        xbgpu.command += stream.command_line_extra
+        xbgpu.command += streams[0].command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
         xbgpu.katsdpservices_config = False
         xbgpu.pass_telstate = False
-        xbgpu.data_suspect_sensors = [data_suspect_sensor]
+        xbgpu.data_suspect_sensors = data_suspect_sensors
         xbgpu.data_suspect_range = (
-            i * stream.n_chans_per_substream,
-            (i + 1) * stream.n_chans_per_substream,
+            i * acv.n_chans_per_substream,
+            (i + 1) * acv.n_chans_per_substream,
         )
         xbgpu.critical = False  # Can survive losing individual engines
         g.add_node(xbgpu)
@@ -1240,7 +1335,8 @@ def _make_xbgpu(
             depends_init=True,
             depends_ready=True,
         )
-        g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
+        for dst_multicast in dst_multicasts:
+            g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
         xbgpu.command += [
             f"{{endpoints_vector[multicast.{acv.name}_spead][{i}]}}",
         ]
@@ -1254,15 +1350,16 @@ def _make_xbgpu(
             "rx.unixtime",
             "rx.missing-unixtime",
         ]:
-            xbgpu.sensor_renames[name] = f"{stream.name}.{i}.{name}"
+            xbgpu.sensor_renames[name] = [f"{stream.name}.{i}.{name}" for stream in streams]
 
         # Rename sensors that are relevant to the stream rather than the Pipeline
-        for name in [
-            "chan-range",
-            "rx.synchronised",
-            "xeng-clip-cnt",
-        ]:
-            xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
+        for stream in streams:
+            if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
+                renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
+            elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+                renames = ["chan-range", "beng-clip-cnt"]
+            for name in renames:
+                xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
@@ -2501,12 +2598,18 @@ def build_logical_graph(
         configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream), key=_fgpu_key
     ):
         _make_fgpu(g, configuration, fgpu_streams, sync_time)
-    for stream in configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream):
-        _make_xbgpu(g, configuration, stream, sync_time, sensors)
-    for stream in configuration.by_class(product_config.GpucbfTiedArrayChannelisedVoltageStream):
-        # TODO: NGC-1116 might change make_xbgpu's function signature,
-        # iterating (and raising) separately for now.
-        raise NotImplementedError("beamformer isn't supported yet")
+    for xbgpu_streams in _groupby(
+        configuration.by_class(product_config.GpucbfTiedArrayChannelisedVoltageStream)
+        + configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream),
+        key=_xbgpu_key,
+    ):
+        _make_xbgpu(
+            g,
+            configuration,
+            streams=xbgpu_streams,
+            sync_time=sync_time,
+            sensors=sensors,
+        )
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()

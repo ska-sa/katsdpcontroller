@@ -44,7 +44,7 @@ _T = TypeVar("_T")
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
 CONFIG = """{
-    "version": "3.3",
+    "version": "3.5",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -83,6 +83,16 @@ CONFIG = """{
             "type": "gpucbf.baseline_correlation_products",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "int_time": 0.5
+        },
+        "gpucbf_tied_array_channelised_voltage_0x": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": ["gpucbf_antenna_channelised_voltage"],
+            "src_pol": 0
+        },
+        "gpucbf_tied_array_channelised_voltage_0y": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": ["gpucbf_antenna_channelised_voltage"],
+            "src_pol": 1
         },
 
         "i0_antenna_channelised_voltage": {
@@ -208,7 +218,7 @@ CONFIG = """{
 }"""  # noqa: E501
 
 CONFIG_CBF_ONLY = """{
-    "version": "3.1",
+    "version": "3.5",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -247,6 +257,16 @@ CONFIG_CBF_ONLY = """{
             "type": "gpucbf.baseline_correlation_products",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "int_time": 0.5
+        },
+        "gpucbf_tied_array_channelised_voltage_0x": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": ["gpucbf_antenna_channelised_voltage"],
+            "src_pol": 0
+        },
+        "gpucbf_tied_array_channelised_voltage_0y": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": ["gpucbf_antenna_channelised_voltage"],
+            "src_pol": 1
         }
     },
     "config": {}
