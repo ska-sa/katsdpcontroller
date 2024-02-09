@@ -308,7 +308,6 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     str,
                     f"{beam_name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    default="",
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
