@@ -1146,7 +1146,7 @@ def _make_xbgpu(
                 SumSensor(
                     sensors,
                     f"{stream.name}.beng-clip-cnt",
-                    "Number of visibilities that saturated",
+                    "Number of complex samples that saturated",
                     name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
                     n_children=stream.n_substreams,
                 ),
