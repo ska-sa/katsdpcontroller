@@ -489,14 +489,14 @@ def _make_dsim(
     dsim.ports = ["port", "prometheus"]
     dsim.interfaces = [
         scheduler.InterfaceRequest(
-            "cbf", infiniband=ibv, multicast_out={stream.name for stream in streams}
+            "gpucbf", infiniband=ibv, multicast_out={stream.name for stream in streams}
         )
     ]
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         "dsim",
         "--interface",
-        "{interfaces[cbf].name}",
+        "{interfaces[gpucbf].name}",
         "--adc-sample-rate",
         str(streams[0].adc_sample_rate),
         "--ttl",
@@ -787,7 +787,7 @@ def _make_fgpu(
         # up by network name.
         fgpu.interfaces = [
             scheduler.InterfaceRequest(
-                "cbf",
+                "gpucbf",
                 infiniband=ibv,
                 multicast_in={src.name for src in srcs},
                 multicast_out={stream.name for stream in streams},
@@ -807,9 +807,9 @@ def _make_fgpu(
             + [
                 "fgpu",
                 "--src-interface",
-                "{interfaces[cbf].name}",
+                "{interfaces[gpucbf].name}",
                 "--dst-interface",
-                "{interfaces[cbf].name}",
+                "{interfaces[gpucbf].name}",
                 "--dst-packet-payload",
                 "8192",
                 "--adc-sample-rate",
@@ -1186,7 +1186,7 @@ def _make_xbgpu(
         # the destination it is more useful.
         xbgpu.interfaces = [
             scheduler.InterfaceRequest(
-                "cbf",
+                "gpucbf",
                 infiniband=ibv,
                 multicast_in={acv.name},
                 multicast_out={(stream, i) for stream in streams},
@@ -1255,9 +1255,9 @@ def _make_xbgpu(
                 "--sample-bits",
                 str(acv.bits_per_sample),
                 "--src-interface",
-                "{interfaces[cbf].name}",
+                "{interfaces[gpucbf].name}",
                 "--dst-interface",
-                "{interfaces[cbf].name}",
+                "{interfaces[gpucbf].name}",
                 "--sync-epoch",
                 str(sync_time),
                 "--katcp-port",
