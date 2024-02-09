@@ -990,6 +990,15 @@ def _make_xbgpu(
         data_suspect_sensors.append(data_suspect_sensor)
 
         stream_sensors: List[Sensor] = [
+            # The timestamps are simply ADC sample counts
+            Sensor(
+                float,
+                f"{stream.name}.scale-factor-timestamp",
+                "Factor by which to divide instrument timestamps to convert to unix seconds",
+                "Hz",
+                default=stream.adc_sample_rate,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
             Sensor(
                 float,
                 f"{stream.name}.sync-time",
@@ -1105,11 +1114,37 @@ def _make_xbgpu(
                     n_children=stream.n_substreams,
                 ),
             ]
-            for xsensor in xstream_sensors:
-                stream_sensors.append(xsensor)
+            stream_sensors.extend(xstream_sensors)
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-            # TODO: NGC-447
-            pass
+            source_indices = ", ".join(
+                str(i)
+                for i in range(stream.src_pol, (len(stream.antennas) * 2) + stream.src_pol, 2)
+            )
+            bstream_sensors: List[Sensor] = [
+                Sensor(
+                    int,
+                    f"{stream.name}.beng-out-bits-per-sample",
+                    "X-engine output bits per sample. Per number, not complex pair- "
+                    "Real and imaginary parts are both this wide",
+                    default=stream.bits_per_sample,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.spectra-per-heap",
+                    "Number of spectra per heap of beamformer output",
+                    default=stream.spectra_per_heap,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    str,
+                    f"{stream.name}.source-indices",
+                    "The global input indices of the sources summed in this beam",
+                    default=f"[{source_indices}]",
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+            ]
+            stream_sensors.extend(bstream_sensors)
 
         # Add all sensors for all streams
         for ss in stream_sensors:
@@ -1357,9 +1392,13 @@ def _make_xbgpu(
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-                renames = ["chan-range", "beng-clip-cnt"]
+                renames = ["chan-range", "delay", "quantiser-gain", "weight", "beng-clip-cnt"]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
+                # TODO: Remove once tested
+                xbgpu.sensor_renames[
+                    f"{stream.name}.{stream.name}.{name}"
+                ] = f"99{stream.name}.{i}.{name}"
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
