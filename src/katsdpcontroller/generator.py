@@ -1143,6 +1143,13 @@ def _make_xbgpu(
                     default=f"[{source_indices}]",
                     initial_status=Sensor.Status.NOMINAL,
                 ),
+                SumSensor(
+                    sensors,
+                    f"{stream.name}.beng-clip-cnt",
+                    "Number of visibilities that saturated",
+                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
+                    n_children=stream.n_substreams,
+                ),
             ]
             stream_sensors.extend(bstream_sensors)
 
@@ -1395,10 +1402,6 @@ def _make_xbgpu(
                 renames = ["chan-range", "delay", "quantiser-gain", "weight", "beng-clip-cnt"]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
-                # TODO: Remove once tested
-                xbgpu.sensor_renames[
-                    f"{stream.name}.{stream.name}.{name}"
-                ] = f"99{stream.name}.{i}.{name}"
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate

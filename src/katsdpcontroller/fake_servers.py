@@ -269,8 +269,59 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         super().__init__(*args, **kwargs)
         channel_offset = self.get_command_argument(int, "--channel-offset-value")
         channels_per_substream = self.get_command_argument(int, "--channels-per-substream")
+        beam_outpus = self.get_command_arguments(_parse_key_val, "--beam")
+        beam_names = [beam["name"] for beam in beam_outpus]
         corrprod_outputs = self.get_command_arguments(_parse_key_val, "--corrprod")
         corrprod_names = [corrprod["name"] for corrprod in corrprod_outputs]
+
+        for beam_name in beam_names:
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.chan-range",
+                    "The range of channels processed by this B-engine, inclusive",
+                    default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.delay",
+                    "The delay settings of the inputs for this beam: (loadmcnt "
+                    "<ADC sample count when model was loaded>, delay <in seconds>,"
+                    "phase <radians>, ...)",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    float,
+                    f"{beam_name}.quantiser-gain",
+                    "Non-complex post-summation quantiser gain applied to this beam",
+                    default=0.0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.weight",
+                    "The summing weights applied to all the inputs of this beam",
+                    default="",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"{beam_name}.beng-clip-cnt",
+                    "Number of complex samples that saturated",
+                    default=0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+
         for corrprod_name in corrprod_names:
             self.sensors.add(
                 Sensor(
@@ -294,7 +345,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 Sensor(
                     str,
                     f"{corrprod_name}.chan-range",
-                    "The range of channels processed by this XB-engine, inclusive",
+                    "The range of channels processed by this X-engine, inclusive",
                     default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
                     initial_status=Sensor.Status.NOMINAL,
                 )
