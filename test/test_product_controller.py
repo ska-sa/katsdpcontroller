@@ -768,6 +768,36 @@ class TestControllerInterface(BaseTestController):
             "(4280000000, 0.0, 0.0, 0.25, 0.0)",
         )
 
+    async def test_beam_weights(self, client: aiokatcp.Client) -> None:
+        """Test beam-weights."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await client.request("beam-weights", "gpucbf_tied_array_channelised_voltage_0x", 2.0, 3.5)
+        await assert_sensor_value(
+            client, "gpucbf_tied_array_channelised_voltage_0x.weight", "[2.0, 3.5]"
+        )
+        await client.request("product-deconfigure")
+
+    async def test_beam_quant_gains(self, client: aiokatcp.Client) -> None:
+        """Test beam-quant-gains."""
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await client.request("beam-quant-gains", "gpucbf_tied_array_channelised_voltage_0x", "2.5")
+        await assert_sensor_value(
+            client, "gpucbf_tied_array_channelised_voltage_0x.quantiser-gain", 2.5
+        )
+        await client.request("product-deconfigure")
+
+    async def test_beam_delays(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await client.request(
+            "beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0.5:0.0", "-1.5:-2.0"
+        )
+        await assert_sensor_value(
+            client,
+            "gpucbf_tied_array_channelised_voltage_0x.delay",
+            "(12345678, 0.5, 0.0, -1.5, -2.0)",
+        )
+        await client.request("product-deconfigure")
+
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         await assert_sensor_value(
