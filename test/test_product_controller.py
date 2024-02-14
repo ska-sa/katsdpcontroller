@@ -110,6 +110,9 @@ STREAMS = """{
 }"""
 
 EXPECTED_REQUEST_LIST = [
+    "beam-delays",
+    "beam-quant-gains",
+    "beam-weights",
     "capture-done",
     "capture-init",
     "capture-list",
