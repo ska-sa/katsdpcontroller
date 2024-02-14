@@ -49,12 +49,13 @@ import katsdpmodels.fetch.aiohttp
 import katsdptelstate.aio
 import networkx
 import numpy as np
-from aiokatcp import Reading, Sensor, SensorSampler, SensorSet, SimpleAggregateSensor
+from aiokatcp import Sensor, SensorSet
 from katsdpmodels.band_mask import BandMask, SpectralWindow
 from katsdpmodels.rfi_mask import RFIMask
 from katsdptelstate.endpoint import Endpoint
 
 from . import defaults, product_config, scheduler
+from .aggregate_sensors import LatestSensor, SumSensor, SyncSensor
 from .defaults import LOCALHOST
 from .fake_servers import (
     FakeCalDeviceServer,
@@ -188,122 +189,6 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
             self.ports = {"spead": await resolver.resources.get_port()}
         self._endpoint_sensor.value = str(Endpoint(self.host, self.ports["spead"]))
-
-
-class SumSensor(SimpleAggregateSensor[int]):
-    """Aggregate which takes the sum of its children.
-
-    It also tracks how many child readings are present, and sets the state to
-    FAILURE if they aren't all present.
-    """
-
-    def __init__(
-        self,
-        target: SensorSet,
-        name: str,
-        description: str,
-        units: str = "",
-        *,
-        auto_strategy: Optional[SensorSampler.Strategy] = None,
-        auto_strategy_parameters: Iterable[Any] = (),
-        name_regex: re.Pattern,
-        n_children: int,
-    ) -> None:
-        self.name_regex = name_regex
-        self.n_children = n_children
-        self._total = 0
-        self._known = 0
-        super().__init__(
-            target,
-            int,
-            name,
-            description,
-            units,
-            auto_strategy=auto_strategy,
-            auto_strategy_parameters=auto_strategy_parameters,
-        )
-
-    def filter_aggregate(self, sensor: Sensor) -> bool:
-        return bool(self.name_regex.fullmatch(sensor.name))
-
-    def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
-        assert isinstance(reading.value, int)
-        if reading.status.valid_value():
-            self._total += reading.value
-            self._known += 1
-            return True
-        return False
-
-    def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
-        assert isinstance(reading.value, int)
-        if reading.status.valid_value():
-            self._total -= reading.value
-            self._known -= 1
-            return True
-        return False
-
-    def aggregate_compute(self) -> Tuple[Sensor.Status, int]:
-        status = Sensor.Status.NOMINAL if self._known == self.n_children else Sensor.Status.FAILURE
-        return (status, self._total)
-
-
-class SyncSensor(SimpleAggregateSensor[bool]):
-    """Aggregate which tracks whether its children are synchronised.
-
-    In this case,
-    - a 'synchronised' child has a reading of (True, NOMINAL), and
-    - an 'unsynchronised' child has a reading of (False, ERROR).
-    """
-
-    def __init__(
-        self,
-        target: SensorSet,
-        name: str,
-        description: str,
-        units: str = "",
-        *,
-        auto_strategy: Optional["SensorSampler.Strategy"] = None,
-        auto_strategy_parameters: Iterable[Any] = (),
-        name_regex: re.Pattern,
-        n_children: int,
-    ) -> None:
-        self.name_regex = name_regex
-        self.n_children = n_children
-        self._total_in_sync = 0
-
-        super().__init__(
-            target,
-            bool,
-            name,
-            description,
-            units,
-            auto_strategy=auto_strategy,
-            auto_strategy_parameters=auto_strategy_parameters,
-        )
-
-    def filter_aggregate(self, sensor: Sensor) -> bool:
-        return bool(self.name_regex.fullmatch(sensor.name))
-
-    def aggregate_add(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
-        assert isinstance(reading.value, bool)
-        if reading.status.valid_value():
-            if reading.value:
-                self._total_in_sync += 1
-            return True
-        return False
-
-    def aggregate_remove(self, sensor: Sensor[_T], reading: Reading[_T]) -> bool:
-        assert isinstance(reading.value, bool)
-        if reading.status.valid_value():
-            if reading.value:
-                self._total_in_sync -= 1
-            return True
-        return False
-
-    def aggregate_compute(self) -> Tuple[Sensor.Status, bool]:
-        synchronised = self._total_in_sync == self.n_children
-        status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
-        return (status, synchronised)
 
 
 class TelstateTask(ProductPhysicalTask):
@@ -989,6 +874,7 @@ def _make_xbgpu(
         )
         data_suspect_sensors.append(data_suspect_sensor)
 
+        escaped_name = re.escape(stream.name)
         stream_sensors: List[Sensor] = [
             # The timestamps are simply ADC sample counts
             Sensor(
@@ -1102,7 +988,7 @@ def _make_xbgpu(
                     sensors,
                     f"{stream.name}.xeng-clip-cnt",
                     "Number of visibilities that saturated",
-                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.xeng-clip-cnt"),
                     n_children=stream.n_substreams,
                 ),
                 SyncSensor(
@@ -1110,7 +996,7 @@ def _make_xbgpu(
                     f"{stream.name}.xengs-synchronised",
                     "For the latest accumulation, was data present from all F-Engines "
                     "for all X-Engines",
-                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.rx.synchronised"),
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
                     n_children=stream.n_substreams,
                 ),
             ]
@@ -1144,8 +1030,29 @@ def _make_xbgpu(
                     sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
-                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.beng-clip-cnt"),
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.beng-clip-cnt"),
                     n_children=stream.n_substreams,
+                ),
+                LatestSensor(
+                    sensors,
+                    float,
+                    f"{stream.name}.quantiser-gain",
+                    "Non-complex post-summation quantiser gain applied to this beam",
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.quantiser-gain"),
+                ),
+                LatestSensor(
+                    sensors,
+                    str,
+                    f"{stream.name}.delay",
+                    "The delay settings of the inputs for this beam",
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
+                ),
+                LatestSensor(
+                    sensors,
+                    str,
+                    f"{stream.name}.weight",
+                    "The summing weights applied to all the inputs of this beam",
+                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
