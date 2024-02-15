@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,7 +24,7 @@ import json
 import logging
 import signal
 import socket
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, cast
 from unittest import mock
 
 import async_solipsism
@@ -35,6 +35,8 @@ from aiohttp.web import Application
 from aiokatcp import Sensor, SensorSet
 
 from katsdpcontroller import web
+
+from .utils import AsyncSolipsismEventLoopPolicy
 
 EXTERNAL_URL = yarl.URL("http://proxy.invalid:1234")
 ROOT_GUI_URLS: List[Dict[str, Any]] = [
@@ -195,10 +197,8 @@ class TestWeb:
         return ("localhost.invalid", 80) if use_haproxy else None
 
     @pytest.fixture
-    def event_loop(self):
-        loop = async_solipsism.EventLoop()
-        yield loop
-        loop.close()
+    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
+        return AsyncSolipsismEventLoopPolicy()
 
     @pytest.fixture
     def mc_server(self, use_haproxy: bool) -> mock.MagicMock:
@@ -383,12 +383,12 @@ class TestWebHaproxy(TestWeb):
 
     @pytest.fixture(autouse=True)
     def _set_app_internal_port(self, app) -> None:
-        app["updater"].internal_port = 2345
+        app[web.updater_key].internal_port = 2345
         return app
 
     def test_internal_port(self, app) -> None:
         """Tests the internal_port property getter"""
-        assert app["updater"].internal_port == 2345
+        assert app[web.updater_key].internal_port == 2345
 
     async def test_null_update(self, mocker, dirty_set) -> None:
         """Triggered update must not poke haproxy if not required"""
@@ -404,13 +404,17 @@ class TestWebHaproxy(TestWeb):
         guis[0]["title"] = "Test Title"
         sensor.value = json.dumps(guis).encode()
         await asyncio.sleep(1)
-        assert "test-title" in app["updater"]._haproxy._process.config
+        haproxy = app[web.updater_key]._haproxy
+        assert haproxy is not None
+        assert "test-title" in cast(DummyHaproxyProcess, haproxy._process).config
 
     async def test_haproxy_died(self, app: Application, client: TestClient, caplog) -> None:
         """Gracefully handle haproxy dying on its own"""
         with caplog.at_level(logging.WARNING, "katsdpcontroller.web"):
             await asyncio.sleep(1)  # Give simulated process a chance to start
-            app["updater"]._haproxy._process.died(-9)
+            haproxy = app[web.updater_key]._haproxy
+            assert haproxy is not None
+            cast(DummyHaproxyProcess, haproxy._process).died(-9)
             await client.close()
         assert caplog.record_tuples == [
             ("katsdpcontroller.web", logging.WARNING, "haproxy exited with non-zero exit status -9")

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -103,7 +103,7 @@ async def _rotate_handler(request: web.Request) -> dict:
 
 @aiohttp_jinja2.template("index.html.j2")
 async def _index_handler(request: web.Request) -> dict:
-    return _get_guis(request.app["server"])
+    return _get_guis(request.app[server_key])
 
 
 async def _favicon_handler(request: web.Request) -> web.Response:
@@ -142,7 +142,7 @@ async def _websocket_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(timeout=60, autoping=True, heartbeat=30)
     await ws.prepare(request)
 
-    updater = request.app["updater"]
+    updater = request.app[updater_key]
     updater.add_websocket(ws)
     try:
         async for msg in ws:
@@ -356,12 +356,12 @@ def make_app(
     If `haproxy_bind` is provided, also run an haproxy process on this host:port
     which will forward requests either to the web application or to individual
     dashboards. In this case, the caller must update
-    `app['updater'].internal_port` with the port on which this web application
+    `app[updater_key].internal_port` with the port on which this web application
     is listening.
     """
     app = web.Application(middlewares=[web_utils.cache_control])
-    app["server"] = server
-    app["updater"] = updater = _Updater(server, haproxy_bind)
+    app[server_key] = server
+    app[updater_key] = updater = _Updater(server, haproxy_bind)
     app.on_shutdown.append(updater.close)
     app.add_routes(
         [
@@ -382,3 +382,7 @@ def make_app(
         autoescape=True,
     )
     return app
+
+
+server_key = web.AppKey("server_key", master_controller.DeviceServer)
+updater_key = web.AppKey("updater_key", _Updater)

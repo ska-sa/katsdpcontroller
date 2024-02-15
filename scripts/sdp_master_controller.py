@@ -52,7 +52,7 @@ async def setup_web(
     if args.haproxy:
         site = aiohttp.web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
-        app["updater"].internal_port = runner.addresses[0][1]
+        app[web.updater_key].internal_port = runner.addresses[0][1]
     else:
         site = aiohttp.web.TCPSite(runner, args.host, args.http_port)
         await site.start()

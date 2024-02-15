@@ -27,3 +27,21 @@ repos:
       # https://github.com/pre-commit/mirrors-mypy/issues/33.
       # mypy.ini determines the set of files that will actually be checked.
       pass_filenames: false
+- repo: https://github.com/jazzband/pip-tools
+  rev: 7.3.0
+  hooks:
+    - id: pip-compile
+      name: pip-compile setup.cfg
+      args:
+        - --output-file=requirements.txt
+        # --strip-extras makes the output usable as a constraint file
+        - --strip-extras
+        - setup.cfg
+      files: '^(requirements\.txt|setup\.cfg)$'
+    - id: pip-compile
+      name: pip-compile test-requirements.in
+      args:
+        - --output-file=test-requirements.txt
+        - --strip-extras
+        - test-requirements.in
+      files: '^((test-)?requirements\.(in|txt)|setup\.cfg)$'
