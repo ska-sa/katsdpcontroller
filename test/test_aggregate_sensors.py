@@ -23,12 +23,69 @@ from unittest import mock
 import pytest
 from aiokatcp import Reading, Sensor, SensorSet
 
-from katsdpcontroller.aggregate_sensors import LatestSensor
+from katsdpcontroller.aggregate_sensors import LatestSensor, SumSensor
 
 
 @pytest.fixture
 def target() -> SensorSet:
-    return SensorSet()
+    sensors = SensorSet()
+    # Add an unrelated sensor to verify name_regex behaviour
+    sensors.add(Sensor(int, "ignore-me", "", initial_status=Sensor.Status.NOMINAL, default=123))
+    return sensors
+
+
+@pytest.fixture
+def int_children() -> List[Sensor[int]]:
+    sensors = [Sensor(int, f"int-child-{i}", "") for i in range(4)]
+    sensors[0].set_value(3, timestamp=1234567890.0)
+    sensors[1].set_value(4, timestamp=1234567891.0, status=Sensor.Status.WARN)
+    sensors[2].set_value(5, timestamp=1234567892.0)
+    sensors[3].set_value(6, timestamp=1234567893.0, status=Sensor.Status.UNREACHABLE)
+    return sensors
+
+
+class TestSumSensor:
+    """Test :class:`.SumSensor`."""
+
+    @pytest.fixture
+    def sum_sensor(self, target: SensorSet) -> SumSensor:
+        return SumSensor(
+            target,
+            "sum-sensor",
+            "sum sensor",
+            "",
+            name_regex=re.compile("int-child-.*"),
+            n_children=4,
+        )
+
+    def test_initial_state(self, sum_sensor: SumSensor) -> None:
+        """Before the children are added, the sensor status is FAILURE."""
+        assert sum_sensor.reading == Reading(mock.ANY, Sensor.Status.FAILURE, 0)
+
+    def test_bad_reading(
+        self, sum_sensor: SumSensor, target: SensorSet, int_children: List[Sensor[int]]
+    ) -> None:
+        """When a child has a reading without a valid value, the sensor status is FAILURE."""
+        for sensor in int_children:
+            target.add(sensor)
+        assert sum_sensor.reading == Reading(mock.ANY, Sensor.Status.FAILURE, 12)
+
+    def test_good(
+        self, sum_sensor: SumSensor, target: SensorSet, int_children: List[Sensor[int]]
+    ) -> None:
+        """Test behaviour when all the child sensors are valid."""
+        for sensor in int_children:
+            target.add(sensor)
+        int_children[3].value = 10
+        assert sum_sensor.reading == Reading(mock.ANY, Sensor.Status.NOMINAL, 22)
+
+    def test_remove(
+        self, sum_sensor: SumSensor, target: SensorSet, int_children: List[Sensor[int]]
+    ) -> None:
+        """Removing a sensor changes the status back to FAILURE."""
+        self.test_good(sum_sensor, target, int_children)
+        target.remove(int_children[0])
+        assert sum_sensor.reading == Reading(mock.ANY, Sensor.Status.FAILURE, 19)
 
 
 class TestLatestSensor:
@@ -45,15 +102,6 @@ class TestLatestSensor:
         return LatestSensor(
             target, str, "str-sensor", "str sensor", "", name_regex=re.compile("str-child-.*")
         )
-
-    @pytest.fixture
-    def int_children(self) -> List[Sensor[int]]:
-        sensors = [Sensor(int, f"int-child-{i}", "") for i in range(4)]
-        sensors[0].set_value(3, timestamp=1234567890.0)
-        sensors[1].set_value(4, timestamp=1234567891.0, status=Sensor.Status.WARN)
-        sensors[2].set_value(5, timestamp=1234567892.0)
-        sensors[3].set_value(6, timestamp=1234567893.0, status=Sensor.Status.UNREACHABLE)
-        return sensors
 
     def test_initial_state(
         self, int_sensor: LatestSensor[int], str_sensor: LatestSensor[str]
