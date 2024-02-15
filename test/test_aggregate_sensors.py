@@ -23,7 +23,7 @@ from unittest import mock
 import pytest
 from aiokatcp import Reading, Sensor, SensorSet
 
-from katsdpcontroller.aggregate_sensors import LatestSensor, SumSensor
+from katsdpcontroller.aggregate_sensors import LatestSensor, SumSensor, SyncSensor
 
 
 @pytest.fixture
@@ -86,6 +86,45 @@ class TestSumSensor:
         self.test_good(sum_sensor, target, int_children)
         target.remove(int_children[0])
         assert sum_sensor.reading == Reading(mock.ANY, Sensor.Status.FAILURE, 19)
+
+
+class TestSyncSensor:
+    @pytest.fixture
+    def sync_sensor(self, target: SensorSet) -> SyncSensor:
+        return SyncSensor(
+            target,
+            "sync-sensor",
+            "sync sensor",
+            name_regex=re.compile("sync-child-.*"),
+            n_children=2,
+        )
+
+    @pytest.fixture
+    def children(self) -> List[Sensor[bool]]:
+        sensors = [Sensor(bool, f"sync-child-{i}", "") for i in range(2)]
+        sensors[0].set_value(True, status=Sensor.Status.NOMINAL)
+        sensors[1].set_value(False, status=Sensor.Status.ERROR)
+        return sensors
+
+    def test_initial_state(self, sync_sensor: SyncSensor) -> None:
+        # Should be unsynchronised because children are missing
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.ERROR, False)
+
+    def test_all_children(
+        self, target: SensorSet, sync_sensor: SyncSensor, children: List[Sensor[bool]]
+    ) -> None:
+        """Test with all child sensors present."""
+        for sensor in children:
+            target.add(sensor)
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.ERROR, False)
+        children[1].set_value(True)
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.NOMINAL, True)
+        children[0].set_value(False)
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.ERROR, False)
+        children[0].set_value(True, status=Sensor.Status.FAILURE)  # Value should be ignored
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.ERROR, False)
+        children[0].set_value(True)
+        assert sync_sensor.reading == Reading(mock.ANY, Sensor.Status.NOMINAL, True)
 
 
 class TestLatestSensor:
