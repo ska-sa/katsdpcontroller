@@ -399,7 +399,7 @@ def _make_cam2telstate(
     cam2telstate.command = ["cam2telstate.py"]
     cam2telstate.cpus = 0.75
     cam2telstate.mem = 256
-    cam2telstate.ports = ["port", "aiomonitor_port", "aioconsole_port"]
+    cam2telstate.ports = ["port", "aiomonitor_port", "aiomonitor_webui_port", "aioconsole_port"]
     cam2telstate.wait_ports = ["port"]
     url = stream.url
     antennas = set()
@@ -1840,7 +1840,7 @@ def _make_ingest(
         ingest.taskinfo.command.environment.setdefault("variables", []).extend(
             [{"name": "KATSDPSIGPROC_TUNE_MATCH", "value": defaults.KATSDPSIGPROC_TUNE_MATCH}]
         )
-        ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
+        ingest.ports = ["port", "aiomonitor_port", "aiomonitor_webui_port", "aioconsole_port"]
         ingest.wait_ports = ["port"]
         ingest.gpus = [scheduler.GPURequest()]
         if not develop.any_gpu:
@@ -2030,7 +2030,13 @@ def _make_cal(
         cal.interfaces[0].bandwidth_out = sum(
             flags_stream.data_rate() / n_cal for flags in flags_streams
         )
-        cal.ports = ["port", "dask_diagnostics", "aiomonitor_port", "aioconsole_port"]
+        cal.ports = [
+            "port",
+            "dask_diagnostics",
+            "aiomonitor_port",
+            "aiomonitor_webui_port",
+            "aioconsole_port",
+        ]
         cal.wait_ports = ["port"]
         cal.gui_urls = [
             {
@@ -2180,7 +2186,7 @@ def _make_vis_writer(
         buffer_dumps,
         max_accum_dumps,
     )
-    vis_writer.ports = ["port", "aiomonitor_port", "aioconsole_port"]
+    vis_writer.ports = ["port", "aiomonitor_port", "aiomonitor_webui_port", "aioconsole_port"]
     vis_writer.wait_ports = ["port"]
     vis_writer.interfaces = [scheduler.InterfaceRequest("sdp_10g")]
     vis_writer.interfaces[0].bandwidth_in = stream.data_rate()
@@ -2274,7 +2280,7 @@ def _make_flag_writer(
         buffer_dumps,
         max_accum_dumps,
     )
-    flag_writer.ports = ["port", "aiomonitor_port", "aioconsole_port"]
+    flag_writer.ports = ["port", "aiomonitor_port", "aiomonitor_webui_port", "aioconsole_port"]
     flag_writer.wait_ports = ["port"]
     flag_writer.interfaces = [scheduler.InterfaceRequest("sdp_10g")]
     flag_writer.interfaces[0].bandwidth_in = stream.data_rate()
@@ -2450,7 +2456,7 @@ def _make_beamformer_engineering_pol(
         bf_ingest.volumes = [
             scheduler.VolumeRequest(volume_name.format(idx), "/data", "RW", affinity=ram)
         ]
-    bf_ingest.ports = ["port", "aiomonitor_port", "aioconsole_port"]
+    bf_ingest.ports = ["port", "aiomonitor_port", "aiomonitor_webui_port", "aioconsole_port"]
     bf_ingest.wait_ports = ["port"]
     bf_ingest.transitions = CAPTURE_TRANSITIONS
 

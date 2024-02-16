@@ -821,7 +821,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 2048,
-                "numPorts": 5,  # katcp, http, aiomonitor, aioconsole, dashboard
+                "numPorts": 6,  # katcp, http, aiomonitor, aioconsole, dashboard, aiomonitor_webui
             },
         }
 
@@ -1112,6 +1112,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 "aiomonitor": int(env["PORT2"]),
                 "aioconsole": int(env["PORT3"]),
                 "dashboard": int(env["PORT4"]),
+                "aiomonitor_webui": int(env["PORT5"]),
             }
             self._connect(product, env["TASK_HOST"], host, ports)
             success = True
