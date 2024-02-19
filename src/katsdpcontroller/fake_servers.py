@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -267,10 +267,11 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 class FakeXbgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        antennas = self.get_command_argument(int, "--array-size")
         channel_offset = self.get_command_argument(int, "--channel-offset-value")
         channels_per_substream = self.get_command_argument(int, "--channels-per-substream")
-        beam_outpus = self.get_command_arguments(_parse_key_val, "--beam")
-        beam_names = [beam["name"] for beam in beam_outpus]
+        beam_outputs = self.get_command_arguments(_parse_key_val, "--beam")
+        beam_names = [beam["name"] for beam in beam_outputs]
         corrprod_outputs = self.get_command_arguments(_parse_key_val, "--corrprod")
         corrprod_names = [corrprod["name"] for corrprod in corrprod_outputs]
 
@@ -284,13 +285,15 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
+            default_delays_str = str([0.0] * antennas)
             self.sensors.add(
                 Sensor(
                     str,
                     f"{beam_name}.delay",
-                    "The delay settings of the inputs for this beam: (loadmcnt "
-                    "<ADC sample count when model was loaded>, delay <in seconds>,"
-                    "phase <radians>, ...)",
+                    "The delay settings of the inputs for this beam. Each input has "
+                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1,"
+                    "phase1, ...)",
+                    default=f"(0, {default_delays_str[1:-1]})",
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
@@ -299,7 +302,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     float,
                     f"{beam_name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    default=0.0,
+                    default=1.0,
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
@@ -308,6 +311,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     str,
                     f"{beam_name}.weight",
                     "The summing weights applied to all the inputs of this beam",
+                    default=str([1.0] * antennas),
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )

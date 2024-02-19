@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -654,7 +654,7 @@ def _make_fgpu(
             Sensor(
                 float,
                 f"{stream.name}.scale-factor-timestamp",
-                "Factor by which to divide instrument timestamps to convert to unix seconds",
+                "Factor by which to divide instrument timestamps to convert to seconds",
                 "Hz",
                 default=stream.adc_sample_rate,
                 initial_status=Sensor.Status.NOMINAL,
@@ -1116,15 +1116,12 @@ def _make_xbgpu(
             ]
             stream_sensors.extend(xstream_sensors)
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-            source_indices = ", ".join(
-                str(i)
-                for i in range(stream.src_pol, (len(stream.antennas) * 2) + stream.src_pol, 2)
-            )
+            source_indices = str(list(range(stream.src_pol, len(stream.antennas) * 2, 2)))
             bstream_sensors: List[Sensor] = [
                 Sensor(
                     int,
                     f"{stream.name}.beng-out-bits-per-sample",
-                    "X-engine output bits per sample. Per number, not complex pair- "
+                    "B-engine output bits per sample. Per number, not complex pair- "
                     "Real and imaginary parts are both this wide",
                     default=stream.bits_per_sample,
                     initial_status=Sensor.Status.NOMINAL,
@@ -1147,7 +1144,7 @@ def _make_xbgpu(
                     sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
-                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.xeng-clip-cnt"),
+                    name_regex=re.compile(rf"{re.escape(stream.name)}\.[0-9]+\.beng-clip-cnt"),
                     n_children=stream.n_substreams,
                 ),
             ]
