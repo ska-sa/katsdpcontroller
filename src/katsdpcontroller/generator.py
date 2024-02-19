@@ -994,7 +994,7 @@ def _make_xbgpu(
             Sensor(
                 float,
                 f"{stream.name}.scale-factor-timestamp",
-                "Factor by which to divide instrument timestamps to convert to unix seconds",
+                "Factor by which to divide instrument timestamps to convert to seconds",
                 "Hz",
                 default=stream.adc_sample_rate,
                 initial_status=Sensor.Status.NOMINAL,
