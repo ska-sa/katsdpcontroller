@@ -1806,33 +1806,71 @@ class TestController(BaseTestController):
         reply, _ = await client.request("capture-status")
         assert reply == [b"capturing"]
 
-    async def test_gain_bad_stream(self, client: aiokatcp.Client) -> None:
-        """Test gain with a stream that doesn't exist."""
+    @pytest.mark.parametrize(
+        "katcp_request",
+        [
+            # stream does not exist
+            ("gain", "foo", "m000h", "1"),
+            # stream has wrong type
+            ("gain", "i0_antenna_channelised_voltage", "m000h", "1"),
+            # wrong number of channels
+            ("gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m900h", "1", "0.5"),
+            # badly-formatted gains
+            ("gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m900h", "not a complex number"),
+            # stream does not exist
+            ("gain-all", "foo", "1"),
+            # stream has the wrong type
+            ("gain-all", "i0_antenna_channelised_voltage", "1"),
+            # wrong number of channels
+            ("gain-all", "gpucbf_antenna_channelised_voltage", "1", "0.5"),
+            # badly-formatted gains
+            ("gain-all", "gpucbf_antenna_channelised_voltage", "not a complex number"),
+            # stream does not exist
+            ("delays", "foo", 1234567890.0, "0,0:0,0"),
+            # stream has wrong type
+            ("delays", "i0_antenna_channelised_voltage", 1234567890.0, "0,0:0,0"),
+            # wrong number of inputs
+            ("delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,0:0,0"),
+            # badly-formatted coefficient sets
+            (
+                "delays",
+                "gpucbf_antenna_channelised_voltage",
+                1234567890.0,
+                "0,0:0,0:extra",
+                "0,0:0,0",
+                "0,0:0,0",
+                "0,0:0,0",
+            ),
+            (
+                "delays",
+                "gpucbf_antenna_channelised_voltage",
+                1234567890.0,
+                "0,0:0,0,extra",
+                "0,0:0,0",
+                "0,0:0,0",
+                "0,0:0,0",
+            ),
+            (
+                "delays",
+                "gpucbf_antenna_channelised_voltage",
+                1234567890.0,
+                "a,0:0,0",
+                "0,0:0,0",
+                "0,0:0,0",
+                "0,0:0,0",
+            ),
+            # stream does not exist
+            ("capture-start", "foo"),
+            # stream has wrong type
+            ("capture-start", "gpucbf_antenna_channelised_voltage"),
+            # stream has wrong type
+            ("capture-list", "sdp_l0"),
+        ],
+    )
+    async def test_request_fails(self, client: aiokatcp.Client, katcp_request: tuple) -> None:
+        """Test that assorted invalid requests fail."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "gain", "foo", "m000h", "1")
-
-    async def test_gain_wrong_stream_type(self, client: aiokatcp.Client) -> None:
-        """Test gain with a stream that is of the wrong type."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "gain", "i0_antenna_channelised_voltage", "m000h", "1")
-
-    async def test_gain_wrong_length(self, client: aiokatcp.Client) -> None:
-        """Test gain with the wrong number of channels."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m900h", "1", "0.5"
-        )
-
-    async def test_gain_bad_format(self, client: aiokatcp.Client) -> None:
-        """Test gain with badly-formatted gains."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client,
-            "gain",
-            "gpucbf_antenna_channelised_voltage",
-            "gpucbf_m900h",
-            "not a complex number",
-        )
+        await assert_request_fails(client, *katcp_request)
 
     async def test_gain_single(
         self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
@@ -1867,30 +1905,6 @@ class TestController(BaseTestController):
         )
         assert reply == gains
 
-    async def test_gain_all_bad_stream(self, client: aiokatcp.Client) -> None:
-        """Test gain-all with a stream that doesn't exist."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "gain-all", "foo", "1")
-
-    async def test_gain_all_wrong_stream_type(self, client: aiokatcp.Client) -> None:
-        """Test gain-all with a stream that is of the wrong type."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "gain-all", "i0_antenna_channelised_voltage", "1")
-
-    async def test_gain_all_wrong_length(self, client: aiokatcp.Client) -> None:
-        """Test gain-all with the wrong number of channels."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, "gain-all", "gpucbf_antenna_channelised_voltage", "1", "0.5"
-        )
-
-    async def test_gain_all_bad_format(self, client: aiokatcp.Client) -> None:
-        """Test gain-all with badly-formatted gains."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, "gain-all", "gpucbf_antenna_channelised_voltage", "not a complex number"
-        )
-
     async def test_gain_all_single(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         """Test gain-all with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1920,59 +1934,6 @@ class TestController(BaseTestController):
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call(
             "gain-all", "gpucbf_antenna_channelised_voltage", "default"
-        )
-
-    async def test_delays_bad_stream(self, client: aiokatcp.Client) -> None:
-        """Test delays with a stream that doesn't exist."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "delays", "foo", 1234567890.0, "0,0:0,0")
-
-    async def test_delays_wrong_stream_type(self, client: aiokatcp.Client) -> None:
-        """Test delays with a stream that is of the wrong type."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, "delays", "i0_antenna_channelised_voltage", 1234567890.0, "0,0:0,0"
-        )
-
-    async def test_delays_wrong_length(self, client: aiokatcp.Client) -> None:
-        """Test delays with the wrong number of arguments."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client, "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,0:0,0"
-        )
-
-    async def test_delays_bad_format(self, client: aiokatcp.Client) -> None:
-        """Test delays with a badly-formatted coefficient set."""
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(
-            client,
-            "delays",
-            "gpucbf_antenna_channelised_voltage",
-            1234567890.0,
-            "0,0:0,0:extra",
-            "0,0:0,0",
-            "0,0:0,0",
-            "0,0:0,0",
-        )
-        await assert_request_fails(
-            client,
-            "delays",
-            "gpucbf_antenna_channelised_voltage",
-            1234567890.0,
-            "0,0:0,0,extra",
-            "0,0:0,0",
-            "0,0:0,0",
-            "0,0:0,0",
-        )
-        await assert_request_fails(
-            client,
-            "delays",
-            "gpucbf_antenna_channelised_voltage",
-            1234567890.0,
-            "a,0:0,0",
-            "0,0:0,0",
-            "0,0:0,0",
-            "0,0:0,0",
         )
 
     async def test_delays_success(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
@@ -2006,14 +1967,6 @@ class TestController(BaseTestController):
         katcp_client.request.assert_any_call(
             "capture-start", "gpucbf_baseline_correlation_products"
         )
-
-    async def test_capture_start_bad_stream(self, client: aiokatcp.Client) -> None:
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "capture-start", "foo")
-
-    async def test_capture_start_wrong_stream_type(self, client: aiokatcp.Client) -> None:
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "capture-start", "gpucbf_antenna_channelised_voltage")
 
     async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         # Note: most of the code for capture-stop is shared with capture-start,
@@ -2056,10 +2009,6 @@ class TestController(BaseTestController):
         assert len(informs) == 1
         assert informs[0].arguments == [b"gpucbf_antenna_channelised_voltage", mock.ANY, b"up"]
         assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[0].arguments[1])
-
-    async def test_capture_list_bad_stream(self, client: aiokatcp.Client) -> None:
-        await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        await assert_request_fails(client, "capture-list", "sdp_l0")
 
     def _check_prom(
         self,
