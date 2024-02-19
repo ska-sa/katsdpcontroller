@@ -420,6 +420,7 @@ class TestSingularityProductManager:
         assert product.ports["aiomonitor"] == 12347
         assert product.ports["aioconsole"] == 12348
         assert product.ports["dashboard"] == 12349
+        assert product.ports["aiomonitor_webui"] == 12350
         assert product.image is not None
         assert product.image.path == "registry.invalid:5000/katsdpcontroller:a_tag"
         assert fix.server.sensors["foo.version"].value == product.image.path

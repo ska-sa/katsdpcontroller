@@ -196,7 +196,7 @@ class Product:
         self.ports = ports
         self.sensors[f"{self.name}.host"].value = hostname
         for (port_name, port_value) in ports.items():
-            sensor_name = f"{self.name}.{port_name}-address"
+            sensor_name = f"{self.name}.{port_name.replace('_', '-')}-address"
             try:
                 self.sensors[sensor_name].value = Address(host, port_value)
             except KeyError:
@@ -637,6 +637,13 @@ class SingularityProduct(Product):
                 Address,
                 f"{name}.aioconsole-address",
                 "Address of aioconsole debugging port (only accessible from the host)",
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Address,
+                f"{name}.aiomonitor-webui-address",
+                "Address of aiomonitor web UI (only accessible from the host)",
             )
         )
         self.sensors.add(
