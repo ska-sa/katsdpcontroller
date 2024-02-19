@@ -285,7 +285,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
-            default_delays_str = str([0.0] * antennas)
+            default_delays = (0,) + (0.0, 0.0) * antennas
             self.sensors.add(
                 Sensor(
                     str,
@@ -293,7 +293,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     "The delay settings of the inputs for this beam. Each input has "
                     "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1,"
                     "phase1, ...)",
-                    default=f"(0, {default_delays_str[1:-1]})",
+                    default=str(default_delays),
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
