@@ -1860,6 +1860,21 @@ class TestController(BaseTestController):
                 "0,0:0,0",
             ),
             # stream does not exist
+            ("beam-quant-gains", "foo", 1.0),
+            ("beam-weights", "foo", 1.0, 1.0, 1.0, 1.0),
+            ("beam-delays", "foo", "0:0", "0:0", "0:0", "0:0"),
+            # stream has wrong type
+            ("beam-quant-gains", "gpucbf_antenna_channelised_voltage", 1.0),
+            ("beam-weights", "gpucbf_antenna_channelised_voltage", 1.0, 1.0),
+            ("beam-delays", "gpucbf_antenna_channelised_voltage", "0:0", "0:0"),
+            # wrong number of arguments
+            ("beam-weights", "gpucbf_tied_array_channelised_voltage_0x", 1.0, 1.0, 1.0),
+            ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:0", "0:0"),
+            # bad delay formatting
+            ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:x"),
+            ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:0:0"),
+            ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0,0:0,0", "0:0"),
+            # stream does not exist
             ("capture-start", "foo"),
             # stream has wrong type
             ("capture-start", "gpucbf_antenna_channelised_voltage"),
