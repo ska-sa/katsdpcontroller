@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -1376,6 +1376,58 @@ class SubarrayProduct:
             timeout=GAIN_TIMEOUT,
         )
 
+    async def beam_weights(self, stream_name: str, weights: Sequence[float]) -> None:
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set beam gains in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        expected = len(stream.antenna_channelised_voltage.src_streams) // 2
+        if len(weights) != expected:
+            raise FailReply(f"Expected {expected} values, received {len(weights)}")
+        await self._multi_request(
+            self.find_nodes(task_type="xb", streams=[stream]),
+            itertools.repeat(("beam-weights", stream_name) + tuple(weights)),
+            timeout=GAIN_TIMEOUT,
+        )
+
+    async def beam_quant_gains(self, stream_name: str, value: float) -> None:
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set beam gains in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        await self._multi_request(
+            self.find_nodes(task_type="xb", streams=[stream]),
+            itertools.repeat(("beam-quant-gains", stream_name, value)),
+            timeout=GAIN_TIMEOUT,
+        )
+
+    async def beam_delays(self, stream_name: str, coefficient_sets: Sequence[str]) -> None:
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set beam gains in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        expected = len(stream.antenna_channelised_voltage.src_streams) // 2
+        if len(coefficient_sets) != expected:
+            raise FailReply(f"Expected {expected} values, received {len(coefficient_sets)}")
+        for coefficient_set in coefficient_sets:
+            try:
+                # Parse it just for validation
+                parts = coefficient_set.split(":")
+                if len(parts) != 2:
+                    raise ValueError
+                for part in parts:
+                    float(part)
+            except ValueError:
+                raise FailReply(f"Invalid coefficient-set {coefficient_set!r}")
+        await self._multi_request(
+            self.find_nodes(task_type="xb", streams=[stream]),
+            itertools.repeat(("beam-delays", stream_name) + tuple(coefficient_sets)),
+            timeout=DELAYS_TIMEOUT,
+        )
+
     async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
         """Either start or stop transmission on a stream."""
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
@@ -1948,6 +2000,44 @@ class DeviceServer(aiokatcp.DeviceServer):
             "default" to restore the gains used at startup.
         """
         await self._get_product().gain_all(stream, values)
+
+    async def request_beam_weights(self, ctx, stream: str, *weights: float) -> None:
+        """Set input weights for a single beamformer data stream.
+
+        Parameters
+        ----------
+        stream
+            Tied-array-channelised-voltage stream on which to operate
+        *weights
+            Real-valued weights (one per input)
+        """
+        await self._get_product().beam_weights(stream, weights)
+
+    async def request_beam_quant_gains(self, ctx, stream: str, value: float) -> None:
+        """Set output gain of a single beamformer data stream.
+
+        Parameters
+        ----------
+        stream
+            Tied-array-channelised-voltage stream on which to operate
+        value
+            A real-value scaled factor
+        """
+        await self._get_product().beam_quant_gains(stream, value)
+
+    async def request_beam_delays(self, ctx, stream: str, *coefficient_sets: str) -> None:
+        """Set delays for a single beamformer data stream.
+
+        Parameters
+        ----------
+        stream
+            Tied-array-channelised-voltage stream on which to operate
+        *coefficient_sets
+            One coefficient set per input, each in the form <delay>:<phase>
+            where the delay is in seconds, the phase in radians and the phase
+            specifies the overall phase to apply at the centre of the band.
+        """
+        await self._get_product().beam_delays(stream, coefficient_sets)
 
     async def request_capture_start(self, ctx, stream: str) -> None:
         """Enable data transmission for the named data stream."""

@@ -104,6 +104,19 @@ def _add_time_sync_sensors(sensors: SensorSet) -> None:
     )
 
 
+def _add_steady_state_timestamp_sensor(sensors: SensorSet) -> None:
+    sensors.add(
+        Sensor(
+            int,
+            "steady-state-timestamp",
+            "Heaps with this timestamp or greater are guaranteed to "
+            "reflect the effects of previous katcp requests.",
+            default=0,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+
+
 class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
     DEFAULT_GAIN = 1.0
@@ -206,6 +219,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         _add_rx_device_status_sensor(
             self.sensors, "The F-engine is receiving a good, clean digitiser stream"
         )
+        _add_steady_state_timestamp_sensor(self.sensors)
 
     def _check_stream_name(self, stream_name: str) -> None:
         """Validate that a stream name matches one of the outputs.
@@ -387,6 +401,23 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         _add_rx_device_status_sensor(
             self.sensors, "The XB-engine is receiving a good, clean F-engine stream"
         )
+        _add_steady_state_timestamp_sensor(self.sensors)
+
+    async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
+        """Set beam weights."""
+        self.sensors[f"{stream_name}.weight"].value = repr(list(weights))
+
+    async def request_beam_quant_gains(self, ctx, stream_name: str, value: float) -> None:
+        """Set beam quantisation gains."""
+        self.sensors[f"{stream_name}.quantiser-gain"].value = value
+
+    async def request_beam_delays(self, ctx, stream_name: str, *coefficient_sets: str) -> None:
+        """Set beam delays."""
+        params: list = [12345678]  # Dummy loadmcnt; typing is to prevent list[int] being inferred
+        for coefficient_set in coefficient_sets:
+            parts = [float(x) for x in coefficient_set.split(":")]
+            params.extend(parts)
+        self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):

@@ -3,7 +3,7 @@
 addict==2.1.1
 aiohttp
 aiohttp-jinja2==1.5.1
-aiokatcp
+aiokatcp==1.8.0
 aiozk==0.14.0
 async-timeout
 blinker==1.6.2             # via flask
