@@ -1023,7 +1023,7 @@ def _make_xbgpu(
                     str,
                     f"{stream.name}.source-indices",
                     "The global input indices of the sources summed in this beam",
-                    default=f"[{source_indices}]",
+                    default=f"{source_indices}",
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
