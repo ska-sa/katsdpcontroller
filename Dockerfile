@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install Python dependencies
 COPY requirements.txt /tmp/install/requirements.txt
-RUN install_pinned.py -r /tmp/install/requirements.txt
+RUN pip install -r /tmp/install/requirements.txt
 
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpcontroller
