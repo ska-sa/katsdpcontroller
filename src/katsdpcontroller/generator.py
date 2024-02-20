@@ -780,7 +780,7 @@ def _make_fgpu(
         else:
             fgpu.cpus = 3 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
             taskset = []
-        fgpu.ports = ["port", "prometheus", "aiomonitor", "aioconsole"]
+        fgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
         fgpu.wait_ports = ["port", "prometheus"]
         # TODO: could specify separate interface requests for input and
         # output. Currently that's not possible because interfaces are looked
@@ -827,6 +827,8 @@ def _make_fgpu(
                 "--aiomonitor",
                 "--aiomonitor-port",
                 "{ports[aiomonitor]}",
+                "--aiomonitor-webui-port",
+                "{ports[aiomonitor_webui]}",
                 "--aioconsole-port",
                 "{ports[aioconsole]}",
             ]
@@ -1178,7 +1180,7 @@ def _make_xbgpu(
             taskset = ["taskset", "-c", "{cores[dst]}"]
         else:
             taskset = []
-        xbgpu.ports = ["port", "prometheus", "aiomonitor", "aioconsole"]
+        xbgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
         xbgpu.wait_ports = ["port", "prometheus"]
         # Note: we use just one name for the input stream, even though we only
         # subscribe to a single multicast group of many. Every xbgpu receives
@@ -1267,6 +1269,8 @@ def _make_xbgpu(
                 "--aiomonitor",
                 "--aiomonitor-port",
                 "{ports[aiomonitor]}",
+                "--aiomonitor-webui-port",
+                "{ports[aiomonitor_webui]}",
                 "--aioconsole-port",
                 "{ports[aioconsole]}",
             ]
