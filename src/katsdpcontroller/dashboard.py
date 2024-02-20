@@ -279,14 +279,14 @@ class Dashboard:
                 Output("task-table", "data"),
                 Output("capture-block-table", "data"),
                 Output("batch-table", "data"),
-                Output("root", "data-dummy"),
-            ],  # Just to set loading state on root
+                Output("root", "data-dummy"),  # Just to set loading state on root
+            ],
             [Input("interval", "n_intervals")],
         )
         @use_event_loop
         async def top_level(n_intervals):
             if sdp_controller.product is None:
-                return {}, {"display": "none"}, "", "", [], [], []
+                return {}, {"display": "none"}, "", "", [], [], [], ""
             config = json.dumps(sdp_controller.product.config_dict, indent=2, sort_keys=True)
 
             tasks = _get_tasks(sdp_controller.product)
