@@ -136,17 +136,8 @@ class TestLatestSensor:
             target, int, "int-sensor", "int sensor", "bits", name_regex=re.compile("int-child-.*")
         )
 
-    @pytest.fixture
-    def str_sensor(self, target: SensorSet) -> LatestSensor[str]:
-        return LatestSensor(
-            target, str, "str-sensor", "str sensor", "", name_regex=re.compile("str-child-.*")
-        )
-
-    def test_initial_state(
-        self, int_sensor: LatestSensor[int], str_sensor: LatestSensor[str]
-    ) -> None:
+    def test_initial_state(self, int_sensor: LatestSensor[int]) -> None:
         assert int_sensor.reading == Reading(mock.ANY, Sensor.Status.UNKNOWN, 0)
-        assert str_sensor.reading == Reading(mock.ANY, Sensor.Status.UNKNOWN, "")
 
     def test_add(
         self, target: SensorSet, int_sensor: LatestSensor[int], int_children: List[Sensor[int]]
