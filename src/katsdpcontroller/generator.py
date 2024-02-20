@@ -1002,7 +1002,7 @@ def _make_xbgpu(
             ]
             stream_sensors.extend(xstream_sensors)
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-            source_indices = str(list(range(stream.src_pol, len(stream.antennas) * 2, 2)))
+            source_indices = str(list(range(stream.src_pol, n_inputs, 2)))
             bstream_sensors: List[Sensor] = [
                 Sensor(
                     int,
