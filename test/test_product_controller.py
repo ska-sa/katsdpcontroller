@@ -1867,7 +1867,7 @@ class TestController(BaseTestController):
             ("beam-quant-gains", "gpucbf_antenna_channelised_voltage", 1.0),
             ("beam-weights", "gpucbf_antenna_channelised_voltage", 1.0, 1.0),
             ("beam-delays", "gpucbf_antenna_channelised_voltage", "0:0", "0:0"),
-            # wrong number of arguments
+            # wrong number of arguments (expected 2 values but 3 provided)
             ("beam-weights", "gpucbf_tied_array_channelised_voltage_0x", 1.0, 1.0, 1.0),
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:0", "0:0"),
             # bad delay formatting

@@ -37,6 +37,7 @@ def target() -> SensorSet:
 @pytest.fixture
 def int_children() -> List[Sensor[int]]:
     sensors = [Sensor(int, f"int-child-{i}", "") for i in range(4)]
+    # No status_func, so default status is NOMINAL
     sensors[0].set_value(3, timestamp=1234567890.0)
     sensors[1].set_value(4, timestamp=1234567891.0, status=Sensor.Status.WARN)
     sensors[2].set_value(5, timestamp=1234567892.0)
