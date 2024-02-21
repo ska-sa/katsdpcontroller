@@ -23,8 +23,7 @@ mkdir -p "$dir/logs"
 PYTHONPATH="$dir/../src:$PYTHONPATH" python -m katsdpcontroller.agent_mkconfig \
     --attributes-dir "$dir/etc/mesos-agent/attributes" \
     --resources-dir "$dir/etc/mesos-agent/resources" \
-    --network "lo:cbf" \
-    --network "lo:sdp_10g" \
+    --network "lo:cbf,gpucbf,sdp_10g" \
     --volume "data:$dir/data" \
     --volume "data_local:$dir/data" \
     --volume "obj_data:$dir/data" \
