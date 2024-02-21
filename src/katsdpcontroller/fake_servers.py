@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -99,6 +99,19 @@ def _add_time_sync_sensors(sensors: SensorSet) -> None:
             "time.synchronised",
             "Whether the host clock is synchronised within tolerances",
             default=True,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+
+
+def _add_steady_state_timestamp_sensor(sensors: SensorSet) -> None:
+    sensors.add(
+        Sensor(
+            int,
+            "steady-state-timestamp",
+            "Heaps with this timestamp or greater are guaranteed to "
+            "reflect the effects of previous katcp requests.",
+            default=0,
             initial_status=Sensor.Status.NOMINAL,
         )
     )
@@ -206,6 +219,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         _add_rx_device_status_sensor(
             self.sensors, "The F-engine is receiving a good, clean digitiser stream"
         )
+        _add_steady_state_timestamp_sensor(self.sensors)
 
     def _check_stream_name(self, stream_name: str) -> None:
         """Validate that a stream name matches one of the outputs.
@@ -267,10 +281,64 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 class FakeXbgpuDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        antennas = self.get_command_argument(int, "--array-size")
         channel_offset = self.get_command_argument(int, "--channel-offset-value")
         channels_per_substream = self.get_command_argument(int, "--channels-per-substream")
+        beam_outputs = self.get_command_arguments(_parse_key_val, "--beam")
+        beam_names = [beam["name"] for beam in beam_outputs]
         corrprod_outputs = self.get_command_arguments(_parse_key_val, "--corrprod")
         corrprod_names = [corrprod["name"] for corrprod in corrprod_outputs]
+
+        for beam_name in beam_names:
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.chan-range",
+                    "The range of channels processed by this B-engine, inclusive",
+                    default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            default_delays = (0,) + (0.0, 0.0) * antennas
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.delay",
+                    "The delay settings of the inputs for this beam. Each input has "
+                    "a delay [s] and phase [rad]: (loadmcnt, delay0, phase0, delay1,"
+                    "phase1, ...)",
+                    default=str(default_delays),
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    float,
+                    f"{beam_name}.quantiser-gain",
+                    "Non-complex post-summation quantiser gain applied to this beam",
+                    default=1.0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.weight",
+                    "The summing weights applied to all the inputs of this beam",
+                    default=str([1.0] * antennas),
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"{beam_name}.beng-clip-cnt",
+                    "Number of complex samples that saturated",
+                    default=0,
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+
         for corrprod_name in corrprod_names:
             self.sensors.add(
                 Sensor(
@@ -294,7 +362,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                 Sensor(
                     str,
                     f"{corrprod_name}.chan-range",
-                    "The range of channels processed by this XB-engine, inclusive",
+                    "The range of channels processed by this X-engine, inclusive",
                     default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
                     initial_status=Sensor.Status.NOMINAL,
                 )
@@ -333,6 +401,23 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         _add_rx_device_status_sensor(
             self.sensors, "The XB-engine is receiving a good, clean F-engine stream"
         )
+        _add_steady_state_timestamp_sensor(self.sensors)
+
+    async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
+        """Set beam weights."""
+        self.sensors[f"{stream_name}.weight"].value = repr(list(weights))
+
+    async def request_beam_quant_gains(self, ctx, stream_name: str, value: float) -> None:
+        """Set beam quantisation gains."""
+        self.sensors[f"{stream_name}.quantiser-gain"].value = value
+
+    async def request_beam_delays(self, ctx, stream_name: str, *coefficient_sets: str) -> None:
+        """Set beam delays."""
+        params: list = [12345678]  # Dummy loadmcnt; typing is to prevent list[int] being inferred
+        for coefficient_set in coefficient_sets:
+            parts = [float(x) for x in coefficient_set.split(":")]
+            params.extend(parts)
+        self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
