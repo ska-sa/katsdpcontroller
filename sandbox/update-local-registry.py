@@ -164,6 +164,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use skopeo to copy images between repositories rather than local Docker [no]",
     )
+    parser.add_argument(
+        "--skopeo-arg",
+        action="append",
+        metavar="ARG",
+        default=[],
+        help="Specify an extra argument to pass to skopeo (can be repeated) [none]",
+    )
     args = parser.parse_args()
     args.include = expand_special(args.include)
     args.exclude = expand_special(args.exclude)
@@ -254,13 +261,15 @@ def copy_image(name: str, args: argparse.Namespace) -> None:
     downstream_image = downstream_path(name, args)
     if args.skopeo:
         logging.info("Copying %s -> %s with skopeo", upstream_image, downstream_image)
-        skopeo_options = [f"docker://{upstream_image}", f"docker://{downstream_image}"]
+        skopeo_cmd = ["skopeo", "copy"]
         # Skopeo assumes https by default, but the sandbox registry on
         # localhost is http.
         if downstream_image.startswith("localhost:5000"):
-            skopeo_options.insert(0, "--dest-tls-verify=false")
+            skopeo_cmd.append("--dest-tls-verify=false")
+        skopeo_cmd += args.skopeo_arg
+        skopeo_cmd += [f"docker://{upstream_image}", f"docker://{downstream_image}"]
         subprocess.run(
-            ["skopeo", "copy"] + skopeo_options,
+            skopeo_cmd,
             stdin=subprocess.DEVNULL,
             check=True,
         )
