@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -2763,7 +2763,7 @@ def run_in_event_loop(func, *args, **kw):
 
 
 async def wait_start_handler(request):
-    scheduler = request.app["katsdpcontroller_scheduler"]
+    scheduler = request.app[scheduler_key]
     task_id = request.match_info["id"]
     task, graph = scheduler.get_task(task_id, return_graph=True)
     if task is None:
@@ -2951,7 +2951,7 @@ class SchedulerBase:
 
         # Configure the web app
         app = aiohttp.web.Application()
-        app["katsdpcontroller_scheduler"] = self
+        app[scheduler_key] = self
         app.router.add_get("/tasks/{id}/wait_start", wait_start_handler)
         app.router.add_static("/static", importlib_resources.files("katsdpcontroller") / "static")
         self.app = app
@@ -3916,6 +3916,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
             self._driver = None
 
 
+scheduler_key = aiohttp.web.AppKey("scheduler_key", SchedulerBase)
 __all__ = [
     "LogicalNode",
     "PhysicalNode",
@@ -3952,4 +3953,5 @@ __all__ = [
     "SchedulerBase",
     "Scheduler",
     "instantiate",
+    "scheduler_key",
 ]

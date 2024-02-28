@@ -196,7 +196,7 @@ class Product:
         self.ports = ports
         self.sensors[f"{self.name}.host"].value = hostname
         for (port_name, port_value) in ports.items():
-            sensor_name = f"{self.name}.{port_name}-address"
+            sensor_name = f"{self.name}.{port_name.replace('_', '-')}-address"
             try:
                 self.sensors[sensor_name].value = Address(host, port_value)
             except KeyError:
@@ -640,6 +640,13 @@ class SingularityProduct(Product):
             )
         )
         self.sensors.add(
+            Sensor(
+                Address,
+                f"{name}.aiomonitor-webui-address",
+                "Address of aiomonitor web UI (only accessible from the host)",
+            )
+        )
+        self.sensors.add(
             Sensor(Address, f"{name}.dashboard-address", "Address of product controller dashboard")
         )
         self.sensors.add(
@@ -821,7 +828,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             "resources": {
                 "cpus": 0.2,
                 "memoryMb": 2048,
-                "numPorts": 5,  # katcp, http, aiomonitor, aioconsole, dashboard
+                "numPorts": 6,  # katcp, http, aiomonitor, aioconsole, dashboard, aiomonitor_webui
             },
         }
 
@@ -1112,6 +1119,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
                 "aiomonitor": int(env["PORT2"]),
                 "aioconsole": int(env["PORT3"]),
                 "dashboard": int(env["PORT4"]),
+                "aiomonitor_webui": int(env["PORT5"]),
             }
             self._connect(product, env["TASK_HOST"], host, ports)
             success = True

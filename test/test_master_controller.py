@@ -62,6 +62,7 @@ from .utils import (
     EXPECTED_INTERFACE_SENSOR_LIST,
     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
     S3_CONFIG,
+    AsyncSolipsismEventLoopPolicy,
     Background,
     DelayedManager,
     assert_request_fails,
@@ -325,11 +326,9 @@ class TestSingularityProductManager:
             return product
 
     @pytest.fixture
-    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        loop = async_solipsism.EventLoop()
-        yield loop
-        loop.close()
+        return AsyncSolipsismEventLoopPolicy()
 
     @pytest.fixture
     async def singularity_server(self) -> AsyncGenerator[fake_singularity.SingularityServer, None]:
@@ -421,6 +420,7 @@ class TestSingularityProductManager:
         assert product.ports["aiomonitor"] == 12347
         assert product.ports["aioconsole"] == 12348
         assert product.ports["dashboard"] == 12349
+        assert product.ports["aiomonitor_webui"] == 12350
         assert product.image is not None
         assert product.image.path == "registry.invalid:5000/katsdpcontroller:a_tag"
         assert fix.server.sensors["foo.version"].value == product.image.path
@@ -755,11 +755,9 @@ class TestDeviceServer:
     """
 
     @pytest.fixture
-    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        loop = async_solipsism.EventLoop()
-        yield loop
-        loop.close()
+        return AsyncSolipsismEventLoopPolicy()
 
     @pytest.fixture
     def rmock(self) -> Generator[aioresponses.aioresponses, None, None]:
@@ -1185,11 +1183,9 @@ class TestDeviceServerReal:
     """
 
     @pytest.fixture
-    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        loop = async_solipsism.EventLoop()
-        yield loop
-        loop.close()
+        return AsyncSolipsismEventLoopPolicy()
 
     @pytest.fixture(autouse=True)
     def open_mock(self, mocker) -> open_file_mock.MockOpen:

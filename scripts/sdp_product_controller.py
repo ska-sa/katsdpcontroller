@@ -149,6 +149,7 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.set_defaults(
         aiomonitor_port=os.environ.get("PORT2", aiomonitor.MONITOR_PORT),
         aioconsole_port=os.environ.get("PORT3", aiomonitor.CONSOLE_PORT),
+        aiomonitor_webui_port=os.environ.get("PORT5", aiomonitor.MONITOR_WEBUI_PORT),
     )
     args = parser.parse_args()
 

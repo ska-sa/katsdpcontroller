@@ -36,6 +36,7 @@ from typing import (
 from unittest import mock
 
 import aiokatcp
+import async_solipsism
 import pytest
 from addict import Dict
 
@@ -585,3 +586,8 @@ def make_text_attr(name, value):
 
 def make_json_attr(name, value):
     return make_text_attr(name, base64.urlsafe_b64encode(json.dumps(value).encode("utf-8")))
+
+
+class AsyncSolipsismEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
+    def new_event_loop(self) -> async_solipsism.EventLoop:
+        return async_solipsism.EventLoop()

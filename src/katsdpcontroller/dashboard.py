@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,12 +24,8 @@ import threading
 import time
 from datetime import datetime
 
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
-import dash_table
 import jinja2
-from dash.dependencies import Input, Output
+from dash import Dash, Input, Output, dash_table, dcc, html
 from dash_dangerously_set_inner_html import DangerouslySetInnerHTML
 
 from . import scheduler
@@ -178,7 +174,7 @@ class Dashboard:
     def _make_app(self, **dash_args):
         sdp_controller = self._sdp_controller
         use_event_loop = self._use_event_loop
-        app = dash.Dash(__name__, **dash_args)
+        app = Dash(__name__, **dash_args)
         app.title = "SDP Product Controller"
         app.layout = html.Div(
             id="root",

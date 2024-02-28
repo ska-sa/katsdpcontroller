@@ -1,0 +1,16 @@
+-c requirements.txt
+
+aioresponses
+async-solipsism
+mypy
+open-mock-file
+psutil
+pyfakefs
+pytest
+pytest-asyncio>=0.23
+pytest-cov
+pytest-mock
+pytest-timeout
+# Static type annotations for mypy
+types-decorator
+types-setuptools
