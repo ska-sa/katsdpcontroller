@@ -149,7 +149,7 @@ katsdpservices==1.3
     # via
     #   katsdpcontroller (setup.cfg)
     #   katsdpservices
-katsdptelstate==0.13
+katsdptelstate==0.14
     # via
     #   katdal
     #   katsdpcontroller (setup.cfg)
