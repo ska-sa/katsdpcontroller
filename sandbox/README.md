@@ -46,14 +46,9 @@ Prometheus, Grafana, Elasticsearch, Logstash and Kibana are all just for
 monitoring, so you could disable them in `docker-compose.yml` if they are
 causing problems.
 
-To use the SDP Docker registry at sdp-docker-registry.kat.ac.za, you'll need
-read-access credentials stored (unencrypted) in your `~/.docker/config.json`.
-Note that on some systems, `docker login` stores credentials in a key store,
-which will not work with the Mesos agent.
-
 ## Populating a local Docker registry
 
-If you don't have access to sdp-docker-registry.kat.ac.za (outside the SARAO firewall)
+If you don't have access to harbor.sdp.kat.ac.za (outside the SARAO firewall)
 or want to be independent of it, you can create your own registry. The steps to
 do this, starting at the root of katsdpcontroller, and with a Python 3.6+
 virtual environment, are:
@@ -73,10 +68,9 @@ registry shared between multiple people). Note that some of the built images
 (for example, those bundling CUDA) might not be suitable for public
 redistribution due to licensing restrictions.
 
-If you're inside the SARAO firewall (and have used `docker login` to
-authenticate to the registry), you can replace the last step with
+If you're inside the SARAO firewall, you can replace the last step with
 ```sh
-./update-local-registry.py --copy-all --upstream sdp-docker-registry.kat.ac.za:5000
+./update-local-registry.py --copy-all --upstream harbor.sdp.kat.ac.za/dpp
 ```
 which will be faster since it will avoid building a number of images.
 
@@ -143,10 +137,10 @@ K2100M`, use `quadro_k2100m` in place of GPUNAME the example below. **Remember
 to replace GPUNAME with the actual name and TAG with your custom tag when
 using the commands below.**
 ```sh
-docker pull sdp-docker-registry.kat.ac.za:5000/katsdpingest:TAG
+docker pull harbor.sdp.kat.ac.za/dpp/katsdpingest:TAG
 cd ~/katsdpingest    # or wherever you have it checked out
-scripts/autotune_mkimage.py sdp-docker-registry.kat.ac.za:5000/katsdpingest_GPUNAME:TAG sdp-docker-registry.kat.ac.za:5000/katsdpingest:TAG
-docker push sdp-docker-registry.kat.ac.za:5000/katsdpingest_GPUNAME:TAG
+scripts/autotune_mkimage.py harbor.sdp.kat.ac.za/dpp/katsdpingest_GPUNAME:TAG harbor.sdp.kat.ac.za/dpp/katsdpingest:TAG
+docker push harbor.sdp.kat.ac.za/dpp/katsdpingest_GPUNAME:TAG
 ```
 This will take about 10 minutes to do. If you've done this before but need to
 update it for a new upstream katsdpingest image, you can add `--copy` to the
@@ -169,7 +163,7 @@ installed.
 ### Docker image
 
 ```sh
-docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127.0.0.1 sdp-docker-registry.kat.ac.za:5000/katsdpcontroller sdp_master_controller.py --gui-urls /sandbox/gui-urls/ --localhost --image-tag-file /sandbox/sdp_image_tag --s3-config-file /sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity --registry http://localhost:5000 --user kat
+docker run --net=host -v $PWD/sandbox:/sandbox:ro -e KATSDP_LOG_GELF_ADDRESS=127.0.0.1 harbor.sdp.kat.ac.za/dpp/katsdpcontroller sdp_master_controller.py --gui-urls /sandbox/gui-urls/ --localhost --image-tag-file /sandbox/sdp_image_tag --s3-config-file /sandbox/s3_config.json --haproxy localhost:2181 http://localhost:7099/singularity --registry http://localhost:5000 --user kat
 ```
 
 ### Local machine
