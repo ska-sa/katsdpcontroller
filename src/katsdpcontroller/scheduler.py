@@ -255,6 +255,7 @@ import jsonschema
 import networkx
 import pymesos
 import www_authenticate
+import yarl
 from addict import Dict
 from decorator import decorator
 from katsdptelstate.endpoint import Endpoint
@@ -1130,7 +1131,13 @@ class HTTPImageLookup(_RegistryImageLookup):
         if "://" not in registry:
             # If no scheme is specified, assume https
             registry = "https://" + registry
-        manifest_url = f"{registry}/v2/{repo}/manifests/{tag}"
+        registry_url = yarl.URL(registry)
+        # The /v2 for the API has to inserted at the root. So a registry argument of
+        # foo.bar/baz with repository spam needs be accessed at
+        # https://foo.bar/v2/baz/spam.
+        registry_url = registry_url.with_path("/v2" + registry_url.path)
+        repo_url = registry_url / repo
+        manifest_url = repo_url / "manifests" / tag
         headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.v2+json"}
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
@@ -1158,7 +1165,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         except (KeyError, TypeError):
             raise ImageError(f"Could not find image blob in {manifest_url}")
 
-        image_url = f"{registry}/v2/{repo}/blobs/{image_blob}"
+        image_url = repo_url / "blobs" / image_blob
         headers[aiohttp.hdrs.ACCEPT] = content_type
         try:
             async with session.get(
