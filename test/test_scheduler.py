@@ -350,19 +350,21 @@ class TestImage:
 
     @pytest.fixture
     def scheme_image(self) -> scheduler.Image:
-        return scheduler.Image(registry="http://registry.invalid", repo="foo", tag="bar")
+        return scheduler.Image(registry="http://registry.invalid/project", repo="foo", tag="bar")
 
     @pytest.fixture
     def digest_image(self) -> scheduler.Image:
-        return scheduler.Image(registry="registry.invalid", repo="foo", digest="sha256:deadbeef")
+        return scheduler.Image(
+            registry="registry.invalid/project", repo="foo", digest="sha256:deadbeef"
+        )
 
     def test_path(self, scheme_image: scheduler.Image, digest_image: scheduler.Image) -> None:
-        assert scheme_image.path == "registry.invalid/foo:bar"
-        assert digest_image.path == "registry.invalid/foo@sha256:deadbeef"
+        assert scheme_image.path == "registry.invalid/project/foo:bar"
+        assert digest_image.path == "registry.invalid/project/foo@sha256:deadbeef"
 
     def test_no_tag_or_digest(self) -> None:
         with pytest.raises(TypeError):
-            scheduler.Image(registry="registry.invalid", repo="foo")
+            scheduler.Image(registry="registry.invalid/project", repo="foo")
 
     @pytest.mark.parametrize(
         "path,expected",
@@ -379,8 +381,8 @@ class TestImage:
 
 class TestSimpleImageLookup:
     async def test(self) -> None:
-        lookup = scheduler.SimpleImageLookup("registry.invalid:5000")
-        assert (await lookup("foo", "latest")).path == "registry.invalid:5000/foo:latest"
+        lookup = scheduler.SimpleImageLookup("registry.invalid:5000/project")
+        assert (await lookup("foo", "latest")).path == "registry.invalid:5000/project/foo:latest"
 
 
 class TestHTTPImageLookup:
@@ -502,51 +504,51 @@ class TestHTTPImageLookup:
         """Resolve an image without a registry, using the default registry."""
         self._prepare_image(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             self.digest1,
             callback=self._check_basic(self.auth1),
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         image = await lookup("myimage", "latest")
-        assert image.path == "registry.invalid:5000/myimage@" + self.digest1
+        assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
         assert image.labels["label1"] == "value1"
 
     async def test_absolute(self, rmock) -> None:
         """Resolve an image with an explicit registry."""
         self._prepare_image(
             rmock,
-            "https://registry2.invalid:5000/v2/anotherimage/manifests/custom",
+            "https://registry2.invalid:5000/v2/project2/anotherimage/manifests/custom",
             self.digest2,
             callback=self._check_basic(self.auth2),
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
-        image = await lookup("registry2.invalid:5000/anotherimage", "custom")
-        assert image.path == "registry2.invalid:5000/anotherimage@" + self.digest2
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        image = await lookup("registry2.invalid:5000/project2/anotherimage", "custom")
+        assert image.path == "registry2.invalid:5000/project2/anotherimage@" + self.digest2
         assert image.labels["label1"] == "value1"
 
     async def test_anonymous(self, rmock) -> None:
         """Resolve an image with a registry having no authentication information."""
         self._prepare_image(
-            rmock, "https://anon.invalid:5000/v2/myimage/manifests/latest", self.digest2
+            rmock, "https://anon.invalid:5000/v2/project/myimage/manifests/latest", self.digest2
         )
-        lookup = scheduler.HTTPImageLookup("anon.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("anon.invalid:5000/project")
         image = await lookup("myimage", "latest")
-        assert image.path == "anon.invalid:5000/myimage@" + self.digest2
+        assert image.path == "anon.invalid:5000/project/myimage@" + self.digest2
         assert image.labels["label1"] == "value1"
 
     async def test_token_service(self, rmock) -> None:
         """Test redirection via a token service."""
         self._prepare_image_auth_required(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             "https://tokenservice.invalid/service/token",
-            "repository:myimage:pull",
+            "repository:project/myimage:pull",
         )
         rmock.get(
             URL("https://tokenservice.invalid/service/token").with_query(
                 {
                     "client_id": "katsdpcontroller",
-                    "scope": "repository:myimage:pull",
+                    "scope": "repository:project/myimage:pull",
                     "service": "harbor-registry",
                 }
             ),
@@ -560,24 +562,24 @@ class TestHTTPImageLookup:
         )
         self._prepare_image(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             self.digest1,
             callback=self._check_token,
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         image = await lookup("myimage", "latest")
-        assert image.path == "registry.invalid:5000/myimage@" + self.digest1
+        assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
         assert image.labels["label1"] == "value1"
 
     async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
         self._prepare_image(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             self.digest1,
             status=403,  # unauthorized
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         with pytest.raises(scheduler.ImageError):
             await lookup("myimage", "latest")
 
@@ -585,15 +587,15 @@ class TestHTTPImageLookup:
         """Test that appropriate error is raised if token service doesn't return a token."""
         self._prepare_image_auth_required(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             "https://tokenservice.invalid/service/token",
-            "repository:myimage:pull",
+            "repository:project/myimage:pull",
         )
         rmock.get(
             URL("https://tokenservice.invalid/service/token").with_query(
                 {
                     "client_id": "katsdpcontroller",
-                    "scope": "repository:myimage:pull",
+                    "scope": "repository:project/myimage:pull",
                     "service": "harbor-registry",
                 }
             ),
@@ -601,7 +603,7 @@ class TestHTTPImageLookup:
             payload={},
             callback=self._check_basic(self.auth1),
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         with pytest.raises(scheduler.ImageError):
             await lookup("myimage", "latest")
 
@@ -609,15 +611,15 @@ class TestHTTPImageLookup:
         """Test that appropriate error is raised if token isn't valid base64."""
         self._prepare_image_auth_required(
             rmock,
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             "https://tokenservice.invalid/service/token",
-            "repository:myimage:pull",
+            "repository:project/myimage:pull",
         )
         rmock.get(
             URL("https://tokenservice.invalid/service/token").with_query(
                 {
                     "client_id": "katsdpcontroller",
-                    "scope": "repository:myimage:pull",
+                    "scope": "repository:project/myimage:pull",
                     "service": "harbor-registry",
                 }
             ),
@@ -629,19 +631,19 @@ class TestHTTPImageLookup:
             },
             callback=self._check_basic(self.auth1),
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         with pytest.raises(scheduler.ImageError):
             await lookup("myimage", "latest")
 
     async def test_missing_authenticate_fields(self, rmock):
         """Test error if WWW-Authenticate header is missing required fields."""
         rmock.head(
-            "https://registry.invalid:5000/v2/myimage/manifests/latest",
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             status=401,
             content_type="application/json; charset=utf-8",
             headers={"WWW-Authenticate": 'Bearer service="harbor-registry"'},
         )
-        lookup = scheduler.HTTPImageLookup("registry.invalid:5000")
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
         with pytest.raises(scheduler.ImageError):
             await lookup("myimage", "latest")
 
