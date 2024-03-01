@@ -2039,7 +2039,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--registry",
-        default="sdp-docker-registry.kat.ac.za:5000",
+        default="sdp-docker-registry.kat.ac.za:5000/dpp",
         metavar="HOST:PORT",
         help="registry from which to pull images [%(default)s]",
     )
