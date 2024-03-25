@@ -36,8 +36,6 @@ from aiokatcp import Sensor, SensorSet
 
 from katsdpcontroller import web
 
-from .utils import AsyncSolipsismEventLoopPolicy
-
 EXTERNAL_URL = yarl.URL("http://proxy.invalid:1234")
 ROOT_GUI_URLS: List[Dict[str, Any]] = [
     {
@@ -197,8 +195,8 @@ class TestWeb:
         return ("localhost.invalid", 80) if use_haproxy else None
 
     @pytest.fixture
-    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
-        return AsyncSolipsismEventLoopPolicy()
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
+        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     def mc_server(self, use_haproxy: bool) -> mock.MagicMock:
