@@ -62,7 +62,6 @@ from .utils import (
     EXPECTED_INTERFACE_SENSOR_LIST,
     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
     S3_CONFIG,
-    AsyncSolipsismEventLoopPolicy,
     Background,
     DelayedManager,
     assert_request_fails,
@@ -326,9 +325,9 @@ class TestSingularityProductManager:
             return product
 
     @pytest.fixture
-    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        return AsyncSolipsismEventLoopPolicy()
+        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     async def singularity_server(self) -> AsyncGenerator[fake_singularity.SingularityServer, None]:
@@ -755,9 +754,9 @@ class TestDeviceServer:
     """
 
     @pytest.fixture
-    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        return AsyncSolipsismEventLoopPolicy()
+        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     def rmock(self) -> Generator[aioresponses.aioresponses, None, None]:
@@ -1183,9 +1182,9 @@ class TestDeviceServerReal:
     """
 
     @pytest.fixture
-    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
         """Use async_solipsism's event loop for the tests."""
-        return AsyncSolipsismEventLoopPolicy()
+        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture(autouse=True)
     def open_mock(self, mocker) -> open_file_mock.MockOpen:

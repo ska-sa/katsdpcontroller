@@ -27,6 +27,7 @@ from unittest import mock
 
 import aiohttp
 import aioresponses
+import async_solipsism
 import networkx
 import open_file_mock
 import pymesos
@@ -40,7 +41,6 @@ from katsdpcontroller.scheduler import TaskState
 
 from .utils import (
     AnyOrderList,
-    AsyncSolipsismEventLoopPolicy,
     exhaust_callbacks,
     future_return,
     make_json_attr,
@@ -1376,8 +1376,8 @@ class TestScheduler:
 
     # Override pytest-asyncio to use async-solipsism event loop
     @pytest.fixture
-    def event_loop_policy(self) -> AsyncSolipsismEventLoopPolicy:
-        return AsyncSolipsismEventLoopPolicy()
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
+        return async_solipsism.EventLoopPolicy()
 
     @staticmethod
     def _dummy_random():
