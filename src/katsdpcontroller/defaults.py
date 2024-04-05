@@ -42,7 +42,7 @@ FLAGS_RATE_RATIO = 8.0
 #: Alignment constraint for `int_time` in katcbfsim
 KATCBFSIM_SPECTRA_PER_HEAP = 256
 #: Alignment constraint for `int_time` in xgpu
-GPUCBF_JONES_PER_HEAP = 2**20
+GPUCBF_JONES_PER_BATCH = 2**20
 #: Maximum input data rate for an xbgpu instance (bytes per second).
 #: This is sufficient for UHF with 80 antennas to be handled by 32 engines.
 XBGPU_MAX_SRC_DATA_RATE = 5.45e9

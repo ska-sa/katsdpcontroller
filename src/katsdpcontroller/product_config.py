@@ -716,12 +716,12 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         return self.n_chans // self.n_substreams
 
     @property
-    def n_jones_per_heap(self) -> int:
-        return defaults.GPUCBF_JONES_PER_HEAP  # TODO: should maybe make this a tunable?
+    def n_jones_per_batch(self) -> int:
+        return defaults.GPUCBF_JONES_PER_BATCH  # TODO: should maybe make this a tunable?
 
     @property
     def n_spectra_per_heap(self) -> int:
-        return self.n_jones_per_heap // self.n_chans_per_substream
+        return self.n_jones_per_batch // self.n_chans
 
     def sources(
         self, feng_id: int

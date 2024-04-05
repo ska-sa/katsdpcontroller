@@ -724,7 +724,7 @@ def _make_fgpu(
                 "channels": stream.n_chans,
                 "taps": stream.pfb_taps,
                 "w_cutoff": stream.w_cutoff,
-                "jones_per_heap": stream.n_jones_per_heap,
+                "jones_per_batch": stream.n_jones_per_batch,
                 "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
             }
             if stream.narrowband is not None:
@@ -1095,7 +1095,14 @@ def _make_xbgpu(
 
     # Compute how much memory to provide for input
 
-    batch_size = n_inputs * acv.n_jones_per_heap * COMPLEX * acv.bits_per_sample // 8
+    batch_size = (
+        n_inputs
+        * acv.n_spectra_per_heap
+        * stream.n_chans_per_endpoint
+        * COMPLEX
+        * acv.bits_per_sample
+        // 8
+    )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(target_chunk_size / batch_size)
     chunk_size = batches_per_chunk * batch_size
@@ -1166,7 +1173,12 @@ def _make_xbgpu(
                 xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 # TODO: NGC-1222 Update xbgpu.mem and xbgpu.gpus[0].mem
-                beam_size = batches_per_chunk * acv.n_jones_per_heap * COMPLEX
+                beam_size = (
+                    batches_per_chunk
+                    * stream.n_chans_per_substream
+                    * stream.spectra_per_heap
+                    * COMPLEX
+                )
                 xbgpu.mem += _mb(beam_size * 2)  # Magic number default for xbgpu
 
         first_dig = acv.sources(0)[0]
@@ -1186,8 +1198,8 @@ def _make_xbgpu(
                 str(acv.n_chans_per_substream),
                 "--samples-between-spectra",
                 str(acv.n_samples_between_spectra),
-                "--jones-per-heap",
-                str(acv.n_jones_per_heap),
+                "--jones-per-batch",
+                str(acv.n_jones_per_batch),
                 "--heaps-per-fengine-per-chunk",
                 str(batches_per_chunk),
                 "--channel-offset-value",
