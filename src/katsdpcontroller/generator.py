@@ -724,6 +724,7 @@ def _make_fgpu(
                 "channels": stream.n_chans,
                 "taps": stream.pfb_taps,
                 "w_cutoff": stream.w_cutoff,
+                "jones_per_batch": stream.n_jones_per_batch,
                 "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
             }
             if stream.narrowband is not None:
@@ -1102,7 +1103,7 @@ def _make_xbgpu(
         * acv.bits_per_sample
         // 8
     )
-    target_chunk_size = 16 * 1024**2
+    target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(target_chunk_size / batch_size)
     chunk_size = batches_per_chunk * batch_size
     rx_reorder_tol = 2**29  # Default of --rx-reorder-tol option
@@ -1159,8 +1160,11 @@ def _make_xbgpu(
                     // 8
                     * COMPLEX
                 )
-                # intermediate accumulators (* 2 because they're 64-bit not 32-bit)
-                mid_vis_size = batches_per_chunk * vis_size * 2
+                # intermediate accumulators (* 2 because they're 64-bit not 32-bit).
+                # The code in correlation.py adjusts the number of accumulators
+                # in a way that keeps them to roughly 100MB, but there is always at
+                # least 1 and that could be larger.
+                mid_vis_size = max(100 * 1024 * 1024, vis_size * 2)
                 xbgpu.mem += _mb(vis_size * 5)  # Magic number is default in XSend class
                 xbgpu.gpus[0].mem += _mb(2 * vis_size + mid_vis_size)
                 # Minimum capability as a function of bits-per-sample, based on
@@ -1194,8 +1198,8 @@ def _make_xbgpu(
                 str(acv.n_chans_per_substream),
                 "--samples-between-spectra",
                 str(acv.n_samples_between_spectra),
-                "--spectra-per-heap",
-                str(acv.n_spectra_per_heap),
+                "--jones-per-batch",
+                str(acv.n_jones_per_batch),
                 "--heaps-per-fengine-per-chunk",
                 str(batches_per_chunk),
                 "--channel-offset-value",
