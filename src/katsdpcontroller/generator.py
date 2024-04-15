@@ -1107,6 +1107,7 @@ def _make_xbgpu(
     batches_per_chunk = math.ceil(target_chunk_size / batch_size)
     chunk_size = batches_per_chunk * batch_size
     rx_reorder_tol = 2**29  # Default of --rx-reorder-tol option
+    n_tx_items = 2  # Magic number default for xbgpu
     chunk_ticks = acv.n_samples_between_spectra * acv.n_spectra_per_heap * batches_per_chunk
     max_active_chunks = math.ceil(rx_reorder_tol / chunk_ticks) + 1  # Based on calc in xbgpu
     free_chunks = max_active_chunks + 8  # Magic number is from xbgpu
@@ -1146,10 +1147,11 @@ def _make_xbgpu(
             sum(stream.data_rate() for stream in streams) / n_engines
         )
         xbgpu.gpus = [scheduler.GPURequest()]
-        xbgpu.gpus[0].compute = (
-            0.15 * bw_scale
-        )  # TODO: NGC-1222 update depending on number and type of streams
         xbgpu.gpus[0].mem = 300 + _mb(3 * chunk_size)
+        # This memory is independent of the number of beams, but is needed
+        # only if there is at least one beam. So set it to 0 here then
+        # update it if we see a beam.
+        rand_state_size = 0
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 # Compute how much memory to provide for output
@@ -1166,20 +1168,23 @@ def _make_xbgpu(
                 # least 1 and that could be larger.
                 mid_vis_size = max(100 * 1024 * 1024, vis_size * 2)
                 xbgpu.mem += _mb(vis_size * 5)  # Magic number is default in XSend class
-                xbgpu.gpus[0].mem += _mb(2 * vis_size + mid_vis_size)
+                xbgpu.gpus[0].compute += 0.15 * bw_scale
+                xbgpu.gpus[0].mem += _mb(n_tx_items * vis_size + mid_vis_size)
                 # Minimum capability as a function of bits-per-sample, based on
                 # tensor_core_correlation_kernel.mako from katgpucbf.xbgpu.
                 min_compute_capability = {4: (7, 3), 8: (7, 2), 16: (7, 0)}
                 xbgpu.gpus[0].min_compute_capability = min_compute_capability[acv.bits_per_sample]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-                # TODO: NGC-1222 Update xbgpu.mem and xbgpu.gpus[0].mem
-                beam_size = (
-                    batches_per_chunk
-                    * stream.n_chans_per_substream
-                    * stream.spectra_per_heap
-                    * COMPLEX
+                elements = (
+                    batches_per_chunk * stream.n_chans_per_substream * stream.spectra_per_heap
                 )
-                xbgpu.mem += _mb(beam_size * 2)  # Magic number default for xbgpu
+                beam_size = elements * COMPLEX
+                rand_state_size = elements * 48  # 48 is sizeof(curandStateXORWOW_t)
+                xbgpu.mem += _mb(n_tx_items * beam_size)
+                # Allow 128 single-pol beams + 1 baseline-correlation-products for 80 antennas.
+                xbgpu.gpus[0].compute += 0.125 / n_inputs * bw_scale
+                xbgpu.gpus[0].mem += _mb(n_tx_items * beam_size)
+        xbgpu.gpus[0].mem += _mb(rand_state_size)
 
         first_dig = acv.sources(0)[0]
         heap_time = acv.n_samples_between_spectra / acv.adc_sample_rate * acv.n_spectra_per_heap
