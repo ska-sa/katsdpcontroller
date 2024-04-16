@@ -452,7 +452,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 f"Cannot issue request {req} to node {self.name} without a katcp connection"
             )
         log_args = args
-        # Don't bother trimming if it won't be logged anyway
+        # Limit the number of arguments we report to avoid spamming the logs
+        # with huge messages. But don't bother trimming if it won't be logged
+        # anyway.
         if self.logger.isEnabledFor(log_level):
             max_args = 20
             if len(args) > max_args:
