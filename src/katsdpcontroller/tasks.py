@@ -441,12 +441,18 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             raise FailReply(
                 f"Cannot issue request {req} to node {self.name} without a katcp connection"
             )
+        log_args = args
+        # Don't bother trimming if it won't be logged anyway
+        if self.logger.isEnabledFor(log_level):
+            max_args = 20
+            if len(args) > max_args:
+                log_args = tuple(args[:max_args]) + ("...",)
         if timeout is None:
             self.logger.log(
                 log_level,
                 "Issuing request %s %s to node %s (no timeout)",
                 req,
-                args,
+                log_args,
                 self.name,
             )
         else:
@@ -454,7 +460,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 log_level,
                 "Issuing request %s %s to node %s (timeout %gs)",
                 req,
-                args,
+                log_args,
                 self.name,
                 timeout,
             )
@@ -462,7 +468,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             async with async_timeout.timeout(timeout):
                 await self.katcp_connection.wait_connected()
                 reply, informs = await self.katcp_connection.request(req, *args)
-            self.logger.log(log_level, "Request %s %s to node %s successful", req, args, self.name)
+            self.logger.log(
+                log_level, "Request %s %s to node %s successful", req, log_args, self.name
+            )
             return (reply, informs)
         except (FailReply, InvalidReply, OSError, asyncio.TimeoutError) as error:
             if isinstance(error, asyncio.TimeoutError):
