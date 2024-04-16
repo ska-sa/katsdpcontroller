@@ -334,6 +334,16 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
+class _ElidedArgs:
+    """Reports request arguments elided from a log message."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __repr__(self) -> str:
+        return f"[{self.n} more arguments omitted]"
+
+
 class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
     """Augments task classes with functionality specific to subarray products.
 
@@ -446,7 +456,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.logger.isEnabledFor(log_level):
             max_args = 20
             if len(args) > max_args:
-                log_args = tuple(args[:max_args]) + ("...",)
+                log_args = tuple(args[:max_args]) + (_ElidedArgs(len(args) - max_args),)
         if timeout is None:
             self.logger.log(
                 log_level,
