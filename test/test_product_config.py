@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -1494,98 +1494,6 @@ def config() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def config_v2() -> Dict[str, Any]:
-    return {
-        "version": "2.6",
-        "inputs": {
-            "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
-            "i0_antenna_channelised_voltage": {
-                "type": "cbf.antenna_channelised_voltage",
-                "url": "spead://239.2.1.150+15:7148",
-                "antennas": ["m000", "m001", "s0003", "another_antenna"],
-                "n_chans": 4096,
-                "n_pols": 2,
-                "adc_sample_rate": 1712000000.0,
-                "bandwidth": 856000000.0,
-                "n_samples_between_spectra": 8192,
-                "instrument_dev_name": "i0",
-            },
-            "i0_baseline_correlation_products": {
-                "type": "cbf.baseline_correlation_products",
-                "url": "spead://239.9.3.1+15:7148",
-                "src_streams": ["i0_antenna_channelised_voltage"],
-                "int_time": 0.499,
-                "n_bls": 40,
-                "xeng_out_bits_per_sample": 32,
-                "n_chans_per_substream": 256,
-                "instrument_dev_name": "i0",
-            },
-            "i0_tied_array_channelised_voltage_0x": {
-                "beng_out_bits_per_sample": 8,
-                "instrument_dev_name": "i0",
-                "n_chans_per_substream": 256,
-                "simulate": False,
-                "spectra_per_heap": 256,
-                "src_streams": ["i0_antenna_channelised_voltage"],
-                "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.30+15:7148",
-            },
-            "i0_tied_array_channelised_voltage_0y": {
-                "beng_out_bits_per_sample": 8,
-                "instrument_dev_name": "i0",
-                "n_chans_per_substream": 256,
-                "simulate": False,
-                "spectra_per_heap": 256,
-                "src_streams": ["i0_antenna_channelised_voltage"],
-                "type": "cbf.tied_array_channelised_voltage",
-                "url": "spead://239.9.3.46+7:7148",
-            },
-        },
-        "outputs": {
-            "l0": {
-                "type": "sdp.vis",
-                "src_streams": ["i0_baseline_correlation_products"],
-                "output_int_time": 4.0,
-                "output_channels": [0, 4096],
-                "continuum_factor": 1,
-                "archive": True,
-            },
-            "beamformer_engineering": {
-                "type": "sdp.beamformer_engineering",
-                "src_streams": [
-                    "i0_tied_array_channelised_voltage_0x",
-                    "i0_tied_array_channelised_voltage_0y",
-                ],
-                "output_channels": [0, 4096],
-                "store": "ssd",
-            },
-            "cal": {"type": "sdp.cal", "src_streams": ["l0"]},
-            "sdp_l1_flags": {
-                "type": "sdp.flags",
-                "src_streams": ["l0"],
-                "calibration": ["cal"],
-                "archive": True,
-            },
-            "continuum_image": {
-                "type": "sdp.continuum_image",
-                "src_streams": ["sdp_l1_flags"],
-                "uvblavg_parameters": {},
-                "mfimage_parameters": {},
-                "max_realtime": 10000.0,
-                "min_time": 20 * 60,
-            },
-            "spectral_image": {
-                "type": "sdp.spectral_image",
-                "src_streams": ["sdp_l1_flags", "continuum_image"],
-                "output_channels": [100, 4000],
-                "min_time": 3600.0,
-            },
-        },
-        "config": {},
-    }
-
-
-@pytest.fixture
 def config_sim() -> Dict[str, Any]:
     return {
         "version": "3.5",
@@ -1623,12 +1531,6 @@ class TestValidate:
 
     def test_good(self, config: Dict[str, Any]) -> None:
         product_config._validate(config)
-
-    def test_good_v2(self, config_v2: Dict[str, Any]) -> None:
-        product_config._validate(config_v2)
-
-    def test_good_sim(self, config_v2: Dict[str, Any]) -> None:
-        product_config._validate(config_v2)
 
     def test_bad_version(self, config: Dict[str, Any]) -> None:
         config["version"] = "1.10"
@@ -1689,57 +1591,12 @@ class TestValidate:
         with pytest.raises(ValueError, match="cam.http stream is required"):
             product_config._validate(config)
 
-    def test_calibration_does_not_exist(self, config_v2: Dict[str, Any]) -> None:
-        config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["bad"]
-        with pytest.raises(ValueError, match="does not exist"):
-            product_config._validate(config_v2)
-
-    def test_calibration_wrong_type(self, config_v2: Dict[str, Any]) -> None:
-        config_v2["outputs"]["sdp_l1_flags"]["calibration"] = ["l0"]
-        with pytest.raises(ValueError, match="has wrong type"):
-            product_config._validate(config_v2)
-
-    def test_cal_models(self, config_v2: Dict[str, Any]) -> None:
-        config_v2["outputs"]["cal"]["models"] = {"foo": "bar"}
-        with pytest.raises(ValueError, match="no longer supports models"):
-            product_config._validate(config_v2)
-
-    def test_simulate_v2(self, config_v2: Dict[str, Any]) -> None:
-        config_v2["inputs"]["i0_baseline_correlation_products"]["simulate"] = {}
-        with pytest.raises(ValueError, match="simulation is not supported"):
-            product_config._validate(config_v2)
-
 
 class TestUpgrade:
     """Test :func:`~katsdpcontroller.product_config._upgrade`."""
 
-    def test_simple(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
-        upgraded = product_config._upgrade(config_v2)
-        # Uncomment to debug differences
-        # import json
-        # with open('actual.json', 'w') as f:
-        #     json.dump(upgraded, f, indent=2, sort_keys=True)
-        # with open('expected.json', 'w') as f:
-        #     json.dump(config, f, indent=2, sort_keys=True)
-        assert upgraded == config
-
     def test_upgrade_v3(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
-        assert upgraded == config
-
-    def test_few_antennas(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
-        del config_v2["inputs"]["i0_antenna_channelised_voltage"]["antennas"][2:]
-        upgraded = product_config._upgrade(config_v2)
-        del config["inputs"]["i0_antenna_channelised_voltage"]["antennas"][2:]
-        del config["outputs"]["cal"]
-        del config["outputs"]["sdp_l1_flags"]
-        del config["outputs"]["continuum_image"]
-        del config["outputs"]["spectral_image"]
-        assert upgraded == config
-
-    def test_unknown_input(self, config: Dict[str, Any], config_v2: Dict[str, Any]) -> None:
-        config_v2["inputs"]["xyz"] = {"type": "custom", "url": "http://test.invalid/"}
-        upgraded = product_config._upgrade(config_v2)
         assert upgraded == config
 
 
@@ -1756,8 +1613,7 @@ class TestConfiguration:
 
     @pytest.fixture(autouse=True)
     def client(self, mocker) -> fake_katportalclient.KATPortalClient:
-        # Create dummy sensors. Some deliberately have different values to
-        # config_v2 to ensure that the changes are picked up.
+        # Create dummy sensors.
         client = fake_katportalclient.KATPortalClient(
             components={"cbf": "cbf_1", "sub": "subarray_1"},
             sensors={

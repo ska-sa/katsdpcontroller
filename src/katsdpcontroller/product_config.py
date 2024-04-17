@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -46,7 +46,6 @@ import katportalclient
 import networkx
 import yarl
 from katsdptelstate.endpoint import endpoint_list_parser
-from packaging.version import Version
 
 from . import defaults, schemas
 
@@ -1948,13 +1947,6 @@ def _validate(config):
     constraints that are needed for :func:`_upgrade` and
     :meth:`Configuration.from_config` to function without breaking.
 
-    .. note::
-
-       Some pre-3.0 configurations that would have been rejected in earlier
-       versions will now pass validation. This occurs where certain information
-       provided in those configurations is discarded during the migration to
-       3.x.
-
     Raises
     ------
     jsonschema.ValidationError
@@ -1963,7 +1955,6 @@ def _validate(config):
         if semantic constraints are violated
     """
     schemas.PRODUCT_CONFIG.validate(config)
-    version = Version(config["version"])
     inputs = config.get("inputs", {})
     outputs = config.get("outputs", {})
     for name, stream in itertools.chain(inputs.items(), outputs.items()):
@@ -1985,10 +1976,6 @@ def _validate(config):
 
     have_cam_http = False
     for name, stream in inputs.items():
-        # It's not possible to convert 2.x simulations to 3.0 because we don't
-        # know the band.
-        if stream.get("simulate", False) is not False:
-            raise ValueError(f'Version {config["version"]} with simulation is not supported')
         if stream["type"] == "cam.http":
             if have_cam_http:
                 raise ValueError("Cannot have more than one cam.http stream")
@@ -2007,23 +1994,6 @@ def _validate(config):
             # Names of inputs and outputs must be disjoint
             if name in inputs:
                 raise ValueError("cannot be both an input and an output")
-
-            if output["type"] == "sdp.cal":
-                if output.get("models", {}):
-                    raise ValueError("sdp.cal output type no longer supports models")
-
-            if output["type"] == "sdp.flags":
-                if version < Version("3.0"):
-                    calibration = output["calibration"][0]
-                    if calibration not in outputs:
-                        raise ValueError(f"calibration ({calibration}) does not exist")
-                    elif outputs[calibration]["type"] != "sdp.cal":
-                        raise ValueError(
-                            "calibration ({}) has wrong type {}".format(
-                                calibration, outputs[calibration]["type"]
-                            )
-                        )
-
         except ValueError as error:
             raise ValueError(f"{name}: {error}") from error
 
@@ -2098,57 +2068,6 @@ def _upgrade(config):
     config = copy.deepcopy(config)
     config.setdefault("inputs", {})
     config.setdefault("outputs", {})
-    # Update to 3.0
-    if Version(config["version"]) < Version("3.0"):
-        # Transfer only recognised stream types and parameters from inputs
-        orig_inputs = config["inputs"]
-        config["inputs"] = {}
-        for name, stream in orig_inputs.items():
-            copy_keys = {"type", "url", "src_streams"}
-            if stream["type"] == "cbf.antenna_channelised_voltage":
-                copy_keys |= {"antennas", "instrument_dev_name"}
-            elif stream["type"] == "cbf.baseline_correlation_products":
-                copy_keys |= {"instrument_dev_name"}
-            elif stream["type"] == "cbf.tied_array_channelised_voltage":
-                copy_keys |= {"instrument_dev_name"}
-            elif stream["type"] == "cam.http":
-                pass
-            else:
-                assert stream["type"] not in STREAM_CLASSES
-                # The next line is actually covered, but due to
-                # https://bugs.python.org/issue2506 is not detected.
-                continue  # pragma: nocover
-            new_stream = {}
-            for key in copy_keys:
-                if key in stream:
-                    new_stream[key] = stream[key]
-            config["inputs"][name] = new_stream
-
-        # Remove calibration and imaging if less than 4 antennas
-        to_remove = []
-        req_ants = {"sdp.cal", "sdp.flags", "sdp.continuum_image", "sdp.spectral_image"}
-        for name, output in config["outputs"].items():
-            if output["type"] in req_ants:
-                src = name
-                # Follow the chain to find the antenna-channelised-voltage stream
-                while src in config["outputs"]:
-                    src = config["outputs"][src]["src_streams"][0]
-                while "antennas" not in config["inputs"][src]:
-                    src = config["inputs"][src]["src_streams"][0]
-                n_antennas = len(config["inputs"][src]["antennas"])
-                if n_antennas < 4:
-                    to_remove.append(name)
-        for name in to_remove:
-            del config["outputs"][name]
-
-        # Convert sdp.flags.calibration to src_stream
-        for name, output in config["outputs"].items():
-            if output["type"] == "sdp.flags":
-                output["src_streams"].append(output["calibration"][0])
-                del output["calibration"]
-
-        config["version"] = "3.0"
-
     # Upgrade to latest 3.x
     config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
 
