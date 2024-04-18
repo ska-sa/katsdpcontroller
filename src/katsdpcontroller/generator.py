@@ -395,6 +395,7 @@ def _make_dsim(
         "--prometheus-port",
         "{ports[prometheus]}",
     ]
+    dsim.sensor_renames["sync-time"] = [f"{stream.name}.sync-time" for stream in streams]
     # Allow dsim task to set a realtime scheduling priority itself
     dsim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "rtprio=1"}]
     if configuration.options.develop.less_resources:
