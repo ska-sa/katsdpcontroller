@@ -27,7 +27,7 @@ import katportalclient
 import pytest
 import yarl
 
-from katsdpcontroller import defaults, product_config
+from katsdpcontroller import defaults, product_config, schemas
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -286,6 +286,7 @@ class TestDigBasebandVoltageStream:
         return {
             "type": "sim.dig.baseband_voltage",
             "url": "spead://239.0.0.0+7:7148",
+            "sync_epoch": 1234567890.5,
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "band": "l",
@@ -295,6 +296,7 @@ class TestDigBasebandVoltageStream:
     def test_from_config(self, config: Dict[str, Any]) -> None:
         dig = DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.url == yarl.URL(config["url"])
+        assert dig.sync_epoch == config["sync_epoch"]
         assert dig.adc_sample_rate == config["adc_sample_rate"]
         assert dig.centre_frequency == config["centre_frequency"]
         assert dig.band == config["band"]
@@ -310,6 +312,7 @@ class TestSimDigBasebandVoltageStream:
     def config(self) -> Dict[str, Any]:
         return {
             "type": "sim.dig.baseband_voltage",
+            "sync_epoch": 1234567890.5,
             "adc_sample_rate": 1712000000.0,
             "centre_frequency": 1284000000.0,
             "band": "l",
@@ -318,6 +321,7 @@ class TestSimDigBasebandVoltageStream:
 
     def test_from_config(self, config: Dict[str, Any]) -> None:
         dig = SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
+        assert dig.sync_epoch == config["sync_epoch"]
         assert dig.adc_sample_rate == config["adc_sample_rate"]
         assert dig.centre_frequency == config["centre_frequency"]
         assert dig.band == config["band"]
@@ -383,6 +387,7 @@ def make_dig_baseband_voltage(name: str) -> DigBasebandVoltageStream:
         name,
         [],
         url=yarl.URL(urls[name]),
+        sync_epoch=1234567890.5,
         adc_sample_rate=1712000000.0,
         centre_frequency=1284000000.0,
         band="l",
@@ -394,6 +399,7 @@ def make_sim_dig_baseband_voltage(name: str) -> SimDigBasebandVoltageStream:
     return SimDigBasebandVoltageStream(
         name,
         [],
+        sync_epoch=1234567890.5,
         adc_sample_rate=1712000000.0,
         centre_frequency=1284000000.0,
         band="l",
@@ -1597,6 +1603,7 @@ class TestUpgrade:
 
     def test_upgrade_v3(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
+        config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
         assert upgraded == config
 
 
