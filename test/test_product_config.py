@@ -27,7 +27,7 @@ import katportalclient
 import pytest
 import yarl
 
-from katsdpcontroller import defaults, product_config, schemas
+from katsdpcontroller import defaults, product_config
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -1432,7 +1432,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "3.5",
+        "version": "4.0",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1459,8 +1459,24 @@ def config() -> Dict[str, Any]:
                 "src_streams": ["i0_antenna_channelised_voltage"],
                 "instrument_dev_name": "i0",
             },
+            "m000h": {
+                "type": "dig.baseband_voltage",
+                "url": "spead://239.10.0.0+7:7148",
+                "adc_sample_rate": 1712000000.0,
+                "sync_epoch": 123456789.0,
+                "band": "l",
+                "centre_frequency": 1284000000.0,
+                "antenna": "m000",
+            },
         },
         "outputs": {
+            "m002h": {
+                "type": "sim.dig.baseband_voltage",
+                "adc_sample_rate": 1712000000.0,
+                "band": "l",
+                "centre_frequency": 1284000000.0,
+                "antenna": _M002.description,
+            },
             "l0": {
                 "type": "sdp.vis",
                 "src_streams": ["i0_baseline_correlation_products"],
@@ -1500,9 +1516,17 @@ def config() -> Dict[str, Any]:
 
 
 @pytest.fixture
+def config_v3(config: Dict[str, Any]) -> Dict[str, Any]:
+    v3 = copy.deepcopy(config)
+    v3["version"] = "3.5"
+    del v3["inputs"]["m000h"]["sync_epoch"]
+    return v3
+
+
+@pytest.fixture
 def config_sim() -> Dict[str, Any]:
     return {
-        "version": "3.5",
+        "version": "4.0",
         "outputs": {
             "acv": {
                 "type": "sim.cbf.antenna_channelised_voltage",
@@ -1601,9 +1625,18 @@ class TestValidate:
 class TestUpgrade:
     """Test :func:`~katsdpcontroller.product_config._upgrade`."""
 
-    def test_upgrade_v3(self, config: Dict[str, Any]) -> None:
+    @pytest.fixture(autouse=True)
+    def mock_time(self, mocker) -> None:
+        mocker.patch("time.time", return_value=123456789.5)
+
+    def test_upgrade_v3(self, config_v3: Dict[str, Any], config: Dict[str, Any]) -> None:
+        upgraded = product_config._upgrade(config_v3)
+        config["outputs"]["m002h"]["sync_epoch"] = 123456789.0  # Added by _upgrade
+        assert upgraded == config
+
+    def test_upgrade_v4(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
-        config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
+        config["outputs"]["m002h"]["sync_epoch"] = 123456789.0  # Added by _upgrade
         assert upgraded == config
 
 
