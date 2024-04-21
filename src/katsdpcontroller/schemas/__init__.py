@@ -17,6 +17,7 @@
 """Makes packaged JSON schemas available."""
 
 import json
+from typing import TYPE_CHECKING, Union
 
 import importlib_resources
 import jinja2
@@ -26,12 +27,12 @@ from packaging.version import Version
 _env = jinja2.Environment(loader=jinja2.PackageLoader(__name__, "."))
 
 
-def _normalise_version(version):
+def _normalise_version(version: Union["ComparableVersion", str]) -> "ComparableVersion":
     """Coerce strings to ComparableVersion."""
     return ComparableVersion(version) if isinstance(version, str) else version
 
 
-def _make_validator(schema):
+def _make_validator(schema) -> jsonschema.protocols.Validator:
     """Check a schema document and create a validator from it"""
     validator_cls = jsonschema.validators.validator_for(schema)
     validator_cls.check_schema(schema)
@@ -108,3 +109,15 @@ for entry in importlib_resources.files(__name__).iterdir():
         globals()[name[:-5].upper()] = _make_validator(schema)
     elif name.endswith(".json.j2"):
         globals()[name[:-8].upper()] = MultiVersionValidator(name)
+
+if TYPE_CHECKING:
+    # Let type checkers know about the defined schemas
+    GPUS: jsonschema.protocols.Validator
+    INFINIBAND_DEVICES: jsonschema.protocols.Validator
+    INTERFACES: jsonschema.protocols.Validator
+    NUMA: jsonschema.protocols.Validator
+    PRODUCT_CONFIG: MultiVersionValidator
+    S3_CONFIG: jsonschema.protocols.Validator
+    STREAMS: jsonschema.protocols.Validator
+    SUBSYSTEMS: jsonschema.protocols.Validator
+    VOLUMES: jsonschema.protocols.Validator

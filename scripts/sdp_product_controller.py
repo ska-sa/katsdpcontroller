@@ -72,7 +72,7 @@ def init_dashboard(controller, opts, dashboard_path):
 def parse_s3_config(value: str) -> dict:
     try:
         s3_config = load_json_dict(value)
-        schemas.S3_CONFIG.validate(s3_config)  # type: ignore
+        schemas.S3_CONFIG.validate(s3_config)
     except jsonschema.ValidationError as exc:
         raise ValueError(str(exc))
     return s3_config

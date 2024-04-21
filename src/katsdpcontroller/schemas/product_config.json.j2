@@ -1,5 +1,5 @@
 {% macro versions() %}
-["3.0", "3.1", "3.2", "3.3", "3.4", "3.5"]
+["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -126,13 +126,24 @@
                                 "properties": {
                                     "type": {},
                                     "url": {},
+{% if version >= "4.0" %}
+                                    "sync_epoch": {"type": "number"},
+{% endif %}
                                     "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
                                     "centre_frequency": {"$ref": "#/definitions/positive_number"},
                                     "band": {"type": "string"},
                                     "antenna": {"type": "string"}
                                 },
                                 "additionalProperties": false,
-                                "required": ["adc_sample_rate", "centre_frequency", "band", "antenna"]
+                                "required": [
+{% if version >= "4.0" %}
+                                    "sync_epoch",
+{% endif %}
+                                    "adc_sample_rate",
+                                    "centre_frequency",
+                                    "band",
+                                    "antenna"
+                                ]
                             }
                         },
 {% endif %}
@@ -461,6 +472,9 @@
                             "then": {
                                 "properties": {
                                     "type": {},
+{% if version >= "4.0" %}
+                                    "sync_epoch": {"type": "number"},
+{% endif %}
                                     "adc_sample_rate": {"$ref": "#/definitions/positive_number"},
                                     "centre_frequency": {"$ref": "#/definitions/positive_number"},
                                     "band": {"type": "string"},

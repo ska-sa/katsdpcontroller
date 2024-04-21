@@ -342,7 +342,6 @@ def _make_dsim(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
     streams: Iterable[product_config.SimDigBasebandVoltageStream],
-    sync_time: int,
 ) -> scheduler.LogicalNode:
     """Create the dsim process for a single antenna.
 
@@ -355,6 +354,9 @@ def _make_dsim(
     # sort by reverse of name so that if the streams are, for example,
     # m012h and m012v then m012v comes first.
     streams = sorted(streams, key=lambda stream: stream.name, reverse=True)
+
+    if not all(stream.sync_epoch == streams[0].sync_epoch for stream in streams):
+        raise RuntimeError("inconsistent sync epochs for {streams[0].antenna_name}")
 
     n_endpoints = 8  # Matches MeerKAT digitisers
 
@@ -387,12 +389,13 @@ def _make_dsim(
         "--ttl",
         "4",
         "--sync-time",
-        str(sync_time),
+        str(streams[0].sync_epoch),
         "--katcp-port",
         "{ports[port]}",
         "--prometheus-port",
         "{ports[prometheus]}",
     ]
+    dsim.sensor_renames["sync-time"] = [f"{stream.name}.sync-time" for stream in streams]
     # Allow dsim task to set a realtime scheduling priority itself
     dsim.taskinfo.container.docker.parameters = [{"key": "ulimit", "value": "rtprio=1"}]
     if configuration.options.develop.less_resources:
@@ -462,7 +465,6 @@ def _make_fgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
     streams: Iterable[product_config.GpucbfAntennaChannelisedVoltageStream],
-    sync_time: int,
 ) -> scheduler.LogicalNode:
     # streams needs to be a Sequence (not just an iterable that is consumed
     # once), which `sorted` achieves. Put wideband first for consistency.
@@ -470,6 +472,7 @@ def _make_fgpu(
     ibv = not configuration.options.develop.disable_ibverbs
     n_engines = len(streams[0].src_streams) // 2
     base_name = streams[0].name
+    sync_epoch = streams[0].sources(0)[0].sync_epoch
     fgpu_group = LogicalGroup(f"fgpu.{base_name}")
     g.add_node(fgpu_group)
 
@@ -549,7 +552,7 @@ def _make_fgpu(
                 f"{stream.name}.sync-time",
                 "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
                 "s",
-                default=float(sync_time),
+                default=sync_epoch,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
@@ -640,7 +643,7 @@ def _make_fgpu(
             "adc_sample_rate": stream.adc_sample_rate,
             "n_inputs": len(stream.src_streams),
             "scale_factor_timestamp": stream.adc_sample_rate,
-            "sync_time": float(sync_time),
+            "sync_time": sync_epoch,
             "ticks_between_spectra": stream.n_samples_between_spectra,
             "n_chans": stream.n_chans,
             "bandwidth": stream.bandwidth,
@@ -704,7 +707,7 @@ def _make_fgpu(
                 "--array-size",
                 str(n_engines),
                 "--sync-epoch",
-                str(sync_time),
+                str(srcs[0].sync_epoch),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
@@ -828,7 +831,6 @@ def _make_fgpu(
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    sync_time: int,
     sensors: SensorSet,
     streams: Iterable[GpucbfXBStream],
 ) -> scheduler.LogicalNode:
@@ -848,6 +850,7 @@ def _make_xbgpu(
     acv = streams[0].antenna_channelised_voltage
     n_engines = streams[0].n_substreams
     n_inputs = len(acv.src_streams)
+    sync_epoch = acv.sources(0)[0].sync_epoch
 
     # Input labels list `h` and `v` pols separately so the reshape is to
     # make the process a bit smoother.
@@ -893,7 +896,7 @@ def _make_xbgpu(
                 f"{stream.name}.sync-time",
                 "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
                 "s",
-                default=float(sync_time),
+                default=sync_epoch,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
@@ -1216,7 +1219,7 @@ def _make_xbgpu(
                 "--dst-interface",
                 "{interfaces[gpucbf].name}",
                 "--sync-epoch",
-                str(sync_time),
+                str(sync_epoch),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
@@ -2548,11 +2551,10 @@ def build_logical_graph(
         """Key for dsim streams that should be run in the same process."""
         return (stream.antenna.name, stream.adc_sample_rate)
 
-    sync_time = int(time.time())
     for dig_streams in _groupby(
         configuration.by_class(product_config.SimDigBasebandVoltageStream), key=dsim_key
     ):
-        _make_dsim(g, configuration, dig_streams, sync_time)
+        _make_dsim(g, configuration, dig_streams)
     for stream in configuration.by_class(product_config.SimBaselineCorrelationProductsStream):
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
@@ -2562,7 +2564,7 @@ def build_logical_graph(
     for fgpu_streams in _groupby(
         configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream), key=_fgpu_key
     ):
-        _make_fgpu(g, configuration, fgpu_streams, sync_time)
+        _make_fgpu(g, configuration, fgpu_streams)
     for xbgpu_streams in _groupby(
         configuration.by_class(product_config.GpucbfTiedArrayChannelisedVoltageStream)
         + configuration.by_class(product_config.GpucbfBaselineCorrelationProductsStream),
@@ -2572,7 +2574,6 @@ def build_logical_graph(
             g,
             configuration,
             streams=xbgpu_streams,
-            sync_time=sync_time,
             sensors=sensors,
         )
 

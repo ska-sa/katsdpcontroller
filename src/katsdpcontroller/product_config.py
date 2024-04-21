@@ -22,6 +22,7 @@ import itertools
 import logging
 import math
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
@@ -365,7 +366,7 @@ class CamHttpStream(Stream):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "CamHttpStream":
         assert not src_streams
@@ -391,12 +392,14 @@ class DigBasebandVoltageStreamBase(Stream):
         name: str,
         src_streams: Sequence[Stream],
         *,
+        sync_epoch: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
         antenna_name: str,
     ) -> None:
         super().__init__(name, [])
+        self.sync_epoch = sync_epoch
         self.adc_sample_rate = adc_sample_rate
         self.centre_frequency = centre_frequency
         self.band = band
@@ -420,6 +423,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         src_streams: Sequence[Stream],
         *,
         url: yarl.URL,
+        sync_epoch: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
@@ -428,6 +432,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         super().__init__(
             name,
             [],
+            sync_epoch=sync_epoch,
             adc_sample_rate=adc_sample_rate,
             centre_frequency=centre_frequency,
             band=band,
@@ -441,13 +446,14 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "DigBasebandVoltageStream":
         return cls(
             name,
             src_streams,
             url=yarl.URL(config["url"]),
+            sync_epoch=config["sync_epoch"],
             adc_sample_rate=config["adc_sample_rate"],
             centre_frequency=config["centre_frequency"],
             band=config["band"],
@@ -463,6 +469,7 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         name: str,
         src_streams: Sequence[Stream],
         *,
+        sync_epoch: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
@@ -472,6 +479,7 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         super().__init__(
             name,
             [],
+            sync_epoch=sync_epoch,
             adc_sample_rate=adc_sample_rate,
             centre_frequency=centre_frequency,
             band=band,
@@ -486,12 +494,15 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "SimDigBasebandVoltageStream":
+        # Note: "sync_epoch" is optional in the schema, but _upgrade supplies
+        # a default if it is not specified.
         return cls(
             name,
             src_streams,
+            sync_epoch=config["sync_epoch"],
             adc_sample_rate=config["adc_sample_rate"],
             centre_frequency=config["centre_frequency"],
             band=config["band"],
@@ -574,7 +585,7 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "AntennaChannelisedVoltageStream":
         return cls(
@@ -658,6 +669,10 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                 raise ValueError(
                     "Inconsistent centre frequencies "
                     f"(both {first.centre_frequency} and {src.centre_frequency})"
+                )
+            if src.sync_epoch != first.sync_epoch:
+                raise ValueError(
+                    f"Inconsistent sync epochs (both {first.sync_epoch} and {src.sync_epoch})"
                 )
         decimation_factor = 1
         dig_bandwidth = first.adc_sample_rate / 2
@@ -748,7 +763,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "GpucbfAntennaChannelisedVoltageStream":
         narrowband = config.get("narrowband")
@@ -805,7 +820,7 @@ class SimAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "SimAntennaChannelisedVoltageStream":
         return cls(
@@ -1655,7 +1670,7 @@ class FlagsStream(Stream):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "FlagsStream":
         return cls(
@@ -1713,7 +1728,7 @@ class ContinuumImageStream(ImageStream):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "ContinuumImageStream":
         return cls(
@@ -1763,7 +1778,7 @@ class SpectralImageStream(ImageStream):
         options: Options,
         name: str,
         config: Mapping[str, Any],
-        src_streams: Sequence["Stream"],
+        src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "SpectralImageStream":
         output_channels = config.get("output_channels")
@@ -2068,7 +2083,20 @@ def _upgrade(config):
     config = copy.deepcopy(config)
     config.setdefault("inputs", {})
     config.setdefault("outputs", {})
-    # Upgrade to latest 3.x
+
+    # Fill in sync_epoch for any streams that are missing it. The field doesn't
+    # exist in 3.x, and in 4.x it's optional for sim.dig.baseband_voltage.
+    default_sync_epoch = float(int(time.time()))
+    for stream in config["inputs"].values():
+        if stream["type"] == "dig.baseband_voltage":
+            stream.setdefault("sync_epoch", default_sync_epoch)
+    for stream in config["outputs"].values():
+        if stream["type"] == "sim.dig.baseband_voltage":
+            stream.setdefault("sync_epoch", default_sync_epoch)
+
+    # Upgrade to latest version. The only backwards incompatibility from 3.5 to
+    # 4.0 is that sync_epoch is a new required field for dig.baseband_voltage
+    # streams, which we've dealt with above.
     config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
 
     _validate(config)  # Should never fail if the input was valid

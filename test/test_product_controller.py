@@ -712,7 +712,7 @@ class TestControllerInterface(BaseTestController):
         await assert_sensor_value(
             client,
             "gpucbf_antenna_channelised_voltage.sync-time",
-            123456789.0,  # Just to detect any change in sync time logic in generator.py
+            123456789.0,  # Just to detect any change in sync time logic in product_config.py
         )
         await client.request(
             "delays",

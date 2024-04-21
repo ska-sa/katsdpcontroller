@@ -53,7 +53,7 @@ from katsdpcontroller.master_controller import (
     SingularityProductManager,
     parse_args,
 )
-from katsdpcontroller.schemas import PRODUCT_CONFIG  # type: ignore
+from katsdpcontroller.schemas import PRODUCT_CONFIG
 
 from . import fake_singularity, fake_zk
 from .utils import (
