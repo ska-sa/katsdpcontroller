@@ -392,14 +392,14 @@ class DigBasebandVoltageStreamBase(Stream):
         name: str,
         src_streams: Sequence[Stream],
         *,
-        sync_epoch: float,
+        sync_time: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
         antenna_name: str,
     ) -> None:
         super().__init__(name, [])
-        self.sync_epoch = sync_epoch
+        self.sync_time = sync_time
         self.adc_sample_rate = adc_sample_rate
         self.centre_frequency = centre_frequency
         self.band = band
@@ -423,7 +423,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         src_streams: Sequence[Stream],
         *,
         url: yarl.URL,
-        sync_epoch: float,
+        sync_time: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
@@ -432,7 +432,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         super().__init__(
             name,
             [],
-            sync_epoch=sync_epoch,
+            sync_time=sync_time,
             adc_sample_rate=adc_sample_rate,
             centre_frequency=centre_frequency,
             band=band,
@@ -453,7 +453,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             name,
             src_streams,
             url=yarl.URL(config["url"]),
-            sync_epoch=config["sync_epoch"],
+            sync_time=config["sync_time"],
             adc_sample_rate=config["adc_sample_rate"],
             centre_frequency=config["centre_frequency"],
             band=config["band"],
@@ -469,7 +469,7 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         name: str,
         src_streams: Sequence[Stream],
         *,
-        sync_epoch: float,
+        sync_time: float,
         adc_sample_rate: float,
         centre_frequency: float,
         band: str,
@@ -479,7 +479,7 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         super().__init__(
             name,
             [],
-            sync_epoch=sync_epoch,
+            sync_time=sync_time,
             adc_sample_rate=adc_sample_rate,
             centre_frequency=centre_frequency,
             band=band,
@@ -497,12 +497,12 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "SimDigBasebandVoltageStream":
-        # Note: "sync_epoch" is optional in the schema, but _upgrade supplies
+        # Note: "sync_time" is optional in the schema, but _upgrade supplies
         # a default if it is not specified.
         return cls(
             name,
             src_streams,
-            sync_epoch=config["sync_epoch"],
+            sync_time=config["sync_time"],
             adc_sample_rate=config["adc_sample_rate"],
             centre_frequency=config["centre_frequency"],
             band=config["band"],
@@ -670,9 +670,9 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                     "Inconsistent centre frequencies "
                     f"(both {first.centre_frequency} and {src.centre_frequency})"
                 )
-            if src.sync_epoch != first.sync_epoch:
+            if src.sync_time != first.sync_time:
                 raise ValueError(
-                    f"Inconsistent sync epochs (both {first.sync_epoch} and {src.sync_epoch})"
+                    f"Inconsistent sync times (both {first.sync_time} and {src.sync_time})"
                 )
         decimation_factor = 1
         dig_bandwidth = first.adc_sample_rate / 2
@@ -2084,18 +2084,18 @@ def _upgrade(config):
     config.setdefault("inputs", {})
     config.setdefault("outputs", {})
 
-    # Fill in sync_epoch for any streams that are missing it. The field doesn't
+    # Fill in sync_time for any streams that are missing it. The field doesn't
     # exist in 3.x, and in 4.x it's optional for sim.dig.baseband_voltage.
-    default_sync_epoch = float(int(time.time()))
+    default_sync_time = float(int(time.time()))
     for stream in config["inputs"].values():
         if stream["type"] == "dig.baseband_voltage":
-            stream.setdefault("sync_epoch", default_sync_epoch)
+            stream.setdefault("sync_time", default_sync_time)
     for stream in config["outputs"].values():
         if stream["type"] == "sim.dig.baseband_voltage":
-            stream.setdefault("sync_epoch", default_sync_epoch)
+            stream.setdefault("sync_time", default_sync_time)
 
     # Upgrade to latest version. The only backwards incompatibility from 3.5 to
-    # 4.0 is that sync_epoch is a new required field for dig.baseband_voltage
+    # 4.0 is that sync_time is a new required field for dig.baseband_voltage
     # streams, which we've dealt with above.
     config["version"] = str(max(schemas.PRODUCT_CONFIG.versions))
 
