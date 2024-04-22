@@ -123,7 +123,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._sync_epoch = self.get_command_argument(float, "--sync-epoch")
+        self._sync_time = self.get_command_argument(float, "--sync-time")
         self._adc_sample_rate = self.logical_task.streams[0].adc_sample_rate
         outputs = self.get_command_arguments(_parse_key_val, "--wideband")
         outputs += self.get_command_arguments(_parse_key_val, "--narrowband")
@@ -241,7 +241,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         # sensors immediately.
         self._check_stream_name(stream_name)
         assert len(delays) == self.N_POLS
-        load_time = int((float(start_time) - self._sync_epoch) * self._adc_sample_rate)
+        load_time = int((float(start_time) - self._sync_time) * self._adc_sample_rate)
         for i, delay_str in enumerate(delays):
             delay_args, phase_args = delay_str.split(":")
             delay, delay_rate = (float(x) for x in delay_args.split(","))

@@ -355,8 +355,8 @@ def _make_dsim(
     # m012h and m012v then m012v comes first.
     streams = sorted(streams, key=lambda stream: stream.name, reverse=True)
 
-    if not all(stream.sync_epoch == streams[0].sync_epoch for stream in streams):
-        raise RuntimeError("inconsistent sync epochs for {streams[0].antenna_name}")
+    if not all(stream.sync_time == streams[0].sync_time for stream in streams):
+        raise RuntimeError("inconsistent sync times for {streams[0].antenna_name}")
 
     n_endpoints = 8  # Matches MeerKAT digitisers
 
@@ -389,7 +389,7 @@ def _make_dsim(
         "--ttl",
         "4",
         "--sync-time",
-        str(streams[0].sync_epoch),
+        str(streams[0].sync_time),
         "--katcp-port",
         "{ports[port]}",
         "--prometheus-port",
@@ -472,7 +472,7 @@ def _make_fgpu(
     ibv = not configuration.options.develop.disable_ibverbs
     n_engines = len(streams[0].src_streams) // 2
     base_name = streams[0].name
-    sync_epoch = streams[0].sources(0)[0].sync_epoch
+    sync_time = streams[0].sources(0)[0].sync_time
     fgpu_group = LogicalGroup(f"fgpu.{base_name}")
     g.add_node(fgpu_group)
 
@@ -552,7 +552,7 @@ def _make_fgpu(
                 f"{stream.name}.sync-time",
                 "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
                 "s",
-                default=sync_epoch,
+                default=sync_time,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
@@ -643,7 +643,7 @@ def _make_fgpu(
             "adc_sample_rate": stream.adc_sample_rate,
             "n_inputs": len(stream.src_streams),
             "scale_factor_timestamp": stream.adc_sample_rate,
-            "sync_time": sync_epoch,
+            "sync_time": sync_time,
             "ticks_between_spectra": stream.n_samples_between_spectra,
             "n_chans": stream.n_chans,
             "bandwidth": stream.bandwidth,
@@ -706,8 +706,8 @@ def _make_fgpu(
                 str(i),
                 "--array-size",
                 str(n_engines),
-                "--sync-epoch",
-                str(srcs[0].sync_epoch),
+                "--sync-time",
+                str(srcs[0].sync_time),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
@@ -850,7 +850,7 @@ def _make_xbgpu(
     acv = streams[0].antenna_channelised_voltage
     n_engines = streams[0].n_substreams
     n_inputs = len(acv.src_streams)
-    sync_epoch = acv.sources(0)[0].sync_epoch
+    sync_time = acv.sources(0)[0].sync_time
 
     # Input labels list `h` and `v` pols separately so the reshape is to
     # make the process a bit smoother.
@@ -896,7 +896,7 @@ def _make_xbgpu(
                 f"{stream.name}.sync-time",
                 "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
                 "s",
-                default=sync_epoch,
+                default=sync_time,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
@@ -1218,8 +1218,8 @@ def _make_xbgpu(
                 "{interfaces[gpucbf].name}",
                 "--dst-interface",
                 "{interfaces[gpucbf].name}",
-                "--sync-epoch",
-                str(sync_epoch),
+                "--sync-time",
+                str(sync_time),
                 "--katcp-port",
                 "{ports[port]}",
                 "--prometheus-port",
