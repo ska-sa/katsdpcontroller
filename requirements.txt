@@ -10,7 +10,7 @@ addict==2.3.0
     #   pymesos
 aioconsole==0.7.0
     # via aiomonitor
-aiohttp==3.9.3
+aiohttp==3.9.5
     # via
     #   aiohttp-jinja2
     #   aiohttp-retry
