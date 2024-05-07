@@ -21,7 +21,7 @@ aiohttp-jinja2==1.6
     # via katsdpcontroller (setup.cfg)
 aiohttp-retry==2.8.3
     # via katsdpmodels
-aiokatcp==1.9.0
+aiokatcp==1.10.0
     # via katsdpcontroller (setup.cfg)
 aiomonitor==0.7.0
     # via katsdpservices
@@ -137,6 +137,8 @@ jsonschema==4.21.1
     # via katsdpcontroller (setup.cfg)
 jsonschema-specifications==2023.12.1
     # via jsonschema
+katcp-codec==0.1.0
+    # via aiokatcp
 katdal==0.22
     # via katsdpcontroller (setup.cfg)
 katpoint==0.10.1
