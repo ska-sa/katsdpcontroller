@@ -620,7 +620,7 @@ def _make_fgpu(
             # stream.centre_frequency.
             Sensor(
                 float,
-                f"{stream.name}.center-freq",
+                f"{stream.name}.centre-freq",
                 "The centre frequency of the digitised band",
                 default=stream.narrowband.centre_frequency
                 if stream.narrowband is not None
@@ -644,7 +644,7 @@ def _make_fgpu(
             "ticks_between_spectra": stream.n_samples_between_spectra,
             "n_chans": stream.n_chans,
             "bandwidth": stream.bandwidth,
-            "center_freq": stream.centre_frequency,
+            "centre_freq": stream.centre_frequency,
         }
         for key, value in telstate_data.items():
             init_telstate[(stream.name, key)] = value
