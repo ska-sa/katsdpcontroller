@@ -37,6 +37,7 @@ repos:
         # --strip-extras makes the output usable as a constraint file
         - --strip-extras
         - setup.cfg
+      language_version: python3.8
       files: '^(requirements\.txt|setup\.cfg)$'
     - id: pip-compile
       name: pip-compile test-requirements.in
@@ -44,4 +45,5 @@ repos:
         - --output-file=test-requirements.txt
         - --strip-extras
         - test-requirements.in
+      language_version: python3.8
       files: '^((test-)?requirements\.(in|txt)|setup\.cfg)$'
