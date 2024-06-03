@@ -14,10 +14,11 @@ also recommended for simulating more than a few antennas, and AVX2 is required
 for the continuum imager.
 
 Software-wise, you will need:
-- Python 3 (see [setup.py](../setup.py) for specific minimum version)
+- Python 3 (see [setup.cfg](../setup.cfg) for specific minimum version)
 - docker
-- nvidia-container-runtime
+- nvidia-container-toolkit
 - curl
+- hwloc
 - haproxy (optional)
 - [docker-compose](https://docs.docker.com/compose/)
 - [kattelmod](https://github.com/ska-sa/kattelmod)
@@ -97,11 +98,7 @@ upstream registry, use `skopeo login` rather than `docker login`.
    minute for the services to start up and try again. This step is only
    needed once, unless you destroy the Docker volumes from the sandbox.
 
-4. Run `./grafana-setup.sh`, which will install a plugin needed for one of the
-   Grafana plots. Again, this step is only needed once, unless you destroy
-   the Docker volumes.
-
-5. Run `./minio-setup.py`, which will install some canned models into the MinIO
+4. Run `./minio-setup.py`, which will install some canned models into the MinIO
    server. This is also only needed once, unless you wipe out the `minio-data`
    directory.
 
