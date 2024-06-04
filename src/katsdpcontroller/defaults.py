@@ -50,3 +50,5 @@ XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 PFB_TAPS = 16
 #: Autotune fallback behaviour: "nearest" or "exact"
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
+#: Time (in seconds) to sleep before exiting
+SHUTDOWN_DELAY = 10.0

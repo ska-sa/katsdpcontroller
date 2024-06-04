@@ -61,7 +61,7 @@ from .controller import (
     load_json_dict,
     log_task_exceptions,
 )
-from .defaults import LOCALHOST
+from .defaults import LOCALHOST, SHUTDOWN_DELAY
 from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
@@ -1655,7 +1655,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         graph_dir: Optional[str] = None,
         dashboard_url: Optional[str] = None,
         prometheus_registry: CollectorRegistry = REGISTRY,
-        shutdown_delay: float = 10.0,
+        shutdown_delay: float = SHUTDOWN_DELAY,
     ) -> None:
         self.sched = sched
         self.subarray_product_id = subarray_product_id
@@ -1783,14 +1783,18 @@ class DeviceServer(aiokatcp.DeviceServer):
         str
             Final name of the subarray-product.
         """
+        if configuration.options.shutdown_delay is not None:
+            shutdown_delay = configuration.options.shutdown_delay
+        else:
+            shutdown_delay = self.shutdown_delay
 
         def dead_callback(product):
-            if self.shutdown_delay > 0:
+            if shutdown_delay > 0:
                 logger.info(
                     "Sleeping %.1f seconds to give time for final Prometheus scrapes",
-                    self.shutdown_delay,
+                    shutdown_delay,
                 )
-                asyncio.get_event_loop().call_later(self.shutdown_delay, self.halt, False)
+                asyncio.get_event_loop().call_later(shutdown_delay, self.halt, False)
             else:
                 self.halt(False)
 
