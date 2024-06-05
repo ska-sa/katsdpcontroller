@@ -40,7 +40,7 @@ def _reading_to_float(reading: aiokatcp.Reading) -> float:
     value = reading.value
     if isinstance(value, enum.Enum):
         try:
-            values = list(type(value))  # type: List[enum.Enum]
+            values: List[enum.Enum] = list(type(value))
             idx = values.index(value)
         except ValueError:
             idx = -1

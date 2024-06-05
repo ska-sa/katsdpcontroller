@@ -265,6 +265,7 @@ class Options:
         image_tag: Optional[str] = None,
         image_overrides: Mapping[str, str] = {},
         service_overrides: Mapping[str, ServiceOverride] = {},
+        shutdown_delay: Optional[float] = None,
         interface_mode: bool = False,
     ) -> None:
         if isinstance(develop, bool):
@@ -275,6 +276,7 @@ class Options:
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
         self.service_overrides = dict(service_overrides)
+        self.shutdown_delay = shutdown_delay
         # Command line --interface mode - not set via config dict, but
         # convenient to pass together with other options.
         self.interface_mode = interface_mode
@@ -291,6 +293,7 @@ class Options:
             image_tag=config.get("image_tag"),
             image_overrides=config.get("image_overrides", {}),
             service_overrides=service_overrides,
+            shutdown_delay=config.get("shutdown_delay"),
         )
 
 
