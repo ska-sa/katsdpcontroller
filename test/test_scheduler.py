@@ -287,7 +287,7 @@ class TestPollPorts:
         getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", autospec=True)
         test_address = socket.getaddrinfo("127.0.0.1", port)
         # create a legitimate return future for getaddrinfo
-        legit_future = asyncio.Future()  # type: asyncio.Future[Any]
+        legit_future: asyncio.Future[Any] = asyncio.Future()
         legit_future.set_result(test_address)
 
         # sequential calls to getaddrinfo produce failure and success

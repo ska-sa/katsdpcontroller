@@ -103,7 +103,7 @@ class GPU:
                 # Some of the attributes use Boost.Python's enum, which is
                 # derived from int but which leads to invalid JSON when passed
                 # to json.dumps.
-                if isinstance(value, int) and type(value) != int:
+                if isinstance(value, int) and type(value) is not int:
                     value = str(value)
                 self.device_attributes[str(key)] = value
 
