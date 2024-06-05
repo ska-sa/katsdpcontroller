@@ -1955,17 +1955,19 @@ class Agent:
 
         if logical_task.requests["cores"].amount:
             # For tasks requesting cores we activate NUMA awareness
+            message = "No suitable NUMA node found"
             for numa_node in range(len(self.numa)):
                 try:
                     return self._allocate_numa_node(numa_node, logical_task)
-                except InsufficientResourcesError:
+                except InsufficientResourcesError as exc:
                     logger.debug(
                         "Failed to allocate NUMA node %d on %s",
                         numa_node,
                         self.agent_id,
                         exc_info=True,
                     )
-            raise InsufficientResourcesError("No suitable NUMA node found")
+                    message += f" [{numa_node}: {exc}]"
+            raise InsufficientResourcesError(message)
         return self._allocate_numa_node(None, logical_task)
 
     def can_allocate(self, logical_task):
