@@ -781,13 +781,14 @@ def _make_fgpu(
         src_strs = []
         for src in srcs:
             src_multicast = find_node(g, f"multicast.{src.name}")
+            # depends_init is included purely to ensure sensible ordering
+            # on the dashboard.
             g.add_edge(
                 fgpu,
                 src_multicast,
                 port="spead",
                 depends_resolve=True,
                 depends_init=True,
-                depends_ready=True,
             )
             src_strs.append(f"{{endpoints[multicast.{src.name}_spead]}}")
         fgpu.command.append(",".join(src_strs))
@@ -1289,13 +1290,14 @@ def _make_xbgpu(
 
         # Wire it up to the multicast streams
         src_multicast = find_node(g, f"multicast.{acv.name}")
+        # depends_init is included purely to ensure sensible ordering
+        # on the dashboard.
         g.add_edge(
             xbgpu,
             src_multicast,
             port="spead",
             depends_resolve=True,
             depends_init=True,
-            depends_ready=True,
         )
         for dst_multicast in dst_multicasts:
             g.add_edge(xbgpu, dst_multicast, port="spead", depends_resolve=True)
