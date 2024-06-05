@@ -29,7 +29,7 @@ from dash import Dash, Input, Output, dash_table, dcc, html
 from dash_dangerously_set_inner_html import DangerouslySetInnerHTML
 
 from . import scheduler
-from .tasks import ProductPhysicalTask
+from .tasks import DEPENDS_INIT, ProductPhysicalTask
 
 
 def timestamp_utc(timestamp):
@@ -87,7 +87,10 @@ def _get_tasks(product):
     # To do that, we perform a topological sort, breaking ties by
     # - first, maximising the number of components shared with the previous entry
     # - next, by the name
-    order_graph = scheduler.subgraph(product.physical_graph, scheduler.DEPENDS_READY)
+    order_graph = scheduler.subgraph(
+        product.physical_graph,
+        lambda data: bool(data.get(scheduler.DEPENDS_READY) or data.get(DEPENDS_INIT)),
+    )
     deg = {v: d for v, d in order_graph.out_degree()}
     ready = {v for v, d in deg.items() if d == 0}
     tasks = []
