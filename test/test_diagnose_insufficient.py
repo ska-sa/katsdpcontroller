@@ -27,6 +27,7 @@ from katsdpcontroller.diagnose_insufficient import (
     ResourceGroup,
     TaskInsufficientResourcesError,
     TaskNoAgentError,
+    TaskNoAgentErrorGeneric,
     TaskNoDeviceError,
     diagnose_insufficient,
 )
@@ -265,8 +266,12 @@ class TestDiagnoseInsufficient:
             diagnose_insufficient([self.cpus_agent, self.ports_agent], [self.physical_tasks[0]])
         assert cm.value.task is self.physical_tasks[0]
         # Make sure that it didn't incorrectly return a subclass
-        assert cm.type == TaskNoAgentError
-        assert str(cm.value) == "No agent was found suitable for physical0"
+        assert cm.type is TaskNoAgentErrorGeneric
+        assert str(cm.value) == (
+            "No agent was found suitable for physical0:\n"
+            "  agenthost0: Not enough ports (0 < 3)\n"
+            "  agenthost3: Not enough cpus (1.750 < 8.000)"
+        )
 
     def test_group_insufficient_scalar_resource(self):
         """A group of tasks require more of a scalar resource than available"""
