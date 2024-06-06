@@ -79,11 +79,12 @@ and type of the resource. Each requester has a `requester` attribute
 describing itself, and edges with finite capacity have a `capacity` attribute.
 """
 
+import copy
 import decimal
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Callable, Iterable, List, NoReturn, Optional, Sequence, Tuple, Union
+from typing import Callable, Iterable, List, Mapping, NoReturn, Optional, Sequence, Tuple, Union
 
 import networkx
 
@@ -161,8 +162,29 @@ class TaskNoAgentError(InsufficientResourcesError):
         super().__init__()
         self.task = task
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"No agent was found suitable for {self.task.name}"
+
+
+class TaskNoAgentErrorGeneric(TaskNoAgentError):
+    """No agent was suitable for a task.
+
+    This is used where no more useful subclass of :exc:`TaskNoAgentError`
+    can be identified.
+    """
+
+    def __init__(
+        self, task: PhysicalTask, reasons: Mapping[str, InsufficientResourcesError]
+    ) -> None:
+        super().__init__(task)
+        self.reasons = reasons
+
+    def __str__(self) -> str:
+        parts = [f"No agent was found suitable for {self.task.name}:"]
+        # Sort by hostname
+        for host, exc in sorted(self.reasons.items(), key=lambda item: item[0]):
+            parts.append(f"  {host}: {exc}")
+        return "\n".join(parts)
 
 
 class TaskInsufficientResourcesError(TaskNoAgentError):
@@ -503,8 +525,16 @@ def diagnose_insufficient(
                 _check_no_device(task, agents)
                 # If _check_no_device returns, we don't have a single
                 # bottleneck (a single resource bottleneck would have been
-                # raised from _diagnose_insufficient_filter above).
-                raise TaskNoAgentError(task)
+                # raised from _diagnose_insufficient_filter above). Gather
+                # all the individual reasons
+                reasons = {}
+                for agent in agents:
+                    dup = copy.deepcopy(agent)
+                    try:
+                        dup.allocate(task.logical_node)
+                    except InsufficientResourcesError as exc:
+                        reasons[agent.host] = exc
+                raise TaskNoAgentErrorGeneric(task, reasons)
 
         # Try find a resource bottleneck again, but now with a stronger filter
         _diagnose_insufficient_filter(

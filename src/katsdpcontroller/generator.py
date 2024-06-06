@@ -37,7 +37,6 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    cast,
 )
 
 import addict
@@ -1087,14 +1086,8 @@ def _make_xbgpu(
         for key, value in telstate_data.items():
             init_telstate[(stream.name, key)] = value
 
-    input_rate = (
-        sum(
-            cast(product_config.DigBasebandVoltageStreamBase, dig).adc_sample_rate
-            for dig in acv.src_streams
-        )
-        * acv.bits_per_sample
-        // 8
-    )
+    # Factor of 2 is because samples are complex
+    input_rate = acv.bandwidth * len(acv.src_streams) * acv.bits_per_sample / 8 * 2
     bw_scale = input_rate / (acv.n_substreams * defaults.XBGPU_MAX_SRC_DATA_RATE)
 
     # Compute how much memory to provide for input
