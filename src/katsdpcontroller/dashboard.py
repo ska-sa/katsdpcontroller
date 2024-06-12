@@ -22,7 +22,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import jinja2
 from dash import Dash, Input, Output, dash_table, dcc, html
@@ -33,7 +33,7 @@ from .tasks import DEPENDS_INIT, ProductPhysicalTask
 
 
 def timestamp_utc(timestamp):
-    t = datetime.utcfromtimestamp(timestamp)
+    t = datetime.fromtimestamp(timestamp, timezone.utc)
     return t.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
