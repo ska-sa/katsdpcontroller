@@ -35,7 +35,7 @@ import socket
 import time
 import uuid
 from abc import abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import (
     Any,
     Awaitable,
@@ -290,10 +290,10 @@ class Product:
             self.katcp_conn.close()
 
     async def description(self) -> str:
-        start_dt = datetime.utcfromtimestamp(self.start_time)
-        start_str = start_dt.isoformat(timespec="seconds")
+        start_dt = datetime.fromtimestamp(self.start_time, timezone.utc)
+        start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         state = (await self.get_state()).name.lower()
-        return f"{state}, started at {start_str}Z"
+        return f"{state}, started at {start_str}"
 
 
 class ProductManagerBase(Generic[_P]):
@@ -850,9 +850,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             if old_id == current_id:
                 deploy["id"] = current_id
                 if deploy == old_deploy:
-                    timestamp = datetime.utcfromtimestamp(stat.modified / 1000.0)
-                    timestamp_str = timestamp.isoformat(timespec="seconds")
-                    logger.info("Reusing deploy ID %s, created at %sZ", current_id, timestamp_str)
+                    timestamp = datetime.fromtimestamp(stat.modified / 1000.0, timezone.utc)
+                    timestamp_str = timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    logger.info("Reusing deploy ID %s, created at %s", current_id, timestamp_str)
                     return current_id
         except (aiozk.exc.NoNode, KeyError, TypeError, ValueError):
             logger.debug("Cannot reuse deploy", exc_info=True)
