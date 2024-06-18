@@ -693,11 +693,11 @@ def _make_fgpu(
             + taskset
             + [
                 "fgpu",
-                "--src-interface",
+                "--recv-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-interface",
+                "--send-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-packet-payload",
+                "--send-packet-payload",
                 "8192",
                 "--adc-sample-rate",
                 str(srcs[0].adc_sample_rate),
@@ -742,9 +742,9 @@ def _make_fgpu(
 
         if not configuration.options.develop.less_resources:
             fgpu.command += [
-                "--src-affinity",
+                "--recv-affinity",
                 "{cores[src]}",
-                "--dst-affinity",
+                "--send-affinity",
                 "{cores[dst]}",
             ]
         fgpu.capabilities.append("SYS_NICE")  # For schedrr
@@ -752,16 +752,16 @@ def _make_fgpu(
             # Enable cap_net_raw capability for access to raw QPs
             fgpu.capabilities.append("NET_RAW")
             fgpu.command += [
-                "--src-ibv",
-                "--dst-ibv",
+                "--recv-ibv",
+                "--send-ibv",
             ]
             if not configuration.options.develop.less_resources:
                 # Use the core numbers as completion vectors. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
-                    "--src-comp-vector",
+                    "--recv-comp-vector",
                     "{cores[src]}",
-                    "--dst-comp-vector",
+                    "--send-comp-vector",
                     "{cores[dst]}",
                 ]
         fgpu.command += streams[0].command_line_extra
@@ -1208,9 +1208,9 @@ def _make_xbgpu(
                 str(i * acv.n_chans_per_substream),
                 "--sample-bits",
                 str(acv.bits_per_sample),
-                "--src-interface",
+                "--recv-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-interface",
+                "--send-interface",
                 "{interfaces[gpucbf].name}",
                 "--sync-time",
                 str(sync_time),
@@ -1251,22 +1251,22 @@ def _make_xbgpu(
                 ]
 
         if not configuration.options.develop.less_resources:
-            xbgpu.command += ["--src-affinity", "{cores[src]}", "--dst-affinity", "{cores[dst]}"]
+            xbgpu.command += ["--recv-affinity", "{cores[src]}", "--send-affinity", "{cores[dst]}"]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             xbgpu.capabilities.append("NET_RAW")
             xbgpu.command += [
-                "--src-ibv",
-                "--dst-ibv",
+                "--recv-ibv",
+                "--send-ibv",
             ]
             if not configuration.options.develop.less_resources:
                 # Use the core number as completion vector. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 xbgpu.command += [
-                    "--src-comp-vector",
+                    "--recv-comp-vector",
                     "{cores[src]}",
-                    "--dst-comp-vector",
+                    "--send-comp-vector",
                     "{cores[dst]}",
                 ]
         xbgpu.command += streams[0].command_line_extra
