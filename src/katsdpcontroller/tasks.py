@@ -317,18 +317,30 @@ class CaptureBlockStateObserver:
 
 
 class DeviceStatusObserver:
-    """Watches a device-status sensor from a child, and reports when it is in error."""
+    """Watches a device-status sensor from a child, and reports when it is in error.
+
+    It also provides the facility to wait until it is nominal.
+    """
 
     def __init__(self, sensor, task):
         self.sensor = sensor
         self.task = task
+        self._nominal_event = asyncio.Event()
         sensor.attach(self)
         # Arrange to observe the initial value
         asyncio.get_event_loop().call_soon(self, sensor, sensor.reading)
 
     def __call__(self, sensor, reading):
+        if reading.status == Sensor.Status.NOMINAL:
+            self._nominal_event.set()
+        else:
+            self._nominal_event.clear()
         if reading.status == Sensor.Status.ERROR:
             self.task.subarray_product.bad_device_status(self.task)
+
+    async def wait_nominal(self):
+        """Wait until the sensor has status NOMINAL."""
+        await self._nominal_event.wait()
 
     def close(self):
         self.sensor.detach(self)
@@ -545,6 +557,11 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
+            if self.device_status_observer is not None:
+                self.logger.info("Waiting for device status on %s to become nominal", self.name)
+                await self.device_status_observer.wait_nominal()
+                self.logger.info("Device status on %s is nominal", self.name)
+
         return True
 
     def mark_suspect(self):

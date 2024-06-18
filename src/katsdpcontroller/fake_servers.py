@@ -16,6 +16,7 @@
 
 """Katcp device servers that emulate various container images."""
 
+import asyncio
 import json
 import numbers
 from typing import Dict, Optional, Tuple
@@ -40,27 +41,33 @@ def _parse_key_val(value: str) -> Dict[str, str]:
 
 
 def _add_device_status_sensor(sensors: SensorSet) -> None:
-    sensors.add(
-        Sensor(
-            DeviceStatus,
-            "device-status",
-            "Overall engine health",
-            default=DeviceStatus.DEGRADED,
-            initial_status=Sensor.Status.WARN,
-        )
+    """Add a device-status sensor.
+
+    It is initially set to DeviceStatus.DEGRADED, but after a short
+    delay will change to DeviceStatus.OK. This simulates the startup
+    process for fgpu/xbgpu, which only become OK after receiving some data.
+    """
+    sensor = Sensor(
+        DeviceStatus,
+        "device-status",
+        "Overall engine health",
+        default=DeviceStatus.DEGRADED,
+        initial_status=Sensor.Status.WARN,
     )
+    sensors.add(sensor)
+    asyncio.get_running_loop().call_later(0.5, sensor.set_value, DeviceStatus.OK)
 
 
 def _add_rx_device_status_sensor(sensors: SensorSet, description: str) -> None:
-    sensors.add(
-        Sensor(
-            DeviceStatus,
-            "rx.device-status",
-            description,
-            default=DeviceStatus.DEGRADED,
-            initial_status=Sensor.Status.WARN,
-        )
+    sensor = Sensor(
+        DeviceStatus,
+        "rx.device-status",
+        description,
+        default=DeviceStatus.DEGRADED,
+        initial_status=Sensor.Status.WARN,
     )
+    sensors.add(sensor)
+    asyncio.get_running_loop().call_later(0.5, sensor.set_value, DeviceStatus.OK)
 
 
 def _add_time_sync_sensors(sensors: SensorSet) -> None:
