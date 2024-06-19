@@ -661,7 +661,7 @@ def _make_fgpu(
         fgpu.mem = 1700  # Actual use is currently around 1.6GB when using narrowband
         if not configuration.options.develop.less_resources:
             fgpu.cpus = 3
-            fgpu.cores = ["src", "dst", "python"]
+            fgpu.cores = ["recv", "send", "python"]
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[python]}"]
         else:
@@ -1120,7 +1120,7 @@ def _make_xbgpu(
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
-            xbgpu.cores = ["src", "dst"]
+            xbgpu.cores = ["recv", "send"]
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[send]}"]
         else:
