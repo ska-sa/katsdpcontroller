@@ -743,9 +743,9 @@ def _make_fgpu(
         if not configuration.options.develop.less_resources:
             fgpu.command += [
                 "--recv-affinity",
-                "{cores[src]}",
+                "{cores[recv]}",
                 "--send-affinity",
-                "{cores[dst]}",
+                "{cores[send]}",
             ]
         fgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
@@ -760,9 +760,9 @@ def _make_fgpu(
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
                     "--recv-comp-vector",
-                    "{cores[src]}",
+                    "{cores[recv]}",
                     "--send-comp-vector",
-                    "{cores[dst]}",
+                    "{cores[send]}",
                 ]
         fgpu.command += streams[0].command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
@@ -1122,7 +1122,7 @@ def _make_xbgpu(
         if not configuration.options.develop.less_resources:
             xbgpu.cores = ["src", "dst"]
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
-            taskset = ["taskset", "-c", "{cores[dst]}"]
+            taskset = ["taskset", "-c", "{cores[send]}"]
         else:
             taskset = []
         xbgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
@@ -1251,7 +1251,12 @@ def _make_xbgpu(
                 ]
 
         if not configuration.options.develop.less_resources:
-            xbgpu.command += ["--recv-affinity", "{cores[src]}", "--send-affinity", "{cores[dst]}"]
+            xbgpu.command += [
+                "--recv-affinity",
+                "{cores[recv]}",
+                "--send-affinity",
+                "{cores[send]}",
+            ]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
@@ -1265,9 +1270,9 @@ def _make_xbgpu(
                 # multiple instances on a machine will use distinct vectors.
                 xbgpu.command += [
                     "--recv-comp-vector",
-                    "{cores[src]}",
+                    "{cores[recv]}",
                     "--send-comp-vector",
-                    "{cores[dst]}",
+                    "{cores[send]}",
                 ]
         xbgpu.command += streams[0].command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
