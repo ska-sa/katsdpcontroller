@@ -334,6 +334,24 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
+async def wait_status(sensor: Sensor, status: Sensor.Status):
+    """Wait until a sensor has a given status."""
+    if sensor.status == status:
+        return
+
+    future = asyncio.get_running_loop().create_future()
+
+    def observer(sensor, reading):
+        if not future.done() and reading.status == Sensor.Status.NOMINAL:
+            future.set_result(None)
+
+    sensor.attach(observer)
+    try:
+        await future
+    finally:
+        sensor.detach(observer)
+
+
 class _ElidedArgs:
     """Reports request arguments elided from a log message."""
 
@@ -545,6 +563,12 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     # Sleep for a bit to avoid hammering the port if there
                     # is a quick failure, before trying again.
                     await asyncio.sleep(1.0)
+            rx_device_status = self.sdp_controller.sensors.get(prefix + "rx.device-status")
+            if rx_device_status is not None and rx_device_status.status != Sensor.Status.NOMINAL:
+                self.logger.info("Waiting for device status on %s to become nominal", self.name)
+                await wait_status(rx_device_status, Sensor.Status.NOMINAL)
+                self.logger.info("Device status on %s is nominal", self.name)
+
         return True
 
     def mark_suspect(self):
