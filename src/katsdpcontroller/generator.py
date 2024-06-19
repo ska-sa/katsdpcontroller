@@ -661,7 +661,7 @@ def _make_fgpu(
         fgpu.mem = 1700  # Actual use is currently around 1.6GB when using narrowband
         if not configuration.options.develop.less_resources:
             fgpu.cpus = 3
-            fgpu.cores = ["src", "dst", "python"]
+            fgpu.cores = ["recv", "send", "python"]
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[python]}"]
         else:
@@ -693,11 +693,11 @@ def _make_fgpu(
             + taskset
             + [
                 "fgpu",
-                "--src-interface",
+                "--recv-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-interface",
+                "--send-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-packet-payload",
+                "--send-packet-payload",
                 "8192",
                 "--adc-sample-rate",
                 str(srcs[0].adc_sample_rate),
@@ -742,27 +742,27 @@ def _make_fgpu(
 
         if not configuration.options.develop.less_resources:
             fgpu.command += [
-                "--src-affinity",
-                "{cores[src]}",
-                "--dst-affinity",
-                "{cores[dst]}",
+                "--recv-affinity",
+                "{cores[recv]}",
+                "--send-affinity",
+                "{cores[send]}",
             ]
         fgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             fgpu.capabilities.append("NET_RAW")
             fgpu.command += [
-                "--src-ibv",
-                "--dst-ibv",
+                "--recv-ibv",
+                "--send-ibv",
             ]
             if not configuration.options.develop.less_resources:
                 # Use the core numbers as completion vectors. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
-                    "--src-comp-vector",
-                    "{cores[src]}",
-                    "--dst-comp-vector",
-                    "{cores[dst]}",
+                    "--recv-comp-vector",
+                    "{cores[recv]}",
+                    "--send-comp-vector",
+                    "{cores[send]}",
                 ]
         fgpu.command += streams[0].command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
@@ -1120,9 +1120,9 @@ def _make_xbgpu(
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
         xbgpu.mem = 512 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
-            xbgpu.cores = ["src", "dst"]
+            xbgpu.cores = ["recv", "send"]
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
-            taskset = ["taskset", "-c", "{cores[dst]}"]
+            taskset = ["taskset", "-c", "{cores[send]}"]
         else:
             taskset = []
         xbgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
@@ -1208,9 +1208,9 @@ def _make_xbgpu(
                 str(i * acv.n_chans_per_substream),
                 "--sample-bits",
                 str(acv.bits_per_sample),
-                "--src-interface",
+                "--recv-interface",
                 "{interfaces[gpucbf].name}",
-                "--dst-interface",
+                "--send-interface",
                 "{interfaces[gpucbf].name}",
                 "--sync-time",
                 str(sync_time),
@@ -1251,23 +1251,28 @@ def _make_xbgpu(
                 ]
 
         if not configuration.options.develop.less_resources:
-            xbgpu.command += ["--src-affinity", "{cores[src]}", "--dst-affinity", "{cores[dst]}"]
+            xbgpu.command += [
+                "--recv-affinity",
+                "{cores[recv]}",
+                "--send-affinity",
+                "{cores[send]}",
+            ]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
             # Enable cap_net_raw capability for access to raw QPs
             xbgpu.capabilities.append("NET_RAW")
             xbgpu.command += [
-                "--src-ibv",
-                "--dst-ibv",
+                "--recv-ibv",
+                "--send-ibv",
             ]
             if not configuration.options.develop.less_resources:
                 # Use the core number as completion vector. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 xbgpu.command += [
-                    "--src-comp-vector",
-                    "{cores[src]}",
-                    "--dst-comp-vector",
-                    "{cores[dst]}",
+                    "--recv-comp-vector",
+                    "{cores[recv]}",
+                    "--send-comp-vector",
+                    "{cores[send]}",
                 ]
         xbgpu.command += streams[0].command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
