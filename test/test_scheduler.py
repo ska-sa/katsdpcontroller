@@ -18,6 +18,7 @@ import asyncio
 import base64
 import ipaddress
 import logging
+import math
 import socket
 import time
 from collections import Counter
@@ -1248,6 +1249,24 @@ class TestAgent:
         assert agent.gpus[0].resources["mem"].available == 0.0
         assert agent.gpus[1].resources["compute"].available == 0.25
         assert agent.gpus[1].resources["mem"].available == 1024.0
+
+
+class TestLogicalTask:
+    """Tests for :class:`katsdpcontroller.scheduler.LogicalTask`"""
+
+    def test_numa_nodes(self):
+        """Test the :attr:`~katsdpcontroller.scheduler.LogicalTask.numa_nodes` property."""
+        task = scheduler.LogicalTask("task")
+        assert task.numa_nodes == 0.0
+        task.numa_nodes = 0.5
+        assert task.numa_nodes == 0.5
+        with pytest.raises(ValueError):
+            task.numa_nodes = 1.2
+        with pytest.raises(ValueError):
+            task.numa_nodes = -0.1
+        with pytest.raises(ValueError):
+            task.numa_nodes = math.nan
+        assert task.numa_nodes == 0.5  # Must not have been altered by failures
 
 
 class TestPhysicalTask:

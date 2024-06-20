@@ -1606,6 +1606,16 @@ class LogicalTask(LogicalNode, ResourceRequestsContainer):
         self.taskinfo.command.shell = False
         self.physical_factory = PhysicalTask
 
+    @property
+    def numa_nodes(self) -> float:
+        return self._numa_nodes
+
+    @numa_nodes.setter
+    def numa_nodes(self, value: float) -> None:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("numa_nodes must be between 0 and 1")
+        self._numa_nodes = value
+
     def valid_agent(self, agent) -> bool:
         """Checks whether the attributes of an agent are suitable for running
         this task. Subclasses may override this to enforce constraints e.g.,
