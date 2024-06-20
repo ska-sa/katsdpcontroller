@@ -37,7 +37,7 @@ from addict import Dict
 from yarl import URL
 
 from katsdpcontroller import scheduler
-from katsdpcontroller.diagnose_insufficient import TaskInsufficientResourcesError
+from katsdpcontroller.diagnose_insufficient import TaskNoAgentError
 from katsdpcontroller.scheduler import TaskState
 
 from .utils import (
@@ -2259,7 +2259,7 @@ class TestScheduler:
         )
         await asyncio.sleep(30)
         results = await task
-        with pytest.raises(TaskInsufficientResourcesError):
+        with pytest.raises(TaskNoAgentError):
             raise next(iter(results.values()))
         assert fix.task_stats.batch_created == 1
         assert fix.task_stats.batch_started == 1

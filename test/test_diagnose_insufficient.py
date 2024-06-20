@@ -25,10 +25,12 @@ from katsdpcontroller.diagnose_insufficient import (
     InsufficientResource,
     InsufficientResourcesError,
     ResourceGroup,
+    TaskHostMissingError,
     TaskInsufficientResourcesError,
     TaskNoAgentError,
     TaskNoAgentErrorGeneric,
     TaskNoDeviceError,
+    TaskNoValidAgentError,
     diagnose_insufficient,
 )
 
@@ -256,6 +258,23 @@ class TestDiagnoseInsufficient:
         assert cm.value.task == self.physical_tasks[0]
         assert cm.value.requester == InsufficientRequesterGPU(self.physical_tasks[0], 0)
         assert str(cm.value) == "physical0 (GPU request #0) could not be satisfied by any agent"
+
+    def test_task_missing_host(self):
+        """A task requests a host for which no offers were received."""
+        self.logical_tasks[0].host = "spam"
+        with pytest.raises(TaskHostMissingError) as cm:
+            diagnose_insufficient([self.mem_agent], [self.physical_tasks[0]])
+        assert cm.value.task == self.physical_tasks[0]
+        assert str(cm.value) == "Task physical0 needs host spam but no offers were received for it"
+
+    def test_task_no_valid_agents(self):
+        """A task requests a subsystem but there are no agents for it."""
+        self.logical_tasks[0].subsystem = "spam"
+        self.mem_agent.subsystems = {"ham"}
+        with pytest.raises(TaskNoValidAgentError) as cm:
+            diagnose_insufficient([self.mem_agent], [self.physical_tasks[0]])
+        assert cm.value.task == self.physical_tasks[0]
+        assert str(cm.value) == "No valid agent for physical0"
 
     def test_task_no_agent(self):
         """A task does not fit on any agent, but not due to a single reason"""

@@ -166,6 +166,21 @@ class TaskNoAgentError(InsufficientResourcesError):
         return f"No agent was found suitable for {self.task.name}"
 
 
+class TaskHostMissingError(TaskNoAgentError):
+    """A task requested a specific agent host, but no offers were received for it."""
+
+    def __str__(self) -> str:
+        host = self.task.logical_node.host
+        return f"Task {self.task.name} needs host {host} but no offers were received for it"
+
+
+class TaskNoValidAgentError(TaskNoAgentError):
+    """No agent was valid (correct subsystem) for this task."""
+
+    def __str__(self) -> str:
+        return f"No valid agent for {self.task.name}"
+
+
 class TaskNoAgentErrorGeneric(TaskNoAgentError):
     """No agent was suitable for a task.
 
@@ -473,6 +488,20 @@ def _diagnose_insufficient_filter(
         _check_subsets(g)
 
 
+def _check_no_valid_agent(task: PhysicalTask, agents: Sequence[Agent]) -> None:
+    """Check if a task is unrunnable due to there being no compatible agents.
+
+    If so, it raises a :exc:`TaskNoAgentError`. If not, it returns.
+    """
+    logical_task = task.logical_node
+    if logical_task.host is not None:
+        agents = [agent for agent in agents if logical_task.host == agent.host]
+        if not agents:
+            raise TaskHostMissingError(task)
+    if not any(logical_task.valid_agent(agent) for agent in agents):
+        raise TaskNoValidAgentError(task)
+
+
 def _check_no_device(task: PhysicalTask, agents: Sequence[Agent]) -> None:
     """Check if a task is unrunnable due to a missing device.
 
@@ -512,6 +541,12 @@ def diagnose_insufficient(
         # Non-tasks aren't relevant, so filter them out.
         tasks = [node for node in nodes if isinstance(node, PhysicalTask)]
 
+        # Check for a task with no valid agent. This indicates a
+        # misconfiguration rather than the cluster just being too busy.
+        for task in tasks:
+            _check_no_valid_agent(task, agents)
+            _check_no_device(task, agents)
+
         # First use a weak filter. This avoids an error saying that a task
         # requires more than zero of a resource of which zero was available,
         # if the actual problem is that the task has some device requirement
@@ -522,11 +557,10 @@ def diagnose_insufficient(
         # Check for a task that doesn't fit anywhere
         for task in tasks:
             if not any(agent.can_allocate(task.logical_node) for agent in agents):
-                _check_no_device(task, agents)
-                # If _check_no_device returns, we don't have a single
-                # bottleneck (a single resource bottleneck would have been
-                # raised from _diagnose_insufficient_filter above). Gather
-                # all the individual reasons
+                # We don't have a single bottleneck (a single resource
+                # bottleneck would have been raised from
+                # _diagnose_insufficient_filter above). Gather
+                # all the individual reasons.
                 reasons = {}
                 for agent in agents:
                     dup = copy.deepcopy(agent)
