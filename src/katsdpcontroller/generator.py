@@ -631,7 +631,7 @@ def _make_fgpu(
             ),
             Sensor(
                 int,
-                f"{stream.name}-payload-len",
+                f"{stream.name}.payload-len",
                 "The payload size of the F-engine data stream packets",
                 default=GPUCBF_PACKET_PAYLOAD_BYTES,
                 initial_status=Sensor.Status.NOMINAL,
@@ -999,7 +999,7 @@ def _make_xbgpu(
                 ),
                 Sensor(
                     int,
-                    f"{stream.name}-payload-len",
+                    f"{stream.name}.payload-len",
                     "The payload size of the X-engine data stream packets",
                     default=GPUCBF_PACKET_PAYLOAD_BYTES,
                     initial_status=Sensor.Status.NOMINAL,
@@ -1048,7 +1048,7 @@ def _make_xbgpu(
                 ),
                 Sensor(
                     int,
-                    f"{stream.name}-payload-len",
+                    f"{stream.name}.payload-len",
                     "The payload size of the B-engine data stream packets",
                     default=GPUCBF_PACKET_PAYLOAD_BYTES,
                     initial_status=Sensor.Status.NOMINAL,
