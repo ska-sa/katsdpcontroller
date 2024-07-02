@@ -49,7 +49,7 @@ XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16
 #: Default payload size for gpucbf data products. Bigger is better to
-#  minimise the number of packets/second to process.
+#: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
 #: Autotune fallback behaviour: "nearest" or "exact"
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
