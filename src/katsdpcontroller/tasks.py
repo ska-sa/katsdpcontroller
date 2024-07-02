@@ -430,7 +430,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self._interface_sensors[request.network] = Sensor(
                 str,
                 self.name + f".interfaces.{request.network}.name",
-                "Network interface for connection to the '{request.network}' network",
+                f"Network interface for connection to the '{request.network}' network",
             )
         if logical_task.metadata_katcp_sensors:
             # Note: these sensors are added to the subarray product and not self
