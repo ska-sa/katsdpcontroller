@@ -55,7 +55,7 @@ from katsdptelstate.endpoint import Endpoint
 
 from . import defaults, product_config, scheduler
 from .aggregate_sensors import LatestSensor, SumSensor, SyncSensor
-from .defaults import LOCALHOST
+from .defaults import GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
 from .fake_servers import (
     FakeCalDeviceServer,
     FakeFgpuDeviceServer,
@@ -593,7 +593,7 @@ def _make_fgpu(
             Sensor(
                 int,
                 f"{stream.name}.n-chans-per-substream",
-                "Number of channels in each substream for this f-engine stream",
+                "Number of channels in each substream for this F-engine stream",
                 default=stream.n_chans_per_substream,
                 initial_status=Sensor.Status.NOMINAL,
             ),
@@ -627,6 +627,13 @@ def _make_fgpu(
                 default=stream.narrowband.centre_frequency
                 if stream.narrowband is not None
                 else stream.bandwidth / 2,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.payload-len",
+                "The payload size, in bytes, of the F-engine data stream packets",
+                default=GPUCBF_PACKET_PAYLOAD_BYTES,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             data_suspect_sensor,
@@ -698,7 +705,7 @@ def _make_fgpu(
                 "--send-interface",
                 "{interfaces[gpucbf].name}",
                 "--send-packet-payload",
-                "8192",
+                str(GPUCBF_PACKET_PAYLOAD_BYTES),
                 "--adc-sample-rate",
                 str(srcs[0].adc_sample_rate),
                 "--feng-id",
@@ -990,6 +997,13 @@ def _make_xbgpu(
                     default=stream.n_baselines,
                     initial_status=Sensor.Status.NOMINAL,
                 ),
+                Sensor(
+                    int,
+                    f"{stream.name}.payload-len",
+                    "The payload size, in bytes, of the X-engine data stream packets",
+                    default=GPUCBF_PACKET_PAYLOAD_BYTES,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
                 SumSensor(
                     sensors,
                     f"{stream.name}.xeng-clip-cnt",
@@ -1030,6 +1044,13 @@ def _make_xbgpu(
                     f"{stream.name}.source-indices",
                     "The global input indices of the sources summed in this beam",
                     default=f"{source_indices}",
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
+                    f"{stream.name}.payload-len",
+                    "The payload size, in bytes, of the B-engine data stream packets",
+                    default=GPUCBF_PACKET_PAYLOAD_BYTES,
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
@@ -1212,6 +1233,8 @@ def _make_xbgpu(
                 "{interfaces[gpucbf].name}",
                 "--send-interface",
                 "{interfaces[gpucbf].name}",
+                "--send-packet-payload",
+                str(GPUCBF_PACKET_PAYLOAD_BYTES),
                 "--sync-time",
                 str(sync_time),
                 "--katcp-port",
