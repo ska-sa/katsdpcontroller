@@ -429,7 +429,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         for request in self.logical_node.interfaces:
             self._interface_sensors[request.network] = Sensor(
                 str,
-                self.name + f".interfaces.{request.network}.name",
+                f"{self.name}.interfaces.{request.network}.name",
                 f"Network interface for connection to the '{request.network}' network",
             )
         if logical_task.metadata_katcp_sensors:
