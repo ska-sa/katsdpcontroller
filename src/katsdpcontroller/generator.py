@@ -1013,7 +1013,7 @@ def _make_xbgpu(
                 ),
                 SyncSensor(
                     sensors,
-                    f"{stream.name}.xengs-synchronised",
+                    f"{stream.name}.rx.synchronised",
                     "For the latest accumulation, was data present from all F-Engines "
                     "for all X-Engines",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
