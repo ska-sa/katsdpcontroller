@@ -2064,6 +2064,4 @@ class DeviceServer(aiokatcp.DeviceServer):
             )
         if stream is not None and not response:
             raise FailReply(f"Unknown stream {stream!r}")
-        # ctx.informs normally sends a count, but the ICD for ?capture-list
-        # does not include this.
-        ctx.informs(response, send_reply=False)
+        ctx.informs(response)
