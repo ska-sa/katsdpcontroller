@@ -55,3 +55,5 @@ GPUCBF_PACKET_PAYLOAD_BYTES = 8192
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
 #: Time (in seconds) to sleep before exiting
 SHUTDOWN_DELAY = 10.0
+#: Time to wait for rx.device-status sensors to become nominal
+RX_DEVICE_STATUS_TIMEOUT = 30.0
