@@ -589,6 +589,22 @@ class TestControllerInterface(BaseTestController):
         await assert_request_fails(client, "product-configure", SUBARRAY_PRODUCT, CONFIG)
         await client.request("product-deconfigure")
 
+    async def test_configure_bad_rx_device_status(
+        self, client: aiokatcp.Client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Patched implementation of aiokatcp.Sensor.set_value to artificially
+        # prevent rx.device-status sensors from becoming nominal.
+        def sensor_set_value(self, value, status=None, timestamp=None):
+            if self.name == "rx.device-status":
+                status = Sensor.Status.ERROR
+            orig_sensor_set_value(self, value, status, timestamp)
+
+        orig_sensor_set_value = Sensor.set_value
+        monkeypatch.setattr(Sensor, "set_value", sensor_set_value)
+        monkeypatch.setattr("katsdpcontroller.product_controller.RX_DEVICE_STATUS_TIMEOUT", 1.0)
+        with pytest.raises(FailReply, match="Some tasks did not receive good data"):
+            await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+
     async def test_help(self, client: aiokatcp.Client) -> None:
         reply, informs = await client.request("help")
         requests = [inform.arguments[0].decode("utf-8") for inform in informs]

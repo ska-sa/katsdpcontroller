@@ -61,7 +61,7 @@ from .controller import (
     load_json_dict,
     log_task_exceptions,
 )
-from .defaults import LOCALHOST, SHUTDOWN_DELAY
+from .defaults import LOCALHOST, RX_DEVICE_STATUS_TIMEOUT, SHUTDOWN_DELAY
 from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
@@ -808,6 +808,48 @@ class SubarrayProduct:
         if non_critical:
             logger.debug("multi_request: no katcp connection to some nodes: %s", non_critical)
 
+    async def _wait_rx_device_status(self) -> None:
+        """Wait for task rx.device-status sensors to become nominal.
+
+        The wait is limited to RX_DEVICE_STATUS_TIMEOUT seconds. If it times out,
+        a helpful :exc:`.FailReply` is raised.
+        """
+
+        def observer(sensor, reading):
+            if reading.status == Sensor.Status.NOMINAL:
+                task_name = sensor.name.rsplit(".", 2)[0]
+                missing.discard(task_name)
+                if not missing and not future.done():
+                    future.set_result(None)
+
+        sensors = []
+        missing: Set[str] = set()  # Task names we're still waiting for
+        future = asyncio.get_running_loop().create_future()
+        for task in self.physical_graph:
+            if isinstance(task, tasks.ProductPhysicalTaskMixin):
+                sensor = self.sdp_controller.sensors.get(f"{task.name}.rx.device-status")
+                if sensor is not None:
+                    sensors.append(sensor)
+                    sensor.attach(observer)
+                    if sensor.status != Sensor.Status.NOMINAL:
+                        missing.add(task.name)
+        if not sensors:
+            # Nothing to do
+            return
+
+        logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
+        try:
+            await asyncio.wait_for(future, timeout=RX_DEVICE_STATUS_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise FailReply(
+                f"Some tasks did not receive good data within {RX_DEVICE_STATUS_TIMEOUT}s: "
+                + ", ".join(sorted(missing))
+            ) from None
+        finally:
+            for sensor in sensors:
+                sensor.detach(observer)
+        logger.info("All tasks receiving good data")
+
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.
 
@@ -941,6 +983,7 @@ class SubarrayProduct:
                     await telstate.add(
                         "sdp_image_overrides", resolver.image_resolver.overrides, immutable=True
                     )
+                await self._wait_rx_device_status()
             except BaseException as exc:
                 # If there was a problem the graph might be semi-running. Shut it all down.
                 await self._shutdown(force=True)
