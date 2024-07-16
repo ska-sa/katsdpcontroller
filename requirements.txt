@@ -311,7 +311,7 @@ yarl==1.9.4
     # via
     #   aiohttp
     #   katsdpcontroller (setup.cfg)
-zipp==3.17.0
+zipp==3.19.2
     # via
     #   importlib-metadata
     #   importlib-resources
