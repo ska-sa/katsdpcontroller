@@ -828,11 +828,10 @@ class SubarrayProduct:
         for task in self.physical_graph:
             if isinstance(task, tasks.ProductPhysicalTaskMixin):
                 sensor = self.sdp_controller.sensors.get(f"{task.name}.rx.device-status")
-                if sensor is not None:
+                if sensor is not None and sensor.status != Sensor.Status.NOMINAL:
                     sensors.append(sensor)
                     sensor.attach(observer)
-                    if sensor.status != Sensor.Status.NOMINAL:
-                        missing.add(task.name)
+                    missing.add(task.name)
         if not sensors:
             # Nothing to do
             return
