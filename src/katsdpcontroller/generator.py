@@ -48,14 +48,14 @@ import katsdpmodels.fetch.aiohttp
 import katsdptelstate.aio
 import networkx
 import numpy as np
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import Sensor, SensorSampler, SensorSet
 from katsdpmodels.band_mask import BandMask, SpectralWindow
 from katsdpmodels.rfi_mask import RFIMask
 from katsdptelstate.endpoint import Endpoint
 
 from . import defaults, product_config, scheduler
 from .aggregate_sensors import LatestSensor, SumSensor, SyncSensor
-from .defaults import GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
+from .defaults import GPUCBF_MIN_SENSOR_UPDATE_PERIOD, GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
 from .fake_servers import (
     FakeCalDeviceServer,
     FakeFgpuDeviceServer,
@@ -1010,6 +1010,8 @@ def _make_xbgpu(
                     "Number of visibilities that saturated",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.xeng-clip-cnt"),
                     n_children=stream.n_substreams,
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 SyncSensor(
                     sensors,
@@ -1018,6 +1020,8 @@ def _make_xbgpu(
                     "for all X-Engines",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
                     n_children=stream.n_substreams,
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
             ]
             stream_sensors.extend(xstream_sensors)
@@ -1057,8 +1061,11 @@ def _make_xbgpu(
                     sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
+                    # Update this to honour sampling intervals and strategies
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.beng-clip-cnt"),
                     n_children=stream.n_substreams,
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,
@@ -1066,6 +1073,8 @@ def _make_xbgpu(
                     f"{stream.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.quantiser-gain"),
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,
@@ -1073,6 +1082,8 @@ def _make_xbgpu(
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,
@@ -1080,6 +1091,8 @@ def _make_xbgpu(
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(GPUCBF_MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
