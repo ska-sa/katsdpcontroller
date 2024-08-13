@@ -515,6 +515,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     close_action=sensor_proxy.CloseAction.UNREACHABLE,
                     host=self.host,
                     port=self.ports["port"],
+                    notify=self.subarray_product.notify_sensors_changed,
                 )
                 try:
                     await self.katcp_connection.wait_synced()
@@ -630,7 +631,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             self.subarray_product.add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
-            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
+            self.subarray_product.notify_sensors_changed()
 
     def set_state(self, state):
         super().set_state(state)
