@@ -4,7 +4,11 @@
 #
 #    pip-compile --output-file=test-requirements.txt --strip-extras test-requirements.in
 #
-aiohttp==3.9.5
+aiohappyeyeballs==2.3.7
+    # via
+    #   -c requirements.txt
+    #   aiohttp
+aiohttp==3.10.4
     # via
     #   -c requirements.txt
     #   aioresponses
