@@ -742,6 +742,13 @@ def _make_fgpu(
                 output_arg_name = "narrowband"
             else:
                 output_arg_name = "wideband"
+            if stream.dither is not None:
+                if stream.dither == "none":
+                    output_config["dither"] = "false"
+                elif stream.dither == "uniform":
+                    output_config["dither"] = "true"
+                else:
+                    raise ValueError(f"unsupported dither value {stream.dither!r}")
             fgpu.command += [
                 f"--{output_arg_name}",
                 ",".join(f"{key}={value}" for (key, value) in output_config.items()),
@@ -1268,6 +1275,13 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
+                if stream.dither is not None:
+                    if stream.dither == "none":
+                        output_config["dither"] = "false"
+                    elif stream.dither == "uniform":
+                        output_config["dither"] = "true"
+                    else:
+                        raise ValueError(f"unsupported dither value {stream.dither!r}")
                 xbgpu.command += [
                     "--beam",
                     ",".join(f"{key}={value}" for (key, value) in output_config.items()),
