@@ -742,6 +742,8 @@ def _make_fgpu(
                 output_arg_name = "narrowband"
             else:
                 output_arg_name = "wideband"
+            if stream.dither is not None:
+                output_config["dither"] = stream.dither
             fgpu.command += [
                 f"--{output_arg_name}",
                 ",".join(f"{key}={value}" for (key, value) in output_config.items()),
@@ -1268,6 +1270,8 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
+                if stream.dither is not None:
+                    output_config["dither"] = stream.dither
                 xbgpu.command += [
                     "--beam",
                     ",".join(f"{key}={value}" for (key, value) in output_config.items()),

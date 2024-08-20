@@ -639,6 +639,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         input_labels: Optional[Iterable[str]] = None,
         w_cutoff: float = 1.0,
         narrowband: Optional[GpucbfNarrowbandConfig] = None,
+        dither: Optional[str] = None,
         command_line_extra: Iterable[str] = (),
     ) -> None:
         if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
@@ -726,6 +727,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         self.pfb_taps = defaults.PFB_TAPS
         self.w_cutoff = w_cutoff
         self.narrowband = narrowband
+        self.dither = dither
         self.command_line_extra = list(command_line_extra)
 
     @property
@@ -779,6 +781,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             narrowband=(
                 GpucbfNarrowbandConfig.from_config(narrowband) if narrowband is not None else None
             ),
+            dither=config.get("dither"),
             command_line_extra=config.get("command_line_extra", []),
         )
 
@@ -1260,6 +1263,7 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
         src_streams: Sequence[Stream],
         *,
         src_pol: int,
+        dither: Optional[str] = None,
         command_line_extra: Iterable[str] = (),
     ) -> None:
         acv = src_streams[0]
@@ -1273,6 +1277,7 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
             bits_per_sample=8,
         )
         self.src_pol = src_pol
+        self.dither = dither
         self.command_line_extra = list(command_line_extra)
 
     if TYPE_CHECKING:  # pragma: nocover
@@ -1294,6 +1299,7 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
             name,
             src_streams,
             src_pol=config["src_pol"],
+            dither=config.get("dither"),
             command_line_extra=config.get("command_line_extra", []),
         )
 
