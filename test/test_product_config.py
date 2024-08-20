@@ -934,11 +934,11 @@ class TestGpucbfTiedArrayChannelisedVoltageStream:
     def test_dither(
         self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
     ) -> None:
-        config["dither"] = "uniform"
+        config["dither"] = "none"
         tacv = GpucbfTiedArrayChannelisedVoltageStream.from_config(
             Options(), "wide2_tacv", config, [acv], {}
         )
-        assert tacv.dither == "uniform"
+        assert tacv.dither == "none"
 
     def test_command_line_extra(
         self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
