@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,8 +17,21 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import enum
+import functools
 import logging
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 import aiokatcp
 import prometheus_client  # noqa: F401
@@ -71,6 +84,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
+        notify: Optional[Callable[[], Any]] = None,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
@@ -85,8 +99,12 @@ class SensorWatcher(aiokatcp.SensorWatcher):
 
         self.rewrite_gui_urls = rewrite_gui_urls
         self.close_action = close_action
-        # Whether we need to do an interface-changed at the end of the batch
-        self._interface_changed = False
+        if notify is not None:
+            self.notify = notify
+        else:
+            self.notify = functools.partial(server.mass_inform, "interface-changed", "sensor-list")
+        # Whether we need to call notify at the end of the batch
+        self._need_notify = False
 
     def rewrite_name(self, name: str) -> Sequence[str]:
         names = self.renames.get(name, self.prefix + name)
@@ -117,13 +135,13 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                     sensor.status,
                 )
             self.server.sensors.add(sensor)
-        self._interface_changed = True
+        self._need_notify = True
 
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the rewritten name"""
         self.server.sensors.pop(name, None)
         self.orig_sensors.pop(name, None)
-        self._interface_changed = True
+        self._need_notify = True
 
     def sensor_removed(self, name: str) -> None:
         super().sensor_removed(name)
@@ -146,9 +164,9 @@ class SensorWatcher(aiokatcp.SensorWatcher):
 
     def batch_stop(self) -> None:
         super().batch_stop()
-        if self._interface_changed:
-            self.server.mass_inform("interface-changed", "sensor-list")
-        self._interface_changed = False
+        if self._need_notify:
+            self.notify()
+        self._need_notify = False
 
     def _mark_unreachable(self, sensor: aiokatcp.Sensor) -> None:
         # Special case for device-status sensors: if we can no longer
@@ -200,6 +218,10 @@ class SensorProxyClient(aiokatcp.Client):
         will be duplicated under each of these names.
     close_action
         Defines what to do with the sensors when the connection is closed.
+    notify
+        Callback which is called when there are changes to the sensor list.
+        If not specified, it defaults to sending an ``interface-changed``
+        inform to all clients of the server.
     kwargs
         Passed to the base class
     """
@@ -212,11 +234,18 @@ class SensorProxyClient(aiokatcp.Client):
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
+        notify: Optional[Callable[[], Any]] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         watcher = SensorWatcher(
-            self, server, prefix, rewrite_gui_urls, renames=renames, close_action=close_action
+            self,
+            server,
+            prefix,
+            rewrite_gui_urls,
+            renames=renames,
+            close_action=close_action,
+            notify=notify,
         )
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
