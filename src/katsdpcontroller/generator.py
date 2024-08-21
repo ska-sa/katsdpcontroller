@@ -1202,7 +1202,7 @@ def _make_xbgpu(
                     batches_per_chunk * stream.n_chans_per_substream * stream.spectra_per_heap
                 )
                 beam_size = elements * COMPLEX
-                rand_state_size = elements * 48  # 48 is sizeof(curandStateXORWOW_t)
+                rand_state_size = elements * 24  # 24 is sizeof(randState_t)
                 xbgpu.mem += _mb(n_tx_items * beam_size)
                 # Allow 128 single-pol beams + 1 baseline-correlation-products for 80 antennas.
                 xbgpu.gpus[0].compute += 0.125 / n_inputs * bw_scale
