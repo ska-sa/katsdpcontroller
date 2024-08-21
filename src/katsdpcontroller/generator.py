@@ -1124,7 +1124,10 @@ def _make_xbgpu(
         // 8
     )
     target_chunk_size = 64 * 1024**2
-    batches_per_chunk = math.ceil(target_chunk_size / batch_size)
+    # Performance is poor if the number of spectra per chunk is too low,
+    # so we ensure at least 128 even if that means overshooting the
+    # target chunk size.
+    batches_per_chunk = math.ceil(max(128 / acv.n_spectra_per_heap, target_chunk_size / batch_size))
     chunk_size = batches_per_chunk * batch_size
     rx_reorder_tol = 2**29  # Default of --rx-reorder-tol option
     n_tx_items = 2  # Magic number default for xbgpu
