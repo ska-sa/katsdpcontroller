@@ -53,7 +53,7 @@ PFB_TAPS = 16
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
 #: Minimum update period (in seconds) for katcp sensors where the underlying
 #: value may update extremely rapidly.
-GPUCBF_MIN_SENSOR_UPDATE_PERIOD = 1.0
+FAST_SENSOR_UPDATE_PERIOD = 1.0
 #: Autotune fallback behaviour: "nearest" or "exact"
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
 #: Time (in seconds) to sleep before exiting
