@@ -1104,8 +1104,9 @@ def _make_xbgpu(
                 n_accs=n_accs,
             )
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-            # TODO: NGC-1225
-            pass
+            telstate_data.update(
+                spectra_per_heap=stream.spectra_per_heap,
+            )
         for key, value in telstate_data.items():
             init_telstate[(stream.name, key)] = value
 
