@@ -535,6 +535,15 @@ class SubarrayProduct:
         self.state = ProductState.CONFIGURING  # This sets the sensor
         self.add_sensor(self._capture_block_sensor)
         self.add_sensor(self._state_sensor)
+        self.add_sensor(
+            Sensor(
+                str,
+                "product-config",
+                "Configuration dictionary used to build the subarray product",
+                default=json.dumps(config_dict),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
         # Priority is lower (higher number) than the default queue
         self.batch_queue = scheduler.LaunchQueue(
             sdp_controller.batch_role, "batch", priority=BATCH_PRIORITY
