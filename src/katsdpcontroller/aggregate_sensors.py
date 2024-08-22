@@ -152,8 +152,11 @@ class SyncSensor(SimpleAggregateSensor[bool]):
     ) -> Optional[Reading[bool]]:
         updated_reading = super().update_aggregate(updated_sensor, reading, old_reading)
         if updated_reading is not None and updated_reading.value == self.value:
-            # Value hasn't changed, no need to update the sensor
-            return None
+            # Value hasn't changed, just check if the status has
+            if updated_reading.status == self.status:
+                return None
+            else:
+                return updated_reading
         else:
             return updated_reading
 
