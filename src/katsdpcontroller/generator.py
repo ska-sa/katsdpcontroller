@@ -1105,15 +1105,8 @@ def _make_xbgpu(
             )
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
             telstate_data.update(
-                # Had to keep mismatch in spelling as external users still use
-                # 'cent-e-r' spelling.
-                center_freq=stream.centre_frequency,
-                n_chans=stream.n_chans,
-                scale_factor_timestamp=stream.adc_sample_rate,
-                sync_time=sync_time,
-                ticks_between_spectra=stream.n_samples_between_spectra,
+                spectra_per_heap=stream.spectra_per_heap,
             )
-            pass
         for key, value in telstate_data.items():
             init_telstate[(stream.name, key)] = value
 
