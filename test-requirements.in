@@ -1,7 +1,7 @@
 -c requirements.txt
 
 aioresponses
-async-solipsism
+async-solipsism>=0.7
 mypy
 open-mock-file
 psutil

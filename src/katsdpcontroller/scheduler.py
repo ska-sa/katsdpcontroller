@@ -1237,7 +1237,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                 # (see https://docs.docker.com/registry/spec/auth/token/).
                 if isinstance(cause, aiohttp.client.ClientResponseError) and cause.status == 401:
                     try:
-                        assert cause.headers is not None
+                        assert isinstance(cause.headers, Mapping)
                         hdr = cause.headers[aiohttp.hdrs.WWW_AUTHENTICATE]
                         challenge = www_authenticate.parse(hdr)["Bearer"]
                         realm = challenge["realm"]

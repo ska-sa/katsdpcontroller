@@ -14,6 +14,19 @@
 # limitations under the License.
 ################################################################################
 
+import async_solipsism
 import pytest
 
 pytest.register_assert_rewrite("test.utils")
+
+
+@pytest.fixture
+def solipsism(monkeypatch: pytest.MonkeyPatch) -> async_solipsism.EventLoopPolicy:
+    """Use async_solipsism's event loop for the tests.
+
+    Wrap this in an `event_loop_policy` fixture for a test.
+    """
+    monkeypatch.setattr(
+        "aiohappyeyeballs.start_connection", async_solipsism.aiohappyeyeballs_start_connection
+    )
+    return async_solipsism.EventLoopPolicy()
