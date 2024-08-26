@@ -742,6 +742,8 @@ def _make_fgpu(
                 output_arg_name = "narrowband"
             else:
                 output_arg_name = "wideband"
+            if stream.dither is not None:
+                output_config["dither"] = stream.dither
             fgpu.command += [
                 f"--{output_arg_name}",
                 ",".join(f"{key}={value}" for (key, value) in output_config.items()),
@@ -1122,7 +1124,10 @@ def _make_xbgpu(
         // 8
     )
     target_chunk_size = 64 * 1024**2
-    batches_per_chunk = math.ceil(target_chunk_size / batch_size)
+    # Performance is poor if the number of spectra per chunk is too low,
+    # so we ensure at least 128 even if that means overshooting the
+    # target chunk size.
+    batches_per_chunk = math.ceil(max(128 / acv.n_spectra_per_heap, target_chunk_size / batch_size))
     chunk_size = batches_per_chunk * batch_size
     rx_reorder_tol = 2**29  # Default of --rx-reorder-tol option
     n_tx_items = 2  # Magic number default for xbgpu
@@ -1197,7 +1202,7 @@ def _make_xbgpu(
                     batches_per_chunk * stream.n_chans_per_substream * stream.spectra_per_heap
                 )
                 beam_size = elements * COMPLEX
-                rand_state_size = elements * 48  # 48 is sizeof(curandStateXORWOW_t)
+                rand_state_size = elements * 24  # 24 is sizeof(randState_t)
                 xbgpu.mem += _mb(n_tx_items * beam_size)
                 # Allow 128 single-pol beams + 1 baseline-correlation-products for 80 antennas.
                 xbgpu.gpus[0].compute += 0.125 / n_inputs * bw_scale
@@ -1268,6 +1273,8 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
+                if stream.dither is not None:
+                    output_config["dither"] = stream.dither
                 xbgpu.command += [
                     "--beam",
                     ",".join(f"{key}={value}" for (key, value) in output_config.items()),

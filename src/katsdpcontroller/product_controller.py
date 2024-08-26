@@ -584,7 +584,11 @@ class SubarrayProduct:
         self._state_sensor.set_value(value, timestamp=now)
 
     def add_sensor(self, sensor: Sensor) -> None:
-        """Add the supplied sensor to the top-level device and track it locally."""
+        """Add the supplied sensor to the top-level device and track it locally.
+
+        It does *not* send an ``interface-changed`` inform; that is left to the
+        caller, which should call :meth:`notify_sensors_changed`.
+        """
         self.sensors.add(sensor)
         self.sdp_controller.sensors.add(sensor)
 
@@ -592,11 +596,23 @@ class SubarrayProduct:
         """Remove all sensors added via :meth:`add_sensor`.
 
         It does *not* send an ``interface-changed`` inform; that is left to the
-        caller.
+        caller, which should call :meth:`notify_sensors_changed`.
         """
         for sensor in self.sensors:
             self.sdp_controller.sensors.discard(sensor)
         self.sensors.clear()
+
+    def notify_sensors_changed(self) -> None:
+        """Notify subscribers that the set of sensors have changed.
+
+        This should be called after using :meth:`add_sensor` or otherwise
+        changing the sensors. It will notify katcp clients that the interface
+        has changed. However, while in CONFIGURING state these notifications
+        are suppressed to avoid clients continually updating the sensor list
+        as each task starts.
+        """
+        if self.state != ProductState.CONFIGURING:
+            self.sdp_controller.mass_inform("interface-changed", "sensor-list")
 
     @property
     def async_busy(self) -> bool:

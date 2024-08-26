@@ -462,6 +462,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
         assert acv.input_labels == config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
+        assert acv.dither is None
         assert acv.command_line_extra == []
 
     def test_from_config_narrowband(
@@ -489,6 +490,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2 / 8
         assert acv.input_labels == narrowband_config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
+        assert acv.dither is None
         assert acv.command_line_extra == []
 
     def test_n_chans_not_power_of_two(
@@ -582,6 +584,15 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             Options(), "wide1_acv", config, src_streams, {}
         )
         assert acv.w_cutoff == 0.9
+
+    def test_dither(
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
+    ) -> None:
+        config["dither"] = "uniform"
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
+            Options(), "wide1_acv", config, src_streams, {}
+        )
+        assert acv.dither == "uniform"
 
     def test_command_line_extra(
         self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
@@ -919,6 +930,15 @@ class TestGpucbfTiedArrayChannelisedVoltageStream:
         assert tacv.n_chans_per_substream == 1024
         assert tacv.src_pol == 0
         assert tacv.command_line_extra == []
+
+    def test_dither(
+        self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        config["dither"] = "none"
+        tacv = GpucbfTiedArrayChannelisedVoltageStream.from_config(
+            Options(), "wide2_tacv", config, [acv], {}
+        )
+        assert tacv.dither == "none"
 
     def test_command_line_extra(
         self, acv: GpucbfAntennaChannelisedVoltageStream, config: Dict[str, Any]
@@ -1435,7 +1455,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.1",
+        "version": "4.2",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1529,7 +1549,7 @@ def config_v3(config: Dict[str, Any]) -> Dict[str, Any]:
 @pytest.fixture
 def config_sim() -> Dict[str, Any]:
     return {
-        "version": "4.1",
+        "version": "4.2",
         "outputs": {
             "acv": {
                 "type": "sim.cbf.antenna_channelised_voltage",

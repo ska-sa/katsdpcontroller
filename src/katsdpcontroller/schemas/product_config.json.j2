@@ -1,5 +1,5 @@
 {% macro versions() %}
-["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1"]
+["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -87,6 +87,9 @@
         "simulate_bool": {
             "type": "boolean",
             "default": false
+        },
+        "dither": {
+            "enum": ["uniform", "none"]
         }
     },
     "type": "object",
@@ -512,6 +515,9 @@
                                         "required": ["decimation_factor", "centre_frequency"]
                                     },
 {% endif %}
+{% if version >= "4.2" %}
+                                    "dither": {"$ref": "#/definitions/dither"},
+{% endif %}
                                     "command_line_extra": {
                                         "type": "array",
                                         "items": {"type": "string"}
@@ -551,6 +557,9 @@
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/singleton"},
                                     "src_pol": {"type": "integer", "enum": [0, 1]},
+{% if version >= "4.2" %}
+                                    "dither": {"$ref": "#/definitions/dither"},
+{% endif %}
                                     "command_line_extra": {
                                         "type": "array",
                                         "items": {"type": "string"}
