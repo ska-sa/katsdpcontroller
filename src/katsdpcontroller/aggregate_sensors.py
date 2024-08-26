@@ -205,8 +205,7 @@ class LatestSensor(AggregateSensor[_T]):
             return None  # It's not valid
         if self.status.valid_value() and self.timestamp > reading.timestamp:
             return None  # It's older than what we already have
-        if reading is not None and old_reading is not None:
-            if reading.value == old_reading.value:
-                # If it's the same as what we already have, no need to update
-                return None
+        if reading is not None and reading.value == self.value:
+            # If it's the same as what we already have, no need to update
+            return None
         return reading
