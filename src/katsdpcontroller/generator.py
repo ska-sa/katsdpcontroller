@@ -1020,8 +1020,6 @@ def _make_xbgpu(
                     "for all X-Engines",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
                     n_children=stream.n_substreams,
-                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
             ]
             stream_sensors.extend(xstream_sensors)
@@ -1072,8 +1070,6 @@ def _make_xbgpu(
                     f"{stream.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.quantiser-gain"),
-                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,
@@ -1081,8 +1077,6 @@ def _make_xbgpu(
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
-                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,
@@ -1090,8 +1084,6 @@ def _make_xbgpu(
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
-                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
