@@ -151,14 +151,14 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         old_reading: Optional[Reading[_T]],
     ) -> Optional[Reading[bool]]:
         updated_reading = super().update_aggregate(updated_sensor, reading, old_reading)
-        if updated_reading is not None and updated_reading.value == self.value:
-            # Value hasn't changed, just check if the status has
-            if updated_reading.status == self.status:
-                return None
-            else:
-                return updated_reading
-        else:
-            return updated_reading
+        # Suppress updates that only change the timestamp
+        if (
+            updated_reading is not None
+            and updated_reading.value == self.value
+            and updated_reading.status == self.status
+        ):
+            updated_reading = None
+        return updated_reading
 
 
 class LatestSensor(AggregateSensor[_T]):
@@ -205,7 +205,6 @@ class LatestSensor(AggregateSensor[_T]):
             return None  # It's not valid
         if self.status.valid_value() and self.timestamp > reading.timestamp:
             return None  # It's older than what we already have
-        if reading is not None and reading.value == self.value:
-            # If it's the same as what we already have, no need to update
-            return None
+        if reading.value == self.value and reading.status == self.status:
+            return None  # It's the same as what we already have
         return reading
