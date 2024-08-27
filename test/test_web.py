@@ -195,8 +195,11 @@ class TestWeb:
         return ("localhost.invalid", 80) if use_haproxy else None
 
     @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        return async_solipsism.EventLoopPolicy()
+    def event_loop_policy(
+        self, solipsism: async_solipsism.EventLoopPolicy
+    ) -> async_solipsism.EventLoopPolicy:
+        """Use async_solipsism's event loop for the tests."""
+        return solipsism
 
     @pytest.fixture
     def mc_server(self, use_haproxy: bool) -> mock.MagicMock:

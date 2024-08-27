@@ -1393,10 +1393,12 @@ class TestSubgraph:
 class TestScheduler:
     """Tests for :class:`katsdpcontroller.scheduler.Scheduler`."""
 
-    # Override pytest-asyncio to use async-solipsism event loop
     @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        return async_solipsism.EventLoopPolicy()
+    def event_loop_policy(
+        self, solipsism: async_solipsism.EventLoopPolicy
+    ) -> async_solipsism.EventLoopPolicy:
+        """Use async_solipsism's event loop for the tests."""
+        return solipsism
 
     @staticmethod
     def _dummy_random():
