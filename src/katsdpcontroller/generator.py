@@ -48,14 +48,14 @@ import katsdpmodels.fetch.aiohttp
 import katsdptelstate.aio
 import networkx
 import numpy as np
-from aiokatcp import Sensor, SensorSet
+from aiokatcp import Sensor, SensorSampler, SensorSet
 from katsdpmodels.band_mask import BandMask, SpectralWindow
 from katsdpmodels.rfi_mask import RFIMask
 from katsdptelstate.endpoint import Endpoint
 
 from . import defaults, product_config, scheduler
 from .aggregate_sensors import LatestSensor, SumSensor, SyncSensor
-from .defaults import GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
+from .defaults import FAST_SENSOR_UPDATE_PERIOD, GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
 from .fake_servers import (
     FakeCalDeviceServer,
     FakeFgpuDeviceServer,
@@ -1012,6 +1012,8 @@ def _make_xbgpu(
                     "Number of visibilities that saturated",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.xeng-clip-cnt"),
                     n_children=stream.n_substreams,
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 SyncSensor(
                     sensors,
@@ -1061,6 +1063,8 @@ def _make_xbgpu(
                     "Number of complex samples that saturated",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.beng-clip-cnt"),
                     n_children=stream.n_substreams,
+                    auto_strategy=SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
                     sensors,

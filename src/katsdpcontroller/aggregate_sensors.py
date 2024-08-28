@@ -144,6 +144,22 @@ class SyncSensor(SimpleAggregateSensor[bool]):
         status = Sensor.Status.NOMINAL if synchronised else Sensor.Status.ERROR
         return (status, synchronised)
 
+    def update_aggregate(
+        self,
+        updated_sensor: Optional[Sensor[_T]],
+        reading: Optional[Reading[_T]],
+        old_reading: Optional[Reading[_T]],
+    ) -> Optional[Reading[bool]]:
+        updated_reading = super().update_aggregate(updated_sensor, reading, old_reading)
+        # Suppress updates that only change the timestamp
+        if (
+            updated_reading is not None
+            and updated_reading.value == self.value
+            and updated_reading.status == self.status
+        ):
+            updated_reading = None
+        return updated_reading
+
 
 class LatestSensor(AggregateSensor[_T]):
     """Aggregate sensor which returns the reading with the latest timestamp.
@@ -189,4 +205,6 @@ class LatestSensor(AggregateSensor[_T]):
             return None  # It's not valid
         if self.status.valid_value() and self.timestamp > reading.timestamp:
             return None  # It's older than what we already have
+        if reading.value == self.value and reading.status == self.status:
+            return None  # It's the same as what we already have
         return reading

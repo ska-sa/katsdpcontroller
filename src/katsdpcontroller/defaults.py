@@ -51,6 +51,10 @@ PFB_TAPS = 16
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
+#: Minimum update period (in seconds) for katcp sensors which aggregate many
+#: underlying sensors and hence may be updated much more often than any one
+#: of the underlying sensors.
+FAST_SENSOR_UPDATE_PERIOD = 1.0
 #: Autotune fallback behaviour: "nearest" or "exact"
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
 #: Time (in seconds) to sleep before exiting
