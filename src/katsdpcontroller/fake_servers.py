@@ -32,7 +32,7 @@ def _format_complex(value: numbers.Complex) -> str:
 
     This is copied from katgpucbf.
     """
-    return f"{value.real}{value.imag:+}j"
+    return f"{value:.17g}"
 
 
 def _parse_key_val(value: str) -> Dict[str, str]:
@@ -147,7 +147,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                         f"{output}.input{pol}.eq",
                         "For this input, the complex, unitless, per-channel "
                         "digital scaling factors implemented prior to requantisation",
-                        default="[1.0+0.0j]",
+                        default="[1+0j]",
                         initial_status=Sensor.Status.NOMINAL,
                     )
                 )

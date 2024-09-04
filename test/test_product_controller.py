@@ -620,16 +620,16 @@ class TestControllerInterface(BaseTestController):
         reply, _ = await client.request(
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h"
         )
-        assert reply == [b"1.0+2.0j"]
+        assert reply == [b"1+2j"]
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901h.eq", "[1.0+2.0j]"
+            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901h.eq", "[1+2j]"
         )
         await client.request("product-deconfigure")
 
     async def test_gain_multi(self, client: aiokatcp.Client) -> None:
         """Test gain with a different gain for each channel."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        gains = [b"%d.0+2.0j" % i for i in range(4096)]
+        gains = [b"%d+2j" % i for i in range(4096)]
         reply, _ = await client.request(
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", *gains
         )
@@ -648,17 +648,17 @@ class TestControllerInterface(BaseTestController):
     async def test_gain_all_single(self, client: aiokatcp.Client) -> None:
         """Test gain-all with a single gain to apply to all channels."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "1.0+2.0j")
+        await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "1+2j")
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
-                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1.0+2.0j]"
+                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1+2j]"
             )
         await client.request("product-deconfigure")
 
     async def test_gain_all_multi(self, client: aiokatcp.Client) -> None:
         """Test gain-all with a different gain for each channel."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        gains = [b"%d.0+2.0j" % i for i in range(4096)]
+        gains = [b"%d+2j" % i for i in range(4096)]
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", *gains)
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
@@ -674,7 +674,7 @@ class TestControllerInterface(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "default")
         for name in ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"]:
             await assert_sensor_value(
-                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1.0+0.0j]"
+                client, f"gpucbf_antenna_channelised_voltage.{name}.eq", "[1+0j]"
             )
         await client.request("product-deconfigure")
 
@@ -688,7 +688,7 @@ class TestControllerInterface(BaseTestController):
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "3.0")
         # Check that the other engine still had its gains set
         await assert_sensor_value(
-            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901v.eq", b"[3.0+0.0j]"
+            client, "gpucbf_antenna_channelised_voltage.gpucbf_m901v.eq", b"[3+0j]"
         )
 
     async def test_gain_all_timeout_engine(
@@ -1909,23 +1909,23 @@ class TestController(BaseTestController):
     ) -> None:
         """Test gain with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        dummy_client.katcp_replies["gain"] = ([b"1.0+2.0j"], [])
+        dummy_client.katcp_replies["gain"] = ([b"1+2j"], [])
         reply, _ = await client.request(
-            "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", "1.0+2.0j"
+            "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", "1+2j"
         )
         # TODO: this doesn't check that it goes to the correct node
         katcp_client = sensor_proxy_client
         katcp_client.request.assert_any_call(
-            "gain", "gpucbf_antenna_channelised_voltage", 1, "1.0+2.0j"
+            "gain", "gpucbf_antenna_channelised_voltage", 1, "1+2j"
         )
-        assert reply == [b"1.0+2.0j"]
+        assert reply == [b"1+2j"]
 
     async def test_gain_multi(
         self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
     ) -> None:
         """Test gain with a different gain for each channel."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-        gains = [b"%d.0+2.0j" % i for i in range(4096)]
+        gains = [b"%d+2j" % i for i in range(4096)]
         dummy_client.katcp_replies["gain"] = (gains, [])
         reply, _ = await client.request(
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", *gains
