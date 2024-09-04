@@ -32,7 +32,7 @@ def _format_complex(value: numbers.Complex) -> str:
 
     This is copied from katgpucbf.
     """
-    return f"{value.real}{value.imag:+}j"
+    return f"{value:.17g}"
 
 
 def _parse_key_val(value: str) -> Dict[str, str]:
