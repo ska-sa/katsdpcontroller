@@ -218,38 +218,38 @@ class TestWeb:
         )
         mc_server.sensors.add(
             Sensor(
-                str,
+                bytes,
                 "gui-urls",
                 "",
-                default=json.dumps(ROOT_GUI_URLS),
+                default=json.dumps(ROOT_GUI_URLS).encode(),
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
 
         mc_server.orig_sensors.add(
             Sensor(
-                str,
+                bytes,
                 "product1.gui-urls",
                 "",
-                default=json.dumps(PRODUCT1_GUI_URLS),
+                default=json.dumps(PRODUCT1_GUI_URLS).encode(),
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
         mc_server.orig_sensors.add(
             Sensor(
-                str,
+                bytes,
                 "product2.cal.1.gui-urls",
                 "",
-                default=json.dumps(PRODUCT2_CAL_GUI_URLS),
+                default=json.dumps(PRODUCT2_CAL_GUI_URLS).encode(),
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
         mc_server.orig_sensors.add(
             Sensor(
-                str,
+                bytes,
                 "product2.ingest.1.gui-urls",
                 "",
-                default=json.dumps(PRODUCT2_CAL_GUI_URLS),
+                default=json.dumps(PRODUCT2_CAL_GUI_URLS).encode(),
                 initial_status=Sensor.Status.UNKNOWN,
             )
         )
