@@ -147,7 +147,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                         f"{output}.input{pol}.eq",
                         "For this input, the complex, unitless, per-channel "
                         "digital scaling factors implemented prior to requantisation",
-                        default="[1.0+0.0j]",
+                        default="[1+0j]",
                         initial_status=Sensor.Status.NOMINAL,
                     )
                 )
