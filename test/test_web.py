@@ -218,10 +218,10 @@ class TestWeb:
         )
         mc_server.sensors.add(
             Sensor(
-                bytes,
+                str,
                 "gui-urls",
                 "",
-                default=json.dumps(ROOT_GUI_URLS).encode(),
+                default=json.dumps(ROOT_GUI_URLS),
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
