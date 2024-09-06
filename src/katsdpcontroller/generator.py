@@ -1075,14 +1075,14 @@ def _make_xbgpu(
                 ),
                 LatestSensor(
                     sensors,
-                    str,
+                    bytes,
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
                 ),
                 LatestSensor(
                     sensors,
-                    str,
+                    bytes,
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
