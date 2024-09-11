@@ -59,16 +59,7 @@ async def setup_web(
     return runner
 
 
-async def async_main(server: master_controller.DeviceServer, args: argparse.Namespace) -> None:
-    runner = await setup_web(args, server)
-    await server.start()
-    await server.join()
-    await runner.cleanup()
-    logging.info("Server shut down")
-
-
-def main(argv: List[str]) -> None:
-    katsdpservices.setup_logging()
+async def async_main(argv: List[str]) -> None:
     katsdpservices.setup_restart()
     args = master_controller.parse_args(argv)
     if args.log_level is not None:
@@ -87,14 +78,18 @@ def main(argv: List[str]) -> None:
     else:
         rewrite_gui_urls = None
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     server = master_controller.DeviceServer(args, rewrite_gui_urls=rewrite_gui_urls)
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, functools.partial(handle_signal, server))
     with katsdpservices.start_aiomonitor(loop, args, locals()):
-        loop.run_until_complete(async_main(server, args))
-    loop.close()
+        runner = await setup_web(args, server)
+        await server.start()
+        await server.join()
+        await runner.cleanup()
+        logging.info("Server shut down")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    katsdpservices.setup_logging()
+    asyncio.run(async_main(sys.argv[1:]))
