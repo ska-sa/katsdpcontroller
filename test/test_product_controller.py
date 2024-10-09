@@ -1989,15 +1989,26 @@ class TestController(BaseTestController):
             "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,1:0,0", "0,1:0,1"
         )
 
-    async def test_capture_start(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_capture_start(
+        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+    ) -> None:
         """Test capture-start in the success case."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
+        server.sensors.add(
+            Sensor(
+                int,
+                "f.gpucbf_antenna_channelised_voltage.0.steady-state-timestamp",
+                "dummy sensor to test the timestamp logic",
+                default=12345,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
         await client.request("capture-start", "gpucbf_baseline_correlation_products")
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
         katcp_client.request.assert_any_call(
-            "capture-start", "gpucbf_baseline_correlation_products"
+            "capture-start", "gpucbf_baseline_correlation_products", 12345
         )
 
     async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
