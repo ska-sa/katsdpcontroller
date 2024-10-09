@@ -1509,11 +1509,25 @@ class SubarrayProduct:
         ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        command = "capture-start" if start else "capture-stop"
-        await self._multi_request(
-            self.find_nodes(task_type="xb", streams=[stream]),
-            itertools.repeat((command, stream_name)),
-        )
+        nodes = self.find_nodes(task_type="xb", streams=[stream])
+        if start:
+            start_timestamp = 0
+            for sensor in self.sdp_controller.sensors.values():
+                if (
+                    sensor.stype is int
+                    and sensor.name.endswith(".steady-state-timestamp")
+                    and sensor.status.valid_value()
+                ):
+                    start_timestamp = max(start_timestamp, sensor.value)
+            await self._multi_request(
+                nodes,
+                itertools.repeat(("capture-start", stream_name, start_timestamp)),
+            )
+        else:
+            await self._multi_request(
+                nodes,
+                itertools.repeat(("capture-stop", stream_name)),
+            )
 
         for node in self.physical_graph.nodes:
             if (
