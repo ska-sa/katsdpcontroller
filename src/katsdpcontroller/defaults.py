@@ -48,6 +48,9 @@ GPUCBF_JONES_PER_BATCH = 2**20
 XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16
+#: Multiply by decimation factor to get digitiser down-conversion taps
+#: for gpucbf F-engines.
+DDC_TAPS_RATIO = 12
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
