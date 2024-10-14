@@ -500,9 +500,10 @@ def _make_fgpu(
 
         if stream.narrowband is not None:
             ddc_group_delay = -(stream.narrowband.ddc_taps - 1) / 2
-            subsampling = stream.narrowband.decimation_factor * 2
-            # Complex-to-complex PFB
-            pfb_group_delay = -(stream.n_chans * stream.pfb_taps - 1) / 2 * subsampling
+            # Complex-to-complex PFB, but katgpucbf first channelises to
+            # 2N channels then discards N of them.
+            subsampling = stream.narrowband.decimation_factor
+            pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2 * subsampling
         else:
             ddc_group_delay = 0.0
             # Real-to-complex PFB
