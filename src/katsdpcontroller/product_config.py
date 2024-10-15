@@ -612,6 +612,7 @@ class GpucbfNarrowbandConfig:
     def __init__(self, *, decimation_factor: int, centre_frequency: float) -> None:
         self.decimation_factor = decimation_factor
         self.centre_frequency = centre_frequency
+        self.ddc_taps = decimation_factor * defaults.DDC_TAPS_RATIO
 
     @classmethod
     def from_config(cls, config: dict) -> "GpucbfNarrowbandConfig":

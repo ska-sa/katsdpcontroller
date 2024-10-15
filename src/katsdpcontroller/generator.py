@@ -499,10 +499,13 @@ def _make_fgpu(
         data_suspect_sensors.append(data_suspect_sensor)
 
         if stream.narrowband is not None:
-            subsampling = stream.narrowband.decimation_factor * 2
-            # Complex-to-complex PFB
-            pfb_group_delay = -(stream.n_chans * stream.pfb_taps - 1) / 2 * subsampling
+            ddc_group_delay = -(stream.narrowband.ddc_taps - 1) / 2
+            # Complex-to-complex PFB, but katgpucbf first channelises to
+            # 2N channels then discards N of them.
+            subsampling = stream.narrowband.decimation_factor
+            pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2 * subsampling
         else:
+            ddc_group_delay = 0.0
             # Real-to-complex PFB
             pfb_group_delay = -(2 * stream.n_chans * stream.pfb_taps - 1) / 2
 
@@ -609,6 +612,21 @@ def _make_fgpu(
                 f"{stream.name}.pfb-group-delay",
                 "PFB group delay, specified in number of samples",
                 default=pfb_group_delay,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.ddc-group-delay",
+                "DDC group delay, specified in number of samples",
+                default=ddc_group_delay,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.filter-group-delay",
+                "Total group delay of all filters in the signal chain, "
+                "specified in number of samples.",
+                default=pfb_group_delay + ddc_group_delay,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
@@ -739,6 +757,7 @@ def _make_fgpu(
             if stream.narrowband is not None:
                 output_config["decimation"] = stream.narrowband.decimation_factor
                 output_config["centre_frequency"] = stream.narrowband.centre_frequency
+                output_config["ddc_taps"] = stream.narrowband.ddc_taps
                 output_arg_name = "narrowband"
             else:
                 output_arg_name = "wideband"
