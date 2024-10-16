@@ -1049,6 +1049,13 @@ def _make_xbgpu(
             bstream_sensors: List[Sensor] = [
                 Sensor(
                     int,
+                    f"{stream.name}.n-bengs",
+                    "The number of B-engines in the instrument",
+                    default=n_engines,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
+                Sensor(
+                    int,
                     f"{stream.name}.beng-out-bits-per-sample",
                     "B-engine output bits per sample. Per number, not complex pair- "
                     "Real and imaginary parts are both this wide",
