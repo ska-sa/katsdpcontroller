@@ -371,7 +371,7 @@ def _make_dsim(
     dsim = ProductLogicalTask(name, streams=streams)
     dsim.subsystem = "cbf"
     dsim.image = "katgpucbf"
-    dsim.mem = 4096
+    dsim.mem = 8192
     dsim.ports = ["port", "prometheus"]
     dsim.interfaces = [
         scheduler.InterfaceRequest(
