@@ -23,7 +23,7 @@ aiohttp-jinja2==1.6
     # via katsdpcontroller (setup.cfg)
 aiohttp-retry==2.8.3
     # via katsdpmodels
-aiokatcp==2.0.1
+aiokatcp==2.0.0
     # via katsdpcontroller (setup.cfg)
 aiomonitor==0.7.0
     # via katsdpservices
