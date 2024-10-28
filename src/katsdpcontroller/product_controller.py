@@ -1713,6 +1713,14 @@ class SubarrayProduct:
             self.state = ProductState.ERROR
 
     async def _shutdown(self, force: bool) -> None:
+        # Rather than marking data as bad as each engine shuts down, just do a
+        # single update per sensor now.
+        data_suspect_sensors = set()
+        for task in self.physical_graph:
+            if isinstance(task, tasks.ProductPhysicalTaskMixin):
+                data_suspect_sensors.update(task.logical_node.data_suspect_sensors)
+        for sensor in data_suspect_sensors:
+            sensor.set_value("1" * len(sensor.value), status=Sensor.Status.ERROR)
         # TODO: issue progress reports as tasks stop
         await self.sched.kill(self.physical_graph, force=force, capture_blocks=self.capture_blocks)
 

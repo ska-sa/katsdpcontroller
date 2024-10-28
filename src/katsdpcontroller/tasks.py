@@ -198,7 +198,7 @@ class ProductLogicalTask(scheduler.LogicalTask):
         # Tell the product controller to pass extra arguments to the physical_factory.
         self.sdp_physical_factory = True
         # Optional sensors of 0's/1's that will be updated if the task dies. The bits
-        # in the range given by the tuple data_suspect_range will be set to 0's.
+        # in the range given by the tuple data_suspect_range will be set to 1's.
         self.data_suspect_sensors: List[Sensor[str]] = []
         self.data_suspect_range = (0, 0)
         # Extra metadata to populate in consul
@@ -560,10 +560,13 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             a, b = self.logical_node.data_suspect_range
             assert a <= b
             data_suspect = data_suspect[:a] + "1" * (b - a) + data_suspect[b:]
-            sensor.set_value(
-                data_suspect,
-                status=Sensor.Status.WARN if data_suspect.count("0") > 0 else Sensor.Status.ERROR,
-            )
+            if data_suspect != sensor.value:
+                sensor.set_value(
+                    data_suspect,
+                    status=Sensor.Status.WARN
+                    if data_suspect.count("0") > 0
+                    else Sensor.Status.ERROR,
+                )
 
     def _disconnect(self):
         """Clean up when killing the task or when it has died.
