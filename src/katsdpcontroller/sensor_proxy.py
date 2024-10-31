@@ -181,7 +181,11 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                 return
         reading = sensor.reading
         if reading.status != aiokatcp.Sensor.Status.UNREACHABLE:
-            sensor.set_value(reading.value, status=aiokatcp.Sensor.Status.UNREACHABLE)
+            # We could keep the last value, but that could be a large string and
+            # we don't want to spam clients with that (particularly since we're
+            # updating all the sensors at once).
+            default_value = aiokatcp.core.get_type(sensor.stype).default(sensor.stype)
+            sensor.set_value(default_value, status=aiokatcp.Sensor.Status.UNREACHABLE)
 
     def state_updated(self, state: aiokatcp.SyncState) -> None:
         super().state_updated(state)
