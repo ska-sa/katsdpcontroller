@@ -77,7 +77,7 @@ from .controller import (
     make_image_resolver_factory,
     time_request,
 )
-from .defaults import LOCALHOST
+from .defaults import CONNECTION_MAX_BACKLOG, LOCALHOST
 from .scheduler import decode_json_base64
 from .schemas import PRODUCT_CONFIG, SUBSYSTEMS, ZK_STATE  # type: ignore
 
@@ -1200,7 +1200,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self._override_dicts = {}
         self._interface_changed_callbacks = []
         self._args = args
-        super().__init__(args.host, args.port)
+        super().__init__(args.host, args.port, max_backlog=CONNECTION_MAX_BACKLOG)
         self.sensors.add(
             Sensor(
                 DeviceStatus,

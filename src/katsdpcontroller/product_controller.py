@@ -61,7 +61,7 @@ from .controller import (
     load_json_dict,
     log_task_exceptions,
 )
-from .defaults import LOCALHOST, RX_DEVICE_STATUS_TIMEOUT, SHUTDOWN_DELAY
+from .defaults import CONNECTION_MAX_BACKLOG, LOCALHOST, RX_DEVICE_STATUS_TIMEOUT, SHUTDOWN_DELAY
 from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
@@ -1758,7 +1758,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
-        super().__init__(host, port)
+        super().__init__(host, port, max_backlog=CONNECTION_MAX_BACKLOG)
         # setup sensors (note: ProductController adds other sensors)
         self.sensors.add(
             Sensor(
