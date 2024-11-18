@@ -38,13 +38,17 @@ import netifaces
 import psutil
 
 try:
-    import py3nvml.py3nvml as pynvml
     import pycuda.driver
+    import pynvml
 
     pycuda.driver.init()
 except ImportError:
     pynvml = None
     pycuda = None
+
+
+def _is_power_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
 
 
 def attr_get(elem: xml.etree.ElementTree.Element, attr: str) -> str:
@@ -72,19 +76,13 @@ def nvml_manager() -> Generator[Any, None, None]:
 
 class GPU:
     def __init__(self, handle: "pynvml.c_nvmlDevice_t", cpu_to_node: Mapping[int, int]) -> None:
-        node = None
-        # TODO: use number of CPU cores to determine cpuset size
-        # This is very hacky at the moment
-        affinity = pynvml.nvmlDeviceGetCpuAffinity(handle, 1)
-        n_cpus = max(cpu_to_node.keys()) + 1
-        for j in range(n_cpus):
-            if affinity[0] & (1 << j):
-                cur_node = cpu_to_node[j]
-                if node is not None and node != cur_node:
-                    node = -1  # Sentinel to indicate unknown affinity
-                else:
-                    node = cur_node
-        if node == -1:
+        # TODO: use number of NUMA nodes to determine nodeset size
+        # This is very hacky at the moment (assumes no more than 64
+        # NUMA nodes).
+        affinity = int(pynvml.nvmlDeviceGetMemoryAffinity(handle, 1)[0])
+        if _is_power_two(affinity):
+            node = affinity.bit_length() - 1
+        else:
             node = None
         self.node = node
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
@@ -113,30 +111,30 @@ def _pus(node: xml.etree.ElementTree.Element) -> List[xml.etree.ElementTree.Elem
     return node.findall(".//object[@type='PU']")
 
 
+def _numa_nodes(node: xml.etree.ElementTree.Element) -> List[xml.etree.ElementTree.Element]:
+    """Return all the NUMA nodes under `node`."""
+    return node.findall(".//object[@type='NUMANode']")
+
+
 class HWLocParser:
     def __init__(self) -> None:
         cmd = ["lstopo", "--output-format", "xml"]
         result = subprocess.check_output(cmd).decode("ascii")
         self._tree = xml.etree.ElementTree.fromstring(result)
-        self._nodes = self._tree.findall(".//object[@type='NUMANode']")
+        self._nodes = _numa_nodes(self._tree)
         # On single-socket machines, hwloc 1.x doesn't create NUMANode.
         if not self._nodes:
             self._nodes = [self._tree]
         self._nodes.sort(key=lambda node: int(node.get("os_index", 0)))
         # In hwloc 2.x, NUMANode is a leaf that doesn't contain the associated
-        # cores and devices. We need to ascend the tree to find the container.
+        # cores and devices. We need to ascend the tree to find the top-level
+        # container.
         parent_map = {child: parent for parent in self._tree.iter() for child in parent}
         for i in range(len(self._nodes)):
             node = self._nodes[i]
             if int(node.get("os_index", 0)) != i:
                 raise RuntimeError("NUMA nodes are not numbered contiguously by the OS")
-            while not _pus(node):
-                node = parent_map[node]
-            # On a single-NUMA system this node doesn't contain the PCIe
-            # devices. Keep ascending until that would cause us to escape the
-            # local NUMA node.
-            n_cpus = len(_pus(node))
-            while node in parent_map and len(_pus(parent_map[node])) == n_cpus:
+            while node in parent_map and len(_numa_nodes(parent_map[node])) <= 1:
                 node = parent_map[node]
             self._nodes[i] = node
 

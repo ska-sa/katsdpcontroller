@@ -33,7 +33,7 @@ from katsdpcontroller import agent_mkconfig
 def mock_gpu(mocker) -> None:
     pynvml = mocker.patch("katsdpcontroller.agent_mkconfig.pynvml")
     pynvml.nvmlDeviceGetCount.return_value = 1
-    pynvml.nvmlDeviceGetCpuAffinity.return_value = [0xF0]
+    pynvml.nvmlDeviceGetMemoryAffinity.return_value = [0x2]
     pynvml.nvmlDeviceGetMemoryInfo.return_value.total = 8589934592
     pynvml.nvmlDeviceGetName.return_value = "NVIDIA GeForce RTX 3070 Ti"
     pynvml.nvmlDeviceGetPciInfo.return_value.busId = b"0000:81:00.0"
