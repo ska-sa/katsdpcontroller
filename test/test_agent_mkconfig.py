@@ -30,10 +30,10 @@ import pytest
 from katsdpcontroller import agent_mkconfig
 
 
-def mock_gpu(mocker) -> None:
+def mock_gpu(mocker, memory_affinity: int) -> None:
     pynvml = mocker.patch("katsdpcontroller.agent_mkconfig.pynvml")
     pynvml.nvmlDeviceGetCount.return_value = 1
-    pynvml.nvmlDeviceGetMemoryAffinity.return_value = [0x2]
+    pynvml.nvmlDeviceGetMemoryAffinity.return_value = [memory_affinity]
     pynvml.nvmlDeviceGetMemoryInfo.return_value.total = 8589934592
     pynvml.nvmlDeviceGetName.return_value = "NVIDIA GeForce RTX 3070 Ti"
     pynvml.nvmlDeviceGetPciInfo.return_value.busId = b"0000:81:00.0"
@@ -106,7 +106,7 @@ def test_attributes_resources_numa(mocker, fs) -> None:
     fs.pause()
     mock_lstopo(mocker, "lstopo-numa.xml")
     fs.resume()
-    mock_gpu(mocker)
+    mock_gpu(mocker, memory_affinity=0x2)  # NUMA node 1
     mock_mem(mocker)
     mock_nics(
         mocker,
@@ -244,6 +244,80 @@ def test_attributes_resources_no_numa(mocker, fs) -> None:
         "cores": "[0-3]",
         "cpus": 3.0,
         "mem": 63488.0,
+    }
+
+
+def test_attributes_resources_l3_domains(mocker, fs) -> None:
+    """Test :func:`.attributes_resources` for a machine with multiple L3 caches."""
+    args = agent_mkconfig.parse_args(
+        [
+            "--network=enp193s0np0:cbf:160",
+            "--volume=data:/foo/data",
+            "--volume=ramdisk:/mnt/ramdisk:0",
+            "--domains=l3",
+        ]
+    )
+
+    fs.pause()
+    mock_lstopo(mocker, "lstopo-no-numa-multi-l3.xml")
+    fs.resume()
+    mock_gpu(mocker, memory_affinity=0x1)  # NUMA node 0
+    mock_mem(mocker)
+    mock_nics(
+        mocker,
+        fs,
+        [
+            FakeNic(
+                ifname="enp193s0np0",
+                ipv4_address="10.100.1.1",
+                speed=200000,
+                infiniband_index=0,
+                loopback_disable=True,
+            ),
+        ],
+    )
+    fs.create_dir("/foo/data")
+    fs.create_dir("/mnt/ramdisk")
+
+    attributes, resources = agent_mkconfig.attributes_resources(args)
+    assert attributes == {
+        "katsdpcontroller.interfaces": [
+            {
+                "name": "enp193s0np0",
+                "network": "cbf",
+                "ipv4_address": "10.100.1.1",
+                "numa_node": 0,
+                "infiniband_devices": [
+                    "/dev/infiniband/rdma_cm",
+                    "/dev/infiniband/uverbs0",
+                ],
+                "infiniband_multicast_loopback": False,
+            },
+        ],
+        "katsdpcontroller.infiniband_devices": ["/dev/infiniband/uverbs0"],
+        "katsdpcontroller.volumes": [
+            {"host_path": "/foo/data", "name": "data"},
+            {"host_path": "/mnt/ramdisk", "name": "ramdisk", "numa_node": 0},
+        ],
+        "katsdpcontroller.gpus": [
+            {
+                "name": "NVIDIA GeForce RTX 3070 Ti",
+                "compute_capability": (8, 6),
+                "device_attributes": {},
+                "uuid": "GPU-2854ce83-bd19-0424-de81-c437df8f47a2",
+                "numa_node": 0,
+            }
+        ],
+        "katsdpcontroller.numa": [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
+    }
+    assert resources == {
+        "katsdpcontroller.gpu.0.compute": 1.0,
+        "katsdpcontroller.gpu.0.mem": 8192.0,
+        "katsdpcontroller.interface.0.bandwidth_in": 160e9,
+        "katsdpcontroller.interface.0.bandwidth_out": 160e9,
+        "cores": "[0-15]",
+        "cpus": 16.0,
+        "mem": 64512.0,
     }
 
 
