@@ -27,7 +27,7 @@ Software-wise, you will need:
 - [katsdpcontroller](https://github.com/ska-sa/katsdpcontroller) checked out,
   but it doesn't need to be installed (unless you want to run your local copy
   instead of the Docker image)
-- Python packages `netifaces`, `psutil`, `py3nvml`, `pycuda`, `botocore`, `h5py`,
+- Python packages `netifaces`, `psutil`, `nvidia-ml-py`, `pycuda`, `botocore`, `h5py`,
   `astropy`, `numpy` and `katsdpmodels`.
 
 You'll also need certain ports to be available on your machine:
