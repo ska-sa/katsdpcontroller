@@ -37,6 +37,8 @@ repos:
         # --strip-extras makes the output usable as a constraint file
         - --strip-extras
         - setup.cfg
+      additional_dependencies:
+        - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
       language_version: python3.8
       files: '^(requirements\.txt|setup\.cfg)$'
     - id: pip-compile
@@ -45,5 +47,7 @@ repos:
         - --output-file=test-requirements.txt
         - --strip-extras
         - test-requirements.in
+      additional_dependencies:
+        - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
       language_version: python3.8
       files: '^((test-)?requirements\.(in|txt)|setup\.cfg)$'
