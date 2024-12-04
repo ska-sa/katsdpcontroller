@@ -862,17 +862,24 @@ class SubarrayProduct:
             return
 
         logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
+        good_data_received = True
         try:
             await asyncio.wait_for(future, timeout=RX_DEVICE_STATUS_TIMEOUT)
         except asyncio.TimeoutError:
-            raise FailReply(
+            good_data_received = False
+            msg = (
                 f"Some tasks did not receive good data within {RX_DEVICE_STATUS_TIMEOUT}s: "
                 + ", ".join(sorted(missing))
-            ) from None
+            )
+            if self.configuration.options.develop.disable_good_data_timeout:
+                logger.error(msg)
+            else:
+                raise FailReply(msg) from None
         finally:
             for sensor in sensors:
                 sensor.detach(observer)
-        logger.info("All tasks receiving good data")
+        if good_data_received:
+            logger.info("All tasks receiving good data")
 
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.

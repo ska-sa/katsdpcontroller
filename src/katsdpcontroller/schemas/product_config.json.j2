@@ -586,6 +586,9 @@
                                 "any_gpu": {"type": "boolean", "default": false},
                                 "disable_ibverbs": {"type": "boolean", "default": false},
                                 "less_resources": {"type": "boolean", "default": false}
+{% if version >= "4.2" %}
+                                "disable_good_data_timeout": {"type": "boolean", "default": false}
+{% endif %}
                             },
                             "additionalProperties": false
                         },
