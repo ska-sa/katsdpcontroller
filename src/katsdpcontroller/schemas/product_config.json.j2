@@ -584,7 +584,7 @@
                             "type": "object",
                             "properties": {
 {% if version >= "4.3" %}
-                                "data_timeout": {"type": "number", "default": 30.0},  {# defaults.RX_DEVICE_STATUS_TIMEOUT #}
+                                "data_timeout": {"$ref": "#/definitions/nonneg_number"},
 {% endif %}
                                 "any_gpu": {"type": "boolean", "default": false},
                                 "disable_ibverbs": {"type": "boolean", "default": false},
