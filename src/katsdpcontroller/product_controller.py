@@ -61,7 +61,7 @@ from .controller import (
     load_json_dict,
     log_task_exceptions,
 )
-from .defaults import LOCALHOST, RX_DEVICE_STATUS_TIMEOUT, SHUTDOWN_DELAY
+from .defaults import LOCALHOST, SHUTDOWN_DELAY
 from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
@@ -861,24 +861,19 @@ class SubarrayProduct:
             # Nothing to do
             return
 
-        logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
-        good_data_received = True
-        try:
-            await asyncio.wait_for(future, timeout=RX_DEVICE_STATUS_TIMEOUT)
-        except asyncio.TimeoutError:
-            good_data_received = False
-            msg = (
-                f"Some tasks did not receive good data within {RX_DEVICE_STATUS_TIMEOUT}s: "
-                + ", ".join(sorted(missing))
-            )
-            if self.configuration.options.develop.disable_good_data_timeout:
-                logger.error(msg)
-            else:
-                raise FailReply(msg) from None
-        finally:
-            for sensor in sensors:
-                sensor.detach(observer)
-        if good_data_received:
+        timeout = self.configuration.options.develop.data_timeout
+        if timeout > 0.0:
+            logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
+            try:
+                await asyncio.wait_for(future, timeout=timeout)
+            except asyncio.TimeoutError:
+                raise FailReply(
+                    f"Some tasks did not receive good data within {timeout}s: "
+                    + ", ".join(sorted(missing))
+                ) from None
+            finally:
+                for sensor in sensors:
+                    sensor.detach(observer)
             logger.info("All tasks receiving good data")
 
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
