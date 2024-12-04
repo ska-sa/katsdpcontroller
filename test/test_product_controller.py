@@ -601,7 +601,6 @@ class TestControllerInterface(BaseTestController):
 
         orig_sensor_set_value = Sensor.set_value
         monkeypatch.setattr(Sensor, "set_value", sensor_set_value)
-        monkeypatch.setattr("katsdpcontroller.product_controller.RX_DEVICE_STATUS_TIMEOUT", 1.0)
         with pytest.raises(FailReply, match="Some tasks did not receive good data"):
             await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
 
