@@ -371,7 +371,7 @@ def _make_dsim(
     dsim = ProductLogicalTask(name, streams=streams)
     dsim.subsystem = "cbf"
     dsim.image = "katgpucbf"
-    dsim.mem = 4096
+    dsim.mem = 8192
     dsim.ports = ["port", "prometheus"]
     dsim.interfaces = [
         scheduler.InterfaceRequest(
@@ -1047,6 +1047,13 @@ def _make_xbgpu(
         elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
             source_indices = str(list(range(stream.src_pol, n_inputs, 2)))
             bstream_sensors: List[Sensor] = [
+                Sensor(
+                    int,
+                    f"{stream.name}.n-bengs",
+                    "The number of B-engines in the instrument",
+                    default=n_engines,
+                    initial_status=Sensor.Status.NOMINAL,
+                ),
                 Sensor(
                     int,
                     f"{stream.name}.beng-out-bits-per-sample",

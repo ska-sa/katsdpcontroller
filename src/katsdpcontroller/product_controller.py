@@ -61,7 +61,7 @@ from .controller import (
     load_json_dict,
     log_task_exceptions,
 )
-from .defaults import LOCALHOST, SHUTDOWN_DELAY
+from .defaults import CONNECTION_MAX_BACKLOG, LOCALHOST, SHUTDOWN_DELAY
 from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
@@ -1715,6 +1715,14 @@ class SubarrayProduct:
             self.state = ProductState.ERROR
 
     async def _shutdown(self, force: bool) -> None:
+        # Rather than marking data as bad as each engine shuts down, just do a
+        # single update per sensor now.
+        data_suspect_sensors = set()
+        for task in self.physical_graph:
+            if isinstance(task, tasks.ProductPhysicalTaskMixin):
+                data_suspect_sensors.update(task.logical_node.data_suspect_sensors)
+        for sensor in data_suspect_sensors:
+            sensor.set_value("1" * len(sensor.value), status=Sensor.Status.ERROR)
         # TODO: issue progress reports as tasks stop
         await self.sched.kill(self.physical_graph, force=force, capture_blocks=self.capture_blocks)
 
@@ -1752,7 +1760,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
 
-        super().__init__(host, port)
+        super().__init__(host, port, max_backlog=CONNECTION_MAX_BACKLOG)
         # setup sensors (note: ProductController adds other sensors)
         self.sensors.add(
             Sensor(

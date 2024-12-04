@@ -24,6 +24,7 @@ See :mod:`katsdpcontroller.scheduler` for details.
 import argparse
 import base64
 import contextlib
+import enum
 import glob
 import json
 import numbers
@@ -32,14 +33,15 @@ import os.path
 import subprocess
 import sys
 import xml.etree.ElementTree
-from typing import Any, Dict, Generator, Iterable, List, Mapping, Tuple
+from typing import Any, Dict, Generator, Iterable, List, Mapping, Optional, Tuple
+from xml.etree.ElementTree import Element
 
 import netifaces
 import psutil
 
 try:
-    import py3nvml.py3nvml as pynvml
     import pycuda.driver
+    import pynvml
 
     pycuda.driver.init()
 except ImportError:
@@ -47,7 +49,16 @@ except ImportError:
     pycuda = None
 
 
-def attr_get(elem: xml.etree.ElementTree.Element, attr: str) -> str:
+class DomainType(enum.Enum):
+    NUMA = 0
+    L3 = 1
+
+
+def _is_power_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
+def attr_get(elem: Element, attr: str) -> str:
     """Get an attribute from an XML element, raising KeyError if not found."""
     value = elem.get(attr)
     if value is None:
@@ -70,23 +81,40 @@ def nvml_manager() -> Generator[Any, None, None]:
         pynvml.nvmlShutdown()
 
 
+class NUMANode:
+    """Encapsulates a NUMA node.
+
+    Parameters
+    ----------
+    element
+        The XML NUMANode element, or the XML root if there are no NUMANode elements
+    root
+        The highest ancestor of `element` that does not contain other NUMANode elements
+    """
+
+    def __init__(self, element: Element, root: Element) -> None:
+        self.element = element
+        self.root = root
+        self.pu_indices = _pu_indices(root)
+        self.os_index = int(element.get("os_index", 0))
+        self.domains: List[int] = []  # Indices of domains corresponding to this NUMA node
+
+
 class GPU:
-    def __init__(self, handle: "pynvml.c_nvmlDevice_t", cpu_to_node: Mapping[int, int]) -> None:
-        node = None
-        # TODO: use number of CPU cores to determine cpuset size
-        # This is very hacky at the moment
-        affinity = pynvml.nvmlDeviceGetCpuAffinity(handle, 1)
-        n_cpus = max(cpu_to_node.keys()) + 1
-        for j in range(n_cpus):
-            if affinity[0] & (1 << j):
-                cur_node = cpu_to_node[j]
-                if node is not None and node != cur_node:
-                    node = -1  # Sentinel to indicate unknown affinity
-                else:
-                    node = cur_node
-        if node == -1:
-            node = None
-        self.node = node
+    def __init__(self, handle: "pynvml.c_nvmlDevice_t", nodes: Mapping[int, NUMANode]) -> None:
+        # TODO: use number of NUMA nodes to determine nodeset size
+        # This is very hacky at the moment (assumes no more than 64
+        # NUMA nodes).
+        affinity = int(
+            pynvml.nvmlDeviceGetMemoryAffinity(handle, 1, pynvml.NVML_AFFINITY_SCOPE_NODE)[0]
+        )
+        if _is_power_two(affinity):
+            self.node: Optional[NUMANode] = nodes[affinity.bit_length() - 1]
+            # TODO: extend the model to allow for multiple domains
+            self.domain: Optional[int] = self.node.domains[0]
+        else:
+            self.node = None
+            self.domain = None
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
         self.name = pynvml.nvmlDeviceGetName(handle)
         # NVML doesn't report compute capability, so we need CUDA
@@ -108,58 +136,128 @@ class GPU:
                 self.device_attributes[str(key)] = value
 
 
-def _pus(node: xml.etree.ElementTree.Element) -> List[xml.etree.ElementTree.Element]:
-    """Return all the processing units under `node`."""
-    return node.findall(".//object[@type='PU']")
+def _descendant_or_self_elements(element: Element, predicate: str) -> List[Element]:
+    """Find all descendants (including the element) matching an XPath predicate."""
+    # ElementTree only implements a small subset of XPath, so we can't use
+    # expressions like ./descendant-or-self::object[...].
+    out = element.findall(f".//object{predicate}")
+    if element.tag == "object":
+        out.extend(element.findall(f".{predicate}"))
+    return out
+
+
+def _pu_elements(element: Element) -> List[Element]:
+    """Return all the processing units under `element`."""
+    return _descendant_or_self_elements(element, "[@type='PU']")
+
+
+def _pu_indices(element: Element) -> List[int]:
+    """Return OS indices of all processing units under `element`."""
+    return sorted(int(attr_get(pu, "os_index")) for pu in _pu_elements(element))
+
+
+def _l3_elements(element: Element) -> List[Element]:
+    """Return all the L3 caches under `element`."""
+    return _descendant_or_self_elements(element, "[@type='L3Cache']")
+
+
+def _numa_node_elements(element: Element) -> List[Element]:
+    """Return all the NUMA nodes under `element`."""
+    return _descendant_or_self_elements(element, "[@type='NUMANode']")
+
+
+def _numa_nodes(tree: Element) -> Mapping[int, NUMANode]:
+    """Retrieve all NUMA nodes from the system.
+
+    The :attr`NUMANode.domains` field is not populated.
+    """
+    node_elements = _numa_node_elements(tree)
+    node_elements.sort(key=lambda element: int(attr_get(element, "os_index")))
+    # On single-socket machines, hwloc 1.x doesn't create NUMANode.
+    if not node_elements:
+        node_elements = [tree]
+
+    nodes: Dict[int, NUMANode] = {}  # NUMA nodes, indexed by os_index
+    # In hwloc 2.x, NUMANode is a leaf that doesn't contain the associated
+    # cores and devices. We need to ascend the tree to find the top-level
+    # container.
+    parent_map = {child: parent for parent in tree.iter() for child in parent}
+    for element in node_elements:
+        root = element
+        while root in parent_map and len(_numa_node_elements(parent_map[root])) <= 1:
+            root = parent_map[root]
+        node = NUMANode(element, root)
+        nodes[node.os_index] = node
+    return nodes
 
 
 class HWLocParser:
-    def __init__(self) -> None:
+    """Parse XML output from lstopo.
+
+    The CPUs and devices are associated with "domains". Normally a "domain"
+    is the same as a NUMA node. However, command-line options can change
+    the interpretation.
+
+    Parameters
+    ----------
+    domain_type
+        Control what domains correspond to.
+
+        If set to L3, domains will correspond to L3 caches rather than
+        NUMA nodes. This will raise an exception if the L3 caches do not
+        partition the CPU set of each NUMA node or if there are NUMA nodes
+        without L3 caches. Hardware devices will be associated with the first
+        domain of each NUMA node.
+    """
+
+    def __init__(self, domain_type: DomainType) -> None:
         cmd = ["lstopo", "--output-format", "xml"]
         result = subprocess.check_output(cmd).decode("ascii")
         self._tree = xml.etree.ElementTree.fromstring(result)
-        self._nodes = self._tree.findall(".//object[@type='NUMANode']")
-        # On single-socket machines, hwloc 1.x doesn't create NUMANode.
-        if not self._nodes:
-            self._nodes = [self._tree]
-        self._nodes.sort(key=lambda node: int(node.get("os_index", 0)))
-        # In hwloc 2.x, NUMANode is a leaf that doesn't contain the associated
-        # cores and devices. We need to ascend the tree to find the container.
-        parent_map = {child: parent for parent in self._tree.iter() for child in parent}
-        for i in range(len(self._nodes)):
-            node = self._nodes[i]
-            if int(node.get("os_index", 0)) != i:
-                raise RuntimeError("NUMA nodes are not numbered contiguously by the OS")
-            while not _pus(node):
-                node = parent_map[node]
-            # On a single-NUMA system this node doesn't contain the PCIe
-            # devices. Keep ascending until that would cause us to escape the
-            # local NUMA node.
-            n_cpus = len(_pus(node))
-            while node in parent_map and len(_pus(parent_map[node])) == n_cpus:
-                node = parent_map[node]
-            self._nodes[i] = node
+        self._nodes = _numa_nodes(self._tree)
 
-    def cpus_by_node(self) -> List[List[int]]:
-        out = []
-        for node in self._nodes:
-            pus = _pus(node)
-            out.append(sorted([int(attr_get(pu, "os_index")) for pu in pus]))
-        return out
+        # Each domain is a list of CPU indices
+        self._domains: List[List[int]] = []
+        if domain_type == DomainType.NUMA:
+            for node in self._nodes.values():
+                node.domains = [len(self._domains)]
+                self._domains.append(node.pu_indices)
+        elif domain_type == DomainType.L3:
+            for node in self._nodes.values():
+                node_cpuset = set(node.pu_indices)  # We'll remove from this as we go
+                orig_node_cpuset = frozenset(node_cpuset)
+                for l3 in _l3_elements(node.root):
+                    l3_cpuset = set(_pu_indices(l3))
+                    if not l3_cpuset.issubset(orig_node_cpuset):
+                        raise RuntimeError("L3 cache PUs not a subset of the NUMA node's")
+                    if not l3_cpuset.issubset(node_cpuset):
+                        raise RuntimeError("L3 caches contain overlapping PUs")
+                    node_cpuset -= l3_cpuset
+                    node.domains.append(len(self._domains))
+                    self._domains.append(sorted(l3_cpuset))
+                if node_cpuset:
+                    raise RuntimeError("NUMA node contains PUs not covered by any L3 cache")
+        else:
+            raise RuntimeError(f"Unhandled domain type {domain_type}")
 
-    def cpu_nodes(self) -> Mapping[int, int]:
+    def cpus_by_domain(self) -> List[List[int]]:
+        return self._domains
+
+    def cpu_domains(self) -> Mapping[int, int]:
         out = {}
-        for i, node in enumerate(self.cpus_by_node()):
-            for cpu in node:
+        for i, domain in enumerate(self._domains):
+            for cpu in domain:
                 out[cpu] = i
         return out
 
-    def interface_nodes(self) -> Mapping[str, int]:
+    def interface_domains(self) -> Mapping[str, int]:
         out = {}
-        for i, node in enumerate(self._nodes):
+        for node in self._nodes.values():
+            # TODO: need to change the module to allow for multiple domains
+            domain = node.domains[0]
             # hwloc uses type 2 for network devices
-            for device in node.iterfind(".//object[@type='OSDev'][@osdev_type='2']"):
-                out[attr_get(device, "name")] = i
+            for device in node.root.iterfind(".//object[@type='OSDev'][@osdev_type='2']"):
+                out[attr_get(device, "name")] = domain
         return out
 
     def gpus(self) -> List[GPU]:
@@ -167,17 +265,17 @@ class HWLocParser:
         with nvml_manager():
             if not pynvml:
                 return out
-            cpu_to_node = self.cpu_nodes()
             n_devices = pynvml.nvmlDeviceGetCount()
             for i in range(n_devices):
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                out.append(GPU(handle, cpu_to_node))
+                out.append(GPU(handle, self._nodes))
         return out
 
 
 def infiniband_devices(interface: str) -> List[str]:
-    """Return a list of device paths associated with a kernel network
-    interface, or an empty list if not an Infiniband device.
+    """Return a list of device paths associated with a kernel network interface.
+
+    Return an empty list if `interface` is not an Infiniband device.
 
     This is based on ibdev2netdev (installed with MLNX OFED) plus inspection of
     /sys.
@@ -220,11 +318,11 @@ def collapse_ranges(values: Iterable[int]) -> str:
 
 
 def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], Mapping[str, Any]]:
-    hwloc = HWLocParser()
+    hwloc = HWLocParser(DomainType[args.domains.upper()])
     attributes: Dict[str, Any] = {}
     resources: Dict[str, Any] = {}
 
-    interface_nodes = hwloc.interface_nodes()
+    interface_domains = hwloc.interface_domains()
     interfaces = []
     for i, network_spec in enumerate(args.networks):
         try:
@@ -272,7 +370,7 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
         except (KeyError, IndexError):
             raise RuntimeError(f"Could not obtain IPv4 address for interface {interface}")
         try:
-            config["numa_node"] = interface_nodes[interface]
+            config["numa_node"] = interface_domains[interface]
         except KeyError:
             pass
         interfaces.append(config)
@@ -307,18 +405,19 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
             name = fields[0]
             path = fields[1]
             if len(fields) >= 3:
-                numa_node = int(fields[2])
+                domain = int(fields[2])
             else:
-                numa_node = None
+                domain = None
         except (ValueError, IndexError):
             raise RuntimeError(
-                f"Error: --volume argument {volume_spec} does not have the format NAME:PATH"
+                f"Error: --volume argument {volume_spec} "
+                "does not have the format NAME:PATH[:DOMAIN]"
             )
         if not os.path.exists(path):
             raise RuntimeError(f"Path {path} does not exist")
         config = {"name": name, "host_path": path}
-        if numa_node is not None:
-            config["numa_node"] = numa_node
+        if domain is not None:
+            config["numa_node"] = domain
         volumes.append(config)
     attributes["katsdpcontroller.volumes"] = volumes
 
@@ -331,8 +430,8 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
                 "device_attributes": gpu.device_attributes,
                 "uuid": gpu.uuid,
             }
-            if gpu.node is not None:
-                config["numa_node"] = gpu.node
+            if gpu.domain is not None:
+                config["numa_node"] = gpu.domain
             gpus.append(config)
             resources[f"katsdpcontroller.gpu.{i}.compute"] = 1.0
             # Convert memory to MiB, for consistency with Mesos' other resources
@@ -345,9 +444,9 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
     if args.subsystems:
         attributes["katsdpcontroller.subsystems"] = args.subsystems
 
-    attributes["katsdpcontroller.numa"] = hwloc.cpus_by_node()
-    resources["cores"] = collapse_ranges(hwloc.cpu_nodes().keys())
-    resources["cpus"] = float(len(hwloc.cpu_nodes())) - args.reserve_cpu
+    attributes["katsdpcontroller.numa"] = hwloc.cpus_by_domain()
+    resources["cores"] = collapse_ranges(hwloc.cpu_domains().keys())
+    resources["cpus"] = float(len(hwloc.cpu_domains())) - args.reserve_cpu
     if resources["cpus"] < 0.1:
         raise RuntimeError(f"--reserve-cpu ({args.reserve_cpu}) is too high")
     resources["mem"] = psutil.virtual_memory().total // 2**20 - args.reserve_mem
@@ -491,6 +590,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default=[],
         metavar="NAME:PATH[:NUMA]",
         help="Map host directory to a logical volume name",
+    )
+    parser.add_argument(
+        "--domains",
+        choices=[value.name.lower() for value in DomainType],
+        default="numa",
+        help="Domains by which to partition hardware [%(default)s]",
     )
     parser.add_argument("--priority", type=float, help="Set agent priority for placement")
     parser.add_argument(
