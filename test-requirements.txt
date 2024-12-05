@@ -8,7 +8,7 @@ aiohappyeyeballs==2.3.7
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.10.4
+aiohttp==3.10.11
     # via
     #   -c requirements.txt
     #   aioresponses
@@ -62,6 +62,10 @@ packaging==23.2
     #   pytest
 pluggy==1.4.0
     # via pytest
+propcache==0.2.0
+    # via
+    #   -c requirements.txt
+    #   yarl
 psutil==5.9.8
     # via -r test-requirements.in
 pyfakefs==5.3.5
@@ -94,7 +98,7 @@ typing-extensions==4.9.0
     # via
     #   -c requirements.txt
     #   mypy
-yarl==1.9.4
+yarl==1.15.2
     # via
     #   -c requirements.txt
     #   aiohttp
