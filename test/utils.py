@@ -213,11 +213,6 @@ CONFIG = """{
                 "major_gain": 0.15
             }
         }
-    },
-    "config": {
-        "develop": {
-            "data_timeout": 1.0
-        }
     }
 }"""  # noqa: E501
 
@@ -271,11 +266,6 @@ CONFIG_CBF_ONLY = """{
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "src_pol": 1
-        }
-    },
-    "config": {
-        "develop": {
-            "data_timeout": 1.0
         }
     }
 }"""

@@ -601,8 +601,14 @@ class TestControllerInterface(BaseTestController):
 
         orig_sensor_set_value = Sensor.set_value
         monkeypatch.setattr(Sensor, "set_value", sensor_set_value)
+
+        # Modify config to make the timeout length much shorter.
+        temp_config = json.loads(CONFIG)
+        temp_config["config"] = {"develop": {"data_timeout": 1.0}}
+        modified_config = json.dumps(temp_config)
+
         with pytest.raises(FailReply, match="Some tasks did not receive good data"):
-            await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+            await client.request("product-configure", SUBARRAY_PRODUCT, modified_config)
 
     async def test_help(self, client: aiokatcp.Client) -> None:
         reply, informs = await client.request("help")
