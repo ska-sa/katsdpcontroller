@@ -268,7 +268,8 @@ CONFIG_CBF_ONLY = """{
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "src_pol": 1
         }
-    }
+    },
+    "config": {}
 }"""
 
 S3_CONFIG = """
@@ -306,8 +307,7 @@ S3_CONFIG = """
         "read": {
             "url": "https://models.s3.invalid/models"
         }
-    },
-    "config": {}
+    }
 }"""
 
 EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST: List[Tuple[bytes, ...]] = [
