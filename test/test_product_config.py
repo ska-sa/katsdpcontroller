@@ -202,7 +202,7 @@ class TestOptions:
 
     def test_from_config_dict(self) -> None:
         config = {
-            "develop": {"disable_ibverbs": True, "less_resources": True},
+            "develop": {"disable_ibverbs": True, "less_resources": True, "data_timeout": 2.4},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
             "shutdown_delay": 5.0,
@@ -211,6 +211,7 @@ class TestOptions:
         assert options.develop.any_gpu is False
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
+        assert options.develop.data_timeout == 2.4
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
@@ -226,6 +227,7 @@ class TestOptions:
         assert options.develop.any_gpu is True
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
+        assert options.develop.data_timeout == defaults.RX_DEVICE_STATUS_TIMEOUT
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
@@ -1455,7 +1457,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.2",
+        "version": "4.3",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
