@@ -227,7 +227,7 @@ class TestOptions:
         assert options.develop.any_gpu is True
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
-        assert options.develop.data_timeout == 30.0
+        assert options.develop.data_timeout == defaults.RX_DEVICE_STATUS_TIMEOUT
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
