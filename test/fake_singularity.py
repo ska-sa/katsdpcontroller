@@ -206,7 +206,10 @@ async def default_lifecycle(
 
 class SingularityServer:
     def __init__(self, *, aiohttp_server_kwargs: Mapping = {}) -> None:
-        app = aiohttp.web.Application()
+        # We increase the keepalive_timeout to work around
+        # https://github.com/aio-libs/aiohttp/issues/10149 in aiohttp 3.10.11.
+        # This new value is the default since aiohttp 3.11.
+        app = aiohttp.web.Application(handler_args=dict(keepalive_timeout=3630))
         app.add_routes(
             [
                 aiohttp.web.get("/api/requests/request/{request_id}", self._get_request),
