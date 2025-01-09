@@ -1175,7 +1175,7 @@ def _make_xbgpu(
         xbgpu.image = "katgpucbf"
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
-        xbgpu.mem = 512 + _mb(recv_buffer)
+        xbgpu.mem = 1024 + _mb(recv_buffer)
         if not configuration.options.develop.less_resources:
             xbgpu.cores = ["recv", "send"]
             xbgpu.numa_nodes = 0.5 * bw_scale  # It's easily starved of bandwidth
