@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -464,6 +464,8 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
         assert acv.input_labels == config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
+        assert acv.window_function is None
+        assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
 
@@ -492,6 +494,8 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2 / 8
         assert acv.input_labels == narrowband_config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
+        assert acv.window_function is None
+        assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
 
@@ -586,6 +590,24 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             Options(), "wide1_acv", config, src_streams, {}
         )
         assert acv.w_cutoff == 0.9
+
+    def test_window_function(
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
+    ) -> None:
+        config["window_function"] = "rect"
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
+            Options(), "wide1_acv", config, src_streams, {}
+        )
+        assert acv.window_function == "rect"
+
+    def test_taps(
+        self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
+    ) -> None:
+        config["taps"] = 3
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
+            Options(), "wide1_acv", config, src_streams, {}
+        )
+        assert acv.pfb_taps == 3
 
     def test_dither(
         self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
@@ -1457,7 +1479,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.3",
+        "version": "4.4",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {

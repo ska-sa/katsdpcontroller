@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -753,6 +753,8 @@ def _make_fgpu(
                 "w_cutoff": stream.w_cutoff,
                 "jones_per_batch": stream.n_jones_per_batch,
                 "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
+                "dither": stream.dither,
+                "window_function": stream.window_function,
             }
             if stream.narrowband is not None:
                 output_config["decimation"] = stream.narrowband.decimation_factor
@@ -761,11 +763,11 @@ def _make_fgpu(
                 output_arg_name = "narrowband"
             else:
                 output_arg_name = "wideband"
-            if stream.dither is not None:
-                output_config["dither"] = stream.dither
             fgpu.command += [
                 f"--{output_arg_name}",
-                ",".join(f"{key}={value}" for (key, value) in output_config.items()),
+                ",".join(
+                    f"{key}={value}" for (key, value) in output_config.items() if value is not None
+                ),
             ]
 
         if not configuration.options.develop.less_resources:
