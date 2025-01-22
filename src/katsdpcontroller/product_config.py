@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -651,6 +651,8 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         n_chans: int,
         input_labels: Optional[Iterable[str]] = None,
         w_cutoff: float = 1.0,
+        window_function: Optional[str] = None,
+        taps: Optional[int] = None,
         narrowband: Optional[GpucbfNarrowbandConfig] = None,
         dither: Optional[str] = None,
         command_line_extra: Iterable[str] = (),
@@ -737,8 +739,9 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         )
         self.n_substreams = n_substreams
         self.bits_per_sample = 8
-        self.pfb_taps = defaults.PFB_TAPS
+        self.pfb_taps = taps if taps is not None else defaults.PFB_TAPS
         self.w_cutoff = w_cutoff
+        self.window_function = window_function
         self.narrowband = narrowband
         self.dither = dither
         self.command_line_extra = list(command_line_extra)
@@ -791,6 +794,8 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             n_chans=config["n_chans"],
             input_labels=config.get("input_labels"),
             w_cutoff=config.get("w_cutoff", 1.0),
+            window_function=config.get("window_function"),
+            taps=config.get("taps"),
             narrowband=(
                 GpucbfNarrowbandConfig.from_config(narrowband) if narrowband is not None else None
             ),

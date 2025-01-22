@@ -1,5 +1,5 @@
 {% macro versions() %}
-["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3"]
+["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3", "4.4"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -90,6 +90,9 @@
         },
         "dither": {
             "enum": ["uniform", "none"]
+        },
+        "window_function": {
+            "enum": ["hann", "rect"]
         }
     },
     "type": "object",
@@ -503,7 +506,11 @@
                                         "items": {"$ref": "#/definitions/stream_name"},
                                         "uniqueItems": true
                                     },
-                                    "w_cutoff": {"$ref": "#/definitions/positive_number", "default": 1.0},
+                                    "w_cutoff": {"$ref": "#/definitions/nonneg_number", "default": 1.0},
+{% if version >= "4.4" %}
+                                    "window_function": {"$ref": "#/definitions/window_function", "default": "hann"},
+                                    "taps": {"$ref": "#/definitions/positive_integer"},
+{% endif %}
 {% if version >= "3.3" %}
                                     "narrowband": {
                                         "type": "object",
