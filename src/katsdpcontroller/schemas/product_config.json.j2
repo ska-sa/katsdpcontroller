@@ -508,7 +508,7 @@
                                     },
                                     "w_cutoff": {"$ref": "#/definitions/nonneg_number", "default": 1.0},
 {% if version >= "4.4" %}
-                                    "window_function": {"$ref": "#/definitions/window_function"},
+                                    "window_function": {"$ref": "#/definitions/window_function", "default": "hann"},
                                     "taps": {"$ref": "#/definitions/positive_integer"},
 {% endif %}
 {% if version >= "3.3" %}
