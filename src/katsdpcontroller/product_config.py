@@ -28,6 +28,7 @@ from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterable,
@@ -52,6 +53,9 @@ from . import defaults, schemas
 
 logger = logging.getLogger(__name__)
 _S = TypeVar("_S", bound="Stream")
+_T = TypeVar("_T")
+_T2 = TypeVar("_T2")
+_T3 = TypeVar("_T3")
 _ValidTypes = Union[AbstractSet[str], Sequence[str]]
 #: Number of bytes per complex visibility
 BYTES_PER_VIS = 8
@@ -151,6 +155,16 @@ class _SubStreamSensor(_Sensor):
 class _SubSensor(_Sensor):
     def full_name(self, components: Mapping[str, str], stream: str, instrument: str) -> str:
         return f'{components["sub"]}_{self.name}'
+
+
+def _or(spec: Optional[_T], default: _T) -> _T:
+    """Replace None with a default value."""
+    return spec if spec is not None else default
+
+
+def _or_call(spec: Optional[_T], apply: Callable[[_T], _T2], default: _T3) -> Union[_T2, _T3]:
+    """Return apply(spec) if spec is not None, otherwise default."""
+    return apply(spec) if spec is not None else default
 
 
 def _normalise_output_channels(
@@ -618,20 +632,43 @@ class AntennaChannelisedVoltageStream(CbfStream, AntennaChannelisedVoltageStream
         )
 
 
+class GpucbfNarrowbandVLBIConfig:
+    """Narrowband configuration specific to VLBI processing."""
+
+    def __init__(self, *, pass_bandwidth: float) -> None:
+        self.pass_bandwidth = pass_bandwidth
+
+    @classmethod
+    def from_config(cls, config: dict) -> "GpucbfNarrowbandVLBIConfig":
+        return cls(pass_bandwidth=config["pass_bandwidth"])
+
+
 class GpucbfNarrowbandConfig:
     """Narrowband configuration for a gpucbf.antenna_channelised_voltage stream."""
 
-    def __init__(self, *, decimation_factor: int, centre_frequency: float) -> None:
+    def __init__(
+        self,
+        *,
+        decimation_factor: int,
+        centre_frequency: float,
+        vlbi: Optional[GpucbfNarrowbandVLBIConfig],
+    ) -> None:
         self.decimation_factor = decimation_factor
         self.centre_frequency = centre_frequency
-        self.ddc_taps = decimation_factor * defaults.DDC_TAPS_RATIO
+        self.vlbi = vlbi
+        self.ddc_taps = self.subsampling * defaults.DDC_TAPS_RATIO
 
     @classmethod
     def from_config(cls, config: dict) -> "GpucbfNarrowbandConfig":
         return cls(
             decimation_factor=config["decimation_factor"],
             centre_frequency=config["centre_frequency"],
+            vlbi=_or_call(config.get("vlbi"), GpucbfNarrowbandVLBIConfig.from_config, None),
         )
+
+    @property
+    def subsampling(self) -> int:
+        return self.decimation_factor if self.vlbi is None else 2 * self.decimation_factor
 
 
 class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
@@ -650,7 +687,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         *,
         n_chans: int,
         input_labels: Optional[Iterable[str]] = None,
-        w_cutoff: float = 1.0,
+        w_cutoff: Optional[float] = None,
         window_function: Optional[str] = None,
         taps: Optional[int] = None,
         narrowband: Optional[GpucbfNarrowbandConfig] = None,
@@ -661,9 +698,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             raise ValueError("n_chans is not a power of 2")
         if len(src_streams) % 2 != 0:
             raise ValueError("src_streams does not have an even number of elements")
-        self.input_labels = (
-            [stream.name for stream in src_streams] if input_labels is None else list(input_labels)
-        )
+        self.input_labels = _or_call(input_labels, list, [stream.name for stream in src_streams])
         if len(self.input_labels) != len(src_streams):
             raise ValueError(
                 f"input_labels has {len(self.input_labels)} elements, expected {len(src_streams)}"
@@ -697,6 +732,10 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         dig_bandwidth = first.adc_sample_rate / 2
         bandwidth = dig_bandwidth
         centre_frequency = first.centre_frequency
+        # Defaults if not in VLBI mode
+        default_taps = defaults.PFB_TAPS
+        default_w_cutoff = 1.0
+        default_window_function = defaults.WINDOW_FUNCTION
         if narrowband is not None:
             decimation_factor = narrowband.decimation_factor
             bandwidth /= narrowband.decimation_factor
@@ -710,6 +749,15 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
                     f" is outside the range [{min_cf}, {max_cf}]"
                 )
             centre_frequency += narrowband.centre_frequency - dig_bandwidth / 2
+            if narrowband.vlbi is not None:
+                default_taps = 1
+                default_w_cutoff = 0.0
+                default_window_function = defaults.WINDOW_FUNCTION_VLBI
+                if narrowband.vlbi.pass_bandwidth >= bandwidth:
+                    raise ValueError(
+                        f"pass_bandwidth ({narrowband.vlbi.pass_bandwidth}) must be "
+                        f"strictly less than bandwidth ({bandwidth})"
+                    )
 
         # Determine how fine to divide the stream, i.e., the number of xgpu
         # processes to run. The minimum is 4 since SDP expects to run 4 ingest
@@ -734,9 +782,9 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         )
         self.n_substreams = n_substreams
         self.bits_per_sample = 8
-        self.pfb_taps = taps if taps is not None else defaults.PFB_TAPS
-        self.w_cutoff = w_cutoff
-        self.window_function = window_function
+        self.pfb_taps = _or(taps, default_taps)
+        self.w_cutoff = _or(w_cutoff, default_w_cutoff)
+        self.window_function = _or(window_function, default_window_function)
         self.narrowband = narrowband
         self.dither = dither
         self.command_line_extra = list(command_line_extra)
@@ -788,12 +836,10 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             src_streams,
             n_chans=config["n_chans"],
             input_labels=config.get("input_labels"),
-            w_cutoff=config.get("w_cutoff", 1.0),
+            w_cutoff=config.get("w_cutoff"),
             window_function=config.get("window_function"),
             taps=config.get("taps"),
-            narrowband=(
-                GpucbfNarrowbandConfig.from_config(narrowband) if narrowband is not None else None
-            ),
+            narrowband=_or_call(narrowband, GpucbfNarrowbandConfig.from_config, None),
             dither=config.get("dither"),
             command_line_extra=config.get("command_line_extra", []),
         )

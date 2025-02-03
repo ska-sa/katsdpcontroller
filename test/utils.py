@@ -44,7 +44,7 @@ _T = TypeVar("_T")
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
 CONFIG = """{
-    "version": "4.3",
+    "version": "4.5",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -218,7 +218,7 @@ CONFIG = """{
 }"""  # noqa: E501
 
 CONFIG_CBF_ONLY = """{
-    "version": "4.3",
+    "version": "4.5",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -252,6 +252,27 @@ CONFIG_CBF_ONLY = """{
             "type": "gpucbf.antenna_channelised_voltage",
             "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
             "n_chans": 4096
+        },
+        "gpucbf_antenna_channelised_voltage_narrowband": {
+            "type": "gpucbf.antenna_channelised_voltage",
+            "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
+            "n_chans": 4096,
+            "narrowband": {
+                "decimation_factor": 8,
+                "centre_frequency": 300e6
+            }
+        },
+        "gpucbf_antenna_channelised_voltage_narrowband_vlbi": {
+            "type": "gpucbf.antenna_channelised_voltage",
+            "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
+            "n_chans": 4096,
+            "narrowband": {
+                "decimation_factor": 8,
+                "centre_frequency": 300e6,
+                "vlbi": {
+                    "pass_bandwidth": 64e6
+                }
+            }
         },
         "gpucbf_baseline_correlation_products": {
             "type": "gpucbf.baseline_correlation_products",
