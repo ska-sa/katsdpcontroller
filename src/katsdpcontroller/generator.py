@@ -502,7 +502,7 @@ def _make_fgpu(
             ddc_group_delay = -(stream.narrowband.ddc_taps - 1) / 2
             subsampling = stream.narrowband.subsampling
             internal_channels = stream.n_chans
-            if stream.narrowband.vlbi is not None:
+            if stream.narrowband.vlbi is None:
                 internal_channels *= 2
             pfb_group_delay = -(internal_channels * stream.pfb_taps - 1) / 2 * subsampling
         else:
