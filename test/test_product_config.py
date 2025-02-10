@@ -64,6 +64,7 @@ _M000 = katpoint.Antenna(
 _M002 = katpoint.Antenna(
     "m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14"  # noqa: E501
 )
+DECIMATION = 8
 
 
 class TestRecursiveDiff:
@@ -428,7 +429,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         return {
             "narrowband": {
                 "centre_frequency": 200e6,
-                "decimation_factor": 8,
+                "decimation_factor": DECIMATION,
             },
             **config,
         }
@@ -438,7 +439,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         return {
             "narrowband": {
                 "centre_frequency": 200e6,
-                "decimation_factor": 8,
+                "decimation_factor": DECIMATION,
                 "vlbi": {
                     "pass_bandwidth": 64e6,
                 },
@@ -492,7 +493,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.antennas == ["m000", "m002"]
         assert acv.band == src_streams[0].band
         assert acv.n_chans == narrowband_config["n_chans"]
-        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / 8
+        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / DECIMATION
         assert acv.centre_frequency == 1056e6
         assert acv.adc_sample_rate == src_streams[0].adc_sample_rate
         assert (
@@ -503,7 +504,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         )
         assert acv.sources(0) == tuple(src_streams[0:2])
         assert acv.sources(1) == tuple(src_streams[2:4])
-        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / 8
+        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
         assert acv.input_labels == narrowband_config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
         assert acv.window_function == defaults.WINDOW_FUNCTION
@@ -520,14 +521,9 @@ class TestGpucbfAntennaChanneliseVoltageStream:
             Options(), "vlbi1_acv", narrowband_vlbi_config, src_streams, {}
         )
         # Most attributes we don't bother testing - just those affected by VLBI mode
-        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / 8
-        assert (
-            acv.n_samples_between_spectra
-            == 2
-            * narrowband_vlbi_config["n_chans"]
-            * narrowband_vlbi_config["narrowband"]["decimation_factor"]
-        )
-        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / 8
+        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / DECIMATION
+        assert acv.n_samples_between_spectra == 2 * narrowband_vlbi_config["n_chans"] * DECIMATION
+        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
         assert acv.w_cutoff == 0.0  # Default value for VLBI
         assert acv.window_function == defaults.WINDOW_FUNCTION_VLBI
         assert acv.pfb_taps == 1
@@ -537,7 +533,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         narrowband_vlbi_config: Dict[str, Any],
         src_streams: List[DigBasebandVoltageStreamBase],
     ) -> None:
-        bandwidth = src_streams[0].adc_sample_rate / 2 / 8
+        bandwidth = src_streams[0].adc_sample_rate / 2 / DECIMATION
         narrowband_vlbi_config["narrowband"]["vlbi"]["pass_bandwidth"] = bandwidth
         with pytest.raises(ValueError):
             GpucbfAntennaChannelisedVoltageStream.from_config(
