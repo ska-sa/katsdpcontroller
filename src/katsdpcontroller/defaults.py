@@ -48,7 +48,7 @@ GPUCBF_JONES_PER_BATCH = 2**20
 XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16
-#: Multiply by subsamplingfactor to get digitiser down-conversion taps
+#: Multiply by subsampling factor to get digitiser down-conversion taps
 #: for gpucbf F-engines.
 DDC_TAPS_RATIO = 24
 #: Window function for non-VLBI antenna-channelised-voltage products
