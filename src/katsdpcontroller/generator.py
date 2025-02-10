@@ -1382,7 +1382,14 @@ def _make_xbgpu(
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
-                renames = ["chan-range", "delay", "quantiser-gain", "weight", "beng-clip-cnt"]
+                renames = [
+                    "chan-range",
+                    "delay",
+                    "quantiser-gain",
+                    "weight",
+                    "beng-clip-cnt",
+                    "tx.next-timestamp",
+                ]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
 
