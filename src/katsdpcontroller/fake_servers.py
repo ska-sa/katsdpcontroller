@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -371,6 +371,19 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     f"{corrprod_name}.chan-range",
                     "The range of channels processed by this X-engine, inclusive",
                     default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+        for stream_name in corrprod_names + beam_names:
+            self.sensors.add(
+                Sensor(
+                    int,
+                    f"{stream_name}.tx.next-timestamp",
+                    "Timestamp (in samples) that has not yet been sent. This "
+                    "is strictly greater than any timestamp of the previous "
+                    "capture and less than or equal to any timestamp of the "
+                    "following capture.",
+                    default=0,
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
