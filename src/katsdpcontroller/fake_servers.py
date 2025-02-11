@@ -124,6 +124,19 @@ def _add_steady_state_timestamp_sensor(sensors: SensorSet) -> None:
     )
 
 
+class FakeDsimDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # There are lots of sensors, but for now we don't model them as the
+        # only interaction the product controller has is with the ?signals
+        # request and the steady state timestamp.
+        _add_steady_state_timestamp_sensor(self.sensors)
+
+    async def request_signals(self, ctx, signals: str, period: Optional[int] = None) -> int:
+        """Update the signals that are generated."""
+        return 0
+
+
 class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
     DEFAULT_GAIN = 1.0

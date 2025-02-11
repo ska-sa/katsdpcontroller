@@ -58,6 +58,7 @@ from .aggregate_sensors import LatestSensor, SumSensor, SyncSensor
 from .defaults import FAST_SENSOR_UPDATE_PERIOD, GPUCBF_PACKET_PAYLOAD_BYTES, LOCALHOST
 from .fake_servers import (
     FakeCalDeviceServer,
+    FakeDsimDeviceServer,
     FakeFgpuDeviceServer,
     FakeIngestDeviceServer,
     FakeXbgpuDeviceServer,
@@ -369,6 +370,7 @@ def _make_dsim(
     # (antenna.name, adc_sample_rate), so that is guaranteed to be unique.
     name = f"sim.{streams[0].antenna.name}.{streams[0].adc_sample_rate}"
     dsim = ProductLogicalTask(name, streams=streams)
+    dsim.fake_katcp_server_cls = FakeDsimDeviceServer
     dsim.subsystem = "cbf"
     dsim.image = "katgpucbf"
     dsim.mem = 8192
