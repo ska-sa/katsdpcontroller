@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -48,9 +48,13 @@ GPUCBF_JONES_PER_BATCH = 2**20
 XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 #: Number of polyphase filter-bank taps for gpucbf F-engines
 PFB_TAPS = 16
-#: Multiply by decimation factor to get digitiser down-conversion taps
+#: Multiply by subsampling factor to get digitiser down-conversion taps
 #: for gpucbf F-engines.
-DDC_TAPS_RATIO = 12
+DDC_TAPS_RATIO = 24
+#: Window function for non-VLBI antenna-channelised-voltage products
+WINDOW_FUNCTION = "hann"
+#: Window function for VLBI antenna-channelised-voltage products
+WINDOW_FUNCTION_VLBI = "rect"
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192

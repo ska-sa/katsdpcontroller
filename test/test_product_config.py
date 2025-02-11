@@ -64,6 +64,7 @@ _M000 = katpoint.Antenna(
 _M002 = katpoint.Antenna(
     "m002, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -32.1085 -224.2365 1.248 5871.207 5872.205, 0:40:20.2 0 -0:02:41.9 -0:03:46.8 0:00:09.4 -0:00:01.1 0:03:04.7, 1.14"  # noqa: E501
 )
+DECIMATION = 8
 
 
 class TestRecursiveDiff:
@@ -428,7 +429,20 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         return {
             "narrowband": {
                 "centre_frequency": 200e6,
-                "decimation_factor": 8,
+                "decimation_factor": DECIMATION,
+            },
+            **config,
+        }
+
+    @pytest.fixture
+    def narrowband_vlbi_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "narrowband": {
+                "centre_frequency": 200e6,
+                "decimation_factor": DECIMATION,
+                "vlbi": {
+                    "pass_bandwidth": 64e6,
+                },
             },
             **config,
         }
@@ -464,7 +478,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
         assert acv.input_labels == config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
-        assert acv.window_function is None
+        assert acv.window_function == defaults.WINDOW_FUNCTION
         assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
@@ -479,7 +493,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.antennas == ["m000", "m002"]
         assert acv.band == src_streams[0].band
         assert acv.n_chans == narrowband_config["n_chans"]
-        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / 8
+        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / DECIMATION
         assert acv.centre_frequency == 1056e6
         assert acv.adc_sample_rate == src_streams[0].adc_sample_rate
         assert (
@@ -490,13 +504,50 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         )
         assert acv.sources(0) == tuple(src_streams[0:2])
         assert acv.sources(1) == tuple(src_streams[2:4])
-        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / 8
+        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
         assert acv.input_labels == narrowband_config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
-        assert acv.window_function is None
+        assert acv.window_function == defaults.WINDOW_FUNCTION
         assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
+
+    def test_from_config_narrowband_vlbi(
+        self,
+        narrowband_vlbi_config: Dict[str, Any],
+        src_streams: List[DigBasebandVoltageStreamBase],
+    ) -> None:
+        acv = GpucbfAntennaChannelisedVoltageStream.from_config(
+            Options(), "vlbi1_acv", narrowband_vlbi_config, src_streams, {}
+        )
+        # Most attributes we don't bother testing - just those affected by VLBI mode
+        assert acv.bandwidth == src_streams[0].adc_sample_rate / 2 / DECIMATION
+        assert acv.n_samples_between_spectra == 2 * narrowband_vlbi_config["n_chans"] * DECIMATION
+        assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
+        assert acv.w_cutoff == 0.0  # Default value for VLBI
+        assert acv.window_function == defaults.WINDOW_FUNCTION_VLBI
+        assert acv.pfb_taps == 1
+
+    @pytest.mark.parametrize("extra", [0.0, 1e6])
+    def test_vlbi_bad_pass_bandwidth(
+        self,
+        narrowband_vlbi_config: Dict[str, Any],
+        src_streams: List[DigBasebandVoltageStreamBase],
+        extra: float,
+    ) -> None:
+        bandwidth = src_streams[0].adc_sample_rate / 2 / DECIMATION
+        pass_bandwidth = bandwidth + extra
+        narrowband_vlbi_config["narrowband"]["vlbi"]["pass_bandwidth"] = pass_bandwidth
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                f"pass_bandwidth ({pass_bandwidth}) must be strictly less than "
+                f"bandwidth ({bandwidth})"
+            ),
+        ):
+            GpucbfAntennaChannelisedVoltageStream.from_config(
+                Options(), "vlbi1_acv", narrowband_vlbi_config, src_streams, {}
+            )
 
     def test_n_chans_not_power_of_two(
         self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]
@@ -786,7 +837,7 @@ class TestBaselineCorrelationProductsStream:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                r"channels per endpoint (128) is not a multiple of channels per substream (2048)"
+                "channels per endpoint (128) is not a multiple of channels per substream (2048)"
             ),
         ):
             BaselineCorrelationProductsStream.from_config(
@@ -1109,7 +1160,7 @@ class TestVisStream:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                rf"n_chans ({bcp.n_chans}) is not a multiple of required alignment ({alignment})"
+                f"n_chans ({bcp.n_chans}) is not a multiple of required alignment ({alignment})"
             ),
         ):
             VisStream.from_config(Options(), "sdp_l0", config, [bcp], {})
@@ -1477,7 +1528,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.4",
+        "version": "4.5",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
