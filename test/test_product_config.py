@@ -540,8 +540,10 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         narrowband_vlbi_config["narrowband"]["vlbi"]["pass_bandwidth"] = pass_bandwidth
         with pytest.raises(
             ValueError,
-            match=rf"pass_bandwidth \({pass_bandwidth}\) must be strictly less than "
-            rf"bandwidth \({bandwidth}\)",
+            match=re.escape(
+                f"pass_bandwidth ({pass_bandwidth}) must be strictly less than "
+                f"bandwidth ({bandwidth})"
+            ),
         ):
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), "vlbi1_acv", narrowband_vlbi_config, src_streams, {}
@@ -835,7 +837,7 @@ class TestBaselineCorrelationProductsStream:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                r"channels per endpoint (128) is not a multiple of channels per substream (2048)"
+                "channels per endpoint (128) is not a multiple of channels per substream (2048)"
             ),
         ):
             BaselineCorrelationProductsStream.from_config(
@@ -1158,7 +1160,7 @@ class TestVisStream:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                rf"n_chans ({bcp.n_chans}) is not a multiple of required alignment ({alignment})"
+                f"n_chans ({bcp.n_chans}) is not a multiple of required alignment ({alignment})"
             ),
         ):
             VisStream.from_config(Options(), "sdp_l0", config, [bcp], {})
