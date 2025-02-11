@@ -528,14 +528,21 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.window_function == defaults.WINDOW_FUNCTION_VLBI
         assert acv.pfb_taps == 1
 
+    @pytest.mark.parametrize("extra", [0.0, 1e6])
     def test_vlbi_bad_pass_bandwidth(
         self,
         narrowband_vlbi_config: Dict[str, Any],
         src_streams: List[DigBasebandVoltageStreamBase],
+        extra: float,
     ) -> None:
         bandwidth = src_streams[0].adc_sample_rate / 2 / DECIMATION
-        narrowband_vlbi_config["narrowband"]["vlbi"]["pass_bandwidth"] = bandwidth
-        with pytest.raises(ValueError):
+        pass_bandwidth = bandwidth + extra
+        narrowband_vlbi_config["narrowband"]["vlbi"]["pass_bandwidth"] = pass_bandwidth
+        with pytest.raises(
+            ValueError,
+            match=rf"pass_bandwidth \({pass_bandwidth}\) must be strictly less than "
+            rf"bandwidth \({bandwidth}\)",
+        ):
             GpucbfAntennaChannelisedVoltageStream.from_config(
                 Options(), "vlbi1_acv", narrowband_vlbi_config, src_streams, {}
             )
