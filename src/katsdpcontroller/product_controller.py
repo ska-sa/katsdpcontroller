@@ -2168,6 +2168,10 @@ class DeviceServer(aiokatcp.DeviceServer):
         signals_str
             Textual description of the signals. Refer to the katgpucbf manual
             for details. The description must produce one signal per polarisation.
+        period
+            Period for the generated signal. It must divide into the value
+            indicated by the ``max-period`` sensor of the dsim. If not
+            specified, the value of ``max-period`` is used.
 
         Returns
         -------
