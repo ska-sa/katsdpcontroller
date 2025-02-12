@@ -50,7 +50,7 @@ XBGPU_MAX_SRC_DATA_RATE = 5.45e9
 PFB_TAPS = 16
 #: Multiply by subsampling factor to get digitiser down-conversion taps
 #: for gpucbf F-engines.
-DDC_TAPS_RATIO = 24
+DDC_TAPS_RATIO = 16
 #: Window function for non-VLBI antenna-channelised-voltage products
 WINDOW_FUNCTION = "hann"
 #: Window function for VLBI antenna-channelised-voltage products
