@@ -2176,7 +2176,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         Returns
         -------
         timestamp
-            First timestamp which will use the new signals
+            First timestamp which will use the new signals.
         """
         return await self._get_product().dsim_signals(dsim, signals_str, period)
 
