@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -120,6 +120,7 @@ EXPECTED_REQUEST_LIST = [
     "capture-status",
     "capture-stop",
     "delays",
+    "dsim-signals",
     "gain",
     "gain-all",
     "product-configure",
@@ -817,6 +818,18 @@ class TestControllerInterface(BaseTestController):
             "gpucbf_tied_array_channelised_voltage_0x.delay",
             "(12345678, 0.5, 0.0, -1.5, -2.0)",
         )
+        await client.request("product-deconfigure")
+
+    async def test_dsim_signals(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        reply, _ = await client.request("dsim-signals", "sim.m900.1712000000.0", "1;2;")
+        assert reply == [b"0"]
+        await client.request("product-deconfigure")
+
+    async def test_dsim_signals_bad_dsim(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        with pytest.raises(FailReply, match="No dsim named spam"):
+            await client.request("dsim-signals", "spam", "1;2;")
         await client.request("product-deconfigure")
 
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
