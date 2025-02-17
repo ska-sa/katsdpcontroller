@@ -1497,7 +1497,15 @@ class SubarrayProduct:
             timeout=DELAYS_TIMEOUT,
         )
 
-    async def dsim_signals(self, dsim: str, signals_str: str, period: Optional[int] = None) -> int:
+    def _get_dsim_katcp(self, dsim: str) -> aiokatcp.Client:
+        """Get the katcp client for connecting to a dsim.
+
+        Raises
+        ------
+        FailReply
+            if the dsim name is not known, there is no connection to it, or the
+            subarray product is not in a suitable state.
+        """
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot set dsim signals in state {self.state}")
         for task in self.physical_graph:
@@ -1510,14 +1518,23 @@ class SubarrayProduct:
                 break
         else:
             raise FailReply(f"No dsim named {dsim}")
+        if dsim_task.katcp_connection is None:
+            raise FailReply(f"No katcp connection to {dsim}")
+        return dsim_task.katcp_connection
+
+    async def dsim_signals(self, dsim: str, signals_str: str, period: Optional[int] = None) -> int:
+        conn = self._get_dsim_katcp(dsim)
         # Have to annotate as 'list', as otherwise mypy infers list[str]
         args: list = ["signals", signals_str]
         if period is not None:
             args.append(period)
-        if dsim_task.katcp_connection is None:
-            raise FailReply(f"No katcp connection to {dsim}")
-        reply, _ = await dsim_task.katcp_connection.request(*args)
-        return reply[0]
+        reply, _ = await conn.request(*args)
+        return aiokatcp.decode(int, reply[0])
+
+    async def dsim_time(self, dsim: str) -> float:
+        conn = self._get_dsim_katcp(dsim)
+        reply, _ = await conn.request("time")
+        return aiokatcp.decode(float, reply[0])
 
     async def capture_start_stop(self, stream_name: str, *, start: bool) -> None:
         """Either start or stop transmission on a stream."""
@@ -2179,6 +2196,10 @@ class DeviceServer(aiokatcp.DeviceServer):
             First timestamp which will use the new signals.
         """
         return await self._get_product().dsim_signals(dsim, signals_str, period)
+
+    async def request_dsim_time(self, ctx, dsim: str) -> float:
+        """Return the current UNIX timestamp from a dsim."""
+        return await self._get_product().dsim_time(dsim)
 
     async def request_capture_start(self, ctx, stream: str) -> None:
         """Enable data transmission for the named data stream."""

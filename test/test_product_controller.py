@@ -121,6 +121,7 @@ EXPECTED_REQUEST_LIST = [
     "capture-stop",
     "delays",
     "dsim-signals",
+    "dsim-time",
     "gain",
     "gain-all",
     "product-configure",

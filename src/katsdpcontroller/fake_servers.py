@@ -19,6 +19,7 @@
 import asyncio
 import json
 import numbers
+import time
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -135,6 +136,10 @@ class FakeDsimDeviceServer(FakeDeviceServer):
     async def request_signals(self, ctx, signals: str, period: Optional[int] = None) -> int:
         """Update the signals that are generated."""
         return 0
+
+    async def request_time(self, ctx) -> float:
+        """Return the current UNIX timestamp."""
+        return time.time()
 
 
 class FakeFgpuDeviceServer(FakeDeviceServer):
