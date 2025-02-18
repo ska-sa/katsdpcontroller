@@ -1500,6 +1500,11 @@ class SubarrayProduct:
     def _get_dsim_katcp(self, dsim: str) -> aiokatcp.Client:
         """Get the katcp client for connecting to a dsim.
 
+        Parameters
+        ----------
+        dsim
+            The task name for the dsim
+
         Raises
         ------
         FailReply
