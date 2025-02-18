@@ -121,6 +121,7 @@ EXPECTED_REQUEST_LIST = [
     "capture-stop",
     "delays",
     "dsim-signals",
+    "dsim-time",
     "gain",
     "gain-all",
     "product-configure",
@@ -830,6 +831,18 @@ class TestControllerInterface(BaseTestController):
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         with pytest.raises(FailReply, match="No dsim named spam"):
             await client.request("dsim-signals", "spam", "1;2;")
+        await client.request("product-deconfigure")
+
+    async def test_dsim_time(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        reply, _ = await client.request("dsim-time", "sim.m900.1712000000.0")
+        assert reply == [b"123456789.5"]
+        await client.request("product-deconfigure")
+
+    async def test_dsim_time_bad_dsim(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        with pytest.raises(FailReply, match="No dsim named spam"):
+            await client.request("dsim-time", "spam")
         await client.request("product-deconfigure")
 
     async def test_input_data_suspect(self, client: aiokatcp.Client, server: DeviceServer) -> None:
