@@ -539,7 +539,8 @@ def _make_fgpu(
             Sensor(
                 float,
                 f"{stream.name}.pass-bandwidth",
-                "Bandwidth over which the CBF produces a flat response" "Hz",
+                "Bandwidth over which the CBF produces a flat response",
+                "Hz",
                 default=stream.pass_bandwidth,
                 initial_status=Sensor.Status.NOMINAL,
             ),
@@ -990,7 +991,8 @@ def _make_xbgpu(
             Sensor(
                 float,
                 f"{stream.name}.pass-bandwidth",
-                "Bandwidth over which the CBF produces a flat response" "Hz",
+                "Bandwidth over which the CBF produces a flat response",
+                "Hz",
                 default=acv.pass_bandwidth,
                 initial_status=Sensor.Status.NOMINAL,
             ),
