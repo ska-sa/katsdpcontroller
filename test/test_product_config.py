@@ -44,6 +44,7 @@ from katsdpcontroller.product_config import (
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
     GpucbfTiedArrayChannelisedVoltageStream,
+    GpucbfWindowFunction,
     Options,
     ServiceOverride,
     SimAntennaChannelisedVoltageStream,
@@ -478,7 +479,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2
         assert acv.input_labels == config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
-        assert acv.window_function == defaults.WINDOW_FUNCTION
+        assert acv.window_function == GpucbfWindowFunction(defaults.WINDOW_FUNCTION)
         assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
@@ -507,7 +508,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
         assert acv.input_labels == narrowband_config["src_streams"]
         assert acv.w_cutoff == 1.0  # Default value
-        assert acv.window_function == defaults.WINDOW_FUNCTION
+        assert acv.window_function == GpucbfWindowFunction(defaults.WINDOW_FUNCTION)
         assert acv.pfb_taps == defaults.PFB_TAPS
         assert acv.dither is None
         assert acv.command_line_extra == []
@@ -525,7 +526,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         assert acv.n_samples_between_spectra == 2 * narrowband_vlbi_config["n_chans"] * DECIMATION
         assert acv.data_rate(1.0, 0) == 27392e6 * 2 / DECIMATION
         assert acv.w_cutoff == 0.0  # Default value for VLBI
-        assert acv.window_function == defaults.WINDOW_FUNCTION_VLBI
+        assert acv.window_function == GpucbfWindowFunction(defaults.WINDOW_FUNCTION_VLBI)
         assert acv.pfb_taps == 1
 
     @pytest.mark.parametrize("extra", [0.0, 1e6])
@@ -648,7 +649,7 @@ class TestGpucbfAntennaChanneliseVoltageStream:
         acv = GpucbfAntennaChannelisedVoltageStream.from_config(
             Options(), "wide1_acv", config, src_streams, {}
         )
-        assert acv.window_function == "rect"
+        assert acv.window_function == GpucbfWindowFunction.RECT
 
     def test_taps(
         self, config: Dict[str, Any], src_streams: List[DigBasebandVoltageStreamBase]

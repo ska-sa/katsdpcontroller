@@ -55,6 +55,8 @@ DDC_TAPS_RATIO = 16
 WINDOW_FUNCTION = "hann"
 #: Window function for VLBI antenna-channelised-voltage products
 WINDOW_FUNCTION_VLBI = "rect"
+#: Weighting for passband in narrowband VLBI filter
+WEIGHT_PASS = 0.005  # Keep in sync with katgpucbf
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192

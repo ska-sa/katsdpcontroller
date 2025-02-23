@@ -537,6 +537,14 @@ def _make_fgpu(
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
+                float,
+                f"{stream.name}.pass-bandwidth",
+                "Bandwidth over which the CBF produces a flat response",
+                "Hz",
+                default=stream.pass_bandwidth,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
                 int,
                 f"{stream.name}.decimation-factor",
                 "The factor by which the bandwidth of the incoming digitiser stream is decimated",
@@ -657,6 +665,43 @@ def _make_fgpu(
                 default=GPUCBF_PACKET_PAYLOAD_BYTES,
                 initial_status=Sensor.Status.NOMINAL,
             ),
+            Sensor(
+                int,
+                f"{stream.name}.pfb-taps",
+                "Number of taps in the polyphase filter bank",
+                default=stream.pfb_taps,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                int,
+                f"{stream.name}.ddc-taps",
+                "Number of taps in the narrowband digital down-conversion filter "
+                "(0 if there isn't one)",
+                default=stream.narrowband.ddc_taps if stream.narrowband is not None else 0,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                product_config.GpucbfWindowFunction,
+                f"{stream.name}.window-function",
+                "Window function for shaping the PFB filter weights",
+                default=stream.window_function,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.w-cutoff",
+                "Scaling factor for sinc component of PFB filter weights",
+                default=stream.w_cutoff,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.weight-pass",
+                "Weight given to passband in narrowband digitial down-conversion filter "
+                "(0 if there isn't one)",
+                default=stream.narrowband.weight_pass if stream.narrowband is not None else 0.0,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
             data_suspect_sensor,
         ]
         for ss in stream_sensors:
@@ -757,12 +802,13 @@ def _make_fgpu(
                 "jones_per_batch": stream.n_jones_per_batch,
                 "dst": f"{{endpoints[multicast.{stream.name}_spead]}}",
                 "dither": stream.dither,
-                "window_function": stream.window_function,
+                "window_function": stream.window_function.value,
             }
             if stream.narrowband is not None:
                 output_config["decimation"] = stream.narrowband.decimation_factor
                 output_config["centre_frequency"] = stream.narrowband.centre_frequency
                 output_config["ddc_taps"] = stream.narrowband.ddc_taps
+                output_config["weight_pass"] = stream.narrowband.weight_pass
                 if stream.narrowband.vlbi is not None:
                     output_config["pass_bandwidth"] = stream.narrowband.vlbi.pass_bandwidth
                 output_arg_name = "narrowband"
@@ -940,6 +986,14 @@ def _make_xbgpu(
                 "The analogue bandwidth of the digitised band",
                 "Hz",
                 default=acv.bandwidth,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+            Sensor(
+                float,
+                f"{stream.name}.pass-bandwidth",
+                "Bandwidth over which the CBF produces a flat response",
+                "Hz",
+                default=acv.pass_bandwidth,
                 initial_status=Sensor.Status.NOMINAL,
             ),
             Sensor(
