@@ -697,7 +697,7 @@ def _make_fgpu(
             Sensor(
                 float,
                 f"{stream.name}.weight-pass",
-                "Weight given to passband in narrowband digitial down-conversion filter "
+                "Weight given to passband in narrowband digital down-conversion filter "
                 "(0 if there isn't one)",
                 default=stream.narrowband.weight_pass if stream.narrowband is not None else 0.0,
                 initial_status=Sensor.Status.NOMINAL,
