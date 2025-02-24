@@ -18,6 +18,7 @@
 
 import collections.abc
 import copy
+import enum
 import itertools
 import logging
 import math
@@ -657,6 +658,7 @@ class GpucbfNarrowbandConfig:
         self.centre_frequency = centre_frequency
         self.vlbi = vlbi
         self.ddc_taps = self.subsampling * defaults.DDC_TAPS_RATIO
+        self.weight_pass = defaults.WEIGHT_PASS  # Not currently configurable by the user
 
     @classmethod
     def from_config(cls, config: dict) -> "GpucbfNarrowbandConfig":
@@ -669,6 +671,11 @@ class GpucbfNarrowbandConfig:
     @property
     def subsampling(self) -> int:
         return self.decimation_factor if self.vlbi is None else 2 * self.decimation_factor
+
+
+class GpucbfWindowFunction(enum.Enum):
+    HANN = "hann"
+    RECT = "rect"
 
 
 class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase):
@@ -688,7 +695,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         n_chans: int,
         input_labels: Optional[Iterable[str]] = None,
         w_cutoff: Optional[float] = None,
-        window_function: Optional[str] = None,
+        window_function: Optional[GpucbfWindowFunction] = None,
         taps: Optional[int] = None,
         narrowband: Optional[GpucbfNarrowbandConfig] = None,
         dither: Optional[str] = None,
@@ -735,7 +742,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         # Defaults if not in VLBI mode
         default_taps = defaults.PFB_TAPS
         default_w_cutoff = 1.0
-        default_window_function = defaults.WINDOW_FUNCTION
+        default_window_function = GpucbfWindowFunction(defaults.WINDOW_FUNCTION)
         if narrowband is not None:
             decimation_factor = narrowband.decimation_factor
             bandwidth /= narrowband.decimation_factor
@@ -752,7 +759,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             if narrowband.vlbi is not None:
                 default_taps = 1
                 default_w_cutoff = 0.0
-                default_window_function = defaults.WINDOW_FUNCTION_VLBI
+                default_window_function = GpucbfWindowFunction(defaults.WINDOW_FUNCTION_VLBI)
                 if narrowband.vlbi.pass_bandwidth >= bandwidth:
                     raise ValueError(
                         f"pass_bandwidth ({narrowband.vlbi.pass_bandwidth}) must be "
@@ -801,6 +808,13 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
     def n_spectra_per_heap(self) -> int:
         return self.n_jones_per_batch // self.n_chans
 
+    @property
+    def pass_bandwidth(self) -> float:
+        if self.narrowband is not None and self.narrowband.vlbi is not None:
+            return self.narrowband.vlbi.pass_bandwidth
+        else:
+            return self.bandwidth
+
     def sources(
         self, feng_id: int
     ) -> Tuple[DigBasebandVoltageStreamBase, DigBasebandVoltageStreamBase]:
@@ -837,7 +851,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
             n_chans=config["n_chans"],
             input_labels=config.get("input_labels"),
             w_cutoff=config.get("w_cutoff"),
-            window_function=config.get("window_function"),
+            window_function=_or_call(config.get("window_function"), GpucbfWindowFunction, None),
             taps=config.get("taps"),
             narrowband=_or_call(narrowband, GpucbfNarrowbandConfig.from_config, None),
             dither=config.get("dither"),
