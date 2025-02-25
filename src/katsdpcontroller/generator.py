@@ -722,7 +722,7 @@ def _make_fgpu(
             "center_freq": stream.centre_frequency,
         }
         for key, value in telstate_data.items():
-            init_telstate[(stream.name, key)] = value
+            init_telstate[(stream.name.replace("-", "_"), key)] = value
 
     for i in range(0, n_engines):
         srcs = streams[0].sources(i)
@@ -1183,7 +1183,7 @@ def _make_xbgpu(
 
         init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
         telstate_data = {
-            "src_streams": [stream.antenna_channelised_voltage.name],
+            "src_streams": [stream.antenna_channelised_voltage.name.replace("-", "_")],
             "instrument_dev_name": "gpucbf",  # Made-up instrument name
             "bandwidth": acv.bandwidth,
             "n_chans_per_substream": stream.n_chans_per_substream,
@@ -1199,7 +1199,7 @@ def _make_xbgpu(
                 spectra_per_heap=stream.spectra_per_heap,
             )
         for key, value in telstate_data.items():
-            init_telstate[(stream.name, key)] = value
+            init_telstate[(stream.name.replace("-", "_"), key)] = value
 
     # Factor of 2 is because samples are complex
     input_rate = acv.bandwidth * len(acv.src_streams) * acv.bits_per_sample / 8 * 2
