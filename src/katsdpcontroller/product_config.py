@@ -458,6 +458,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         centre_frequency: float,
         band: str,
         antenna_name: str,
+        antenna: Optional[katpoint.Antenna] = None,
     ) -> None:
         super().__init__(
             name,
@@ -468,6 +469,7 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             band=band,
             antenna_name=antenna_name,
         )
+        self.antenna = antenna
         self.url = url
 
     @classmethod
@@ -479,6 +481,15 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "DigBasebandVoltageStream":
+        # The schema says this is the antenna name, but as a testing backdoor
+        # we allow it to be a katpoint antenna description, in which case it
+        # can be populated into telstate as <name>_observer.
+        if "," in config["antenna"]:
+            antenna = katpoint.Antenna(config["antenna"])
+            antenna_name = antenna.name
+        else:
+            antenna = None
+            antenna_name = config["antenna"]
         return cls(
             name,
             src_streams,
@@ -487,7 +498,8 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             adc_sample_rate=config["adc_sample_rate"],
             centre_frequency=config["centre_frequency"],
             band=config["band"],
-            antenna_name=config["antenna"],
+            antenna_name=antenna_name,
+            antenna=antenna,
         )
 
 

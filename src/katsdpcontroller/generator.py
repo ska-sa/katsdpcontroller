@@ -437,6 +437,15 @@ def _make_dsim(
     return dsim
 
 
+def _make_dig(g: networkx.MultiDiGraph, stream: product_config.DigBasebandVoltageStream) -> None:
+    """Populate telstate with information about a real antenna."""
+    if stream.antenna is not None:
+        init_telstate: Dict[Union[str, Tuple[str, ...]], Any] = g.graph["init_telstate"]
+        telstate_data = {"observer": stream.antenna.description}
+        for key, value in telstate_data.items():
+            init_telstate[(stream.antenna.name, key)] = value
+
+
 def _fgpu_key(stream: product_config.GpucbfAntennaChannelisedVoltageStream) -> tuple:
     """Comparison key for an antenna-channelised-voltage stream.
 
@@ -2688,6 +2697,11 @@ def build_logical_graph(
         _make_cbf_simulator(g, configuration, stream)
     for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
         _make_cbf_simulator(g, configuration, stream)
+    # If we don't have cam2telstate, try to populate <ant>_observer ourselves
+    # if the user has provided antenna descriptions.
+    if cam2telstate is None:
+        for stream in configuration.by_class(product_config.DigBasebandVoltageStream):
+            _make_dig(g, stream)
 
     # Correlator
     for fgpu_streams in _groupby(
