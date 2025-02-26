@@ -308,8 +308,16 @@ class TestDigBasebandVoltageStream:
         assert dig.centre_frequency == config["centre_frequency"]
         assert dig.band == config["band"]
         assert dig.antenna_name == config["antenna"]
+        assert dig.antenna is None
         assert dig.bits_per_sample == 10
         assert dig.data_rate(1.0, 0) == 1712e7
+
+    def test_from_config_description(self, config: Dict[str, Any]) -> None:
+        """Test with an antenna description instead of just a name."""
+        config["antenna"] = _M000.description
+        dig = DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
+        assert dig.antenna_name == "m000"
+        assert dig.antenna == _M000
 
 
 class TestSimDigBasebandVoltageStream:
