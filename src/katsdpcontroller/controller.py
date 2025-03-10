@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,6 +19,7 @@
 import argparse
 import asyncio
 import functools
+import ipaddress
 import json
 import logging
 from typing import AnyStr, Callable, List, Optional, Tuple, Union
@@ -192,6 +193,16 @@ def device_status_to_sensor_status(status: aiokatcp.DeviceStatus) -> aiokatcp.Se
 
 def device_server_sockname(server: aiokatcp.DeviceServer) -> Tuple[str, int]:
     assert server.server
-    assert isinstance(server.server, asyncio.base_events.Server)  # TODO: fix in aiokatcp
     assert server.server.sockets, "Server is not yet started"
-    return server.server.sockets[0].getsockname()[:2]
+    sockname = server.server.sockets[0].getsockname()[:2]
+    addr = ipaddress.ip_address(sockname[0])
+    # If the socket is not bound to a specific address, we need to pick
+    # an address to contact it on. We'll use a localhost address.
+    if addr.is_unspecified:
+        if isinstance(addr, ipaddress.IPv4Address):
+            return ("127.0.0.1", sockname[1])
+        elif isinstance(addr, ipaddress.IPv6Address):
+            return ("::1", sockname[1])
+        else:
+            raise TypeError(f"Expected IPv4Address or IPv6Address, got {type(addr)}")
+    return sockname

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -578,7 +578,7 @@ class InternalProductManager(ProductManagerBase[InternalProduct]):
         mc_client = aiokatcp.Client(*device_server_sockname(self._server))
         sched = scheduler.SchedulerBase(self._args.realtime_role, LOCALHOST, 0)
         server = product_controller.DeviceServer(
-            "127.0.0.1",
+            self._args.host,
             0,
             mc_client,
             name,
@@ -1967,7 +1967,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     usage = "%(prog)s [options] zk singularity"
     parser = argparse.ArgumentParser(usage=usage)
     parser.add_argument(
-        "-a", "--host", default="", metavar="HOST", help="attach to server HOST [localhost]"
+        "-a", "--host", default="", metavar="HOST", help="bind to server HOST [any]"
     )
     parser.add_argument(
         "-i",
