@@ -1628,6 +1628,9 @@ class SubarrayProduct:
                 for stream in itertools.chain(
                     self.configuration.by_class(product_config.AntennaChannelisedVoltageStream),
                     self.configuration.by_class(product_config.SimAntennaChannelisedVoltageStream),
+                    self.configuration.by_class(
+                        product_config.GpucbfAntennaChannelisedVoltageStream
+                    ),
                 ):
                     ratio = round(stream.adc_sample_rate / 2 / stream.bandwidth)
                     band_mask_model_urls = await _resolve_model(

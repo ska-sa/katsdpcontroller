@@ -92,6 +92,8 @@ from .utils import (
 )
 
 ANTENNAS = ["m000", "m001", "m062", "m063"]
+#: Antenna declared in the gpucbf sections of CONFIG
+GPUCBF_ANTENNAS = ["m900", "m901"]
 SUBARRAY_PRODUCT = "array_1_0"
 CAPTURE_BLOCK = "1122334455"
 
@@ -421,7 +423,7 @@ class BaseTestController:
             band="l",
         )
         model.version = 1
-        for antenna in ANTENNAS:
+        for antenna in ANTENNAS + GPUCBF_ANTENNAS:
             for group in ["individual", "cohort"]:
                 setup_model(
                     model,
