@@ -368,6 +368,14 @@ class Stream:
         self.name = name
         self.src_streams = list(src_streams)
 
+    @property
+    def normalised_name(self) -> str:
+        """Name in the normalised form used by katportalclient.
+
+        katportal replaces dashes with underscores.
+        """
+        return self.name.replace("-", "_")
+
     @classmethod
     @abstractmethod
     def from_config(
