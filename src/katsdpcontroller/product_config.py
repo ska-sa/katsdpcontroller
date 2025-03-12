@@ -1971,11 +1971,16 @@ class Configuration:
             # client.sensor_values can take a list of filters - but it then
             # makes a separate request for each, in series, which is much
             # slower.
-            regex = "^(" + "|".join(re.escape(full_name) for full_name in full_names) + ")$"
-            try:
-                samples = await client.sensor_values(regex)
-            except Exception as exc:
-                raise SensorFailure(f"Could not get sensor values: {exc}") from exc
+            if full_names:
+                regex = "^(" + "|".join(re.escape(full_name) for full_name in full_names) + ")$"
+                try:
+                    samples = await client.sensor_values(regex)
+                except Exception as exc:
+                    raise SensorFailure(f"Could not get sensor values: {exc}") from exc
+            else:
+                # Needs to be a special case because client.sensor_values
+                # raises an exception if the regex doesn't match anything.
+                samples = {}
 
             for name, stream_config in stream_configs.items():
                 stream_cls = STREAM_CLASSES[stream_config["type"]]
