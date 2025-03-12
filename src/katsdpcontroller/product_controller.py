@@ -1638,8 +1638,7 @@ class SubarrayProduct:
                         model_base_url,
                         f"band_mask/current/{stream.band}/nb_ratio={ratio}.alias",
                     )
-                    stream_name_norm = stream.name.replace("-", "_")
-                    prefix: Tuple[str, ...] = (stream_name_norm, "model", "band_mask")
+                    prefix: Tuple[str, ...] = (stream.normalised_name, "model", "band_mask")
                     init_telstate[prefix + ("config",)] = band_mask_model_urls[0]
                     init_telstate[prefix + ("fixed",)] = band_mask_model_urls[1]
                     for group in ["individual", "cohort"]:
@@ -1653,7 +1652,7 @@ class SubarrayProduct:
                             )
                             config_value[ant] = pb_model_urls[0]
                             fixed_value[ant] = pb_model_urls[1]
-                        prefix = (stream_name_norm, "model", "primary_beam", group)
+                        prefix = (stream.normalised_name, "model", "primary_beam", group)
                         init_telstate[prefix + ("config",)] = config_value
                         init_telstate[prefix + ("fixed",)] = fixed_value
 
