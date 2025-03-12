@@ -288,7 +288,10 @@ def _make_cam2telstate(
     cam2telstate.wait_ports = ["port"]
     url = stream.url
     antennas = set()
+    input_: product_config.AntennaChannelisedVoltageStreamBase
     for input_ in configuration.by_class(product_config.AntennaChannelisedVoltageStream):
+        antennas.update(input_.antennas)
+    for input_ in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
         antennas.update(input_.antennas)
     g.add_node(
         cam2telstate,
