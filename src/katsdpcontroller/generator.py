@@ -288,7 +288,10 @@ def _make_cam2telstate(
     cam2telstate.wait_ports = ["port"]
     url = stream.url
     antennas = set()
+    input_: product_config.AntennaChannelisedVoltageStreamBase
     for input_ in configuration.by_class(product_config.AntennaChannelisedVoltageStream):
+        antennas.update(input_.antennas)
+    for input_ in configuration.by_class(product_config.GpucbfAntennaChannelisedVoltageStream):
         antennas.update(input_.antennas)
     g.add_node(
         cam2telstate,
@@ -2667,22 +2670,18 @@ def build_logical_graph(
     )
 
     # Add SPEAD endpoints to the graph.
-    input_multicast = []
     for stream in configuration.streams:
         if isinstance(stream, (product_config.CbfStream, product_config.DigBasebandVoltageStream)):
             url = stream.url
             if url.scheme == "spead":
                 node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
                 g.add_node(node)
-                input_multicast.append(node)
 
     # cam2telstate node (optional: if we're simulating, we don't need it)
     cam2telstate: Optional[scheduler.LogicalNode] = None
     cam_http = configuration.by_class(product_config.CamHttpStream)
     if cam_http:
         cam2telstate = _make_cam2telstate(g, configuration, cam_http[0])
-        for node in input_multicast:
-            g.add_edge(node, cam2telstate, depends_ready=True)
 
     # Simulators
     def dsim_key(stream: product_config.SimDigBasebandVoltageStream) -> Tuple[str, float]:
@@ -2828,7 +2827,8 @@ def build_logical_graph(
             assert node.name not in seen, f"{node.name} appears twice in graph"
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
-            # Connect every task to telstate
+            # Connect every task that needs it to telstate.
+            # Also make them wait for cam2telstate.
             if telstate is not None and node is not telstate:
                 if node.pass_telstate:
                     node.command.extend(
@@ -2836,6 +2836,8 @@ def build_logical_graph(
                     )
                 node.wrapper = configuration.options.wrapper
                 g.add_edge(node, telstate, port="telstate", depends_ready=True, depends_kill=True)
+                if cam2telstate is not None and node is not cam2telstate:
+                    g.add_edge(node, cam2telstate, depends_ready=True)
             # Make sure meta_writer is the last task to be handled in capture-done
             if meta_writer is not None and node is not meta_writer:
                 g.add_edge(meta_writer, node, depends_init=True)
