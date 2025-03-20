@@ -1343,8 +1343,8 @@ class DeviceServer(aiokatcp.DeviceServer):
                             cbf_resources_maintenance += 1
                         elif agent["used_resources"]["cpus"] == 0:
                             cbf_resources_free += 1
-        except Exception as exc:
-            logger.warning("Failed to get resource information from Mesos: %s", exc)
+        except Exception:
+            logger.warning("Failed to get resource information from Mesos", exc_info=True)
             self.sensors["cbf-resources-total"].set_value(0, status=Sensor.Status.FAILURE)
             self.sensors["cbf-resources-maintenance"].set_value(0, status=Sensor.Status.FAILURE)
             self.sensors["cbf-resources-free"].set_value(0, status=Sensor.Status.FAILURE)
