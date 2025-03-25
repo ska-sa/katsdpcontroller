@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ import socket
 import time
 from collections import Counter
 from decimal import Decimal
-from typing import Any, AsyncGenerator, Callable, Generator, Optional
+from typing import AsyncGenerator, Callable, Generator, Optional
 from unittest import mock
 
 import aiohttp
@@ -49,6 +49,29 @@ from .utils import (
     make_resources,
     make_text_attr,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_getaddrinfo(mocker, event_loop) -> None:
+    """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
+    return_value = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.0", 0))]
+    mocker.patch.object(event_loop, "getaddrinfo", return_value=return_value)
+
+
+async def getaddrinfo_never(*args, **kwargs):
+    """Never return.
+
+    This is intended to be used as a getaddrinfo mock implementation.
+    """
+    await asyncio.Future()
+
+
+async def getaddrinfo_fail(*args, **kwargs):
+    """Raise socket.gaierror.
+
+    This is intended to be used as a getaddrinfo mock implementation.
+    """
+    raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
 
 
 class SimpleTaskStats(scheduler.TaskStats):
@@ -282,32 +305,6 @@ class TestPollPorts:
         future.cancel()
         with pytest.raises(asyncio.CancelledError):
             await future
-
-    async def test_temporary_dns_failure(self, mocker, sock: socket.socket, port: int) -> None:
-        """Test poll ports against a temporary DNS failure."""
-        getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", autospec=True)
-        test_address = socket.getaddrinfo("127.0.0.1", port)
-        # create a legitimate return future for getaddrinfo
-        legit_future: asyncio.Future[Any] = asyncio.Future()
-        legit_future.set_result(test_address)
-
-        # sequential calls to getaddrinfo produce failure and success
-        getaddrinfo.side_effect = [
-            socket.gaierror(socket.EAI_FAIL, "Failed to resolve"),
-            legit_future,
-        ]
-
-        sock.listen(1)
-        future = asyncio.ensure_future(scheduler.poll_ports("127.0.0.1", [port]))
-        await asyncio.sleep(1)
-        # temporary DNS failure
-        assert not future.done()
-        # wait for retry loop (currently 5s)
-        # Note: it's tempting to try async_solipsism, but that
-        # only works if ALL interactions with the outside world are mocked
-        # to be instantaneous.
-        await asyncio.sleep(6)
-        assert future.done()
 
 
 class TestTaskState:
@@ -1567,6 +1564,7 @@ class TestScheduler:
                     next(node for node in self.physical_graph if node.name == f"node{i}")
                 )
             self.nodes[2].host = "remotehost"
+            self.nodes[2].address = "192.0.2.1"
             self.nodes[2].ports["foo"] = 10000
             self.batch_nodes = []
             for i in range(2):
@@ -1809,8 +1807,8 @@ class TestScheduler:
             f"http://scheduler/tasks/{fix.task_ids[1]}/wait_start",
             "test",
             "--host=agenthost1",
-            "--remote=agenthost0:30000",
-            "--another=remotehost:10000",
+            "--remote=192.0.2.0:30000",
+            "--another=192.0.2.1:10000",
         ]
         expected_taskinfo1.container.type = "DOCKER"
         expected_taskinfo1.container.docker.image = "sdp/image1:latest"
@@ -1895,7 +1893,7 @@ class TestScheduler:
             assert fix.nodes[0].status == status
             assert await fix.driver_calls() == [mock.call.acknowledgeStatusUpdate(status)]
             fix.driver.reset_mock()
-            poll_ports.assert_called_once_with("agenthost0", [30000])
+            poll_ports.assert_called_once_with("192.0.2.0", [30000])
         assert fix.task_stats.state_counts == {TaskState.RUNNING: 2}
 
         # Make poll_ports ready. Node 0 should now become ready, which will
@@ -2100,6 +2098,57 @@ class TestScheduler:
         await exhaust_callbacks()
         assert await fix.driver_calls() == []
         launch.cancel()
+
+    async def test_unresolved_offer_rescinded(self, fix: "TestScheduler.Fixture", mocker) -> None:
+        """Test offerRescinded for an offer that is not yet resolved."""
+        mocker.patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_never
+        )
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
+        fix.sched.resourceOffers(fix.driver, offers)
+        await exhaust_callbacks()
+        assert len(fix.sched._resolving_offers) == 2
+        assert fix.nodes[0].state == TaskState.STARTING
+        fix.sched.offerRescinded(fix.driver, offers[0].id)
+        fix.sched.offerRescinded(fix.driver, offers[1].id)
+        await exhaust_callbacks()
+        assert fix.sched._resolving_offers == {}
+        assert await fix.driver_calls() == []
+        launch.cancel()
+
+    async def test_offer_resolve_fail(self, fix: "TestScheduler.Fixture", mocker) -> None:
+        """Test receiving an offer that cannot be resolved with getaddrinfo."""
+        mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_fail)
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
+        fix.sched.resourceOffers(fix.driver, offers)
+        await asyncio.sleep(6)  # Give it a chance to try multiple times
+        assert fix.sched._resolving_offers == {}  # Must clean up the tasks
+        assert fix.nodes[0].state == TaskState.STARTING  # Must not start
+        assert await fix.driver_calls() == [
+            mock.call.declineOffer([offers[0].id]),
+            mock.call.declineOffer([offers[1].id]),
+        ]
+        launch.cancel()
+
+    async def test_decline_unresolved_offers(self, fix: "TestScheduler.Fixture", mocker) -> None:
+        """Test that when an unresolved offer is no longer needed, it is declined and removed."""
+        mocker.patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_never
+        )
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
+        fix.sched.resourceOffers(fix.driver, offers)
+        await exhaust_callbacks()
+        launch.cancel()
+        await exhaust_callbacks()
+        assert len(fix.sched._resolving_offers) == 0
+        assert await fix.driver_calls() == [
+            mock.call.suppressOffers({"default"}),
+            mock.call.declineOffer([offers[0].id]),
+            mock.call.declineOffer([offers[1].id]),
+        ]
 
     async def test_decline_unneeded_offers(self, fix: "TestScheduler.Fixture") -> None:
         """Test that useless offers are not hoarded."""

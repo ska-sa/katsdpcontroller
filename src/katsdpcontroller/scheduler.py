@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -337,7 +337,7 @@ class OrderedEnum(Enum):
         return NotImplemented
 
 
-async def poll_ports(host, ports):
+async def poll_ports(address, ports):
     """Waits until a set of TCP ports are accepting connections on a host.
 
     It repeatedly tries to connect to each port until a connection is
@@ -347,8 +347,8 @@ async def poll_ports(host, ports):
 
     Parameters
     ----------
-    host : str
-        Hostname or IP address
+    address : str
+        IP address
     ports : list
         Port numbers to connect to
 
@@ -357,43 +357,22 @@ async def poll_ports(host, ports):
     OSError
         on any socket operation errors other than the connect
     """
-    # protect against temporary name resolution failure.
-    # in the case of permanent DNS failure this will block
-    # indefinitely and higher level timeouts will be needed
-    loop = asyncio.get_event_loop()
-    while True:
-        try:
-            addrs = await loop.getaddrinfo(
-                host=host,
-                port=None,
-                type=socket.SOCK_STREAM,
-                proto=socket.IPPROTO_TCP,
-                flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
-            )
-        except socket.gaierror as error:
-            logger.error(
-                "Failure to resolve address for %s (%s). Waiting 5s to retry.", host, error
-            )
-            await asyncio.sleep(5)
-        else:
-            break
-
-    # getaddrinfo always returns at least 1 (it is an error if there are no
-    # matches), so we do not need to check for the empty case
-    (family, type_, proto, _canonname, sockaddr) = addrs[0]
+    loop = asyncio.get_running_loop()
     for port in ports:
         while True:
-            sock = socket.socket(family=family, type=type_, proto=proto)
+            sock = socket.socket(
+                family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+            )
             with contextlib.closing(sock):
                 sock.setblocking(False)
                 try:
-                    await loop.sock_connect(sock, (sockaddr[0], port))
+                    await loop.sock_connect(sock, (address, port))
                 except OSError as error:
-                    logger.debug("Port %d on %s not ready: %s", port, host, error)
+                    logger.debug("Port %d on %s not ready: %s", port, address, error)
                     await asyncio.sleep(1)
                 else:
                     break
-        logger.debug("Port %d on %s ready", port, host)
+        logger.debug("Port %d on %s ready", port, address)
 
 
 class ResourceRequest:
@@ -1729,6 +1708,7 @@ class Agent:
         self.agent_id = offers[0].agent_id.value
         self.role = offers[0].allocation_info.role
         self.host = offers[0].hostname
+        self.address = offers[0].address
         self.attributes = offers[0].attributes
         self.interfaces = []
         self.infiniband_devices = []
@@ -2022,6 +2002,8 @@ class PhysicalNode:
         The logical node passed to the constructor
     host : str
         Host on which this node is operating (if any).
+    address : str
+        Address corresponding to :attr:`host`.
     ports : dict
         Dictionary mapping logical port names to port numbers.
     state : :class:`TaskState`
@@ -2056,9 +2038,13 @@ class PhysicalNode:
     def __init__(self, logical_node):
         self.logical_node = logical_node
         self.name = logical_node.name
-        # In PhysicalTask it is a property and cannot be set
+        # In PhysicalTask these are properties and cannot be set
         try:
             self.host = None
+        except AttributeError:
+            pass
+        try:
+            self.address = None
         except AttributeError:
             pass
         self.ports = {}
@@ -2108,7 +2094,7 @@ class PhysicalNode:
         else:
             wait_ports = list(self.ports.values())
         if wait_ports:
-            await poll_ports(self.host, wait_ports)
+            await poll_ports(self.address, wait_ports)
         return True
 
     def _ready_callback(self, future):
@@ -2222,6 +2208,7 @@ class PhysicalExternal(PhysicalNode):
     def clone(self):
         dup = super().clone()
         dup.host = self.host
+        dup.address = self.address
         dup.ports = copy.copy(self.ports)
         return dup
 
@@ -2306,6 +2293,12 @@ class PhysicalTask(PhysicalNode):
         return None
 
     @property
+    def address(self):
+        if self.allocation:
+            return self.allocation.agent.address
+        return None
+
+    @property
     def agent_id(self):
         if self.allocation:
             return self.allocation.agent.agent_id
@@ -2349,7 +2342,7 @@ class PhysicalTask(PhysicalNode):
             if "port" in attr:
                 port = attr["port"]
                 endpoint_name = f"{trg.logical_node.name}_{port}"
-                self.endpoints[endpoint_name] = Endpoint(trg.host, trg.ports[port])
+                self.endpoints[endpoint_name] = Endpoint(trg.address, trg.ports[port])
 
         docker_devices = set()
         docker_parameters = []
@@ -2482,6 +2475,7 @@ class PhysicalTask(PhysicalNode):
         args["interfaces"] = self.interfaces
         args["endpoints"] = self.endpoints
         args["host"] = self.host
+        args["address"] = self.address
         args["resolver"] = resolver
         args["generation"] = self.generation
         return args
@@ -2556,7 +2550,7 @@ class FakePhysicalTask(PhysicalNode):
     - When set to :const:`TaskState.STARTED`, it moves itself to
       :const:`TaskState.RUNNING` (although not instantly).
     - When killed, it takes care of going to state DEAD.
-    - If a `max_run_time` is set, it exits immediately; otherwise it waits
+    - Ifa `max_run_time` is set, it exits immediately; otherwise it waits
       until it is killed.
     - It allocates ports and listens on them. By default, incoming connections
       are immediately closed.
@@ -2572,6 +2566,7 @@ class FakePhysicalTask(PhysicalNode):
         super().__init__(logical_task)
         self.queue = None
         self.host = LOCALHOST
+        self.address = LOCALHOST  # LOCALHOST is actually an IP address
         self.interfaces: typing.Dict[str, AgentInterface] = {}  # Never actually populated
         self._task: Optional[asyncio.Task] = None  # Started when we're asked to run
         self._kill_event = asyncio.Event()  # Signalled when we're asked to shut down
@@ -2582,7 +2577,7 @@ class FakePhysicalTask(PhysicalNode):
         # `allocate` but we don't have that method.
         for port_name in self.logical_node.ports:
             if port_name is not None:
-                sock = self._create_socket(self.host, 0)
+                sock = self._create_socket(self.address, 0)
                 self._sockets[port_name] = sock
                 self.ports[port_name] = sock.getsockname()[1]
 
@@ -2891,6 +2886,15 @@ async def _cleanup_task(task):
         pass
 
 
+@dataclass
+class ResolvingOffer:
+    """Offer that is currently undergoing hostname resolution."""
+
+    offer: Dict
+    task: asyncio.Task
+    rescinded: bool = False
+
+
 class SchedulerBase:
     """Top-level scheduler.
 
@@ -2953,6 +2957,8 @@ class SchedulerBase:
         self._loop = asyncio.get_event_loop()
         self._driver = None
         self._offers = {}  #: offers keyed by role then agent ID then offer ID
+        #: dictionary from offer ID to ResolvingOffer
+        self._resolving_offers = {}
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event()
         self._default_queue = LaunchQueue(default_role, "default")
@@ -3769,6 +3775,12 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 role_offers = self._offers.pop(role, {})
                 for agent_offers in role_offers.values():
                     to_decline.extend([offer.id for offer in agent_offers.values()])
+            for offer_id, resolving_offer in self._resolving_offers.items():
+                if resolving_offer.offer.allocation_info.role in suppress_roles:
+                    # Cancel the task, but do not decline the offer or remove
+                    # it from _resolving_offers: those are handled by
+                    # _resolve_offer_done.
+                    resolving_offer.task.cancel()
             if to_decline:
                 self._driver.declineOffer(to_decline)
 
@@ -3777,6 +3789,92 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
 
     def registered(self, driver, framework_id, master_info):
         pass
+
+    async def _resolve_hostname(self, hostname):
+        """Resolve a hostname to an IP address, with some retries."""
+        loop = asyncio.get_running_loop()
+        retries = 5
+        while True:
+            try:
+                retries -= 1
+                addrs = await loop.getaddrinfo(
+                    host=hostname,
+                    port=None,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                    flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
+                )
+                # getaddrinfo always returns at least 1 (it is an error if there are no
+                # matches), so we do not need to check for the empty case.
+                return addrs[0][4][0]  # First entry, sockaddr, address
+            except socket.gaierror as error:
+                if retries > 0:
+                    logger.warning(
+                        "Failure to resolve address for %s (%s). Waiting 1s to retry.",
+                        hostname,
+                        error,
+                    )
+                    await asyncio.sleep(1)
+                else:
+                    raise
+
+    async def _resolve_offer(self, offer):
+        """Resolve the hostname of an offer to an IP address and record the offer."""
+        offer.address = await self._resolve_hostname(offer.hostname)
+        role = offer.allocation_info.role
+        if role in self._roles_needed:
+            logger.debug(
+                "Adding offer %s on %s (%s) with role %s to pool",
+                offer.id.value,
+                offer.agent_id.value,
+                offer.hostname,
+                role,
+            )
+            role_offers = self._offers.setdefault(role, {})
+            agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+            agent_offers[offer.id.value] = offer
+            self._wakeup_launcher.set()
+        else:  # pragma: nocover
+            # This should be unreachable, because the role was in _roles_needed
+            # when we kicked off _resolve_offer, and when it is removed (in
+            # _update_roles) we cancel this task.
+            logger.warning(
+                "Offer %s on %s (%s) with role %s is no longer needed (possible bug)",
+                offer.id.value,
+                offer.agent_id.value,
+                offer.hostname,
+                role,
+            )
+            self._driver.declineOffer([offer.id])
+
+    def _resolve_offer_done(self, resolving_offer: ResolvingOffer, task: asyncio.Task) -> None:
+        """Clean up after :meth:`_resolve_offer`.
+
+        This is added as a done callback rather than a try block inside
+        :meth:`_resolve_offer` to guarantee that it will be used even if
+        the task is cancelled before it gets a chance to run at all.
+        """
+        decline = not resolving_offer.rescinded
+        offer = resolving_offer.offer
+        try:
+            task.result()  # Trigger exception, if any
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning(
+                "Failed to resolve %s for offer %s",
+                offer.hostname,
+                offer.id.value,
+                exc_info=True,
+            )
+        else:
+            # If we get there, the resolution succeeded, and the offer is no
+            # longer our responsibility.
+            decline = False
+        finally:
+            if decline:
+                self._driver.declineOffer([offer.id])
+            self._resolving_offers.pop(offer.id.value, None)
 
     @run_in_event_loop
     def resourceOffers(self, driver, offers):
@@ -3820,15 +3918,14 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                     )
             role = offer.allocation_info.role
             if role in self._roles_needed:
-                logger.debug(
-                    "Adding offer %s on %s with role %s to pool",
-                    offer.id.value,
-                    offer.agent_id.value,
-                    role,
+                # We're currently interested in this offer. Look up the IP
+                # address asynchronously before we actually put it to use.
+                task = asyncio.get_running_loop().create_task(
+                    self._resolve_offer(offer), name=f"Resolve offer {offer.id.value}"
                 )
-                role_offers = self._offers.setdefault(role, {})
-                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
-                agent_offers[offer.id.value] = offer
+                resolving_offer = ResolvingOffer(offer=offer, task=task)
+                task.add_done_callback(functools.partial(self._resolve_offer_done, resolving_offer))
+                self._resolving_offers[offer.id.value] = resolving_offer
             else:
                 # This can happen either due to a race or at startup, when
                 # we haven't yet suppressed roles.
@@ -3845,7 +3942,6 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
             self._driver.declineOffer(to_decline)
         if to_suppress:
             self._driver.suppressOffers(to_suppress)
-        self._wakeup_launcher.set()
 
     @run_in_event_loop
     def inverseOffers(self, driver, offers):
@@ -3855,6 +3951,11 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
 
     @run_in_event_loop
     def offerRescinded(self, driver, offer_id):
+        if offer_id.value in self._resolving_offers:
+            resolving_offer = self._resolving_offers.pop(offer_id.value)
+            resolving_offer.rescinded = True
+            resolving_offer.task.cancel()
+            return  # No point checking self._offers if we haven't resolved it yet
         # TODO: this is not very efficient. A secondary lookup from offer id to
         # the relevant offer info would speed it up.
         for role, role_offers in self._offers.items():

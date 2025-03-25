@@ -961,6 +961,7 @@ class DummyScheduler:
                     assert isinstance(node, scheduler.PhysicalTask)
                     node.allocation = mock.MagicMock()
                     node.allocation.agent.host = "host." + node.logical_node.name
+                    node.allocation.agent.address = "1.2.3.4"
                     node.allocation.agent.agent_id = "agent-id." + node.logical_node.name
                     node.allocation.agent.gpus[0].name = "GeForce GTX TITAN X"
                     for request in node.logical_node.interfaces:
