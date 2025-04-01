@@ -1537,7 +1537,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.5",
+        "version": "4.6",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1616,7 +1616,9 @@ def config() -> Dict[str, Any]:
                 "min_time": 3600.0,
             },
         },
-        "config": {},
+        "config": {
+            "mirror_sensors": False,
+        },
     }
 
 
