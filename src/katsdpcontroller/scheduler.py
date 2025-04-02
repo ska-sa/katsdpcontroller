@@ -997,14 +997,6 @@ class ResourceAllocation:
         self.volumes = []
 
 
-def _strip_scheme(image: str) -> str:
-    """Remove optional http:// or https:// prefix.
-
-    Docker doesn't like these on image paths.
-    """
-    return re.sub(r"^https?://", "", image)
-
-
 @dataclass
 class Image:
     """Information about a (fully resolved) container image."""
