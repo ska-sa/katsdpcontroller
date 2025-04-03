@@ -437,6 +437,7 @@ class ProductManagerBase(Generic[_P]):
     def _update_products_sensor(self) -> None:
         self._server.sensors["products"].value = json.dumps(sorted(self._products.keys()))
         self._update_device_status()
+        self._server.mass_inform("interface-changed", "sensor-list")
 
     def _add_product(self, product: _P) -> None:
         """Used by subclasses to add a newly-created product."""
