@@ -827,23 +827,30 @@ class TestDeviceServer:
         async with self._product_configure_slow(client, mocker, "product"):
             await assert_request_fails(client, "capture-init", "product")
 
-    async def test_interface_sensors(self, client: aiokatcp.Client, server: DeviceServer) -> None:
+    @pytest.mark.parametrize("mirror_sensors", [True, False])
+    async def test_interface_sensors(
+        self, client: aiokatcp.Client, server: DeviceServer, mirror_sensors: bool
+    ) -> None:
         await assert_sensors(client, EXPECTED_SENSOR_LIST)
         await assert_sensor_value(client, "products", "[]")
         interface_changed_callback = mock.MagicMock()
         client.add_inform_callback("interface-changed", interface_changed_callback)
-        await client.request("product-configure", "product", CONFIG)
+        config = json.loads(CONFIG)
+        config["config"]["mirror_sensors"] = mirror_sensors
+        config_str = json.dumps(config)
+        await client.request("product-configure", "product", config_str)
         await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b"sensor-list")
-        # Prepend the subarray product ID to the names
-        expected_product_sensors = [
-            (b"product." + s[0],) + s[1:]
-            for s in (
+        if mirror_sensors:
+            expected_product_sensors = (
                 EXPECTED_INTERFACE_SENSOR_LIST
                 + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
                 + EXPECTED_PRODUCT_SENSOR_LIST
             )
-        ]
+        else:
+            expected_product_sensors = EXPECTED_PRODUCT_SENSOR_LIST
+        # Prepend the subarray product ID to the names
+        expected_product_sensors = [(b"product." + s[0],) + s[1:] for s in expected_product_sensors]
         await assert_sensors(client, EXPECTED_SENSOR_LIST + expected_product_sensors, subset=True)
         await assert_sensor_value(client, "products", '["product"]')
         product = server._manager.products["product"]
@@ -853,11 +860,12 @@ class TestDeviceServer:
         await assert_sensor_value(client, "product.host", "127.0.0.1")
 
         # Change the product's device-status to FAIL and check that the top-level sensor
-        # is updated.
-        product.server.sensors["device-status"].value = DeviceStatus.FAIL
-        # Do a round trip to the product server to give time for the change to propagate
-        await client.request("capture-status", "product")
-        await assert_sensor_value(client, "device-status", "fail", Sensor.Status.ERROR)
+        # is updated. This is only applicable if we're mirroring the sensor.
+        if mirror_sensors:
+            product.server.sensors["device-status"].value = DeviceStatus.FAIL
+            # Do a round trip to the product server to give time for the change to propagate
+            await client.request("capture-status", "product")
+            await assert_sensor_value(client, "device-status", "fail", Sensor.Status.ERROR)
 
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()

@@ -185,11 +185,16 @@ class Product:
         hostname: str,
         host: _IPAddress,
         ports: Dict[str, int],
-    ) -> None:
+    ) -> bool:
         """Notify product of the location of the katcp interface.
 
         After calling this, :attr:`host`, :attr:`hostname`, :attr:`ports` and :attr:`katcp_conn`
         are all ready to use.
+
+        Returns
+        -------
+        mirror_sensors
+            Whether the connection is mirroring sensors to the `server`.
         """
         self.hostname = hostname
         self.host = host
@@ -202,17 +207,20 @@ class Product:
             except KeyError:
                 self.logger.warning("Sensor %s does not exist", sensor_name)
         self.katcp_conn = aiokatcp.Client(str(host), ports["katcp"])
-        self.katcp_conn.add_sensor_watcher(
-            sensor_proxy.SensorWatcher(
-                self.katcp_conn,
-                server,
-                f"{self.name}.",
-                rewrite_gui_urls=rewrite_gui_urls,
-                enum_types=(DeviceStatus,),
+        mirror_sensors = bool(self.config.get("config", {}).get("mirror_sensors", True))
+        if mirror_sensors:
+            self.katcp_conn.add_sensor_watcher(
+                sensor_proxy.SensorWatcher(
+                    self.katcp_conn,
+                    server,
+                    f"{self.name}.",
+                    rewrite_gui_urls=rewrite_gui_urls,
+                    enum_types=(DeviceStatus,),
+                )
             )
-        )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)
         # TODO: start a watchdog
+        return mirror_sensors
 
     def _disconnect_callback(self, *args: bytes) -> None:
         """Called when the remote katcp server tells us it is shutting down.
@@ -429,6 +437,7 @@ class ProductManagerBase(Generic[_P]):
     def _update_products_sensor(self) -> None:
         self._server.sensors["products"].value = json.dumps(sorted(self._products.keys()))
         self._update_device_status()
+        self._server.mass_inform("interface-changed", "sensor-list")
 
     def _add_product(self, product: _P) -> None:
         """Used by subclasses to add a newly-created product."""
@@ -529,9 +538,12 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        product.connect(self._server, self._rewrite_gui_urls, hostname, host, ports)
+        mirror_sensors = product.connect(
+            self._server, self._rewrite_gui_urls, hostname, host, ports
+        )
         assert product.katcp_conn is not None
-        product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
+        if mirror_sensors:
+            product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
     async def get_capture_block_id(self) -> str:
         """Generate a unique capture block ID"""
@@ -1205,7 +1217,8 @@ class DeviceServer(aiokatcp.DeviceServer):
             Sensor(
                 DeviceStatus,
                 "device-status",
-                "Combined (worst) status of all subarray product controllers",
+                "Combined (worst) status of all subarray product controllers, "
+                "excluding those with mirror_sensors=False",
                 default=DeviceStatus.OK,
                 status_func=device_status_to_sensor_status,
             )
