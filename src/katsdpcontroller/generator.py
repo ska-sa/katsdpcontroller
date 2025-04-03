@@ -188,7 +188,11 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         else:
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
             self.ports = {"spead": await resolver.resources.get_port()}
-        self._endpoint_sensor.value = str(Endpoint(self.host, self.ports["spead"]))
+        # It should already be resolved. Note that it might NOT be a valid
+        # IP address if it represents multiple multicast groups in the form
+        # a.b.c.d+N.
+        self.address = self.host
+        self._endpoint_sensor.value = str(Endpoint(self.address, self.ports["spead"]))
 
 
 class TelstateTask(ProductPhysicalTask):
