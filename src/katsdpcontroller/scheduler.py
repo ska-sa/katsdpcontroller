@@ -2550,7 +2550,7 @@ class FakePhysicalTask(PhysicalNode):
     - When set to :const:`TaskState.STARTED`, it moves itself to
       :const:`TaskState.RUNNING` (although not instantly).
     - When killed, it takes care of going to state DEAD.
-    - Ifa `max_run_time` is set, it exits immediately; otherwise it waits
+    - If a `max_run_time` is set, it exits immediately; otherwise it waits
       until it is killed.
     - It allocates ports and listens on them. By default, incoming connections
       are immediately closed.
@@ -3819,7 +3819,11 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                     raise
 
     async def _resolve_offer(self, offer):
-        """Resolve the hostname of an offer to an IP address and record the offer."""
+        """Resolve the hostname of an offer to an IP address and record the offer.
+
+        Note that the `offer` parameter is modified *in place* to create an
+        `address` element.
+        """
         offer.address = await self._resolve_hostname(offer.hostname)
         role = offer.allocation_info.role
         if role in self._roles_needed:
@@ -3868,8 +3872,10 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 exc_info=True,
             )
         else:
-            # If we get there, the resolution succeeded, and the offer is no
-            # longer our responsibility.
+            # If we get here, the resolution succeeded, and the offer is no
+            # longer our responsibility; or we hit the 'else' path in
+            # _resolve_offer, in which case _resolve_offer already declined
+            # it.
             decline = False
         finally:
             if decline:

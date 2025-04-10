@@ -2123,7 +2123,8 @@ class TestScheduler:
         launch, kill = await fix.transition_node0(TaskState.STARTING)
         offers = fix.make_offers()
         fix.sched.resourceOffers(fix.driver, offers)
-        await asyncio.sleep(6)  # Give it a chance to try multiple times
+        # Allow 5 retries at one second intervals
+        await asyncio.sleep(6)
         assert fix.sched._resolving_offers == {}  # Must clean up the tasks
         assert fix.nodes[0].state == TaskState.STARTING  # Must not start
         assert await fix.driver_calls() == [
@@ -2133,7 +2134,7 @@ class TestScheduler:
         launch.cancel()
 
     async def test_decline_unresolved_offers(self, fix: "TestScheduler.Fixture", mocker) -> None:
-        """Test that when an unresolved offer is no longer needed, it is declined and removed."""
+        """Test that when unresolved offers are no longer needed they are declined and removed."""
         mocker.patch.object(
             asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_never
         )
