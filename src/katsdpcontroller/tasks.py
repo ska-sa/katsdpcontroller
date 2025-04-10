@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2024, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -237,7 +237,7 @@ class ConfigMixin:
             endpoint = None
             if "port" in attr and trg.state >= scheduler.TaskState.STARTING:
                 port = attr["port"]
-                endpoint = Endpoint(trg.host, trg.ports[port])
+                endpoint = Endpoint(trg.address, trg.ports[port])
             config.update(
                 attr.get("config", lambda task_, resolver_, endpoint_: {})(self, resolver, endpoint)
             )
@@ -503,7 +503,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             while True:
                 self.logger.info(
                     "Attempting to establish katcp connection to %s:%s for node %s",
-                    self.host,
+                    self.address,
                     self.ports["port"],
                     self.name,
                 )
@@ -513,14 +513,17 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     prefix,
                     renames=self.logical_node.sensor_renames,
                     close_action=sensor_proxy.CloseAction.UNREACHABLE,
-                    host=self.host,
+                    host=self.address,
                     port=self.ports["port"],
                     notify=self.subarray_product.notify_sensors_changed,
                 )
                 try:
                     await self.katcp_connection.wait_synced()
                     self.logger.info(
-                        "Connected to %s:%s for node %s", self.host, self.ports["port"], self.name
+                        "Connected to %s:%s for node %s",
+                        self.address,
+                        self.ports["port"],
+                        self.name,
                     )
                     sensor = self.sdp_controller.sensors.get(prefix + "capture-block-state")
                     if sensor is not None:
@@ -540,7 +543,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                         "Failed to connect to %s via katcp on %s:%d. "
                         "Check to see if networking issues could be to blame.",
                         self.name,
-                        self.host,
+                        self.address,
                         self.ports["port"],
                     )
                     # Sleep for a bit to avoid hammering the port if there
@@ -622,15 +625,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
             endpoint_sensor = Sensor(
                 aiokatcp.Address, f"{self.name}.{key}", f"IP endpoint for {key}"
             )
-            try:
-                addrinfo = await asyncio.get_event_loop().getaddrinfo(self.host, value)
-                host, port = addrinfo[0][4][:2]
-                endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(host), port))
-            except socket.gaierror as error:
-                self.logger.warning("Could not resolve %s: %s", self.host, error)
-                endpoint_sensor.set_value(
-                    aiokatcp.Address(ipaddress.IPv4Address("0.0.0.0")), status=Sensor.Status.FAILURE
-                )
+            endpoint_sensor.set_value(aiokatcp.Address(ipaddress.ip_address(self.address), value))
             self.subarray_product.add_sensor(endpoint_sensor)
             sensors_added = True
         if sensors_added:
@@ -762,7 +757,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             # TODO: see if there is some way this requirement can be
             # eliminated e.g. by running via a wrapper script / sidecar
             # container that handles the registration and deregistration.
-            consul_url = yarl.URL.build(scheme="http", host=self.host, port=CONSUL_PORT)
+            consul_url = yarl.URL.build(scheme="http", host=self.address, port=CONSUL_PORT)
             self.consul_services.append(await ConsulService.register(service, consul_url))
         return True
 
