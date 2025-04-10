@@ -601,7 +601,7 @@
                             "type": "object",
                             "properties": {
 {% if version >= "4.3" %}
-                                "data_timeout": {"$ref": "#/definitions/nonneg_number"},
+                                "data_timeout": {"$ref": "#/definitions/nonneg_number", "default": 0.0},
 {% endif %}
                                 "any_gpu": {"type": "boolean", "default": false},
                                 "disable_ibverbs": {"type": "boolean", "default": false},
