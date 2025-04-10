@@ -606,7 +606,7 @@ class TestControllerInterface(BaseTestController):
         orig_sensor_set_value = Sensor.set_value
         monkeypatch.setattr(Sensor, "set_value", sensor_set_value)
 
-        # Modify config to make the timeout length much shorter.
+        # Modify config to specify a timeout
         temp_config = json.loads(CONFIG)
         temp_config["config"] = {"develop": {"data_timeout": 1.0}}
         modified_config = json.dumps(temp_config)

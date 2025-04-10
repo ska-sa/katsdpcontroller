@@ -68,8 +68,6 @@ FAST_SENSOR_UPDATE_PERIOD = 1.0
 KATSDPSIGPROC_TUNE_MATCH = "nearest"
 #: Time (in seconds) to sleep before exiting
 SHUTDOWN_DELAY = 10.0
-#: Time to wait for rx.device-status sensors to become nominal
-RX_DEVICE_STATUS_TIMEOUT = 30.0
 #: Maximum number of bytes in a connection backlog before disconnecting a
 #: katcp client. This is increased compared to the aiokatcp default because
 #: some sensors are large strings and a batch of sensor updates could

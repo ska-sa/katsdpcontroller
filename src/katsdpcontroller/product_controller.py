@@ -836,9 +836,12 @@ class SubarrayProduct:
     async def _wait_rx_device_status(self) -> None:
         """Wait for task rx.device-status sensors to become nominal.
 
-        The wait is limited to RX_DEVICE_STATUS_TIMEOUT seconds. If it times out,
-        a helpful :exc:`.FailReply` is raised.
+        The wait is limited to the user-specified `data_timeout`.
+        If it times out, a helpful :exc:`.FailReply` is raised.
         """
+        timeout = self.configuration.options.develop.data_timeout
+        if timeout <= 0.0:
+            return  # 0.0 disables the check
 
         def observer(sensor, reading):
             if reading.status == Sensor.Status.NOMINAL:
@@ -861,20 +864,18 @@ class SubarrayProduct:
             # Nothing to do
             return
 
-        timeout = self.configuration.options.develop.data_timeout
-        if timeout > 0.0:
-            logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
-            try:
-                await asyncio.wait_for(future, timeout=timeout)
-            except asyncio.TimeoutError:
-                raise FailReply(
-                    f"Some tasks did not receive good data within {timeout}s: "
-                    + ", ".join(sorted(missing))
-                ) from None
-            finally:
-                for sensor in sensors:
-                    sensor.detach(observer)
-            logger.info("All tasks receiving good data")
+        logger.info(f"Waiting for {len(sensors)} tasks to receive good data")
+        try:
+            await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            raise FailReply(
+                f"Some tasks did not receive good data within {timeout}s: "
+                + ", ".join(sorted(missing))
+            ) from None
+        finally:
+            for sensor in sensors:
+                sensor.detach(observer)
+        logger.info("All tasks receiving good data")
 
     async def _capture_done_impl(self, capture_block: CaptureBlock) -> None:
         """Stop a capture block.
