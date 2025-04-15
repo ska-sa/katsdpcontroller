@@ -238,7 +238,7 @@ import time
 import typing
 import urllib
 from abc import ABC, abstractmethod
-from collections import deque, namedtuple
+from collections import defaultdict, deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -246,9 +246,21 @@ from decimal import Decimal
 from enum import Enum
 
 # Note: don't include Dict here, because it conflicts with addict.Dict.
-from typing import Any, AsyncContextManager, ClassVar, List, Mapping, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    AsyncContextManager,
+    ClassVar,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import aiohttp.web
+import async_timeout
 import docker
 import importlib_resources
 import jsonschema
@@ -261,7 +273,7 @@ from decorator import decorator
 from katsdptelstate.endpoint import Endpoint
 
 from . import schemas
-from .defaults import LOCALHOST
+from .defaults import DNS_ATTEMPTS, DNS_RETRY_TIME, DNS_TIMEOUT, LOCALHOST
 
 #: Mesos task states that indicate that the task is dead
 #: (see https://github.com/apache/mesos/blob/1.0.1/include/mesos/mesos.proto#L1374)
@@ -2879,12 +2891,13 @@ async def _cleanup_task(task):
 
 
 @dataclass
-class ResolvingOffer:
-    """Offer that is currently undergoing hostname resolution."""
+class ResolvingOffers:
+    """Batch of offer that are currently undergoing hostname resolution."""
 
-    offer: Dict
+    offers: List[Dict]
     task: asyncio.Task
-    rescinded: bool = False
+    role: str
+    rescinded: Set[Dict] = field(default_factory=set)
 
 
 class SchedulerBase:
@@ -2949,7 +2962,7 @@ class SchedulerBase:
         self._loop = asyncio.get_event_loop()
         self._driver = None
         self._offers = {}  #: offers keyed by role then agent ID then offer ID
-        #: dictionary from offer ID to ResolvingOffer
+        #: dictionary from offer ID to ResolvingOffers
         self._resolving_offers = {}
         #: set when it's time to retry a launch (see _launcher)
         self._wakeup_launcher = asyncio.Event()
@@ -3776,12 +3789,15 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 role_offers = self._offers.pop(role, {})
                 for agent_offers in role_offers.values():
                     to_decline.extend([offer.id for offer in agent_offers.values()])
-            for offer_id, resolving_offer in self._resolving_offers.items():
-                if resolving_offer.offer.allocation_info.role in suppress_roles:
+            for offer_id, resolving_offers in self._resolving_offers.items():
+                if resolving_offers.role in suppress_roles:
                     # Cancel the task, but do not decline the offer or remove
                     # it from _resolving_offers: those are handled by
-                    # _resolve_offer_done.
-                    resolving_offer.task.cancel()
+                    # _resolve_offers_done.
+                    # Note that each ResolvingOffers may appear multiple times
+                    # in the dictionary, but multi-cancelling a task is
+                    # harmless.
+                    resolving_offers.task.cancel()
             if to_decline:
                 self._driver.declineOffer(to_decline)
 
@@ -3791,97 +3807,111 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     def registered(self, driver, framework_id, master_info):
         pass
 
-    async def _resolve_hostname(self, hostname):
+    @staticmethod
+    async def _resolve_hostname(hostname):
         """Resolve a hostname to an IP address, with some retries."""
         loop = asyncio.get_running_loop()
-        retries = 5
+        retries = DNS_ATTEMPTS
         while True:
             try:
                 retries -= 1
-                addrs = await loop.getaddrinfo(
-                    host=hostname,
-                    port=None,
-                    type=socket.SOCK_STREAM,
-                    proto=socket.IPPROTO_TCP,
-                    flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
-                )
+                async with async_timeout.timeout(DNS_TIMEOUT):
+                    addrs = await loop.getaddrinfo(
+                        host=hostname,
+                        port=None,
+                        type=socket.SOCK_STREAM,
+                        proto=socket.IPPROTO_TCP,
+                        flags=socket.AI_ADDRCONFIG | socket.AI_V4MAPPED,
+                    )
                 # getaddrinfo always returns at least 1 (it is an error if there are no
                 # matches), so we do not need to check for the empty case.
                 return addrs[0][4][0]  # First entry, sockaddr, address
-            except socket.gaierror as error:
+            except (socket.gaierror, asyncio.TimeoutError) as error:
                 if retries > 0:
                     logger.warning(
-                        "Failure to resolve address for %s (%s). Waiting 1s to retry.",
+                        "Failure to resolve address for %s (%s). Waiting %ss to retry.",
                         hostname,
                         error,
+                        DNS_RETRY_TIME,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(DNS_RETRY_TIME)
                 else:
                     raise
 
-    async def _resolve_offer(self, offer):
-        """Resolve the hostname of an offer to an IP address and record the offer.
+    async def _resolve_offers(self, offers):
+        """Resolve the hostnames of offers to IP address and record the offers.
 
-        Note that the `offer` parameter is modified *in place* to create an
-        `address` element.
+        Note that each offers is modified *in place* to create an `address`
+        element.
         """
-        offer.address = await self._resolve_hostname(offer.hostname)
-        role = offer.allocation_info.role
-        if role in self._roles_needed:
-            logger.debug(
-                "Adding offer %s on %s (%s) with role %s to pool",
-                offer.id.value,
-                offer.agent_id.value,
-                offer.hostname,
-                role,
-            )
-            role_offers = self._offers.setdefault(role, {})
-            agent_offers = role_offers.setdefault(offer.agent_id.value, {})
-            agent_offers[offer.id.value] = offer
-            self._wakeup_launcher.set()
-        else:  # pragma: nocover
-            # This should be unreachable, because the role was in _roles_needed
-            # when we kicked off _resolve_offer, and when it is removed (in
-            # _update_roles) we cancel this task.
-            logger.warning(
-                "Offer %s on %s (%s) with role %s is no longer needed (possible bug)",
-                offer.id.value,
-                offer.agent_id.value,
-                offer.hostname,
-                role,
-            )
-            self._driver.declineOffer([offer.id])
 
-    def _resolve_offer_done(self, resolving_offer: ResolvingOffer, task: asyncio.Task) -> None:
-        """Clean up after :meth:`_resolve_offer`.
+        async def resolve_offer(offer):
+            try:
+                offer.address = await Scheduler._resolve_hostname(offer.hostname)
+            except Exception:
+                logger.warning(
+                    "Failed to resolve %s for offer %s",
+                    offer.hostname,
+                    offer.id.value,
+                    exc_info=True,
+                )
+
+        # There should be no exceptions since we catch them in resolve_offer,
+        # but passing return_exceptions makes extra sure. We want to wait for
+        # all the coroutines even if some of them fail.
+        await asyncio.gather(*[resolve_offer(offer) for offer in offers], return_exceptions=True)
+
+    def _resolve_offers_done(self, resolving_offers: ResolvingOffers, task: asyncio.Task) -> None:
+        """Clean up after :meth:`_resolve_offers`.
 
         This is added as a done callback rather than a try block inside
-        :meth:`_resolve_offer` to guarantee that it will be used even if
+        :meth:`_resolve_offers` to guarantee that it will be used even if
         the task is cancelled before it gets a chance to run at all.
         """
-        decline = not resolving_offer.rescinded
-        offer = resolving_offer.offer
+        offers = resolving_offers.offers
+        role = resolving_offers.role
+        to_decline = []
+        for offer in offers:
+            self._resolving_offers.pop(offer.id.value, None)
+            if offer.id.value in resolving_offers.rescinded:
+                continue
+            elif "address" not in offer:
+                # DNS failed, or we cancelled before it completed.
+                to_decline.append(offer.id)
+            elif role in self._roles_needed:
+                logger.debug(
+                    "Adding offer %s on %s (%s) with role %s to pool",
+                    offer.id.value,
+                    offer.agent_id.value,
+                    offer.hostname,
+                    role,
+                )
+                role_offers = self._offers.setdefault(role, {})
+                agent_offers = role_offers.setdefault(offer.agent_id.value, {})
+                agent_offers[offer.id.value] = offer
+                self._wakeup_launcher.set()
+            else:
+                # This can happen if we resolved only some of the addresses
+                # before cancellation.
+                logger.debug(
+                    "Offer %s on %s (%s) with role %s is no longer needed",
+                    offer.id.value,
+                    offer.agent_id.value,
+                    offer.hostname,
+                    role,
+                )
+                to_decline.append(offer.id)
+
+        if to_decline:
+            self._driver.declineOffer(to_decline)
+
         try:
-            task.result()  # Trigger exception, if any
+            task.result()  # Trigger exception, if any, so that it can be logged
         except asyncio.CancelledError:
             pass
-        except Exception:
-            logger.warning(
-                "Failed to resolve %s for offer %s",
-                offer.hostname,
-                offer.id.value,
-                exc_info=True,
-            )
-        else:
-            # If we get here, the resolution succeeded, and the offer is no
-            # longer our responsibility; or we hit the 'else' path in
-            # _resolve_offer, in which case _resolve_offer already declined
-            # it.
-            decline = False
-        finally:
-            if decline:
-                self._driver.declineOffer([offer.id])
-            self._resolving_offers.pop(offer.id.value, None)
+        except Exception:  # pragma: nocover
+            # Shouldn't happen because we catch exceptions in resolve_offer
+            logger.warning("Exception in resolving offers", exc_info=True)
 
     @run_in_event_loop
     def resourceOffers(self, driver, offers):
@@ -3889,6 +3919,8 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
             return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
         to_decline = []
+        # List of ResolvingOffers for each role.
+        to_resolve = defaultdict(list)
         to_suppress = set()
         for offer in offers:
             if offer.unavailability:
@@ -3925,14 +3957,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                     )
             role = offer.allocation_info.role
             if role in self._roles_needed:
-                # We're currently interested in this offer. Look up the IP
-                # address asynchronously before we actually put it to use.
-                task = asyncio.get_running_loop().create_task(
-                    self._resolve_offer(offer), name=f"Resolve offer {offer.id.value}"
-                )
-                resolving_offer = ResolvingOffer(offer=offer, task=task)
-                task.add_done_callback(functools.partial(self._resolve_offer_done, resolving_offer))
-                self._resolving_offers[offer.id.value] = resolving_offer
+                to_resolve[role].append(offer)
             else:
                 # This can happen either due to a race or at startup, when
                 # we haven't yet suppressed roles.
@@ -3945,6 +3970,16 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                 to_decline.append(offer.id)
                 to_suppress.add(role)
 
+        for role, offers in to_resolve.items():
+            # We have some offers we're interested in. Look up the IP
+            # addresses asynchronously before we actually put them to use.
+            task = asyncio.get_running_loop().create_task(
+                self._resolve_offers(offers), name="Resolve offers"
+            )
+            resolving_offers = ResolvingOffers(offers=offers, task=task, role=role)
+            task.add_done_callback(functools.partial(self._resolve_offers_done, resolving_offers))
+            for offer in offers:
+                self._resolving_offers[offer.id.value] = resolving_offers
         if to_decline:
             self._driver.declineOffer(to_decline)
         if to_suppress:
@@ -3960,7 +3995,7 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     def offerRescinded(self, driver, offer_id):
         if offer_id.value in self._resolving_offers:
             resolving_offer = self._resolving_offers.pop(offer_id.value)
-            resolving_offer.rescinded = True
+            resolving_offer.rescinded.add(offer_id.value)
             resolving_offer.task.cancel()
             return  # No point checking self._offers if we haven't resolved it yet
         # TODO: this is not very efficient. A secondary lookup from offer id to
