@@ -3148,6 +3148,15 @@ class SchedulerBase:
             else:
                 try:
                     # At this point we have a sufficient set of offers.
+                    if group.resources_future.cancelled():
+                        # We can get here only with a race condition where:
+                        # 1. wait_for (in launch) timed out and cancelled
+                        #    resources_futures.
+                        # 2. We get here.
+                        # 3. wait_for returns control, and the group is
+                        #    removed from the queue.
+                        logger.debug("Group had resources to launch but timed out")
+                        continue
                     group.last_insufficient = None
                     if not group.resources_future.done():
                         group.resources_future.set_result(None)
