@@ -2138,9 +2138,16 @@ class TestScheduler:
         assert fix.nodes[0].state == TaskState.STARTING
         fix.sched.offerRescinded(fix.driver, offers[0].id)
         await exhaust_callbacks()
-        assert fix.sched._resolving_offers == {}
-        assert await fix.driver_calls() == [mock.call.declineOffer([offers[1].id])]
+        assert fix.sched._resolving_offers == {
+            offers[1].id.value: mock.ANY,
+        }
+        assert await fix.driver_calls() == []
         launch.cancel()
+        await exhaust_callbacks()
+        assert await fix.driver_calls() == [
+            mock.call.suppressOffers({"default"}),
+            mock.call.declineOffer([offers[1].id]),
+        ]
 
     async def test_offer_resolve_fail(self, fix: "TestScheduler.Fixture", mocker) -> None:
         """Test receiving an offer that cannot be resolved with getaddrinfo."""
