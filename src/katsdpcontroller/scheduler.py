@@ -3841,8 +3841,8 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
     async def _resolve_offers(self, offers):
         """Resolve the hostnames of offers to IP address and record the offers.
 
-        Note that each offers is modified *in place* to create an `address`
-        element.
+        Note that each offer in offers is modified *in place* to create an
+        `address` element.
         """
 
         async def resolve_offer(offer):
