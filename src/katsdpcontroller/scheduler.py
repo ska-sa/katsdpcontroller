@@ -3996,7 +3996,12 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
         if offer_id.value in self._resolving_offers:
             resolving_offer = self._resolving_offers.pop(offer_id.value)
             resolving_offer.rescinded.add(offer_id.value)
-            resolving_offer.task.cancel()
+            # Note: we can't cancel the whole _resolving_offer task, because
+            # it may involve other offers that haven't been rescinded. We
+            # could track the individual tasks doing the per-offer resolution,
+            # but that would add complexity, and those tasks have bounded
+            # lifetimes anyway due to timeouts, so it's not critical to
+            # cancel them.
             return  # No point checking self._offers if we haven't resolved it yet
         # TODO: this is not very efficient. A secondary lookup from offer id to
         # the relevant offer info would speed it up.
