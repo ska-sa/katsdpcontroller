@@ -20,6 +20,7 @@
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -210,6 +211,10 @@ def main() -> None:
     framework_info.capabilities = [{"type": "MULTI_ROLE"}, {"type": "TASK_KILLING_STATE"}]
 
     loop = asyncio.get_event_loop()
+    # The default executor is used for DNS lookups, which are I/O-bound.
+    # We would like to use lots of threads for this to parallelise the
+    # lookups.
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=100))
     sched = scheduler.Scheduler(
         args.realtime_role,
         args.host,

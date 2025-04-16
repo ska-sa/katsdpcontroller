@@ -73,3 +73,10 @@ SHUTDOWN_DELAY = 10.0
 #: some sensors are large strings and a batch of sensor updates could
 #: temporarily cause a large backlog.
 CONNECTION_MAX_BACKLOG = 256 * 1024 * 1024
+#: Seconds to wait for DNS resolution. The DNS server should be local and
+#: hence fast.
+DNS_TIMEOUT = 0.1
+#: Seconds to wait between attempts to contact the DNS server.
+DNS_RETRY_TIME = 0.5
+#: Number of attempts to make at DNS resolution
+DNS_ATTEMPTS = 5

@@ -66,6 +66,16 @@ async def getaddrinfo_never(*args, **kwargs):
     await asyncio.Future()
 
 
+async def getaddrinfo_one(host, port, *args, **kwargs):
+    """Return immediately for lookup of agenthost0, otherwise block forever.
+
+    This is intended to be used as a getaddrinfo mock implementation.
+    """
+    if host == "agenthost0":
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.0", port))]
+    return await asyncio.Future()
+
+
 async def getaddrinfo_fail(*args, **kwargs):
     """Raise socket.gaierror.
 
@@ -2117,6 +2127,28 @@ class TestScheduler:
         assert await fix.driver_calls() == []
         launch.cancel()
 
+    async def test_resolved_offer_rescinded(self, fix: "TestScheduler.Fixture", mocker) -> None:
+        """Test offerRescinded for an offer that has been resolved but whose batch has not."""
+        mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_one)
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
+        fix.sched.resourceOffers(fix.driver, offers)
+        await exhaust_callbacks()
+        assert len(fix.sched._resolving_offers) == 2
+        assert fix.nodes[0].state == TaskState.STARTING
+        fix.sched.offerRescinded(fix.driver, offers[0].id)
+        await exhaust_callbacks()
+        assert fix.sched._resolving_offers == {
+            offers[1].id.value: mock.ANY,
+        }
+        assert await fix.driver_calls() == []
+        launch.cancel()
+        await exhaust_callbacks()
+        assert await fix.driver_calls() == [
+            mock.call.suppressOffers({"default"}),
+            mock.call.declineOffer([offers[1].id]),
+        ]
+
     async def test_offer_resolve_fail(self, fix: "TestScheduler.Fixture", mocker) -> None:
         """Test receiving an offer that cannot be resolved with getaddrinfo."""
         mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_fail)
@@ -2128,8 +2160,7 @@ class TestScheduler:
         assert fix.sched._resolving_offers == {}  # Must clean up the tasks
         assert fix.nodes[0].state == TaskState.STARTING  # Must not start
         assert await fix.driver_calls() == [
-            mock.call.declineOffer([offers[0].id]),
-            mock.call.declineOffer([offers[1].id]),
+            mock.call.declineOffer([offers[0].id, offers[1].id]),
         ]
         launch.cancel()
 
@@ -2147,8 +2178,22 @@ class TestScheduler:
         assert len(fix.sched._resolving_offers) == 0
         assert await fix.driver_calls() == [
             mock.call.suppressOffers({"default"}),
-            mock.call.declineOffer([offers[0].id]),
-            mock.call.declineOffer([offers[1].id]),
+            mock.call.declineOffer([offers[0].id, offers[1].id]),
+        ]
+
+    async def test_decline_resolved_offers(self, fix: "TestScheduler.Fixture", mocker) -> None:
+        """Test declining of resolved offers from an unresolved batch."""
+        mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", side_effect=getaddrinfo_one)
+        launch, kill = await fix.transition_node0(TaskState.STARTING)
+        offers = fix.make_offers()
+        fix.sched.resourceOffers(fix.driver, offers)
+        await exhaust_callbacks()
+        launch.cancel()
+        await exhaust_callbacks()
+        assert len(fix.sched._resolving_offers) == 0
+        assert await fix.driver_calls() == [
+            mock.call.suppressOffers({"default"}),
+            mock.call.declineOffer([offers[0].id, offers[1].id]),
         ]
 
     async def test_decline_unneeded_offers(self, fix: "TestScheduler.Fixture") -> None:
