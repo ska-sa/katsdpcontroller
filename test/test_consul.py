@@ -46,6 +46,11 @@ class TestConsulService:
         service = await ConsulService.register(self.service_data)
         assert service.service_id is None
 
+    async def test_register_timeout(self, m) -> None:
+        m.put(self.register_url, timeout=True)
+        service = await ConsulService.register(self.service_data)
+        assert service.service_id is None
+
     async def test_register_success(self, m) -> None:
         m.put(self.register_url)
         service = await ConsulService.register(self.service_data)
@@ -66,6 +71,13 @@ class TestConsulService:
         service_id = "test-id"
         service = ConsulService(service_id)
         m.put(CONSUL_URL / f"v1/agent/service/deregister/{service_id}", status=500)
+        assert not await service.deregister()
+        assert service.service_id == service_id
+
+    async def test_deregister_timeout(self, m) -> None:
+        service_id = "test-id"
+        service = ConsulService(service_id)
+        m.put(CONSUL_URL / f"v1/agent/service/deregister/{service_id}", timeout=True)
         assert not await service.deregister()
         assert service.service_id == service_id
 
