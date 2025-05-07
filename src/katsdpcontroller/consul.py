@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,6 +16,7 @@
 
 """Dynamically register and deregister services with consul."""
 
+import asyncio
 import logging
 import uuid
 from typing import Optional
@@ -27,6 +28,10 @@ from .defaults import LOCALHOST
 
 CONSUL_PORT = 8500
 CONSUL_URL = yarl.URL.build(scheme="http", host=LOCALHOST, port=CONSUL_PORT)
+# Usually needs must less than this, but registering a service requires
+# storing the record on disk in the consul catalogue, and things like VM
+# backups can make that unusually slow.
+CONSUL_TIMEOUT = 20
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +50,7 @@ class ConsulService:
         """
         if self.service_id is None:
             return True
-        timeout = aiohttp.ClientTimeout(total=5)
+        timeout = aiohttp.ClientTimeout(total=CONSUL_TIMEOUT)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.put(
@@ -57,6 +62,9 @@ class ConsulService:
                     return True
         except aiohttp.ClientError as exc:
             logger.warning("Could not deregister from consul: %s", exc)
+            return False
+        except asyncio.TimeoutError:
+            logger.warning("Timed out registering from consul")
             return False
 
     @classmethod
@@ -76,9 +84,7 @@ class ConsulService:
             the consul agent on localhost.
         """
         service_id = str(uuid.uuid4())
-        # We're talking to localhost, so use a low timeout. This will avoid
-        # stalling if consul isn't running on the host.
-        timeout = aiohttp.ClientTimeout(total=5)
+        timeout = aiohttp.ClientTimeout(total=CONSUL_TIMEOUT)
         service = {**service, "ID": service_id}
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -92,4 +98,7 @@ class ConsulService:
                     return ConsulService(service_id, base_url)
         except aiohttp.ClientError as exc:
             logger.warning("Could not register with consul: %s", exc)
+            return ConsulService(base_url=base_url)
+        except asyncio.TimeoutError:
+            logger.warning("Timed out registering with consul")
             return ConsulService(base_url=base_url)
