@@ -28,10 +28,10 @@ from .defaults import LOCALHOST
 
 CONSUL_PORT = 8500
 CONSUL_URL = yarl.URL.build(scheme="http", host=LOCALHOST, port=CONSUL_PORT)
-# Usually needs must less than this, but registering a service requires
+# Usually needs much less than this, but registering a service requires
 # storing the record on disk in the consul catalogue, and things like VM
 # backups can make that unusually slow.
-CONSUL_TIMEOUT = 20
+CONSUL_TIMEOUT = 15
 logger = logging.getLogger(__name__)
 
 
