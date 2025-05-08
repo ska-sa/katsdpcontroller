@@ -123,6 +123,9 @@ class DeviceStatusWatcher(aiokatcp.AbstractSensorWatcher):
     def __init__(self, callback: Callable[[], None]) -> None:
         self.callback = callback
 
+    def filter(self, name: str, description: str, units: str, type_name: str, *args: bytes) -> bool:
+        return name == "device-status"
+
     def sensor_updated(
         self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
     ) -> None:
@@ -178,6 +181,13 @@ class Product:
             Sensor(str, f"{self.name}.host", "Name of the host running the product controller")
         )
 
+    @staticmethod
+    def _mirror_filter(
+        name: str, description: str, units: str, type_name: str, *args: bytes
+    ) -> bool:
+        # Mirror the sensors from the product controller itself, but not from its subordinates
+        return "." not in name
+
     def connect(
         self,
         server: aiokatcp.DeviceServer,
@@ -185,16 +195,11 @@ class Product:
         hostname: str,
         host: _IPAddress,
         ports: Dict[str, int],
-    ) -> bool:
+    ) -> None:
         """Notify product of the location of the katcp interface.
 
         After calling this, :attr:`host`, :attr:`hostname`, :attr:`ports` and :attr:`katcp_conn`
         are all ready to use.
-
-        Returns
-        -------
-        mirror_sensors
-            Whether the connection is mirroring sensors to the `server`.
         """
         self.hostname = hostname
         self.host = host
@@ -208,19 +213,18 @@ class Product:
                 self.logger.warning("Sensor %s does not exist", sensor_name)
         self.katcp_conn = aiokatcp.Client(str(host), ports["katcp"])
         mirror_sensors = bool(self.config.get("config", {}).get("mirror_sensors", True))
-        if mirror_sensors:
-            self.katcp_conn.add_sensor_watcher(
-                sensor_proxy.SensorWatcher(
-                    self.katcp_conn,
-                    server,
-                    f"{self.name}.",
-                    rewrite_gui_urls=rewrite_gui_urls,
-                    enum_types=(DeviceStatus,),
-                )
+        self.katcp_conn.add_sensor_watcher(
+            sensor_proxy.SensorWatcher(
+                self.katcp_conn,
+                server,
+                f"{self.name}.",
+                rewrite_gui_urls=rewrite_gui_urls,
+                enum_types=(DeviceStatus,),
+                filter=self._mirror_filter if not mirror_sensors else None,
             )
+        )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)
         # TODO: start a watchdog
-        return mirror_sensors
 
     def _disconnect_callback(self, *args: bytes) -> None:
         """Called when the remote katcp server tells us it is shutting down.
@@ -538,12 +542,9 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        mirror_sensors = product.connect(
-            self._server, self._rewrite_gui_urls, hostname, host, ports
-        )
+        product.connect(self._server, self._rewrite_gui_urls, hostname, host, ports)
         assert product.katcp_conn is not None
-        if mirror_sensors:
-            product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
+        product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
     async def get_capture_block_id(self) -> str:
         """Generate a unique capture block ID"""
@@ -1217,8 +1218,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             Sensor(
                 DeviceStatus,
                 "device-status",
-                "Combined (worst) status of all subarray product controllers, "
-                "excluding those with mirror_sensors=False",
+                "Combined (worst) status of all subarray product controllers",
                 default=DeviceStatus.OK,
                 status_func=device_status_to_sensor_status,
             )

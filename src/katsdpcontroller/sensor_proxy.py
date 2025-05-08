@@ -27,6 +27,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Type,
@@ -69,6 +70,13 @@ class CloseAction(enum.Enum):
     UNREACHABLE = 2  #: Change the sensor statuses to unreachable
 
 
+class _FilterPredicate(Protocol):
+    def __call__(
+        self, name: str, description: str, units: str, type_name: str, *args: bytes
+    ) -> bool:
+        ...  # pragma: nocover
+
+
 class SensorWatcher(aiokatcp.SensorWatcher):
     """Mirrors sensors from a client into a server.
 
@@ -85,6 +93,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
         notify: Optional[Callable[[], Any]] = None,
+        filter: Optional[_FilterPredicate] = None,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
@@ -105,6 +114,12 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.notify = functools.partial(server.mass_inform, "interface-changed", "sensor-list")
         # Whether we need to call notify at the end of the batch
         self._need_notify = False
+        self._filter = filter
+
+    def filter(self, name: str, description: str, units: str, type_name: str, *args: bytes) -> bool:
+        if self._filter is not None:
+            return self._filter(name, description, units, type_name, *args)
+        return super().filter(name, description, units, type_name, *args)
 
     def rewrite_name(self, name: str) -> Sequence[str]:
         names = self.renames.get(name, self.prefix + name)
@@ -226,6 +241,9 @@ class SensorProxyClient(aiokatcp.Client):
         Callback which is called when there are changes to the sensor list.
         If not specified, it defaults to sending an ``interface-changed``
         inform to all clients of the server.
+    filter
+        Predicate used to decide which sensors are required. The default is
+        to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
     kwargs
         Passed to the base class
     """
@@ -239,6 +257,7 @@ class SensorProxyClient(aiokatcp.Client):
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
         notify: Optional[Callable[[], Any]] = None,
+        filter: Optional[_FilterPredicate] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -250,6 +269,7 @@ class SensorProxyClient(aiokatcp.Client):
             renames=renames,
             close_action=close_action,
             notify=notify,
+            filter=filter,
         )
         self._synced = watcher.synced
         self.add_sensor_watcher(watcher)
