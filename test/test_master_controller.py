@@ -841,14 +841,16 @@ class TestDeviceServer:
         await client.request("product-configure", "product", config_str)
         await exhaust_callbacks()
         interface_changed_callback.assert_called_with(b"sensor-list")
-        if mirror_sensors:
-            expected_product_sensors = (
-                EXPECTED_INTERFACE_SENSOR_LIST
-                + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
-                + EXPECTED_PRODUCT_SENSOR_LIST
-            )
-        else:
-            expected_product_sensors = EXPECTED_PRODUCT_SENSOR_LIST
+        expected_product_sensors = (
+            EXPECTED_INTERFACE_SENSOR_LIST
+            + EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST
+            + EXPECTED_PRODUCT_SENSOR_LIST
+        )
+        if not mirror_sensors:
+            # We don't mirror sensors from individual devices.
+            expected_product_sensors = [
+                sensor for sensor in expected_product_sensors if b"." not in sensor[0]
+            ]
         # Prepend the subarray product ID to the names
         expected_product_sensors = [(b"product." + s[0],) + s[1:] for s in expected_product_sensors]
         await assert_sensors(client, EXPECTED_SENSOR_LIST + expected_product_sensors, subset=True)
@@ -860,12 +862,11 @@ class TestDeviceServer:
         await assert_sensor_value(client, "product.host", "127.0.0.1")
 
         # Change the product's device-status to FAIL and check that the top-level sensor
-        # is updated. This is only applicable if we're mirroring the sensor.
-        if mirror_sensors:
-            product.server.sensors["device-status"].value = DeviceStatus.FAIL
-            # Do a round trip to the product server to give time for the change to propagate
-            await client.request("capture-status", "product")
-            await assert_sensor_value(client, "device-status", "fail", Sensor.Status.ERROR)
+        # is updated.
+        product.server.sensors["device-status"].value = DeviceStatus.FAIL
+        # Do a round trip to the product server to give time for the change to propagate
+        await client.request("capture-status", "product")
+        await assert_sensor_value(client, "device-status", "fail", Sensor.Status.ERROR)
 
         # Deconfigure and check that the array sensors are gone
         interface_changed_callback.reset_mock()
