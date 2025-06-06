@@ -3238,6 +3238,44 @@ async def _make_spectral_imager(
     )
     return data_url, nodes
 
+def _make_rfi_report(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.VisStream, 
+    telstate: katsdptelstate.aio.TelescopeState,
+) -> scheduler.LogicalNode:
+    report_name = f"rfi_report.{stream.name}"
+    report = ProductLogicalTask(report_name, streams=[stream]) # Associated with the source VisStream
+    report.subsystem = "sdp"
+    report.cpus = 4.0
+    report.mem = 4 * 1024 
+    report.disk = 1024 # TBC
+    report.volumes = [DATA_VOL] 
+    report.image = "katsdprfireport" 
+    report.katsdpservices_config = False
+    report.metadata_katcp_sensors = False
+    report.command = [# Placeholder: 
+        "rfi_report.py", 
+        "--vis-stream-name", escape_format(stream.name),
+        "--telstate", f"{telstate}",
+        "--capture-block-id", escape_format(capture_block_id),
+        "--output-dir", escape_format(os.path.join(DATA_VOL.container_path, report_name))
+    ]
+    g.add_node(report)
+    # The report task should depend on the completion of the VisStream's ingest nodes.
+    # Find the ingest group associated with the VisStream.
+    ingest_group_node_name = f"ingest.{stream.name}"
+    try:
+        ingest_group_node = find_node(g, ingest_group_node_name)
+        # Add dependency: report_task runs after ingest_group_node finishes
+        g.add_edge(report, ingest_group_node, depends_finished=True, depends_finished_critical=True)
+    except KeyError:
+        logger.warning(
+            f"Could not find ingest group node {ingest_group_node_name} "
+            f"for RFI report on {stream.name}. Dependency not added."
+        )
+    return report
 
 def _make_spectral_imager_report(
     g: networkx.MultiDiGraph,
