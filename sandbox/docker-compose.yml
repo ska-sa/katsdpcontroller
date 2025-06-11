@@ -19,7 +19,6 @@ services:
       MESOS_ZK: zk://127.0.0.1:2181/mesos
       MESOS_QUORUM: 1
       MESOS_REGISTRY: in_memory
-      MESOS_LOG_DIR: /var/log/mesos
       MESOS_WORK_DIR: /var/tmp/mesos
     entrypoint:
       - /usr/bin/mesos-init-wrapper
@@ -59,7 +58,7 @@ services:
 
   singularity:
     network_mode: host
-    image: hubspot/singularityservice:1.4.0
+    image: hubspot/singularityservice:1.5.0-SNAPSHOT
     depends_on:
       - mesos-master
       - zookeeper
