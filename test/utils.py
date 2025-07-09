@@ -361,7 +361,7 @@ EXPECTED_INTERFACE_SENSOR_LIST: List[Tuple[bytes, ...]] = [
     (b"gui-urls", b"", b"string"),
     (b"ingest.sdp_l0.1.capture-active", b"", b"boolean"),
     (
-        b"state",
+        b"product-state",
         b"",
         b"discrete",
         b"configuring",

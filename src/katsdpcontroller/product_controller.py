@@ -517,7 +517,7 @@ class SubarrayProduct:
         )
         self._state_sensor = Sensor(
             ProductState,
-            "state",
+            "product-state",
             "State of the subarray product state machine (prometheus: gauge)",
             status_func=_error_on_error,
         )

@@ -1600,7 +1600,7 @@ class TestController(BaseTestController):
         product = server.product
         assert product is not None
         assert product.state == ProductState.ERROR
-        assert server.sensors["state"].value == ProductState.ERROR
+        assert server.sensors["product-state"].value == ProductState.ERROR
         assert server.sensors["device-status"].value == DeviceStatus.FAIL
         assert server.sensors["device-status"].status == Sensor.Status.ERROR
         assert product.capture_blocks == {}
@@ -1609,7 +1609,7 @@ class TestController(BaseTestController):
         # observe the internal state during deconfigure (e.g. with
         # DelayedManager), we'll just observe the sensor
         state_observer = mock.Mock()
-        server.sensors["state"].attach(state_observer)
+        server.sensors["product-state"].attach(state_observer)
         await client.request("product-deconfigure")
         # call 0, arguments, argument 1
         assert state_observer.mock_calls[0][1][1].value == ProductState.DECONFIGURING
