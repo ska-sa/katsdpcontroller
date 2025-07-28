@@ -916,6 +916,15 @@ def _make_fgpu(
                     fgpu.sensor_renames[
                         f"{stream.name}.input{j}.{name}"
                     ] = f"{stream.name}.{label}.{name}"
+                for name in [
+                    "dither-seed",
+                ]:
+                    # These engine-level sensors get replicated as well, but are not per-input
+                    orig_sensor_name = f"{stream.name}.{name}"
+                    renames = fgpu.sensor_renames.get(orig_sensor_name, [])
+                    renames.append(f"{stream.name}.{label}.{name}")
+                    fgpu.sensor_renames[orig_sensor_name] = renames
+
         # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
             src.adc_sample_rate / src.samples_per_heap for src in srcs
@@ -1464,6 +1473,7 @@ def _make_xbgpu(
                     "weight",
                     "beng-clip-cnt",
                     "tx.next-timestamp",
+                    "dither-seed",
                 ]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
