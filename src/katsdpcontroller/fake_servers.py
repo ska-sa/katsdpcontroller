@@ -164,6 +164,8 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                     str,
                     f"{output}.dither-seed",
                     "Random seed used in dithering for quantisation",
+                    # This is the largest value that katgpucbf can return,
+                    # which is also the most likely to break something.
                     default=f"{2**64 - 1}",
                     initial_status=Sensor.Status.NOMINAL,
                 )
@@ -339,6 +341,8 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     str,
                     f"{beam_name}.dither-seed",
                     "Random seed used in dithering for quantisation",
+                    # This is the largest value that katgpucbf can return,
+                    # which is also the most likely to break something.
                     default=f"{2**64 - 1}",
                     initial_status=Sensor.Status.NOMINAL,
                 )

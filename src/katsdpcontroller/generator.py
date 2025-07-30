@@ -916,14 +916,14 @@ def _make_fgpu(
                     fgpu.sensor_renames[
                         f"{stream.name}.input{j}.{name}"
                     ] = f"{stream.name}.{label}.{name}"
-                for name in [
-                    "dither-seed",
-                ]:
-                    # These engine-level sensors get replicated as well, but are not per-input
-                    orig_sensor_name = f"{stream.name}.{name}"
-                    renames = fgpu.sensor_renames.get(orig_sensor_name, [])
-                    renames.append(f"{stream.name}.{label}.{name}")
-                    fgpu.sensor_renames[orig_sensor_name] = renames
+        for stream in streams:
+            for name in [
+                "dither-seed",
+            ]:
+                # These engine-level sensors get replicated as well, but are not per-input
+                fgpu.sensor_renames[f"{stream.name}.{name}"] = [
+                    f"{stream.name}.{label}.{name}" for label in input_labels
+                ]
 
         # Prepare expected data rates etc
         fgpu.static_gauges["fgpu_expected_input_heaps_per_second"] = sum(
