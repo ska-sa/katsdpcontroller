@@ -157,8 +157,20 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
             output: [np.full((1,), self.DEFAULT_GAIN, np.complex64) for _ in range(self.N_POLS)]
             for output in self._output_names
         }
-        for pol in range(self.N_POLS):
-            for output in self._output_names:
+
+        for output in self._output_names:
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{output}.dither-seed",
+                    "Random seed used in dithering for quantisation",
+                    # This is the largest value that katgpucbf can return,
+                    # which is also the most likely to break something.
+                    default=f"{2**64 - 1}",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            for pol in range(self.N_POLS):
                 self.sensors.add(
                     Sensor(
                         str,
@@ -321,6 +333,17 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
                     f"{beam_name}.chan-range",
                     "The range of channels processed by this B-engine, inclusive",
                     default=f"({channel_offset},{channel_offset + channels_per_substream - 1})",
+                    initial_status=Sensor.Status.NOMINAL,
+                )
+            )
+            self.sensors.add(
+                Sensor(
+                    str,
+                    f"{beam_name}.dither-seed",
+                    "Random seed used in dithering for quantisation",
+                    # This is the largest value that katgpucbf can return,
+                    # which is also the most likely to break something.
+                    default=f"{2**64 - 1}",
                     initial_status=Sensor.Status.NOMINAL,
                 )
             )
