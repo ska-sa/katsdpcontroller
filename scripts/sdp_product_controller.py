@@ -182,7 +182,13 @@ def prepare_env(args: argparse.Namespace) -> None:
             os.environ["KATSDP_LOG_GELF_LOCALNAME"] = args.external_hostname
 
 
-def main() -> None:
+async def main() -> None:
+    loop = asyncio.get_running_loop()
+    # The default executor is used for DNS lookups, which are I/O-bound.
+    # We would like to use lots of threads for this to parallelise the
+    # lookups.
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=100))
+
     parser, args = parse_args()
     prepare_env(args)
     katsdpservices.setup_logging()
@@ -210,11 +216,6 @@ def main() -> None:
     framework_info.roles = [args.realtime_role, args.batch_role]
     framework_info.capabilities = [{"type": "MULTI_ROLE"}, {"type": "TASK_KILLING_STATE"}]
 
-    loop = asyncio.get_event_loop()
-    # The default executor is used for DNS lookups, which are I/O-bound.
-    # We would like to use lots of threads for this to parallelise the
-    # lookups.
-    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=100))
     sched = scheduler.Scheduler(
         args.realtime_role,
         args.host,
@@ -261,9 +262,8 @@ def main() -> None:
         init_dashboard(server, args, dashboard_path)
 
     with katsdpservices.start_aiomonitor(loop, args, locals()):
-        loop.run_until_complete(run(sched, server))
-    loop.close()
+        await run(sched, server)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
