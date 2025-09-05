@@ -1427,7 +1427,7 @@ class TestFlagsStream:
             "archive": True,
         }
 
-    def test_from_config(self, cal: CalStream, config: Dict[str, Any]) -> None:
+    def test_from_config(self, cal: CalStream, config: Dict[str, Any]) -> None:  # type: ignore
         vis = cal.vis
         flags = FlagsStream.from_config(Options(), "flags", config, [vis, cal], {})
         assert flags.name == "flags"

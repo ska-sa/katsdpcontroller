@@ -594,18 +594,16 @@
                             "then": {
                                 "properties": {
                                     "type": {},
-                                    "src_streams": {"$ref": "#/definitions/pair"}, % This needs to be mandated at 2 tacv streams
-                                    "n_chans": { % This must be even, and for the first version, it must be 2.
-                                        "type": "#/definitions/positive_integer",
-                                        "multipleOf": 2,
-                                    },
-                                    "pols": {"$ref": "#/definitions/pair"}, % Array of two strings
-                                    "station_id": { % String of two ASCII characters
+                                    "src_streams": {"$ref": "#/definitions/pair"},
+                                    "n_chans": {"$ref": "#/definitions/positive_integer"},
+                                    "pols": {"$ref": "#/definitions/pair"},
+                                    "station_id": {
                                         "type": "string",
                                         "minLength": 2,
                                         "maxLength": 2,
                                     }
                                 },
+                                "additionalProperties": false,
                                 "required": ["src_streams", "n_chans", "pols", "station_id"]
                             }
                         }
