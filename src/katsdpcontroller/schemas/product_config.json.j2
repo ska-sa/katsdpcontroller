@@ -1,5 +1,5 @@
 {% macro versions() %}
-["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6"]
+["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -240,6 +240,9 @@
 {% endif %}
 {% if version >= "3.5" %}
                                 "gpucbf.tied_array_channelised_voltage",
+{% endif %}
+{% if version >= "4.7" %}
+                                "gpucbf.tied_array_resampled_voltage",
 {% endif %}
                                 "sdp.vis",
                                 "sdp.cal",
@@ -584,6 +587,26 @@
                                 },
                                 "additionalProperties": false,
                                 "required": ["src_streams", "src_pol"]
+                            }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "gpucbf.tied_array_resampled_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/pair"}, % This needs to be mandated at 2 tacv streams
+                                    "n_chans": { % This must be even, and for the first version, it must be 2.
+                                        "type": "#/definitions/positive_integer",
+                                        "multipleOf": 2,
+                                    },
+                                    "pols": {"$ref": "#/definitions/pair"}, % Array of two strings
+                                    "station_id": { % String of two ASCII characters
+                                        "type": "string",
+                                        "minLength": 2,
+                                        "maxLength": 2,
+                                    }
+                                },
+                                "required": ["src_streams", "n_chans", "pols", "station_id"]
                             }
                         }
                     ]

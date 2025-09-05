@@ -44,6 +44,7 @@ from katsdpcontroller.product_config import (
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
     GpucbfTiedArrayChannelisedVoltageStream,
+    GpucbfTiedArrayResampledVoltageStream,
     GpucbfWindowFunction,
     Options,
     ServiceOverride,
@@ -1077,6 +1078,37 @@ class TestSimTiedArrayChannelisedVoltageStream:
         assert tacv.n_chans_per_substream == 32
 
 
+class TestGpucbfTiedArrayResampledVoltageStream:
+    """Test :class:`~.GpucbfTiedArrayResampledVoltageStream`."""
+
+    @pytest.fixture
+    def tacv_streams(self) -> List[GpucbfTiedArrayChannelisedVoltageStream]:
+        return [
+            make_gpucbf_tied_array_channelised_voltage(None, name="beam_0x", src_pol=0),
+            make_gpucbf_tied_array_channelised_voltage(None, name="beam_0y", src_pol=1),
+        ]
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": ["beam_0x", "beam_0y"],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me",
+        }
+
+    def test_from_config(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        tarv = GpucbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "", config, tacv_streams, {}
+        )
+        assert tarv.n_chans == 2
+        assert tarv.pols == ["x", "y"]
+        assert tarv.station_id == "me"
+
+
 def make_baseline_correlation_products(
     antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None,
 ) -> BaselineCorrelationProductsStream:
@@ -1107,6 +1139,20 @@ def make_tied_array_channelised_voltage(
         spectra_per_heap=256,
         bits_per_sample=8,
         instrument_dev_name="beam",
+    )
+
+
+def make_gpucbf_tied_array_channelised_voltage(
+    gpucbf_antenna_channelised_voltage: Optional[GpucbfAntennaChannelisedVoltageStream],
+    name: str,
+    src_pol: int,
+) -> GpucbfTiedArrayChannelisedVoltageStream:
+    if gpucbf_antenna_channelised_voltage is None:
+        gpucbf_antenna_channelised_voltage = make_gpucbf_antenna_channelised_voltage()
+    return GpucbfTiedArrayChannelisedVoltageStream(
+        name=name,
+        src_streams=[gpucbf_antenna_channelised_voltage],
+        src_pol=src_pol,
     )
 
 

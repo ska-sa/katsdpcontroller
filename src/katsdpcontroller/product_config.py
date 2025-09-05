@@ -1396,6 +1396,48 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
         )
 
 
+class GpucbfTiedArrayResampledVoltageStream:
+    """Real tied-array-resampled-voltage stream (GPU V-engine)."""
+
+    stream_type: ClassVar[str] = "gpucbf.tied_array_resampled_voltage"
+    _valid_src_types: ClassVar[_ValidTypes] = {"gpucbf.tied_array_channelised_voltage"}
+
+    def __init__(
+        self,
+        name: str,
+        src_streams: Sequence[Stream],
+        *,
+        n_chans: int,
+        pols: Sequence[str],
+        station_id: str,
+    ):
+        # Validate that there are only two gpucbf.tied_array_channelised_voltage streams
+        # in src_streams
+        if len(src_streams) != 2:
+            raise ValueError(f"{self.stream_type} requires two {self._valid_src_types}")
+        # TODO: Needs more error-checking against schema requirements
+        self.n_chans = n_chans
+        self.pols = pols
+        self.station_id = station_id
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, any],
+    ) -> "GpucbfTiedArrayResampledVoltageStream":
+        return cls(
+            name,
+            src_streams,
+            n_chans=config["n_chans"],
+            pols=config["pols"],
+            station_id=config["station_id"],
+        )
+
+
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
 
