@@ -1427,7 +1427,7 @@ class GpucbfTiedArrayResampledVoltageStream:
         name: str,
         config: Mapping[str, Any],
         src_streams: Sequence[Stream],
-        sensors: Mapping[str, any],
+        sensors: Mapping[str, Any],
     ) -> "GpucbfTiedArrayResampledVoltageStream":
         return cls(
             name,

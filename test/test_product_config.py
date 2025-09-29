@@ -1083,6 +1083,7 @@ class TestGpucbfTiedArrayResampledVoltageStream:
 
     @pytest.fixture
     def tacv_streams(self) -> List[GpucbfTiedArrayChannelisedVoltageStream]:
+        # TODO: Make one acv object and pass to both make-tacv functions
         return [
             make_gpucbf_tied_array_channelised_voltage(None, name="beam_0x", src_pol=0),
             make_gpucbf_tied_array_channelised_voltage(None, name="beam_0y", src_pol=1),
@@ -1583,7 +1584,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.6",
+        "version": "4.7",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
