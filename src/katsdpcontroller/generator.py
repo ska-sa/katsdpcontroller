@@ -423,6 +423,8 @@ def _make_dsim(
         dsim.command = dsim.command + [
             "--affinity",
             "{cores[send]}",
+            "--comp-vector",
+            "{cores[send]}",
             "--main-affinity",
             "{cores[main]}",
         ]
