@@ -131,6 +131,8 @@ class FakeDsimDeviceServer(FakeDeviceServer):
         # There are lots of sensors, but for now we don't model them as the
         # only interaction the product controller has is with the ?signals
         # request and the steady state timestamp.
+        _add_device_status_sensor(self.sensors)
+        _add_time_sync_sensors(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
 
     async def request_signals(self, ctx, signals: str, period: Optional[int] = None) -> int:
