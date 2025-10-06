@@ -25,6 +25,7 @@ import math
 import re
 import time
 from abc import ABC, abstractmethod
+from fractions import Fraction
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -1411,11 +1412,44 @@ class GpucbfTiedArrayResampledVoltageStream:
         pols: Sequence[str],
         station_id: str,
     ):
-        # Validate that there are only two gpucbf.tied_array_channelised_voltage streams
-        # in src_streams
         if len(src_streams) != 2:
             raise ValueError(f"{self.stream_type} requires two {self._valid_src_types}")
-        # TODO: Needs more error-checking against schema requirements
+        grandparent_streams: List[GpucbfAntennaChannelisedVoltageStream] = [
+            tacv_src_streams.src_streams[0]
+            for tacv_src_streams in src_streams
+            if len(tacv_src_streams.src_streams) == 1
+            and isinstance(tacv_src_streams.src_streams[0], GpucbfAntennaChannelisedVoltageStream)
+        ]
+        _grandparent_stream_type = "gpucbf.antenna_channelised_voltage"
+        if len(grandparent_streams) != 2:
+            # Should be two in total, one per src_stream
+            raise ValueError(
+                f"{self.stream_type} requires {self._valid_src_types} with a single src_stream"
+            )
+        if grandparent_streams[0] != grandparent_streams[1]:
+            raise ValueError(
+                f"{self._valid_src_types} src_streams need to have the same parent "
+                f"{_grandparent_stream_type} stream"
+            )
+
+        try:
+            getattr(getattr(grandparent_streams[0], "narrowband"), "vlbi")
+        except AttributeError:
+            raise ValueError(
+                f"Grandparent {_grandparent_stream_type} stream is not configured for VLBI"
+            ) from None
+
+        output_bandwidth = grandparent_streams[0].bandwidth
+        # We have confirmed above that the vlbi attribute is not None
+        pass_bandwidth = grandparent_streams[0].narrowband.vlbi.pass_bandwidth  # type: ignore
+        actual_bandwidth_ratio = Fraction(output_bandwidth) / Fraction(pass_bandwidth)
+        expected_bandwidth_ratio = Fraction(107, 64)
+        if actual_bandwidth_ratio != expected_bandwidth_ratio:
+            raise ValueError(
+                f"Output to pass bandwidth ratio {actual_bandwidth_ratio}, "
+                f"expected {expected_bandwidth_ratio}"
+            )
+
         self.n_chans = n_chans
         self.pols = pols
         self.station_id = station_id

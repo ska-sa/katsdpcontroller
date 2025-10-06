@@ -43,6 +43,7 @@ from katsdpcontroller.product_config import (
     FlagsStream,
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
+    GpucbfNarrowbandConfig,
     GpucbfTiedArrayChannelisedVoltageStream,
     GpucbfTiedArrayResampledVoltageStream,
     GpucbfWindowFunction,
@@ -773,11 +774,18 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
     )
 
 
-def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltageStream:
+def make_gpucbf_antenna_channelised_voltage(
+    narrowband_config: Optional[GpucbfNarrowbandConfig] = None,
+) -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
         make_sim_dig_baseband_voltage(name) for name in ["m000h", "m000v", "m001h", "m001v"]
     ]
-    return GpucbfAntennaChannelisedVoltageStream("wide1_acv", src_streams, n_chans=4096)
+    return GpucbfAntennaChannelisedVoltageStream(
+        "wide1_acv",
+        src_streams,
+        n_chans=4096,
+        narrowband=narrowband_config,
+    )
 
 
 class TestBaselineCorrelationProductsStream:
@@ -1082,11 +1090,31 @@ class TestGpucbfTiedArrayResampledVoltageStream:
     """Test :class:`~.GpucbfTiedArrayResampledVoltageStream`."""
 
     @pytest.fixture
-    def tacv_streams(self) -> List[GpucbfTiedArrayChannelisedVoltageStream]:
-        # TODO: Make one acv object and pass to both make-tacv functions
+    def narrowband_vlbi_config(self) -> Dict[str, Any]:
+        return {
+            "decimation_factor": DECIMATION,
+            "centre_frequency": 200e6,
+            "vlbi": {
+                "pass_bandwidth": 64e6,
+            },
+        }
+
+    @pytest.fixture
+    def nb_acv(
+        self, narrowband_vlbi_config: Dict[str, Any]
+    ) -> GpucbfAntennaChannelisedVoltageStream:
+        return make_gpucbf_antenna_channelised_voltage(
+            narrowband_config=GpucbfNarrowbandConfig.from_config(narrowband_vlbi_config)
+        )
+
+    @pytest.fixture
+    def tacv_streams(
+        self,
+        nb_acv: GpucbfAntennaChannelisedVoltageStream,
+    ) -> List[GpucbfTiedArrayChannelisedVoltageStream]:
         return [
-            make_gpucbf_tied_array_channelised_voltage(None, name="beam_0x", src_pol=0),
-            make_gpucbf_tied_array_channelised_voltage(None, name="beam_0y", src_pol=1),
+            make_gpucbf_tied_array_channelised_voltage(nb_acv, name="beam_0x", src_pol=0),
+            make_gpucbf_tied_array_channelised_voltage(nb_acv, name="beam_0y", src_pol=1),
         ]
 
     @pytest.fixture
