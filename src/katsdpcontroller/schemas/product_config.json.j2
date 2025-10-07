@@ -596,11 +596,10 @@
                                     "type": {},
                                     "src_streams": {"$ref": "#/definitions/pair"},
                                     "n_chans": {"$ref": "#/definitions/positive_integer"},
-                                    "pols": {"$ref": "#/definitions/pair"},
+                                    "pols": {"enum": [["x", "y"], ["R", "L"]]},
                                     "station_id": {
                                         "type": "string",
-                                        "minLength": 2,
-                                        "maxLength": 2
+                                        "pattern": "^[0-~][ -~]$"
                                     }
                                 },
                                 "additionalProperties": false,
