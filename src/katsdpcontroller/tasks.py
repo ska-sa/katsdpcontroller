@@ -780,12 +780,9 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         }
         if self.capture_block_id is not None:
             labels["capture_block_id"] = self.capture_block_id
-        self.taskinfo.container.docker.setdefault("parameters", []).extend(
-            [
-                {"key": "label", "value": f"za.ac.kat.sdp.katsdpcontroller.{key}={value}"}
-                for (key, value) in labels.items()
-            ]
-        )
+        docker_labels = {
+            f"za.ac.kat.sdp.katsdpcontroller.{key}": value for key, value in labels.items()
+        }
 
         # Set extra fields for katsdpservices-using services to log to logstash
         if self.logical_node.katsdpservices_logging and "KATSDP_LOG_GELF_ADDRESS" in os.environ:
@@ -803,6 +800,11 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
             self.taskinfo.command.environment.setdefault("variables", []).extend(
                 [{"name": key, "value": value} for (key, value) in env.items()]
             )
+            docker_labels["co.elastic.logs/enabled"] = "false"
+
+        self.taskinfo.container.docker.setdefault("parameters", []).extend(
+            [{"key": "label", "value": f"{key}={value}"} for (key, value) in docker_labels.items()]
+        )
 
         # Apply overrides to taskinfo given by the user
         overrides = resolver.service_overrides.get(
