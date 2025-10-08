@@ -1412,17 +1412,18 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         pols: Sequence[str],
         station_id: str,
     ):
-        grandparent_streams = [tacv_src_streams.src_streams[0] for tacv_src_streams in src_streams]
+        grandparent_streams = [tacv_src_stream.src_streams[0] for tacv_src_stream in src_streams]
         if grandparent_streams[0] is not grandparent_streams[1]:
             raise ValueError("src_streams do not have the same parent stream")
 
         acv = grandparent_streams[0]
         assert isinstance(acv, GpucbfAntennaChannelisedVoltageStream)
-        assert (
-            acv.narrowband is not None and acv.narrowband.vlbi is not None
-        ), f"Grandparent stream {acv.name} is not configured for VLBI"
+        if acv.narrowband is not None and acv.narrowband.vlbi is not None:
+            vlbi = acv.narrowband.vlbi
+        else:
+            raise ValueError(f"Grandparent stream {acv.name} is not configured for VLBI")
 
-        actual_bandwidth_ratio = Fraction(acv.bandwidth) / Fraction(acv.pass_bandwidth)
+        actual_bandwidth_ratio = Fraction(acv.bandwidth) / Fraction(vlbi.pass_bandwidth)
         expected_bandwidth_ratio = Fraction(107, 64)
         if actual_bandwidth_ratio != expected_bandwidth_ratio:
             raise ValueError(
