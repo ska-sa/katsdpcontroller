@@ -1213,8 +1213,8 @@ class TestGpucbfTiedArrayResampledVoltageStream:
 
         vlbi_acv = tacv_streams[0].src_streams[0]
         vlbi_acv.narrowband.vlbi.pass_bandwidth = 123e6  # type: ignore[attr-defined]
-        bad_bandwidth_ratio = Fraction(
-            vlbi_acv.bandwidth, vlbi_acv.pass_bandwidth  # type: ignore[attr-defined]
+        bad_bandwidth_ratio = Fraction(vlbi_acv.bandwidth) / Fraction(  # type: ignore[attr-defined]
+            vlbi_acv.pass_bandwidth  # type: ignore[attr-defined]
         )
         expected_bandwidth_ratio = Fraction(107, 64)
         exception_match_string = (
