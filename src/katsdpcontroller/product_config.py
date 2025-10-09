@@ -1427,10 +1427,13 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         expected_bandwidth_ratio = Fraction(107, 64)
         if actual_bandwidth_ratio != expected_bandwidth_ratio:
             raise ValueError(
-                f"Output to pass_bandwidth ratio {actual_bandwidth_ratio}, "
+                f"Output pass_bandwidth ratio {actual_bandwidth_ratio}, "
                 f"expected {expected_bandwidth_ratio}"
             )
         super().__init__(name, src_streams)
+        if n_chans != 2:
+            # TODO: Update the check to ensure n_chans is *even* in the next version
+            raise ValueError("n_chans must be 2 for this first version")
         self.n_chans = n_chans
         self.pols = pols
         self.station_id = station_id
@@ -1959,6 +1962,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,
     "gpucbf.tied_array_channelised_voltage": GpucbfTiedArrayChannelisedVoltageStream,
+    "gpucbf.tied_array_resampled_voltage": GpucbfTiedArrayResampledVoltageStream,
     "sim.cbf.antenna_channelised_voltage": SimAntennaChannelisedVoltageStream,
     "sim.cbf.tied_array_channelised_voltage": SimTiedArrayChannelisedVoltageStream,
     "sim.cbf.baseline_correlation_products": SimBaselineCorrelationProductsStream,

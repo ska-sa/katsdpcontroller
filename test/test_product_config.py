@@ -18,6 +18,7 @@
 
 import copy
 import re
+from fractions import Fraction
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -775,13 +776,14 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
 
 
 def make_gpucbf_antenna_channelised_voltage(
+    stream_name: str = "wide1_acv",
     narrowband_config: Optional[GpucbfNarrowbandConfig] = None,
 ) -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
         make_sim_dig_baseband_voltage(name) for name in ["m000h", "m000v", "m001h", "m001v"]
     ]
     return GpucbfAntennaChannelisedVoltageStream(
-        "wide1_acv",
+        stream_name,
         src_streams,
         n_chans=4096,
         narrowband=narrowband_config,
@@ -1086,6 +1088,53 @@ class TestSimTiedArrayChannelisedVoltageStream:
         assert tacv.n_chans_per_substream == 32
 
 
+def make_baseline_correlation_products(
+    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None,
+) -> BaselineCorrelationProductsStream:
+    if antenna_channelised_voltage is None:
+        antenna_channelised_voltage = make_antenna_channelised_voltage()
+    return BaselineCorrelationProductsStream(
+        "narrow1_bcp",
+        [antenna_channelised_voltage],
+        url=yarl.URL("spead://239.2.0.0+63:7148"),
+        int_time=0.5,
+        n_chans_per_substream=512,
+        n_baselines=40,
+        bits_per_sample=32,
+        instrument_dev_name="narrow1",
+    )
+
+
+def make_tied_array_channelised_voltage(
+    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream], name: str, url: yarl.URL
+) -> TiedArrayChannelisedVoltageStream:
+    if antenna_channelised_voltage is None:
+        antenna_channelised_voltage = make_antenna_channelised_voltage()
+    return TiedArrayChannelisedVoltageStream(
+        name,
+        [antenna_channelised_voltage],
+        url=url,
+        n_chans_per_substream=128,
+        spectra_per_heap=256,
+        bits_per_sample=8,
+        instrument_dev_name="beam",
+    )
+
+
+def make_gpucbf_tied_array_channelised_voltage(
+    gpucbf_antenna_channelised_voltage: Optional[GpucbfAntennaChannelisedVoltageStream],
+    name: str,
+    src_pol: int,
+) -> GpucbfTiedArrayChannelisedVoltageStream:
+    if gpucbf_antenna_channelised_voltage is None:
+        gpucbf_antenna_channelised_voltage = make_gpucbf_antenna_channelised_voltage()
+    return GpucbfTiedArrayChannelisedVoltageStream(
+        name=name,
+        src_streams=[gpucbf_antenna_channelised_voltage],
+        src_pol=src_pol,
+    )
+
+
 class TestGpucbfTiedArrayResampledVoltageStream:
     """Test :class:`~.GpucbfTiedArrayResampledVoltageStream`."""
 
@@ -1137,52 +1186,55 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         assert tarv.pols == ["x", "y"]
         assert tarv.station_id == "me"
 
+    def test_bad_grandparent_streams(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        different_acv_stream = make_gpucbf_antenna_channelised_voltage(stream_name="different_acv")
+        tacv_streams[0].src_streams[0] = different_acv_stream
+        with pytest.raises(ValueError, match="src_streams do not have the same parent stream"):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
 
-def make_baseline_correlation_products(
-    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream] = None,
-) -> BaselineCorrelationProductsStream:
-    if antenna_channelised_voltage is None:
-        antenna_channelised_voltage = make_antenna_channelised_voltage()
-    return BaselineCorrelationProductsStream(
-        "narrow1_bcp",
-        [antenna_channelised_voltage],
-        url=yarl.URL("spead://239.2.0.0+63:7148"),
-        int_time=0.5,
-        n_chans_per_substream=512,
-        n_baselines=40,
-        bits_per_sample=32,
-        instrument_dev_name="narrow1",
-    )
+        tacv_streams[1].src_streams[0] = different_acv_stream
+        with pytest.raises(
+            ValueError,
+            match=f"Grandparent stream {different_acv_stream.name} is not configured for VLBI",
+        ):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
 
+    def test_bad_bandwidth_ratio(
+        self,
+        tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream],
+        config: Dict[str, Any],
+    ) -> None:
 
-def make_tied_array_channelised_voltage(
-    antenna_channelised_voltage: Optional[AntennaChannelisedVoltageStream], name: str, url: yarl.URL
-) -> TiedArrayChannelisedVoltageStream:
-    if antenna_channelised_voltage is None:
-        antenna_channelised_voltage = make_antenna_channelised_voltage()
-    return TiedArrayChannelisedVoltageStream(
-        name,
-        [antenna_channelised_voltage],
-        url=url,
-        n_chans_per_substream=128,
-        spectra_per_heap=256,
-        bits_per_sample=8,
-        instrument_dev_name="beam",
-    )
+        vlbi_acv = tacv_streams[0].src_streams[0]
+        vlbi_acv.narrowband.vlbi.pass_bandwidth = 123e6  # type: ignore[attr-defined]
+        bad_bandwidth_ratio = Fraction(
+            vlbi_acv.bandwidth, vlbi_acv.pass_bandwidth  # type: ignore[attr-defined]
+        )
+        expected_bandwidth_ratio = Fraction(107, 64)
+        exception_match_string = (
+            f"Output pass_bandwidth ratio {bad_bandwidth_ratio}, "
+            f"expected {expected_bandwidth_ratio}"
+        )
+        with pytest.raises(ValueError, match=exception_match_string):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
 
-
-def make_gpucbf_tied_array_channelised_voltage(
-    gpucbf_antenna_channelised_voltage: Optional[GpucbfAntennaChannelisedVoltageStream],
-    name: str,
-    src_pol: int,
-) -> GpucbfTiedArrayChannelisedVoltageStream:
-    if gpucbf_antenna_channelised_voltage is None:
-        gpucbf_antenna_channelised_voltage = make_gpucbf_antenna_channelised_voltage()
-    return GpucbfTiedArrayChannelisedVoltageStream(
-        name=name,
-        src_streams=[gpucbf_antenna_channelised_voltage],
-        src_pol=src_pol,
-    )
+    def test_bad_n_chans(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        config["n_chans"] = 3
+        # TODO: Update error message in the next version
+        with pytest.raises(ValueError, match="n_chans must be 2 for this first version"):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
 
 
 class TestVisStream:
