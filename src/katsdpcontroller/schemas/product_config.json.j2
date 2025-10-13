@@ -1,5 +1,5 @@
 {% macro versions() %}
-["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6"]
+["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7"]
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -240,6 +240,9 @@
 {% endif %}
 {% if version >= "3.5" %}
                                 "gpucbf.tied_array_channelised_voltage",
+{% endif %}
+{% if version >= "4.7" %}
+                                "gpucbf.tied_array_resampled_voltage",
 {% endif %}
                                 "sdp.vis",
                                 "sdp.cal",
@@ -584,6 +587,23 @@
                                 },
                                 "additionalProperties": false,
                                 "required": ["src_streams", "src_pol"]
+                            }
+                        },
+                        {
+                            "if": {"properties": {"type": {"const": "gpucbf.tied_array_resampled_voltage"}}},
+                            "then": {
+                                "properties": {
+                                    "type": {},
+                                    "src_streams": {"$ref": "#/definitions/pair"},
+                                    "n_chans": {"$ref": "#/definitions/positive_integer"},
+                                    "pols": {"enum": [["x", "y"], ["R", "L"]]},
+                                    "station_id": {
+                                        "type": "string",
+                                        "pattern": "^[0-~][ -~]$"
+                                    }
+                                },
+                                "additionalProperties": false,
+                                "required": ["src_streams", "n_chans", "pols", "station_id"]
                             }
                         }
                     ]

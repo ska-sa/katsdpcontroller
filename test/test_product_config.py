@@ -18,6 +18,7 @@
 
 import copy
 import re
+from fractions import Fraction
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -43,7 +44,9 @@ from katsdpcontroller.product_config import (
     FlagsStream,
     GpucbfAntennaChannelisedVoltageStream,
     GpucbfBaselineCorrelationProductsStream,
+    GpucbfNarrowbandConfig,
     GpucbfTiedArrayChannelisedVoltageStream,
+    GpucbfTiedArrayResampledVoltageStream,
     GpucbfWindowFunction,
     Options,
     ServiceOverride,
@@ -772,11 +775,19 @@ def make_sim_antenna_channelised_voltage() -> SimAntennaChannelisedVoltageStream
     )
 
 
-def make_gpucbf_antenna_channelised_voltage() -> GpucbfAntennaChannelisedVoltageStream:
+def make_gpucbf_antenna_channelised_voltage(
+    stream_name: str = "wide1_acv",
+    narrowband_config: Optional[GpucbfNarrowbandConfig] = None,
+) -> GpucbfAntennaChannelisedVoltageStream:
     src_streams = [
         make_sim_dig_baseband_voltage(name) for name in ["m000h", "m000v", "m001h", "m001v"]
     ]
-    return GpucbfAntennaChannelisedVoltageStream("wide1_acv", src_streams, n_chans=4096)
+    return GpucbfAntennaChannelisedVoltageStream(
+        stream_name,
+        src_streams,
+        n_chans=4096,
+        narrowband=narrowband_config,
+    )
 
 
 class TestBaselineCorrelationProductsStream:
@@ -1108,6 +1119,118 @@ def make_tied_array_channelised_voltage(
         bits_per_sample=8,
         instrument_dev_name="beam",
     )
+
+
+def make_gpucbf_tied_array_channelised_voltage(
+    gpucbf_antenna_channelised_voltage: Optional[GpucbfAntennaChannelisedVoltageStream],
+    name: str,
+    src_pol: int,
+) -> GpucbfTiedArrayChannelisedVoltageStream:
+    if gpucbf_antenna_channelised_voltage is None:
+        gpucbf_antenna_channelised_voltage = make_gpucbf_antenna_channelised_voltage()
+    return GpucbfTiedArrayChannelisedVoltageStream(
+        name=name,
+        src_streams=[gpucbf_antenna_channelised_voltage],
+        src_pol=src_pol,
+    )
+
+
+class TestGpucbfTiedArrayResampledVoltageStream:
+    """Test :class:`~.GpucbfTiedArrayResampledVoltageStream`."""
+
+    @pytest.fixture
+    def narrowband_vlbi_config(self) -> Dict[str, Any]:
+        return {
+            "decimation_factor": DECIMATION,
+            "centre_frequency": 200e6,
+            "vlbi": {
+                "pass_bandwidth": 64e6,
+            },
+        }
+
+    @pytest.fixture
+    def nb_acv(
+        self, narrowband_vlbi_config: Dict[str, Any]
+    ) -> GpucbfAntennaChannelisedVoltageStream:
+        return make_gpucbf_antenna_channelised_voltage(
+            narrowband_config=GpucbfNarrowbandConfig.from_config(narrowband_vlbi_config)
+        )
+
+    @pytest.fixture
+    def tacv_streams(
+        self,
+        nb_acv: GpucbfAntennaChannelisedVoltageStream,
+    ) -> List[GpucbfTiedArrayChannelisedVoltageStream]:
+        return [
+            make_gpucbf_tied_array_channelised_voltage(nb_acv, name="beam_0x", src_pol=0),
+            make_gpucbf_tied_array_channelised_voltage(nb_acv, name="beam_0y", src_pol=1),
+        ]
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": ["beam_0x", "beam_0y"],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me",
+        }
+
+    def test_from_config(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        tarv = GpucbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "", config, tacv_streams, {}
+        )
+        assert tarv.n_chans == 2
+        assert tarv.pols == ["x", "y"]
+        assert tarv.station_id == "me"
+
+    def test_bad_grandparent_streams(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        different_acv_stream = make_gpucbf_antenna_channelised_voltage(stream_name="different_acv")
+        tacv_streams[0].src_streams[0] = different_acv_stream
+        with pytest.raises(ValueError, match="src_streams do not have the same parent stream"):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
+
+        tacv_streams[1].src_streams[0] = different_acv_stream
+        with pytest.raises(
+            ValueError,
+            match=f"Grandparent stream {different_acv_stream.name} is not configured for VLBI",
+        ):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
+
+    def test_bad_bandwidth_ratio(
+        self,
+        tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream],
+        config: Dict[str, Any],
+    ) -> None:
+        vlbi_acv = tacv_streams[0].antenna_channelised_voltage
+        vlbi_acv.narrowband.vlbi.pass_bandwidth = 123e6  # type: ignore[union-attr]
+        bad_bandwidth_ratio = Fraction(vlbi_acv.bandwidth) / Fraction(vlbi_acv.pass_bandwidth)
+        expected_bandwidth_ratio = Fraction(107, 64)
+        exception_match_string = (
+            f"Output to pass_bandwidth ratio {bad_bandwidth_ratio}, "
+            f"expected {expected_bandwidth_ratio}"
+        )
+        with pytest.raises(ValueError, match=exception_match_string):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
+
+    def test_bad_n_chans(
+        self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
+    ) -> None:
+        config["n_chans"] = 3
+        with pytest.raises(ValueError, match="n_chans must be 2"):
+            GpucbfTiedArrayResampledVoltageStream.from_config(
+                Options(), "", config, tacv_streams, {}
+            )
 
 
 class TestVisStream:
@@ -1537,7 +1660,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.6",
+        "version": "4.7",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {

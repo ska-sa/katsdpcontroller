@@ -25,6 +25,7 @@ import math
 import re
 import time
 from abc import ABC, abstractmethod
+from fractions import Fraction
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -1396,6 +1397,65 @@ class GpucbfTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamB
         )
 
 
+class GpucbfTiedArrayResampledVoltageStream(Stream):
+    """Real tied-array-resampled-voltage stream (GPU V-engine)."""
+
+    stream_type: ClassVar[str] = "gpucbf.tied_array_resampled_voltage"
+    _valid_src_types: ClassVar[_ValidTypes] = {"gpucbf.tied_array_channelised_voltage"}
+
+    def __init__(
+        self,
+        name: str,
+        src_streams: Sequence[Stream],
+        *,
+        n_chans: int,
+        pols: Sequence[str],
+        station_id: str,
+    ):
+        grandparent_streams = [tacv_src_stream.src_streams[0] for tacv_src_stream in src_streams]
+        if grandparent_streams[0] is not grandparent_streams[1]:
+            raise ValueError("src_streams do not have the same parent stream")
+
+        acv = grandparent_streams[0]
+        assert isinstance(acv, GpucbfAntennaChannelisedVoltageStream)
+        if acv.narrowband is not None and acv.narrowband.vlbi is not None:
+            vlbi = acv.narrowband.vlbi
+        else:
+            raise ValueError(f"Grandparent stream {acv.name} is not configured for VLBI")
+
+        actual_bandwidth_ratio = Fraction(acv.bandwidth) / Fraction(vlbi.pass_bandwidth)
+        expected_bandwidth_ratio = Fraction(107, 64)
+        if actual_bandwidth_ratio != expected_bandwidth_ratio:
+            raise ValueError(
+                f"Output to pass_bandwidth ratio {actual_bandwidth_ratio}, "
+                f"expected {expected_bandwidth_ratio}"
+            )
+        super().__init__(name, src_streams)
+        if n_chans != 2:
+            # NOTE: NGC-1709 may relax this in future
+            raise ValueError("n_chans must be 2")
+        self.n_chans = n_chans
+        self.pols = pols
+        self.station_id = station_id
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any],
+    ) -> "GpucbfTiedArrayResampledVoltageStream":
+        return cls(
+            name,
+            src_streams,
+            n_chans=config["n_chans"],
+            pols=config["pols"],
+            station_id=config["station_id"],
+        )
+
+
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
 
@@ -1902,6 +1962,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,
     "gpucbf.tied_array_channelised_voltage": GpucbfTiedArrayChannelisedVoltageStream,
+    "gpucbf.tied_array_resampled_voltage": GpucbfTiedArrayResampledVoltageStream,
     "sim.cbf.antenna_channelised_voltage": SimAntennaChannelisedVoltageStream,
     "sim.cbf.tied_array_channelised_voltage": SimTiedArrayChannelisedVoltageStream,
     "sim.cbf.baseline_correlation_products": SimBaselineCorrelationProductsStream,
