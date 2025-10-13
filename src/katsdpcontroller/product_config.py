@@ -1427,13 +1427,13 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         expected_bandwidth_ratio = Fraction(107, 64)
         if actual_bandwidth_ratio != expected_bandwidth_ratio:
             raise ValueError(
-                f"Output pass_bandwidth ratio {actual_bandwidth_ratio}, "
+                f"Output to pass_bandwidth ratio {actual_bandwidth_ratio}, "
                 f"expected {expected_bandwidth_ratio}"
             )
         super().__init__(name, src_streams)
         if n_chans != 2:
-            # TODO: Update the check to ensure n_chans is *even* in the next version
-            raise ValueError("n_chans must be 2 for this first version")
+            # NOTE: NGC-1709 may relax this in future
+            raise ValueError("n_chans must be 2")
         self.n_chans = n_chans
         self.pols = pols
         self.station_id = station_id

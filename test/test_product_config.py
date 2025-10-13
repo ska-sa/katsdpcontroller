@@ -1210,15 +1210,12 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream],
         config: Dict[str, Any],
     ) -> None:
-
-        vlbi_acv = tacv_streams[0].src_streams[0]
-        vlbi_acv.narrowband.vlbi.pass_bandwidth = 123e6  # type: ignore[attr-defined]
-        bad_bandwidth_ratio = Fraction(vlbi_acv.bandwidth) / Fraction(  # type: ignore[attr-defined]
-            vlbi_acv.pass_bandwidth  # type: ignore[attr-defined]
-        )
+        vlbi_acv = tacv_streams[0].antenna_channelised_voltage
+        vlbi_acv.narrowband.vlbi.pass_bandwidth = 123e6  # type: ignore[union-attr]
+        bad_bandwidth_ratio = Fraction(vlbi_acv.bandwidth) / Fraction(vlbi_acv.pass_bandwidth)
         expected_bandwidth_ratio = Fraction(107, 64)
         exception_match_string = (
-            f"Output pass_bandwidth ratio {bad_bandwidth_ratio}, "
+            f"Output to pass_bandwidth ratio {bad_bandwidth_ratio}, "
             f"expected {expected_bandwidth_ratio}"
         )
         with pytest.raises(ValueError, match=exception_match_string):
@@ -1230,8 +1227,7 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
     ) -> None:
         config["n_chans"] = 3
-        # TODO: Update error message in the next version
-        with pytest.raises(ValueError, match="n_chans must be 2 for this first version"):
+        with pytest.raises(ValueError, match="n_chans must be 2"):
             GpucbfTiedArrayResampledVoltageStream.from_config(
                 Options(), "", config, tacv_streams, {}
             )
