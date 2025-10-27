@@ -17,6 +17,7 @@
 import copy
 import enum
 import itertools
+import json
 import logging
 import math
 import os.path
@@ -237,6 +238,22 @@ def _round_up(value, period):
     return _round_down(value - 1, period) + period
 
 
+def _add_task_sensors(
+    g: networkx.MultiDiGraph, streams: Iterable[product_config.Stream], task_names: List[str]
+) -> None:
+    """Create a :samp:`{stream}.tasks` sensor for each stream in `streams`."""
+    for stream in streams:
+        g.graph["stream_sensors"].add(
+            Sensor(
+                str,
+                f"{stream.name}.tasks",
+                "Names of tasks that produce this stream (JSON)",
+                default=json.dumps(task_names),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+
+
 def find_node(g: networkx.MultiDiGraph, name: str) -> scheduler.LogicalNode:
     for node in g:
         if node.name == name:
@@ -444,6 +461,7 @@ def _make_dsim(
         g.add_node(multicast)
         g.add_edge(dsim, multicast, port="spead", depends_resolve=True)
         g.add_edge(multicast, dsim, depends_init=True, depends_ready=True)
+    _add_task_sensors(g, streams, [dsim.name])
     return dsim
 
 
@@ -743,10 +761,13 @@ def _make_fgpu(
         for key, value in telstate_data.items():
             init_telstate[(stream.normalised_name, key)] = value
 
+    task_names = []
     for i in range(0, n_engines):
         srcs = streams[0].sources(i)
         input_labels = (streams[0].input_labels[2 * i], streams[0].input_labels[2 * i + 1])
         fgpu = ProductLogicalTask(f"f.{base_name}.{i}", streams=streams, index=i)
+        # Added twice because it's handling two inputs
+        task_names += [fgpu.name, fgpu.name]
         fgpu.subsystem = "cbf"
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
@@ -934,6 +955,7 @@ def _make_fgpu(
         )
         fgpu.static_gauges["fgpu_expected_engines"] = 1.0
 
+    _add_task_sensors(g, streams, task_names)
     return fgpu_group
 
 
@@ -1257,9 +1279,11 @@ def _make_xbgpu(
     # Memory allocated for buffering and reordering incoming data
     recv_buffer = free_chunks * chunk_size
 
+    task_names = []
     for i in range(n_engines):
         # One engine per section of the band
         xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
+        task_names.append(xbgpu.name)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
@@ -1489,6 +1513,7 @@ def _make_xbgpu(
         )
         xbgpu.static_gauges["xbgpu_expected_engines"] = 1.0
 
+    _add_task_sensors(g, streams, task_names)
     return xbgpu_group
 
 
