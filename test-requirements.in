@@ -14,3 +14,4 @@ pytest-timeout
 # Static type annotations for mypy
 types-decorator
 types-setuptools
+types-pyyaml
