@@ -31,7 +31,7 @@
             "properties": {
                 "read": {"$ref": "#/$defs/section"},
                 "write": {"$ref": "#/$defs/section"},
-                "url": {"$type": "string", "format": "uri"},
+                "url": {"type": "string", "format": "uri"},
                 "expiry_days": {"type": "integer", "minimumValue": 0}
             },
             "if": { "$ref": "#/$defs/has_url" },
