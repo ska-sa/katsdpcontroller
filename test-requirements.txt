@@ -92,6 +92,8 @@ tomli==2.0.1
     #   pytest
 types-decorator==5.1.8.20240106
     # via -r test-requirements.in
+types-pyyaml==6.0.12.20241230
+    # via -r test-requirements.in
 types-setuptools==69.1.0.20240215
     # via -r test-requirements.in
 typing-extensions==4.9.0

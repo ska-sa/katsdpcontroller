@@ -14,14 +14,18 @@
 # limitations under the License.
 ################################################################################
 
-"""Makes packaged JSON schemas available."""
+"""Makes packaged JSON schemas available.
 
-import json
+The schemas themselves are written in YAML, but restricted to the JSON data
+types. YAML is used purely for better readability.
+"""
+
 from typing import TYPE_CHECKING, Union
 
 import importlib_resources
 import jinja2
 import jsonschema
+import yaml
 from packaging.version import Version
 
 _env = jinja2.Environment(loader=jinja2.PackageLoader(__name__, "."))
@@ -67,8 +71,8 @@ class MultiVersionValidator:
     The schema must have a top-level `version` key. It is defined by a Jinja2
     template that contains two macros:
 
-    - ``versions()`` returns a JSON list of supported versions.
-    - ``validate(version)`` returns a schema for the given version.
+    - ``versions()`` returns a YAML list of supported versions.
+    - ``validate(version)`` returns a schema for the given version, as YAML.
 
     Versions can be strings or integers, and strings are converted to
     :class:`ComparableVersion` before being passed to `validate`. The template
@@ -79,7 +83,7 @@ class MultiVersionValidator:
     def __init__(self, name):
         self._template = _env.get_template(name)
         # Create the mini-schema that just validates the version
-        versions = json.loads(self._template.module.versions())
+        versions = yaml.safe_load(self._template.module.versions())
         assert isinstance(versions, list)
         schema = {
             "$schema": "http://json-schema.org/draft-07/schema#",
@@ -97,17 +101,17 @@ class MultiVersionValidator:
     def validate(self, doc):
         self._version_validator.validate(doc)
         version = self._get_version(doc)
-        schema = json.loads(self._template.module.validate(version=version))
+        schema = yaml.safe_load(self._template.module.validate(version=version))
         validator = _make_validator(schema)
         validator.validate(doc)
 
 
 for entry in importlib_resources.files(__name__).iterdir():
     name = entry.name
-    if name.endswith(".json"):
-        schema = json.loads(entry.read_text())
+    if name.endswith(".yaml"):
+        schema = yaml.safe_load(entry.read_text())
         globals()[name[:-5].upper()] = _make_validator(schema)
-    elif name.endswith(".json.j2"):
+    elif name.endswith(".yaml.j2"):
         globals()[name[:-8].upper()] = MultiVersionValidator(name)
 
 if TYPE_CHECKING:

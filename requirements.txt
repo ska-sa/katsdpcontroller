@@ -244,6 +244,7 @@ pyyaml==6.0.1
     # via
     #   astropy
     #   dask
+    #   katsdpcontroller (setup.cfg)
 rdbtools==0.1.15
     # via katsdptelstate
 redis==5.0.1

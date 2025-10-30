@@ -1,0 +1,90 @@
+{% macro versions() %}
+- 4
+- 5
+{% endmacro %}
+
+{% macro validate(version) %}
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+additionalProperties: false
+required:
+  - version
+  - next_capture_block_id
+  - next_multicast_group
+  - products
+properties:
+  version:
+    type: integer
+  next_capture_block_id:
+    type: integer
+    minimum: 0
+  next_multicast_group:
+    type: string
+    format: ipv4
+  products:
+    type: object
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      required:
+        - start_time
+        - ports
+        - image
+        - run_id
+        - task_id
+        - host
+        - config
+        - multicast_groups
+      properties:
+        start_time:
+          type: number
+        ports:
+          type: object
+          required:
+            - katcp
+          additionalProperties:
+              type: integer
+              minimum: 0
+              maximum: 65535
+        run_id:
+          type: string
+        task_id:
+          type: string
+{% if version == 4 %}
+        image:
+          type: string
+{% else %}
+        image:
+          type: object
+          properties:
+            registry:
+              type: string
+            repo:
+              type: string
+            tag:
+              type: string
+            digest:
+              type: string
+            labels:
+              type: object
+              additionalProperties:
+                type: string
+          required:
+            - registry
+            - repo
+          anyOf:
+            - required:
+                - tag
+            - required:
+                - digest
+{% endif %}
+        host:
+          type: string
+        config:
+          type: object
+        multicast_groups:
+          type: array
+          items:
+            type: string
+            format: ipv4
+{% endmacro %}
