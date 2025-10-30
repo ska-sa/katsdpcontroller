@@ -23,6 +23,7 @@ import os.path
 import re
 import time
 import urllib.parse
+from json import dumps as json_dumps
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1495,132 +1496,112 @@ def _make_xbgpu(
 def _make_vgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    streams: Iterable[product_config.GpucbfTiedArrayResampledVoltageStream],
+    stream: product_config.GpucbfTiedArrayResampledVoltageStream,
 ) -> scheduler.LogicalNode:
-    # Ensure that streams is a sequence, not just an iterable.
-    streams = sorted(streams, key=lambda stream: stream.name)
-
     n_engines = 1
     n_substreams = 1
-    base_name = streams[0].name
-    vgpu_group = LogicalGroup(f"vgpu.{base_name}")
-    g.add_node(vgpu_group)
+    vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
+    g.add_node(vgpu)
 
-    for stream in streams:
-        stream_sensors: List[Sensor] = [
-            # The timestamps are simply ADC sample counts
-            Sensor(
-                float,
-                f"{stream.name}.scale-factor-timestamp",
-                "Factor by which to divide instrument timestamps to convert to seconds",
-                "Hz",
-                default=stream.adc_sample_rate,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                float,
-                f"{stream.name}.sync-time",
-                "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-                "s",
-                # TODO: Make grandparent property for TARVstream
-                default=sync_time,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                float,
-                f"{stream.name}.bandwidth",
-                "The analogue bandwidth of the digitised band",
-                "Hz",
-                default=acv.bandwidth,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                float,
-                f"{stream.name}.pass-bandwidth",
-                "Bandwidth over which the CBF produces a flat response",
-                "Hz",
-                default=acv.pass_bandwidth,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.n-chans",
-                "The number of frequency channels in this stream's overall output",
-                default=stream.n_chans,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.n-chans-per-substream",
-                "Number of channels in each substream for this data stream",
-                default=stream.n_chans_per_substream,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.n-vengs",
-                "The number of V-engines in the instrument",
-                # TODO: Clarify how this is deciphered. One v-eng to one stream?
-                default=stream.n_vengs,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.veng-out-bits-per-sample",
-                "V-engine output bits per sample. Per number, not complex pair- "
-                "Real and imaginary parts are both this wide",
-                default=stream.bits_per_sample,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                float,
-                f"{stream.name}.power-int-time",
-                "Interval over which power is measured and normalisation is performed",
-                "s",
-                # default=stream.power_int_time,
-                initial_status=Sensor.Status.NOMINAL,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.fir-taps",
-                "Number of taps in the rational downconversion filter",
-                # default=?
-                initial_status=Sensor.Status.Nominal,
-            ),
-            Sensor(
-                int,
-                f"{stream.name}.sideband-taps",
-                "Number of taps in the filter used to split into side-bands",
-                # default=?
-                initial_status=Sensor.Status.Nominal,
-            ),
-            Sensor(
-                str,
-                f"{stream.name}.pol-ordering",
-                "Which polarisations are produced and the order of their thread IDs. "
-                "Each element is one of 'x', 'y', 'R' or 'L'.",
-                # default="" ?
-                initial_status=Sensor.Status.Nominal,
-            ),
-        ]
+    stream_sensors: List[Sensor] = [
+        # The timestamps are simply ADC sample counts
+        Sensor(
+            float,
+            f"{stream.name}.scale-factor-timestamp",
+            "Factor by which to divide instrument timestamps to convert to seconds",
+            "Hz",
+            default=stream.adc_sample_rate,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}.sync-time",
+            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
+            "s",
+            default=stream.sync_time,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}.bandwidth",
+            "The analogue bandwidth of the digitised band",
+            "Hz",
+            default=stream.bandwidth,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}.pass-bandwidth",
+            "Bandwidth over which the CBF produces a flat response",
+            "Hz",
+            default=stream.bandwidth * defaults.VGPU_PASSBAND,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.n-chans",
+            "The number of frequency channels in this stream's overall output",
+            default=stream.n_chans,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.n-chans-per-substream",
+            "Number of channels in each substream for this data stream",
+            default=stream.n_chans // n_substreams,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.n-vengs",
+            "The number of V-engines in the instrument",
+            default=n_engines,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.veng-out-bits-per-sample",
+            "V-engine output bits per sample. Per number, not complex pair- "
+            "Real and imaginary parts are both this wide",
+            default=stream.bits_per_sample,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            float,
+            f"{stream.name}.power-int-time",
+            "Interval over which power is measured and normalisation is performed",
+            "s",
+            default=defaults.VGPU_POWER_INT_TIME,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.fir-taps",
+            "Number of taps in the rational downconversion filter",
+            default=defaults.VGPU_FIR_TAPS,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            int,
+            f"{stream.name}.sideband-taps",
+            "Number of taps in the filter used to split into side-bands",
+            default=defaults.VGPU_HILBERT_TAPS,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+        Sensor(
+            str,
+            f"{stream.name}.pol-ordering",
+            "Which polarisations are produced and the order of their thread IDs. "
+            "Each element is one of 'x', 'y', 'R' or 'L'.",
+            default=json_dumps(stream.pols),
+            initial_status=Sensor.Status.NOMINAL,
+        ),
+    ]
 
-        for ss in stream_sensors:
-            g.graph["stream_sensors"].add(ss)
+    for ss in stream_sensors:
+        g.graph["stream_sensors"].add(ss)
 
-        # TODO: init_telstate
-
-    for i in range(n_engines):
-        vgpu = ProductLogicalTask(f"v.{base_name}.{i}", streams=streams, index=i)
-        vgpu.subsystem = "cbf"
-        vgpu.image = "katgpucbf"
-        vgpu.fake_katcp_server_cls = None  # TODO: No fake server yet
-
-        vgpu.sensor_renames[f"{stream.name}.delay"] = f"{stream.name}.{i}.delay"
-        for pol_id in stream.pols:
-            for channel in range(2):
-                vgpu.sensor_renames[
-                    f"{stream.name}.{pol_id}{channel}.mean-power"
-                ] = f"{stream.name}.{i}.{pol_id}{channel}.mean-power"
+    return vgpu
 
 
 def _make_cbf_simulator(
@@ -2866,10 +2847,8 @@ def build_logical_graph(
             streams=xbgpu_streams,
             sensors=sensors,
         )
-    for vgpu_streams in _groupby(
-        configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream)
-    ):
-        _make_vgpu(g, configuration, vgpu_streams)
+    for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
+        _make_vgpu(g, configuration, vgpu_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()

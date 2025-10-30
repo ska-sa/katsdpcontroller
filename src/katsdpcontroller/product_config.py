@@ -1437,6 +1437,31 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         self.n_chans = n_chans
         self.pols = pols
         self.station_id = station_id
+        self.bits_per_sample = 2
+
+    @property
+    def grandparent_streams(
+        self,
+    ) -> Sequence[GpucbfAntennaChannelisedVoltageStream]:
+        """The grandparent antenna-channelised-voltage streams."""
+        return [
+            tacv_src_stream.src_streams[0] for tacv_src_stream in self.src_streams  # type: ignore
+        ]
+
+    @property
+    def adc_sample_rate(self) -> float:
+        """The ADC sample rate of the tied-array-resampled-voltage stream."""
+        return self.grandparent_streams[0].adc_sample_rate
+
+    @property
+    def sync_time(self) -> float:
+        """The sync time of the source digitiser streams."""
+        return self.grandparent_streams[0].src_streams[0].sync_time  # type: ignore
+
+    @property
+    def bandwidth(self) -> float:
+        """The bandwidth of the tied-array-resampled-voltage stream."""
+        return self.grandparent_streams[0].pass_bandwidth
 
     @classmethod
     def from_config(

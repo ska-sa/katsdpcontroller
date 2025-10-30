@@ -1499,14 +1499,11 @@ class SubarrayProduct:
         )
 
     async def vlbi_delay(self, stream_name: str, delay: float) -> None:
-        if self.state != ProductState.IDLE:
+        if self.state == ProductState.CAPTURING:
             raise FailReply(f"Cannot set VLBI delays in state {self.state}")
         stream = self._find_stream(stream_name)
         if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
-        # TODO: Do we need a multi_request here? Considering we're only launching
-        # one vgpu task per stream. Maybe future-proofing?
-        pass
 
     def _get_dsim_katcp(self, dsim: str) -> aiokatcp.Client:
         """Get the katcp client for connecting to a dsim.
