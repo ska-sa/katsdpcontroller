@@ -129,6 +129,7 @@ EXPECTED_REQUEST_LIST = [
     "product-configure",
     "product-deconfigure",
     "telstate-endpoint",
+    "vlbi-delay",
     # Standard katcp commands
     "client-list",
     "halt",
