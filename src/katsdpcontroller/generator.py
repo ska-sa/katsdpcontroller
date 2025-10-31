@@ -17,13 +17,13 @@
 import copy
 import enum
 import itertools
+import json
 import logging
 import math
 import os.path
 import re
 import time
 import urllib.parse
-from json import dumps as json_dumps
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1504,7 +1504,6 @@ def _make_vgpu(
     g.add_node(vgpu)
 
     stream_sensors: List[Sensor] = [
-        # The timestamps are simply ADC sample counts
         Sensor(
             float,
             f"{stream.name}.scale-factor-timestamp",
@@ -1593,7 +1592,7 @@ def _make_vgpu(
             f"{stream.name}.pol-ordering",
             "Which polarisations are produced and the order of their thread IDs. "
             "Each element is one of 'x', 'y', 'R' or 'L'.",
-            default=json_dumps(stream.pols),
+            default=json.dumps(stream.pols),
             initial_status=Sensor.Status.NOMINAL,
         ),
     ]

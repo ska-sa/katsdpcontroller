@@ -1499,8 +1499,10 @@ class SubarrayProduct:
         )
 
     async def vlbi_delay(self, stream_name: str, delay: float) -> None:
-        if self.state == ProductState.CAPTURING:
-            raise FailReply(f"Cannot set VLBI delays in state {self.state}")
+        # TODO: Check against self.state for CBF case
+        # - ProductState.IDLE basically means running. To determine "capturing"
+        #   we need to use the `transmit_state` for the graph node coresponding
+        #   to the multicast output.
         stream = self._find_stream(stream_name)
         if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
