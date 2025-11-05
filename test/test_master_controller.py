@@ -677,7 +677,7 @@ class TestSingularityProductManager:
         self, fix: "TestSingularityProductManager.Fixture", caplog
     ) -> None:
         await self.test_get_multicast_groups(fix)
-        fix.args.safe_multicast_cidr = "225.101.0.0/24"
+        fix.args.safe_multicast_cidr = "225.101.0.0/16"
         with caplog.at_level(logging.WARNING, "katsdpcontroller.master_controller"):
             await fix.reset()
         assert caplog.record_tuples == [
@@ -685,7 +685,7 @@ class TestSingularityProductManager:
                 "katsdpcontroller.master_controller",
                 logging.WARNING,
                 "Product 'product1' contains multicast group(s) outside the "
-                "defined range 225.101.0.0/24",
+                "defined range 225.101.0.0/16",
             )
         ]
 
@@ -778,7 +778,7 @@ class TestDeviceServer:
                 "--registry",
                 "registry.invalid:5000",
                 "--safe-multicast-cidr",
-                "239.192.0.0/24",
+                "239.192.0.0/16",
                 "unused argument (zk)",
                 "unused argument (Singularity)",
             ]
@@ -1010,6 +1010,7 @@ class TestDeviceServer:
     async def test_product_configure_reuse_name(self, client: aiokatcp.Client) -> None:
         await client.request("product-configure", "product", CONFIG_CBF_ONLY)
         await client.request("product-deconfigure", "product")
+        await asyncio.sleep(1)
         await client.request("product-configure", "product", CONFIG)
 
     async def test_product_configure_versions(self, client: aiokatcp.Client) -> None:
@@ -1242,7 +1243,7 @@ class TestDeviceServerReal:
                 "--registry",
                 "registry.invalid:5000",
                 "--safe-multicast-cidr",
-                "239.192.0.0/24",
+                "239.192.0.0/16",
                 "zk.invalid:2181",
                 "http://singularity.invalid:7099/singularity",
             ]

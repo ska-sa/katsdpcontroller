@@ -1501,7 +1501,16 @@ def _make_vgpu(
     n_engines = 1
     n_substreams = 1
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
+    vgpu.subsystem = "cbf"
+    vgpu.image = "katgpucbf"
     g.add_node(vgpu)
+
+    dst_multicast = LogicalMulticast(
+        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN
+    )
+    g.add_node(dst_multicast)
+
+    g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
 
     stream_sensors: List[Sensor] = [
         Sensor(
