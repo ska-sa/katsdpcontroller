@@ -1503,6 +1503,9 @@ def _make_vgpu(
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
+    # vgpu doesn't use katsdpservices for configuration, or telstate
+    vgpu.katsdpservices_config = False
+    vgpu.pass_telstate = False
     g.add_node(vgpu)
 
     dst_multicast = LogicalMulticast(

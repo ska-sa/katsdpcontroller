@@ -1010,7 +1010,6 @@ class TestDeviceServer:
     async def test_product_configure_reuse_name(self, client: aiokatcp.Client) -> None:
         await client.request("product-configure", "product", CONFIG_CBF_ONLY)
         await client.request("product-deconfigure", "product")
-        await asyncio.sleep(1)
         await client.request("product-configure", "product", CONFIG)
 
     async def test_product_configure_versions(self, client: aiokatcp.Client) -> None:

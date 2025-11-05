@@ -123,7 +123,7 @@ CONFIG = """{
         "gpucbf_tied_array_resampled_voltage": {
             "type": "gpucbf.tied_array_resampled_voltage",
             "src_streams": ["gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
-                        "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"],
+                            "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"],
             "n_chans": 2,
             "pols": ["x", "y"],
             "station_id": "me"
@@ -340,7 +340,7 @@ CONFIG_CBF_ONLY = """{
         "gpucbf_tied_array_resampled_voltage": {
             "type": "gpucbf.tied_array_resampled_voltage",
             "src_streams": ["gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
-                           "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"],
+                            "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"],
             "n_chans": 2,
             "pols": ["x", "y"],
             "station_id": "me"
