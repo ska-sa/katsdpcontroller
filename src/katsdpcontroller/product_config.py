@@ -1444,7 +1444,8 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         self,
     ) -> GpucbfAntennaChannelisedVoltageStream:
         """The grandparent antenna-channelised-voltage stream."""
-        return self.src_streams[0].antenna_channelised_voltage  # type: ignore
+        assert isinstance(self.src_streams[0], GpucbfTiedArrayChannelisedVoltageStream)
+        return self.src_streams[0].antenna_channelised_voltage
 
     @property
     def adc_sample_rate(self) -> float:
