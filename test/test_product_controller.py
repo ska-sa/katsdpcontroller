@@ -844,6 +844,12 @@ class TestControllerInterface(BaseTestController):
         )
         await client.request("product-deconfigure")
 
+    async def test_vlbi_delay(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 2.5)
+        # TODO: Validate sensor value once implemented
+        await client.request("product-deconfigure")
+
     async def test_dsim_signals(self, client: aiokatcp.Client) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
         reply, _ = await client.request("dsim-signals", "sim.m900.1712000000.0", "1;2;")
@@ -1946,6 +1952,10 @@ class TestController(BaseTestController):
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:x"),
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:0:0"),
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0,0:0,0", "0:0"),
+            # wrong number of arguments (expected 1 value but 2 provided)
+            ("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 1.0, 1.0),
+            # stream has wrong type
+            ("vlbi-delay", "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi", 1.0),
             # stream does not exist
             ("capture-start", "foo"),
             # stream has wrong type
