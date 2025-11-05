@@ -677,7 +677,7 @@ class TestSingularityProductManager:
         self, fix: "TestSingularityProductManager.Fixture", caplog
     ) -> None:
         await self.test_get_multicast_groups(fix)
-        fix.args.safe_multicast_cidr = "225.101.0.0/16"
+        fix.args.safe_multicast_cidr = "225.101.0.0/24"
         with caplog.at_level(logging.WARNING, "katsdpcontroller.master_controller"):
             await fix.reset()
         assert caplog.record_tuples == [
@@ -685,7 +685,7 @@ class TestSingularityProductManager:
                 "katsdpcontroller.master_controller",
                 logging.WARNING,
                 "Product 'product1' contains multicast group(s) outside the "
-                "defined range 225.101.0.0/16",
+                "defined range 225.101.0.0/24",
             )
         ]
 
