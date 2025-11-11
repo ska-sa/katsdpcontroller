@@ -1498,6 +1498,17 @@ class SubarrayProduct:
             timeout=DELAYS_TIMEOUT,
         )
 
+    async def vlbi_delay(self, stream_name: str, delay: float) -> None:
+        # TODO: Actually check against `transmit_state`
+        # - ProductState.IDLE basically means running (for CBF). To determine
+        #   "capturing" we need to use the `transmit_state` for the graph node
+        #   corresponding to the multicast output.
+        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
+            raise FailReply(f"Cannot set VLBI delay in state {self.state}")
+        stream = self._find_stream(stream_name)
+        if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+            raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+
     def _get_dsim_katcp(self, dsim: str) -> aiokatcp.Client:
         """Get the katcp client for connecting to a dsim.
 
@@ -2181,6 +2192,18 @@ class DeviceServer(aiokatcp.DeviceServer):
             specifies the overall phase to apply at the centre of the band.
         """
         await self._get_product().beam_delays(stream, coefficient_sets)
+
+    async def request_vlbi_delay(self, ctx, stream: str, delay: float) -> None:
+        """Set delay for a single VLBI data stream.
+
+        Parameters
+        ----------
+        stream
+            Tied-array-resampled-voltage stream on which to operate
+        delay
+            Delay in seconds to apply to the stream
+        """
+        await self._get_product().vlbi_delay(stream, delay)
 
     async def request_dsim_signals(
         self, ctx, dsim: str, signals_str: str, period: Optional[int] = None

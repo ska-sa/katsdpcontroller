@@ -79,6 +79,18 @@ CONFIG = """{
             "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
             "n_chans": 4096
         },
+        "gpucbf_antenna_channelised_voltage_narrowband_vlbi": {
+            "type": "gpucbf.antenna_channelised_voltage",
+            "src_streams": ["gpucbf_m900v", "gpucbf_m900h", "gpucbf_m901v", "gpucbf_m901h"],
+            "n_chans": 4096,
+            "narrowband": {
+                "decimation_factor": 8,
+                "centre_frequency": 300e6,
+                "vlbi": {
+                    "pass_bandwidth": 64e6
+                }
+            }
+        },
         "gpucbf_baseline_correlation_products": {
             "type": "gpucbf.baseline_correlation_products",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
@@ -93,6 +105,30 @@ CONFIG = """{
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "src_pol": 1
+        },
+        "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": [
+                "gpucbf_antenna_channelised_voltage_narrowband_vlbi"
+            ],
+            "src_pol": 0
+        },
+        "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": [
+                "gpucbf_antenna_channelised_voltage_narrowband_vlbi"
+            ],
+            "src_pol": 1
+        },
+        "gpucbf_tied_array_resampled_voltage": {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": [
+                "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
+                "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"
+            ],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me"
         },
 
         "i0_antenna_channelised_voltage": {
@@ -288,6 +324,30 @@ CONFIG_CBF_ONLY = """{
             "type": "gpucbf.tied_array_channelised_voltage",
             "src_streams": ["gpucbf_antenna_channelised_voltage"],
             "src_pol": 1
+        },
+        "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": [
+                "gpucbf_antenna_channelised_voltage_narrowband_vlbi"
+            ],
+            "src_pol": 0
+        },
+        "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi": {
+            "type": "gpucbf.tied_array_channelised_voltage",
+            "src_streams": [
+                "gpucbf_antenna_channelised_voltage_narrowband_vlbi"
+            ],
+            "src_pol": 1
+        },
+        "gpucbf_tied_array_resampled_voltage": {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": [
+                "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
+                "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi"
+            ],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me"
         }
     },
     "config": {}

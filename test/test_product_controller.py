@@ -94,6 +94,25 @@ from .utils import (
 ANTENNAS = ["m000", "m001", "m062", "m063"]
 #: Antenna declared in the gpucbf sections of CONFIG
 GPUCBF_ANTENNAS = ["m900", "m901"]
+#: Streams declared in gpucbf sections of CONFIG with their capture details
+GPUCBF_DATA_STREAMS: List[Tuple[bytes, bytes, bytes]] = [
+    (b"gpucbf_antenna_channelised_voltage", rb"239\.192\.\d+\.\d+\+3:7148", b"up"),
+    (b"gpucbf_antenna_channelised_voltage_narrowband_vlbi", rb"239\.192\.\d+\.\d+\+3:7148", b"up"),
+    (b"gpucbf_baseline_correlation_products", rb"239\.192\.\d+\.\d+\+3:7148", b"down"),
+    (b"gpucbf_tied_array_channelised_voltage_0x", rb"239\.192\.\d+\.\d+\+3:7148", b"down"),
+    (b"gpucbf_tied_array_channelised_voltage_0y", rb"239\.192\.\d+\.\d+\+3:7148", b"down"),
+    (
+        b"gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
+        rb"239\.192\.\d+\.\d+\+3:7148",
+        b"down",
+    ),
+    (
+        b"gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi",
+        rb"239\.192\.\d+\.\d+\+3:7148",
+        b"down",
+    ),
+    (b"gpucbf_tied_array_resampled_voltage", rb"239\.192\.\d+\.\d+\:7148", b"down"),
+]
 SUBARRAY_PRODUCT = "array_1_0"
 CAPTURE_BLOCK = "1122334455"
 
@@ -129,6 +148,7 @@ EXPECTED_REQUEST_LIST = [
     "product-configure",
     "product-deconfigure",
     "telstate-endpoint",
+    "vlbi-delay",
     # Standard katcp commands
     "client-list",
     "halt",
@@ -403,12 +423,13 @@ class BaseTestController:
             )
         )
         model.version = 1
-        setup_model(
-            model,
-            "/models/band_mask/current/l/nb_ratio=1.alias",
-            "/models/band_mask/config/l/nb_ratio=1/2020-06-22.alias",
-            "/models/band_mask/fixed/test.h5",
-        )
+        for nb_ratio in [1, 8]:
+            setup_model(
+                model,
+                f"/models/band_mask/current/l/nb_ratio={nb_ratio}.alias",
+                f"/models/band_mask/config/l/nb_ratio={nb_ratio}/2020-06-22.alias",
+                "/models/band_mask/fixed/test.h5",
+            )
 
     @pytest.fixture(autouse=True)
     def _setup_primary_beam_model(self, setup_model) -> None:
@@ -821,6 +842,12 @@ class TestControllerInterface(BaseTestController):
             "gpucbf_tied_array_channelised_voltage_0x.delay",
             "(12345678, 0.5, 0.0, -1.5, -2.0)",
         )
+        await client.request("product-deconfigure")
+
+    async def test_vlbi_delay(self, client: aiokatcp.Client) -> None:
+        await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
+        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 2.5)
+        # TODO: Validate sensor value once implemented
         await client.request("product-deconfigure")
 
     async def test_dsim_signals(self, client: aiokatcp.Client) -> None:
@@ -1925,6 +1952,10 @@ class TestController(BaseTestController):
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:x"),
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0:0", "0:0:0"),
             ("beam-delays", "gpucbf_tied_array_channelised_voltage_0x", "0,0:0,0", "0:0"),
+            # wrong number of arguments (expected 1 value but 2 provided)
+            ("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 1.0, 1.0),
+            # stream has wrong type
+            ("vlbi-delay", "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi", 1.0),
             # stream does not exist
             ("capture-start", "foo"),
             # stream has wrong type
@@ -2062,23 +2093,10 @@ class TestController(BaseTestController):
     async def test_capture_list_no_args(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         _, informs = await client.request("capture-list")
-        assert len(informs) == 4
-        assert informs[0].arguments == [b"gpucbf_antenna_channelised_voltage", mock.ANY, b"up"]
-        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[0].arguments[1])
-        assert informs[1].arguments == [b"gpucbf_baseline_correlation_products", mock.ANY, b"down"]
-        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[1].arguments[1])
-        assert informs[2].arguments == [
-            b"gpucbf_tied_array_channelised_voltage_0x",
-            mock.ANY,
-            b"down",
-        ]
-        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[2].arguments[1])
-        assert informs[3].arguments == [
-            b"gpucbf_tied_array_channelised_voltage_0y",
-            mock.ANY,
-            b"down",
-        ]
-        assert re.fullmatch(rb"239\.192\.\d+\.\d+\+3:7148", informs[3].arguments[1])
+        assert len(informs) == len(GPUCBF_DATA_STREAMS)
+        for i, (gpucbf_data_stream, addr_regex, state) in enumerate(GPUCBF_DATA_STREAMS):
+            assert informs[i].arguments == [gpucbf_data_stream, mock.ANY, state]
+            assert re.fullmatch(addr_regex, informs[i].arguments[1])
 
     async def test_capture_list_explicit_stream(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
