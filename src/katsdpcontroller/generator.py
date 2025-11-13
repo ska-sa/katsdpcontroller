@@ -1524,6 +1524,8 @@ def _make_vgpu(
 ) -> scheduler.LogicalNode:
     n_engines = 1
     n_substreams = 1
+    # TODO: Are we actually planning to accommodate for non-ibverbs launch?
+    ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
@@ -1531,13 +1533,6 @@ def _make_vgpu(
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
     g.add_node(vgpu)
-
-    dst_multicast = LogicalMulticast(
-        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN
-    )
-    g.add_node(dst_multicast)
-
-    g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
 
     stream_sensors: List[Sensor] = [
         Sensor(
@@ -1635,6 +1630,131 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
+
+    vgpu.cpus = 2.0
+    # TODO: Doesn't seem to be much standardisation on (giga)bytes vs ...
+    vgpu.mem = 8192
+    if not configuration.options.develop.less_resources:
+        # TODO: Update to include send core once V-engine uses --send-affinity
+        vgpu.cores = ["recv", "python"]
+        vgpu.numa_nodes = 1.0
+        taskset = ["taskset", "-c", "{cores[python]}"]
+    else:
+        taskset = []
+
+    vgpu.interfaces = [
+        scheduler.InterfaceRequest(
+            "gpucbf",
+            infiniband=ibv,
+            multicast_in={src_stream.name for src_stream in stream.src_streams},
+            multicast_out={stream.name},
+        )
+    ]
+
+    vgpu.gpus = [scheduler.GPURequest()]
+    vgpu.gpus[0].mem = _mb(6442e6)  # 6 GB for now
+
+    vgpu.command = (
+        ["schedrr"]
+        + taskset
+        + [
+            "vgpu",
+            "--adc-sample-rate",
+            str(stream.adc_sample_rate),
+            "--sync-time",
+            str(stream.sync_time),
+            "--recv-channels",
+            str(stream.n_chans),
+            "--recv-channels-per-substream",
+            str(stream.n_chans_per_substream),
+            "--recv-jones-per-batch",
+            str(stream.antenna_channelised_voltage.n_jones_per_batch),
+            "--recv-samples-between-spectra",
+            str(stream.antenna_channelised_voltage.n_samples_between_spectra),
+            # TODO: Calculate value for batches-per-chunk
+            # "--recv-batches-per-chunk",
+            # None,
+            "--recv-sample-bits",
+            str(stream.recv_bits_per_sample),
+            "--recv-bandwidth",
+            str(stream.bandwidth),
+            "--recv-pols",
+            "x,y",  # TODO: NGC-1404
+            "--send-bandwidth",
+            str(stream.bandwidth * defaults.VGPU_PASSBAND),
+            "--send-pols",
+            str(stream.pols),
+            "--send-samples-per-frame",
+            str(defaults.VGPU_SAMPLES_PER_FRAME),
+            "--send-station",
+            str(stream.station_id),
+            "--fir-taps",
+            str(defaults.VGPU_FIR_TAPS),
+            "--hilbert-taps",
+            str(defaults.VGPU_HILBERT_TAPS),
+            "--passband",
+            str(defaults.VGPU_PASSBAND),
+            "--threshold",
+            str(defaults.VGPU_THRESHOLD),
+            "--power-int-time",
+            str(defaults.VGPU_POWER_INT_TIME),
+            "--recv-interface",
+            "{interfaces[gpucbf].name}",
+            "--send-interface",
+            "{interfaces[gpucbf].name}",
+            "--katcp-port",
+            "{ports[port]}",
+            "--prometheus-port",
+            "{ports[prometheus]}",
+            "--aiomonitor",
+            "--aiomonitor-port",
+            "{ports[aiomonitor]}",
+            "--aiomonitor-webui-port",
+            "{ports[aiomonitor_webui]}",
+            "--aioconsole-port",
+            "{ports[aioconsole]}",
+        ]
+    )
+
+    if configuration.options.develop.less_resources:
+        vgpu.command += [
+            "--recv-affinity",
+            "{cores[recv]}",
+        ]
+
+    if ibv:
+        vgpu.capabilities.append("NET_RAW")
+        vgpu.command += ["--recv-ibv"]
+        if not configuration.options.develop.less_resources:
+            vgpu.command += [
+                "--recv-comp-vector",
+                "{cores[recv]}",
+            ]
+
+    for src_stream in stream.src_streams:
+        src_multicast = find_node(g, f"multicast.{src_stream.name}")
+        # depends_init is included purely to ensure sensible ordering
+        # on the dashboard.
+        g.add_edge(
+            vgpu,
+            src_multicast,
+            port="spead",
+            depends_resolve=True,
+            depends_init=True,
+        )
+        vgpu.command.append(f"{{endpoints_vector[multicast.{src_stream.name}_spead][0]}}")
+
+    # TODO: Clarify this endpoint naming convention
+    vgpu.command.append(f"{{endpoints[multicast.{stream.name}_vdif]}}")
+    dst_multicast = LogicalMulticast(
+        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN
+    )
+    g.add_node(dst_multicast)
+    g.add_edge(vgpu, dst_multicast, port="vdif", depends_resolve=True)
+    g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
+
+    g.add_node(vgpu)
+    _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu
 

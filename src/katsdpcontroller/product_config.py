@@ -1447,6 +1447,8 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         assert isinstance(self.src_streams[0], GpucbfTiedArrayChannelisedVoltageStream)
         return self.src_streams[0].antenna_channelised_voltage
 
+    # TODO: Re-evaluate how necessary some of these properties are
+    # - They might only be needed for make_vgpu
     @property
     def adc_sample_rate(self) -> float:
         """The ADC sample rate of the tied-array-resampled-voltage stream."""
@@ -1461,6 +1463,18 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
     def bandwidth(self) -> float:
         """The bandwidth of the tied-array-resampled-voltage stream."""
         return self.antenna_channelised_voltage.pass_bandwidth
+
+    @property
+    def n_chans_per_substream(self) -> int:
+        """Number of channels per substream."""
+        assert isinstance(self.src_streams[0], GpucbfTiedArrayChannelisedVoltageStream)
+        return self.src_streams[0].n_chans_per_substream
+
+    @property
+    def recv_bits_per_sample(self) -> int:
+        """Bits per received sample."""
+        assert isinstance(self.src_streams[0], GpucbfTiedArrayChannelisedVoltageStream)
+        return self.src_streams[0].bits_per_sample
 
     @classmethod
     def from_config(
