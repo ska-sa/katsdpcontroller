@@ -157,6 +157,7 @@ class LogicalMulticast(scheduler.LogicalExternal):
         n_addresses=None,
         endpoint=None,
         initial_transmit_state=TransmitState.UNKNOWN,
+        port_name="spead",
     ):
         super().__init__("multicast." + stream_name)
         self.stream_name = stream_name
@@ -164,6 +165,7 @@ class LogicalMulticast(scheduler.LogicalExternal):
         self.sdp_physical_factory = True
         self.n_addresses = n_addresses
         self.endpoint = endpoint
+        self.port_name = port_name
         if (self.n_addresses is None) == (self.endpoint is None):
             raise ValueError("Exactly one of n_addresses and endpoint must be specified")
         self.initial_transmit_state = initial_transmit_state
@@ -183,17 +185,18 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
     async def resolve(self, resolver, graph):
         await super().resolve(resolver, graph)
+        port_name = self.logical_node.port_name
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
-            self.ports = {"spead": self.logical_node.endpoint.port}
+            self.ports = {port_name: self.logical_node.endpoint.port}
         else:
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
-            self.ports = {"spead": await resolver.resources.get_port()}
+            self.ports = {port_name: await resolver.resources.get_port()}
         # It should already be resolved. Note that it might NOT be a valid
         # IP address if it represents multiple multicast groups in the form
         # a.b.c.d+N.
         self.address = self.host
-        self._endpoint_sensor.value = str(Endpoint(self.address, self.ports["spead"]))
+        self._endpoint_sensor.value = str(Endpoint(self.address, self.ports[port_name]))
 
 
 class TelstateTask(ProductPhysicalTask):
@@ -1634,6 +1637,8 @@ def _make_vgpu(
     vgpu.cpus = 2.0
     # TODO: Doesn't seem to be much standardisation on (giga)bytes vs ...
     vgpu.mem = 8192
+    vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
+    vgpu.wait_ports = ["port", "prometheus"]
     if not configuration.options.develop.less_resources:
         # TODO: Update to include send core once V-engine uses --send-affinity
         vgpu.cores = ["recv", "python"]
@@ -1745,12 +1750,13 @@ def _make_vgpu(
         vgpu.command.append(f"{{endpoints_vector[multicast.{src_stream.name}_spead][0]}}")
 
     # TODO: Clarify this endpoint naming convention
-    vgpu.command.append(f"{{endpoints[multicast.{stream.name}_vdif]}}")
+    port_name = "vdif"
+    vgpu.command.append(f"{{endpoints[multicast.{stream.name}_{port_name}]}}")
     dst_multicast = LogicalMulticast(
-        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN
+        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN, port_name=port_name
     )
     g.add_node(dst_multicast)
-    g.add_edge(vgpu, dst_multicast, port="vdif", depends_resolve=True)
+    g.add_edge(vgpu, dst_multicast, port=port_name, depends_resolve=True)
     g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
 
     g.add_node(vgpu)
