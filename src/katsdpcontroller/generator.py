@@ -1727,6 +1727,7 @@ def _make_vgpu(
             "{cores[recv]}",
         ]
 
+    vgpu.capabilities.append("SYS_NICE")  # For schedrr
     if ibv:
         vgpu.capabilities.append("NET_RAW")
         vgpu.command += ["--recv-ibv"]
