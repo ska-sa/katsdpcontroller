@@ -1527,6 +1527,10 @@ def _make_vgpu(
 ) -> scheduler.LogicalNode:
     n_engines = 1
     n_substreams = 1
+    n_recv_batches_per_chunk = 1  # TODO: Update according to stream parameters?
+    acv = stream.antenna_channelised_voltage
+    sync_time = acv.sources(0)[0].sync_time
+    tacv = stream.tied_array_channelised_voltage
     # TODO: Are we actually planning to accommodate for non-ibverbs launch?
     ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
@@ -1543,7 +1547,7 @@ def _make_vgpu(
             f"{stream.name}.scale-factor-timestamp",
             "Factor by which to divide instrument timestamps to convert to seconds",
             "Hz",
-            default=stream.adc_sample_rate,
+            default=acv.adc_sample_rate,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1551,7 +1555,7 @@ def _make_vgpu(
             f"{stream.name}.sync-time",
             "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
             "s",
-            default=stream.sync_time,
+            default=sync_time,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1596,7 +1600,7 @@ def _make_vgpu(
             f"{stream.name}.veng-out-bits-per-sample",
             "V-engine output bits per sample. Per number, not complex pair- "
             "Real and imaginary parts are both this wide",
-            default=stream.bits_per_sample,
+            default=tacv[0].bits_per_sample,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1635,7 +1639,6 @@ def _make_vgpu(
         g.graph["stream_sensors"].add(ss)
 
     vgpu.cpus = 2.0
-    # TODO: Doesn't seem to be much standardisation on (giga)bytes vs ...
     vgpu.mem = 8192
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
@@ -1665,22 +1668,21 @@ def _make_vgpu(
         + [
             "vgpu",
             "--adc-sample-rate",
-            str(stream.adc_sample_rate),
+            str(acv.adc_sample_rate),
             "--sync-time",
-            str(stream.sync_time),
+            str(sync_time),
             "--recv-channels",
-            str(stream.antenna_channelised_voltage.n_chans),
+            str(acv.n_chans),
             "--recv-channels-per-substream",
-            str(stream.n_chans_per_substream),
+            str(tacv[0].n_chans_per_substream),
             "--recv-jones-per-batch",
-            str(stream.antenna_channelised_voltage.n_jones_per_batch),
+            str(acv.n_jones_per_batch),
             "--recv-samples-between-spectra",
-            str(stream.antenna_channelised_voltage.n_samples_between_spectra),
-            # TODO: Calculate value for batches-per-chunk
-            # "--recv-batches-per-chunk",
-            # None,
+            str(acv.n_samples_between_spectra),
+            "--recv-batches-per-chunk",
+            str(n_recv_batches_per_chunk),
             "--recv-sample-bits",
-            str(stream.recv_bits_per_sample),
+            str(tacv[0].bits_per_sample),
             "--recv-bandwidth",
             str(stream.bandwidth),
             "--recv-pols",
@@ -1750,7 +1752,6 @@ def _make_vgpu(
         )
         vgpu.command.append(f"{{endpoints_vector[multicast.{src_stream.name}_spead][0]}}")
 
-    # TODO: Clarify this endpoint naming convention
     port_name = "vdif"
     vgpu.command.append(f"{{endpoints[multicast.{stream.name}_{port_name}]}}")
     dst_multicast = LogicalMulticast(
