@@ -1660,7 +1660,7 @@ def _make_vgpu(
     ]
 
     vgpu.gpus = [scheduler.GPURequest()]
-    vgpu.gpus[0].mem = _mb(6442e6)  # 6 GB for now
+    vgpu.gpus[0].mem = _mb(6e9)  # 6 GB for now
 
     vgpu.command = (
         ["schedrr"]
