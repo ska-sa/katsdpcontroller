@@ -2252,7 +2252,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             response.append(
                 (
                     name,
-                    str(Endpoint(mc.host, list(mc.ports.values())[0])),
+                    str(Endpoint(mc.host, mc.ports[mc.logical_node.port_name])),
                     mc.transmit_state.name.lower(),
                 )
             )

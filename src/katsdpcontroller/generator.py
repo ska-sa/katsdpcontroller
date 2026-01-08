@@ -1527,11 +1527,10 @@ def _make_vgpu(
 ) -> scheduler.LogicalNode:
     n_engines = 1
     n_substreams = 1
-    n_recv_batches_per_chunk = 1  # TODO: Update according to stream parameters?
+    n_recv_batches_per_chunk = 1  # TODO: Revisit once vgpu is complete
     acv = stream.antenna_channelised_voltage
     sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
-    # TODO: Are we actually planning to accommodate for non-ibverbs launch?
     ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
@@ -1600,7 +1599,7 @@ def _make_vgpu(
             f"{stream.name}.veng-out-bits-per-sample",
             "V-engine output bits per sample. Per number, not complex pair- "
             "Real and imaginary parts are both this wide",
-            default=tacv[0].bits_per_sample,
+            default=stream.bits_per_sample,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1658,9 +1657,16 @@ def _make_vgpu(
             multicast_out={stream.name},
         )
     ]
+    vgpu.interfaces[0].bandwidth_in = (
+        stream.tied_array_channelised_voltage[0].data_rate() / n_engines
+    )
+    vgpu.interfaces[0].bandwidth_out = stream.data_rate() * stream.n_chans * len(stream.pols)
 
     vgpu.gpus = [scheduler.GPURequest()]
-    vgpu.gpus[0].mem = _mb(6e9)  # 6 GB for now
+    # TODO: To ensure vgpu doesn't share the GPU with anything else.
+    # Revisit once vgpu is complete.
+    vgpu.gpus[0].compute = 1.0
+    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
 
     vgpu.command = (
         ["schedrr"]
@@ -1676,7 +1682,7 @@ def _make_vgpu(
             "--recv-channels-per-substream",
             str(tacv[0].n_chans_per_substream),
             "--recv-jones-per-batch",
-            str(acv.n_jones_per_batch),
+            str(tacv[0].n_jones_per_batch),
             "--recv-samples-between-spectra",
             str(acv.n_samples_between_spectra),
             "--recv-batches-per-chunk",
@@ -1684,11 +1690,11 @@ def _make_vgpu(
             "--recv-sample-bits",
             str(tacv[0].bits_per_sample),
             "--recv-bandwidth",
-            str(stream.bandwidth),
+            str(tacv[0].bandwidth),
             "--recv-pols",
             "x,y",  # TODO: NGC-1404
             "--send-bandwidth",
-            str(stream.bandwidth * defaults.VGPU_PASSBAND),
+            str(stream.bandwidth),
             "--send-pols",
             ",".join(stream.pols),
             "--send-samples-per-frame",
@@ -1723,7 +1729,7 @@ def _make_vgpu(
         ]
     )
 
-    if configuration.options.develop.less_resources:
+    if not configuration.options.develop.less_resources:
         vgpu.command += [
             "--recv-affinity",
             "{cores[recv]}",
@@ -1750,7 +1756,7 @@ def _make_vgpu(
             depends_resolve=True,
             depends_init=True,
         )
-        vgpu.command.append(f"{{endpoints_vector[multicast.{src_stream.name}_spead][0]}}")
+        vgpu.command.append(f"{{endpoints[multicast.{src_stream.name}_spead]}}")
 
     port_name = "vdif"
     vgpu.command.append(f"{{endpoints[multicast.{stream.name}_{port_name}]}}")

@@ -1284,6 +1284,11 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
         """Interval between heaps, in seconds."""
         return self.spectra_per_heap * self.n_samples_between_spectra / self.adc_sample_rate
 
+    @property
+    def n_jones_per_batch(self) -> int:
+        """Number of Jones matrices per batch."""
+        return self.n_chans * self.spectra_per_heap
+
 
 class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageStreamBase):
     """Real tied-array-channelised-voltage stream."""
@@ -1461,6 +1466,12 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
     def bandwidth(self) -> float:
         """The bandwidth of the tied-array-resampled-voltage stream."""
         return self.antenna_channelised_voltage.pass_bandwidth
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        """Network bandwidth in bits per second."""
+        heap_size = defaults.VGPU_SAMPLES_PER_FRAME * self.bits_per_sample // 8
+        time_between_heaps = defaults.VGPU_SAMPLES_PER_FRAME / self.bandwidth
+        return data_rate(heap_size, time_between_heaps, ratio, overhead)
 
     @classmethod
     def from_config(
