@@ -916,11 +916,10 @@ class SubarrayProduct:
             )
             logger.info("Logical graph nodes:\n" + "\n".join(repr(node) for node in logical_graph))
             physical_graph = self._instantiate_physical_graph(logical_graph, capture_block.name)
-            logger.info(
-                "Physical graph nodes:\n" + "\n".join(repr(node) for node in physical_graph)
-            )
+
             capture_block.postprocess_physical_graph = physical_graph
             nodes = {node.logical_node.name: node for node in physical_graph}
+            logger.info("Physical graph nodes:\n" + "\n".join(nodes.keys()))
             telstate_node = nodes["telstate"]
             telstate_node.host = self.telstate_node.host
             telstate_node.ports = dict(self.telstate_node.ports)
@@ -941,7 +940,9 @@ class SubarrayProduct:
                 for node in physical_graph
                 if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
             ]
-            logger.info("node list :\n" + "\n".join(repr(node) for node in nodelist))
+            logger.info(
+                "node list :\n" + "\n".join(repr(node.logical_node.name) for node in nodelist)
+            )
             await self.sched.batch_run(
                 physical_graph,
                 self.resolver,

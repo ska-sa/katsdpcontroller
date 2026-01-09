@@ -19,7 +19,7 @@
 #: Unlike "localhost", guaranteed to be IPv4, which is more compatible with Docker
 LOCALHOST = "127.0.0.1"
 #: GPU to target when not running develop mode
-INGEST_GPU_NAME = "GeForce GTX TITAN X"
+INGEST_GPU_NAME = "NVIDIA A30"
 #: Maximum number of custom signals requested by (correlator) timeplot
 TIMEPLOT_MAX_CUSTOM_SIGNALS = 256
 #: Target size of objects in the object store
@@ -30,7 +30,7 @@ SPECTRAL_OBJECT_CHANNELS = 128
 #: This, and SPECTRAL_MIN_TIME, are set to one minute
 #: less than some typical observations lengths to avoid
 #: off by one dump triggering issues.
-CONTINUUM_MIN_TIME = 14 * 60.0  # 14 minutes
+CONTINUUM_MIN_TIME = 5 * 60.0  # 14 minutes
 #: Minimum observation time for spectral imager (seconds)
 SPECTRAL_MIN_TIME = 44 * 60.0  # 44 minutes
 #: Size of cal buffer in seconds
