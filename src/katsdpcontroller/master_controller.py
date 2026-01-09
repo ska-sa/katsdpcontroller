@@ -807,6 +807,8 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
             Singularity deploy ID
         """
         request_id = self._request_id_prefix + product_name
+        # Prevent logspout from collecting logs, because the product controller
+        # sends logs using GELF.
         environ = {"LOGSPOUT": "ignore"}
         for key in ["KATSDP_LOG_ONELINE", "KATSDP_LOG_LEVEL", "KATSDP_LOG_GELF_ADDRESS"]:
             if key in os.environ:
@@ -820,6 +822,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         labels = {
             "za.ac.kat.sdp.katsdpcontroller.task": "product_controller",
             "za.ac.kat.sdp.katsdpcontroller.subarray_product_id": product_name,
+            "co.elastic.logs/enabled": "false",  # Prevent filebeat from collecting logs
         }
         docker_parameters = [
             {"key": "label", "value": f"{key}={value}"} for (key, value) in labels.items()

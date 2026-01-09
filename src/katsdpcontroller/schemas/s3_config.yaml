@@ -1,0 +1,103 @@
+$schema: http://json-schema.org/draft-07/schema#
+$defs:
+  key:
+    type: string
+  has_keys:
+    required:
+      - access_key
+      - secret_key
+  has_url:
+    required:
+      - url
+  no_url:
+    not:
+      required:
+        - url
+  section:
+    # A read or write section in a store (no required properties)
+    type: object
+    additionalProperties: false
+    properties:
+      access_key:
+        $ref: "#/$defs/key"
+      secret_key:
+        $ref: "#/$defs/key"
+      url:
+        type: string
+        format: uri
+    if:
+      # if either key is given both must be
+      anyOf:
+        - required:
+            - access_key
+        - required:
+            - secret_key
+    then:
+      required:
+        - access_key
+        - secret_key
+  store:
+    type: object
+    additionalProperties: false
+    properties:
+      read:
+        $ref: "#/$defs/section"
+      write:
+        $ref: "#/$defs/section"
+      url:
+        type: string
+        format: uri
+      expiry_days:
+        type: integer
+        minimumValue: 0
+    if:
+      $ref: "#/$defs/has_url"
+    then:
+      # If an URL is passed to store, URLs can't be used in sections
+      properties:
+        read:
+          $ref: "#/$defs/no_url"
+        write:
+          $ref: "#/$defs/no_url"
+    else:
+      # If no URL is passed to store, URLs must be used in sections
+      properties:
+        read:
+          $ref: "#/$defs/has_url"
+        write:
+          $ref: "#/$defs/has_url"
+  imager_store:
+    # Store with read and write sections, both with keys
+    allOf:
+      - $ref: "#/$defs/store"
+      - properties:
+          read:
+            $ref: "#/$defs/has_keys"
+          write:
+            $ref: "#/$defs/has_keys"
+        required:
+          - read
+          - write
+  archive_store:
+    # Store with a read URL
+    if:
+      $ref: "#/$defs/no_url"
+    then:
+      required:
+        - read
+type: object
+additionalProperties: false
+properties:
+  continuum:
+    $ref: "#/$defs/imager_store"
+  spectral:
+    $ref: "#/$defs/imager_store"
+  archive:
+    $ref: "#/$defs/archive_store"
+  models:
+    $ref: "#/$defs/archive_store"
+required:
+  - continuum
+  - spectral
+  - archive
+  - models

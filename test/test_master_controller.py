@@ -778,7 +778,7 @@ class TestDeviceServer:
                 "--registry",
                 "registry.invalid:5000",
                 "--safe-multicast-cidr",
-                "239.192.0.0/24",
+                "239.192.0.0/16",
                 "unused argument (zk)",
                 "unused argument (Singularity)",
             ]
@@ -1242,7 +1242,7 @@ class TestDeviceServerReal:
                 "--registry",
                 "registry.invalid:5000",
                 "--safe-multicast-cidr",
-                "239.192.0.0/24",
+                "239.192.0.0/16",
                 "zk.invalid:2181",
                 "http://singularity.invalid:7099/singularity",
             ]
