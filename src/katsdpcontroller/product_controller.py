@@ -73,7 +73,7 @@ from .tasks import (
 )
 
 BATCH_PRIORITY = 1  #: Scheduler priority for batch queues
-BATCH_RESOURCES_TIMEOUT = 7 * 86400  # A week
+BATCH_RESOURCES_TIMEOUT = 10 * 60  # A week
 GAIN_TIMEOUT = 10.0  # Gains have a large payload, so give them plenty of time
 DELAYS_TIMEOUT = 1.0  # Delays are time-sensitive, so require them to be set fast
 _HINT_RE = re.compile(
