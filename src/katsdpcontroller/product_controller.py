@@ -939,7 +939,7 @@ class SubarrayProduct:
                 for node in physical_graph
                 if isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
             ]
-            logger.info("node list :\n" + "\n".join(repr(node) for node in in nodelist))
+            logger.info("node list :\n" + "\n".join(repr(node) for node in nodelist))
             await self.sched.batch_run(
                 physical_graph,
                 self.resolver,
