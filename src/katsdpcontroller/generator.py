@@ -1660,7 +1660,7 @@ def _make_vgpu(
     vgpu.interfaces[0].bandwidth_in = (
         stream.tied_array_channelised_voltage[0].data_rate() / n_engines
     )
-    vgpu.interfaces[0].bandwidth_out = stream.data_rate() * stream.n_chans * len(stream.pols)
+    vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
 
     vgpu.gpus = [scheduler.GPURequest()]
     # TODO: To ensure vgpu doesn't share the GPU with anything else.

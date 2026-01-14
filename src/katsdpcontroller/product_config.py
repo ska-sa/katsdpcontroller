@@ -1471,7 +1471,8 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         """Network bandwidth in bits per second."""
         heap_size = defaults.VGPU_SAMPLES_PER_FRAME * self.bits_per_sample // 8
         time_between_heaps = defaults.VGPU_SAMPLES_PER_FRAME / self.bandwidth
-        return data_rate(heap_size, time_between_heaps, ratio, overhead)
+        n_separate_streams = self.n_chans * len(self.pols)
+        return data_rate(heap_size, time_between_heaps, ratio, overhead) * n_separate_streams
 
     @classmethod
     def from_config(
