@@ -3191,11 +3191,11 @@ async def _make_continuum_imager(
         imager.disk = _mb(1000 * stream.vis.size + 1000)
         imager.max_run_time = 86400  # 24 hours
         imager.volumes = [DATA_VOL]
-        imager.gpus = [scheduler.GPURequest()]
+        # imager.gpus = [scheduler.GPURequest()]
         # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
         # it can help improve parallelism). There is no memory enforcement and I
         # have no idea how much would be needed, so don't bother reserving memory.
-        imager.gpus[0].compute = 1.0
+        # imager.gpus[0].compute = 1.0
         imager.image = "katsdpcontim"
         mfimage_parameters = dict(nThreads=cpus, **stream.mfimage_parameters)
         format_args = [  # Args to pass through str.format
