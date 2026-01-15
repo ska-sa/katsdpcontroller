@@ -1692,7 +1692,7 @@ def _make_vgpu(
             "--recv-bandwidth",
             str(tacv[0].bandwidth),
             "--recv-pols",
-            "x,y",  # TODO: NGC-1404
+            "+y,+x",
             "--send-bandwidth",
             str(stream.bandwidth),
             "--send-pols",
