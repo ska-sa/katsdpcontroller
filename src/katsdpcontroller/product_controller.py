@@ -2250,7 +2250,11 @@ class DeviceServer(aiokatcp.DeviceServer):
             if stream is not None and stream != name:
                 continue
             response.append(
-                (name, str(Endpoint(mc.host, mc.ports["spead"])), mc.transmit_state.name.lower())
+                (
+                    name,
+                    str(Endpoint(mc.host, mc.ports[mc.logical_node.port_name])),
+                    mc.transmit_state.name.lower(),
+                )
             )
         if stream is not None and not response:
             raise FailReply(f"Unknown stream {stream!r}")

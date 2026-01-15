@@ -1284,6 +1284,11 @@ class TiedArrayChannelisedVoltageStreamBase(CbfPerChannelStream):
         """Interval between heaps, in seconds."""
         return self.spectra_per_heap * self.n_samples_between_spectra / self.adc_sample_rate
 
+    @property
+    def n_jones_per_batch(self) -> int:
+        """Number of Jones matrices per batch."""
+        return self.n_chans * self.spectra_per_heap
+
 
 class TiedArrayChannelisedVoltageStream(CbfStream, TiedArrayChannelisedVoltageStreamBase):
     """Real tied-array-channelised-voltage stream."""
@@ -1448,19 +1453,26 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         return self.src_streams[0].antenna_channelised_voltage
 
     @property
-    def adc_sample_rate(self) -> float:
-        """The ADC sample rate of the tied-array-resampled-voltage stream."""
-        return self.antenna_channelised_voltage.adc_sample_rate
-
-    @property
-    def sync_time(self) -> float:
-        """The sync time of the source digitiser streams."""
-        return self.antenna_channelised_voltage.sources(0)[0].sync_time
+    def tied_array_channelised_voltage(
+        self,
+    ) -> Sequence[GpucbfTiedArrayChannelisedVoltageStream]:
+        """The parent tied-array-channelised-voltage streams."""
+        return [
+            cast(GpucbfTiedArrayChannelisedVoltageStream, src_stream)
+            for src_stream in self.src_streams
+        ]
 
     @property
     def bandwidth(self) -> float:
         """The bandwidth of the tied-array-resampled-voltage stream."""
         return self.antenna_channelised_voltage.pass_bandwidth
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        """Network bandwidth in bits per second."""
+        frame_size = defaults.VGPU_SAMPLES_PER_FRAME * self.bits_per_sample // 8
+        time_between_frames = defaults.VGPU_SAMPLES_PER_FRAME / self.bandwidth
+        n_threads = self.n_chans * len(self.pols)
+        return data_rate(frame_size, time_between_frames, ratio, overhead) * n_threads
 
     @classmethod
     def from_config(

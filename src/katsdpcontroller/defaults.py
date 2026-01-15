@@ -60,15 +60,20 @@ WEIGHT_PASS = 0.005  # Keep in sync with katgpucbf
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
-#: Default passband fraction for the gpucbf V-engine
-VGPU_PASSBAND = 0.9
+#: Default number of samples per VDIF frame for gpucbf V-engine
+VGPU_SAMPLES_PER_FRAME = 20000
 #: Default number of taps for the gpucbf V-engine rational filter
 VGPU_FIR_TAPS = 7201
 #: Default number of taps for the gpucbf V-engine sideband filter
 VGPU_HILBERT_TAPS = 201
+#: Default passband fraction for the gpucbf V-engine
+VGPU_PASSBAND = 0.9
+#: Default threshold between quantisation levels for the gpucbf V-engine,
+#: in sigma.
+VGPU_THRESHOLD = 0.969
 #: Interval over which power is measured and normalisation is performed
 #: in the gpucbf V-engine.
-VGPU_POWER_INT_TIME = 1.0
+VGPU_POWER_INT_TIME = 1
 #: Minimum update period (in seconds) for katcp sensors which aggregate many
 #: underlying sensors and hence may be updated much more often than any one
 #: of the underlying sensors.

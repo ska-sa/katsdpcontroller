@@ -157,6 +157,7 @@ class LogicalMulticast(scheduler.LogicalExternal):
         n_addresses=None,
         endpoint=None,
         initial_transmit_state=TransmitState.UNKNOWN,
+        port_name="spead",
     ):
         super().__init__("multicast." + stream_name)
         self.stream_name = stream_name
@@ -164,6 +165,7 @@ class LogicalMulticast(scheduler.LogicalExternal):
         self.sdp_physical_factory = True
         self.n_addresses = n_addresses
         self.endpoint = endpoint
+        self.port_name = port_name
         if (self.n_addresses is None) == (self.endpoint is None):
             raise ValueError("Exactly one of n_addresses and endpoint must be specified")
         self.initial_transmit_state = initial_transmit_state
@@ -183,17 +185,18 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
 
     async def resolve(self, resolver, graph):
         await super().resolve(resolver, graph)
+        port_name = self.logical_node.port_name
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
-            self.ports = {"spead": self.logical_node.endpoint.port}
+            self.ports = {port_name: self.logical_node.endpoint.port}
         else:
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
-            self.ports = {"spead": await resolver.resources.get_port()}
+            self.ports = {port_name: await resolver.resources.get_port()}
         # It should already be resolved. Note that it might NOT be a valid
         # IP address if it represents multiple multicast groups in the form
         # a.b.c.d+N.
         self.address = self.host
-        self._endpoint_sensor.value = str(Endpoint(self.address, self.ports["spead"]))
+        self._endpoint_sensor.value = str(Endpoint(self.address, self.ports[port_name]))
 
 
 class TelstateTask(ProductPhysicalTask):
@@ -1524,6 +1527,11 @@ def _make_vgpu(
 ) -> scheduler.LogicalNode:
     n_engines = 1
     n_substreams = 1
+    n_recv_batches_per_chunk = 32  # TODO: Revisit once vgpu is complete
+    acv = stream.antenna_channelised_voltage
+    sync_time = acv.sources(0)[0].sync_time
+    tacv = stream.tied_array_channelised_voltage
+    ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
@@ -1532,20 +1540,13 @@ def _make_vgpu(
     vgpu.pass_telstate = False
     g.add_node(vgpu)
 
-    dst_multicast = LogicalMulticast(
-        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN
-    )
-    g.add_node(dst_multicast)
-
-    g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
-
     stream_sensors: List[Sensor] = [
         Sensor(
             float,
             f"{stream.name}.scale-factor-timestamp",
             "Factor by which to divide instrument timestamps to convert to seconds",
             "Hz",
-            default=stream.adc_sample_rate,
+            default=acv.adc_sample_rate,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1553,7 +1554,7 @@ def _make_vgpu(
             f"{stream.name}.sync-time",
             "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
             "s",
-            default=stream.sync_time,
+            default=sync_time,
             initial_status=Sensor.Status.NOMINAL,
         ),
         Sensor(
@@ -1635,6 +1636,139 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
+
+    vgpu.cpus = 2.0
+    vgpu.mem = 8192
+    vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
+    vgpu.wait_ports = ["port", "prometheus"]
+    if not configuration.options.develop.less_resources:
+        # TODO: Update to include send core once V-engine uses --send-affinity
+        vgpu.cores = ["recv", "python"]
+        vgpu.numa_nodes = 1.0
+        taskset = ["taskset", "-c", "{cores[python]}"]
+    else:
+        taskset = []
+
+    vgpu.interfaces = [
+        scheduler.InterfaceRequest(
+            "gpucbf",
+            infiniband=ibv,
+            multicast_in={src_stream.name for src_stream in stream.src_streams},
+            multicast_out={stream.name},
+        )
+    ]
+    vgpu.interfaces[0].bandwidth_in = (
+        stream.tied_array_channelised_voltage[0].data_rate() / n_engines
+    )
+    vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
+
+    vgpu.gpus = [scheduler.GPURequest()]
+    # TODO: To ensure vgpu doesn't share the GPU with anything else.
+    # Revisit once vgpu is complete.
+    vgpu.gpus[0].compute = 1.0
+    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
+
+    vgpu.command = (
+        ["schedrr"]
+        + taskset
+        + [
+            "vgpu",
+            "--adc-sample-rate",
+            str(acv.adc_sample_rate),
+            "--sync-time",
+            str(sync_time),
+            "--recv-channels",
+            str(acv.n_chans),
+            "--recv-channels-per-substream",
+            str(tacv[0].n_chans_per_substream),
+            "--recv-jones-per-batch",
+            str(tacv[0].n_jones_per_batch),
+            "--recv-samples-between-spectra",
+            str(acv.n_samples_between_spectra),
+            "--recv-batches-per-chunk",
+            str(n_recv_batches_per_chunk),
+            "--recv-sample-bits",
+            str(tacv[0].bits_per_sample),
+            "--recv-bandwidth",
+            str(tacv[0].bandwidth),
+            "--recv-pols",
+            "x,y",  # TODO: NGC-1404
+            "--send-bandwidth",
+            str(stream.bandwidth),
+            "--send-pols",
+            ",".join(stream.pols),
+            "--send-samples-per-frame",
+            str(defaults.VGPU_SAMPLES_PER_FRAME),
+            "--send-station",
+            str(stream.station_id),
+            "--fir-taps",
+            str(defaults.VGPU_FIR_TAPS),
+            "--hilbert-taps",
+            str(defaults.VGPU_HILBERT_TAPS),
+            "--passband",
+            str(defaults.VGPU_PASSBAND),
+            "--threshold",
+            str(defaults.VGPU_THRESHOLD),
+            "--power-int-time",
+            str(defaults.VGPU_POWER_INT_TIME),
+            "--recv-interface",
+            "{interfaces[gpucbf].name}",
+            "--send-interface",
+            "{interfaces[gpucbf].name}",
+            "--katcp-port",
+            "{ports[port]}",
+            "--prometheus-port",
+            "{ports[prometheus]}",
+            "--aiomonitor",
+            "--aiomonitor-port",
+            "{ports[aiomonitor]}",
+            "--aiomonitor-webui-port",
+            "{ports[aiomonitor_webui]}",
+            "--aioconsole-port",
+            "{ports[aioconsole]}",
+        ]
+    )
+
+    if not configuration.options.develop.less_resources:
+        vgpu.command += [
+            "--recv-affinity",
+            "{cores[recv]}",
+        ]
+
+    vgpu.capabilities.append("SYS_NICE")  # For schedrr
+    if ibv:
+        vgpu.capabilities.append("NET_RAW")
+        vgpu.command += ["--recv-ibv"]
+        if not configuration.options.develop.less_resources:
+            vgpu.command += [
+                "--recv-comp-vector",
+                "{cores[recv]}",
+            ]
+
+    for src_stream in stream.src_streams:
+        src_multicast = find_node(g, f"multicast.{src_stream.name}")
+        # depends_init is included purely to ensure sensible ordering
+        # on the dashboard.
+        g.add_edge(
+            vgpu,
+            src_multicast,
+            port="spead",
+            depends_resolve=True,
+            depends_init=True,
+        )
+        vgpu.command.append(f"{{endpoints[multicast.{src_stream.name}_spead]}}")
+
+    port_name = "vdif"
+    vgpu.command.append(f"{{endpoints[multicast.{stream.name}_{port_name}]}}")
+    dst_multicast = LogicalMulticast(
+        stream.name, n_substreams, initial_transmit_state=TransmitState.DOWN, port_name=port_name
+    )
+    g.add_node(dst_multicast)
+    g.add_edge(vgpu, dst_multicast, port=port_name, depends_resolve=True)
+    g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
+
+    g.add_node(vgpu)
+    _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu
 

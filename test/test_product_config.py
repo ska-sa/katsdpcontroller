@@ -1185,6 +1185,8 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         assert tarv.n_chans == 2
         assert tarv.pols == ["x", "y"]
         assert tarv.station_id == "me"
+        # 64 MHz passband * 2 channels * 2 pols * 2 (Nyquist sampling)
+        assert tarv.data_rate(1.0, 0) == 512e6
 
     def test_bad_grandparent_streams(
         self, tacv_streams: List[GpucbfTiedArrayChannelisedVoltageStream], config: Dict[str, Any]
