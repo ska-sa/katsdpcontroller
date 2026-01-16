@@ -3190,7 +3190,7 @@ async def _make_continuum_imager(
         imager.mem = 50000 if not configuration.options.develop.less_resources else 8000
         imager.disk = _mb(1000 * stream.vis.size + 1000)
         imager.max_run_time = 86400  # 24 hours
-        imager.volumes = [DATA_VOL]
+        # imager.volumes = [DATA_VOL]
         # imager.gpus = [scheduler.GPURequest()]
         # Just use a whole GPU - no benefit in time-sharing for batch tasks (unless
         # it can help improve parallelism). There is no memory enforcement and I
