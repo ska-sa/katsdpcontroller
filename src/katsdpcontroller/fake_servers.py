@@ -483,6 +483,61 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
 
 
+class FakeVgpuDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.sensors.add(
+            Sensor(
+                float,
+                "delay",
+                "Delay introduced by processing",
+                units="s",
+                default=0.0,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "rx.timestamp",
+                "The timestamp (in samples) of the last chunk of data received from an F-engine",
+                default=-1,
+                initial_status=Sensor.Status.ERROR,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "rx.unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received "
+                "from an F-engine",
+                default=Timestamp(-1.0),
+                initial_status=Sensor.Status.ERROR,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "rx.missing-unixtime",
+                "The timestamp (in UNIX time) when missing data was last detected",
+                default=Timestamp(-1.0),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+
+        _add_time_sync_sensors(self.sensors)
+        _add_device_status_sensor(self.sensors)
+        _add_rx_device_status_sensor(
+            self.sensors, "The V-engine is receiving a good, clean B-engine stream"
+        )
+        _add_steady_state_timestamp_sensor(self.sensors)
+
+    async def request_vlbi_delay(self, ctx, stream_name: str, value: float) -> None:
+        """Set the VLBI delay."""
+        self.sensors["delay"].value = value
+
+
 class FakeIngestDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

@@ -62,6 +62,7 @@ from .fake_servers import (
     FakeDsimDeviceServer,
     FakeFgpuDeviceServer,
     FakeIngestDeviceServer,
+    FakeVgpuDeviceServer,
     FakeXbgpuDeviceServer,
 )
 from .product_config import BYTES_PER_FLAG, BYTES_PER_VFW, BYTES_PER_VIS, Configuration, data_rate
@@ -1532,9 +1533,11 @@ def _make_vgpu(
     sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
+    # TODO: Perhaps change the prefix of this gpucbf stream to *v*
     vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
+    vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
     # vgpu doesn't use katsdpservices for configuration, or telstate
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
@@ -1768,6 +1771,16 @@ def _make_vgpu(
     g.add_edge(dst_multicast, vgpu, depends_init=True, depends_ready=True)
 
     g.add_node(vgpu)
+
+    # Rename sensors that are relevant to the stream rather than the process
+    for sensor_name in [
+        "rx.timestamp",
+        "rx.unixtime",
+        "rx.missing-unixtime",
+        "delay",
+    ]:
+        vgpu.sensor_renames[sensor_name] = f"{stream.name}.{sensor_name}"
+
     _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu
