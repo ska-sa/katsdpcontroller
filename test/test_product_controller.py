@@ -846,8 +846,8 @@ class TestControllerInterface(BaseTestController):
 
     async def test_vlbi_delay(self, client: aiokatcp.Client) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 2.5)
-        # TODO: Validate sensor value once implemented
+        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", "2.5")
+        await assert_sensor_value(client, "gpucbf_tied_array_resampled_voltage.delay", "2.5")
         await client.request("product-deconfigure")
 
     async def test_dsim_signals(self, client: aiokatcp.Client) -> None:
@@ -2069,11 +2069,15 @@ class TestController(BaseTestController):
             )
         )
         await client.request("capture-start", "gpucbf_baseline_correlation_products")
+        await client.request("capture-start", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
         katcp_client.request.assert_any_call(
             "capture-start", "gpucbf_baseline_correlation_products", 12345
+        )
+        katcp_client.request.assert_any_call(
+            "capture-start", "gpucbf_tied_array_resampled_voltage", 12345
         )
 
     async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
@@ -2081,14 +2085,24 @@ class TestController(BaseTestController):
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
+        await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
         katcp_client.request.assert_any_call("capture-stop", "gpucbf_baseline_correlation_products")
+        katcp_client.request.assert_any_call("capture-stop", "gpucbf_tied_array_resampled_voltage")
         # Check that the state changed to down in capture-list
-        _, informs = await client.request("capture-list", "gpucbf_baseline_correlation_products")
-        assert len(informs) == 1
-        assert informs[0].arguments[2] == b"down"
+        _, gpucbf_bcp_informs = await client.request(
+            "capture-list", "gpucbf_baseline_correlation_products"
+        )
+        assert len(gpucbf_bcp_informs) == 1
+        assert gpucbf_bcp_informs[0].arguments[2] == b"down"
+
+        _, gpucbf_tarv_informs = await client.request(
+            "capture-list", "gpucbf_tied_array_resampled_voltage"
+        )
+        assert len(gpucbf_tarv_informs) == 1
+        assert gpucbf_tarv_informs[0].arguments[2] == b"down"
 
     async def test_capture_list_no_args(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)

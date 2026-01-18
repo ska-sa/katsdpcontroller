@@ -1499,15 +1499,28 @@ class SubarrayProduct:
         )
 
     async def vlbi_delay(self, stream_name: str, delay: float) -> None:
-        # TODO: Actually check against `transmit_state`
-        # - ProductState.IDLE basically means running (for CBF). To determine
-        #   "capturing" we need to use the `transmit_state` for the graph node
-        #   corresponding to the multicast output.
+        # TODO: I think this state check needs to remove CAPTURING and just be IDLE
         if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
             raise FailReply(f"Cannot set VLBI delay in state {self.state}")
         stream = self._find_stream(stream_name)
         if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
+        # Check transmit state
+        for node in self.physical_graph.nodes:
+            if (
+                isinstance(node, generator.PhysicalMulticast)
+                and node.logical_node.name == "multicast." + stream_name
+            ):
+                if node.transmit_state == TransmitState.UP:
+                    raise FailReply(
+                        f"Cannot set VLBI delay when stream {stream_name!r} is transmitting"
+                    )
+        # All is well by now
+        await self._multi_request(
+            self.find_nodes(task_type="vgpu", streams=[stream]),
+            itertools.repeat(("vlbi-delay", stream_name, delay)),
+            timeout=DELAYS_TIMEOUT,
+        )
 
     def _get_dsim_katcp(self, dsim: str) -> aiokatcp.Client:
         """Get the katcp client for connecting to a dsim.
@@ -1563,11 +1576,14 @@ class SubarrayProduct:
             (
                 product_config.GpucbfBaselineCorrelationProductsStream,
                 product_config.GpucbfTiedArrayChannelisedVoltageStream,
+                product_config.GpucbfTiedArrayResampledVoltageStream,
             ),
         ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        nodes = self.find_nodes(task_type="xb", streams=[stream])
+        nodes = []
+        nodes += self.find_nodes(task_type="xb", streams=[stream])
+        nodes += self.find_nodes(task_type="vgpu", streams=[stream])
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
