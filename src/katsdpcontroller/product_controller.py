@@ -1581,7 +1581,7 @@ class SubarrayProduct:
         ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        nodes = []
+        nodes: List[tasks.ProductAnyPhysicalTask] = []
         nodes += self.find_nodes(task_type="xb", streams=[stream])
         nodes += self.find_nodes(task_type="vgpu", streams=[stream])
         if start:
