@@ -2830,7 +2830,7 @@ def _make_beamformer_engineering_pol(
     if timeplot or not ram:
         # Actual usage is about 600MB, more-or-less independent of the
         # parameters.
-        bf_ingest.mem = 1024
+        bf_ingest.mem = 2048
     else:
         # When writing to tmpfs, the file is accounted as memory to our
         # process, so we need more memory allocation than there is
