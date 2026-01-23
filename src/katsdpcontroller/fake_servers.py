@@ -533,7 +533,7 @@ class FakeVgpuDeviceServer(FakeDeviceServer):
         )
         _add_steady_state_timestamp_sensor(self.sensors)
 
-    async def request_vlbi_delay(self, ctx, stream_name: str, value: float) -> None:
+    async def request_vlbi_delay(self, ctx, value: float) -> None:
         """Set the VLBI delay."""
         self.sensors["delay"].value = value
 

@@ -1581,9 +1581,9 @@ class SubarrayProduct:
         ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        nodes: List[tasks.ProductAnyPhysicalTask] = []
-        nodes += self.find_nodes(task_type="xb", streams=[stream])
-        nodes += self.find_nodes(task_type="vgpu", streams=[stream])
+        # TODO: Rework the logic here to be neater
+        xb_nodes = list(self.find_nodes(task_type="xb", streams=[stream]))
+        vgpu_nodes = list(self.find_nodes(task_type="vgpu", streams=[stream]))
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
@@ -1593,15 +1593,28 @@ class SubarrayProduct:
                     and sensor.status.valid_value()
                 ):
                     start_timestamp = max(start_timestamp, sensor.value)
-            await self._multi_request(
-                nodes,
-                itertools.repeat(("capture-start", stream_name, start_timestamp)),
-            )
+            if xb_nodes:
+                await self._multi_request(
+                    xb_nodes,
+                    itertools.repeat(("capture-start", stream_name, start_timestamp)),
+                )
+            elif vgpu_nodes:
+                await self._multi_request(
+                    vgpu_nodes,
+                    # TODO: Add start_timestamp argument when supported
+                    itertools.repeat(("capture-start", start_timestamp)),
+                )
         else:
-            await self._multi_request(
-                nodes,
-                itertools.repeat(("capture-stop", stream_name)),
-            )
+            if xb_nodes:
+                await self._multi_request(
+                    xb_nodes,
+                    itertools.repeat(("capture-stop", stream_name)),
+                )
+            elif vgpu_nodes:
+                await self._multi_request(
+                    vgpu_nodes,
+                    itertools.repeat(("capture-stop",)),
+                )
 
         for node in self.physical_graph.nodes:
             if (
