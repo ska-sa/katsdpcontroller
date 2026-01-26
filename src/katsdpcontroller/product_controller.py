@@ -1515,10 +1515,10 @@ class SubarrayProduct:
                     raise FailReply(
                         f"Cannot set VLBI delay when stream {stream_name!r} is transmitting"
                     )
-        # All is well by now
+        # NOTE: The V-engine does not require the stream identifier for this request
         await self._multi_request(
             self.find_nodes(task_type="vgpu", streams=[stream]),
-            itertools.repeat(("vlbi-delay", stream_name, delay)),
+            itertools.repeat(("vlbi-delay", delay)),
             timeout=DELAYS_TIMEOUT,
         )
 
