@@ -1534,7 +1534,7 @@ def _make_vgpu(
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
     # TODO: Perhaps change the prefix of this gpucbf stream to *v*
-    vgpu = ProductLogicalTask(f"vgpu.{stream.name}", streams=[stream])
+    vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
     vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
@@ -1774,13 +1774,24 @@ def _make_vgpu(
 
     # Rename sensors that are relevant to the stream rather than the process
     for sensor_name in [
-        "rx.timestamp",
-        "rx.unixtime",
-        "rx.missing-unixtime",
         "delay",
     ]:
         vgpu.sensor_renames[sensor_name] = f"{stream.name}.{sensor_name}"
 
+    for pol in stream.pols:
+        for name in [
+            "rx.timestamp",
+            "rx.unixtime",
+            "rx.missing-unixtime",
+        ]:
+            vgpu.sensor_renames[f"{pol}.{name}"] = f"{stream.name}.{pol}.{name}"
+            for channel in range(defaults.VGPU_N_SIDEBANDS):
+                for polchan_name in [
+                    "mean-power",
+                ]:
+                    vgpu.sensor_renames[
+                        f"{pol}{channel}.{polchan_name}"
+                    ] = f"{stream.name}.{pol}{channel}.{polchan_name}"
     _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu

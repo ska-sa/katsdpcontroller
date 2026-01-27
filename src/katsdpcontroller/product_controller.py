@@ -26,6 +26,7 @@ import os
 import re
 import time
 from typing import (
+    Any,
     Callable,
     Dict,
     Generator,
@@ -260,6 +261,16 @@ async def _resolve_model(
     fixed = urls[-1]
     config = urls[-2] if len(urls) >= 2 else fixed
     return (str(_relative_url(base, yarl.URL(config))), str(_relative_url(base, yarl.URL(fixed))))
+
+
+def _has_multicast(node: tasks.ProductAnyPhysicalTask, stream_name: str) -> bool:
+    """Confirm a node's type and name to be multicast."""
+    if (
+        isinstance(node, generator.PhysicalMulticast)
+        and node.logical_node.name == "multicast." + stream_name
+    ):
+        return True
+    return False
 
 
 class KatcpImageLookup(scheduler.ImageLookup):
@@ -1499,25 +1510,22 @@ class SubarrayProduct:
         )
 
     async def vlbi_delay(self, stream_name: str, delay: float) -> None:
-        # TODO: I think this state check needs to remove CAPTURING and just be IDLE
-        if self.state not in {ProductState.CAPTURING, ProductState.IDLE}:
-            raise FailReply(f"Cannot set VLBI delay in state {self.state}")
         stream = self._find_stream(stream_name)
         if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
         # Check transmit state
         for node in self.physical_graph.nodes:
-            if (
-                isinstance(node, generator.PhysicalMulticast)
-                and node.logical_node.name == "multicast." + stream_name
-            ):
+            if _has_multicast(node, stream_name):
                 if node.transmit_state == TransmitState.UP:
                     raise FailReply(
                         f"Cannot set VLBI delay when stream {stream_name!r} is transmitting"
                     )
-        # NOTE: The V-engine does not require the stream identifier for this request
+        # NOTE: The V-engine does not require the stream identifier for this request.
+        # Additionally, the timeout doesn't need to be as tight as this request is
+        # explicitly done while not capturing data. Still, good practice to ensure
+        # it doesn't hang indefinitely.
         await self._multi_request(
-            self.find_nodes(task_type="vgpu", streams=[stream]),
+            self.find_nodes(task_type="v", streams=[stream]),
             itertools.repeat(("vlbi-delay", delay)),
             timeout=DELAYS_TIMEOUT,
         )
@@ -1581,9 +1589,8 @@ class SubarrayProduct:
         ):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
 
-        # TODO: Rework the logic here to be neater
-        xb_nodes = list(self.find_nodes(task_type="xb", streams=[stream]))
-        vgpu_nodes = list(self.find_nodes(task_type="vgpu", streams=[stream]))
+        nodes = list(self.find_nodes(streams=[stream]))
+        args: List[Any] = []
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
@@ -1593,34 +1600,33 @@ class SubarrayProduct:
                     and sensor.status.valid_value()
                 ):
                     start_timestamp = max(start_timestamp, sensor.value)
-            if xb_nodes:
-                await self._multi_request(
-                    xb_nodes,
-                    itertools.repeat(("capture-start", stream_name, start_timestamp)),
-                )
-            elif vgpu_nodes:
-                await self._multi_request(
-                    vgpu_nodes,
-                    # TODO: Add start_timestamp argument when supported
-                    itertools.repeat(("capture-start", start_timestamp)),
-                )
+            if isinstance(
+                stream,
+                (
+                    product_config.GpucbfBaselineCorrelationProductsStream,
+                    product_config.GpucbfTiedArrayChannelisedVoltageStream,
+                ),
+            ):
+                args += [stream_name, start_timestamp]
+            elif isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+                args += [start_timestamp]
+            await self._multi_request(nodes, itertools.repeat(("capture-start", *args)))
         else:
-            if xb_nodes:
-                await self._multi_request(
-                    xb_nodes,
-                    itertools.repeat(("capture-stop", stream_name)),
-                )
-            elif vgpu_nodes:
-                await self._multi_request(
-                    vgpu_nodes,
-                    itertools.repeat(("capture-stop",)),
-                )
+            if isinstance(
+                stream,
+                (
+                    product_config.GpucbfBaselineCorrelationProductsStream,
+                    product_config.GpucbfTiedArrayChannelisedVoltageStream,
+                ),
+            ):
+                args += [stream_name]
+            elif isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+                # The V-engine does not require the stream name for this request
+                pass
+            await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))
 
         for node in self.physical_graph.nodes:
-            if (
-                isinstance(node, generator.PhysicalMulticast)
-                and node.logical_node.name == "multicast." + stream_name
-            ):
+            if _has_multicast(node, stream_name):
                 node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:
