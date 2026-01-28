@@ -846,8 +846,8 @@ class TestControllerInterface(BaseTestController):
 
     async def test_vlbi_delay(self, client: aiokatcp.Client) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
-        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", 2.5)
-        # TODO: Validate sensor value once implemented
+        await client.request("vlbi-delay", "gpucbf_tied_array_resampled_voltage", "2.5")
+        await assert_sensor_value(client, "gpucbf_tied_array_resampled_voltage.delay", "2.5")
         await client.request("product-deconfigure")
 
     async def test_dsim_signals(self, client: aiokatcp.Client) -> None:
@@ -2054,6 +2054,13 @@ class TestController(BaseTestController):
             "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,1:0,0", "0,1:0,1"
         )
 
+    async def _verify_capture_call(
+        self, client: aiokatcp.Client, stream_name: str, desired_state: str
+    ) -> None:
+        _, informs = await client.request("capture-list", stream_name)
+        assert len(informs) == 1
+        assert informs[0].arguments[2].decode() == desired_state
+
     async def test_capture_start(
         self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
     ) -> None:
@@ -2069,26 +2076,41 @@ class TestController(BaseTestController):
             )
         )
         await client.request("capture-start", "gpucbf_baseline_correlation_products")
+        # Update steady-state-timestamp to simulate time progressing.
+        # Also, to make sure that the two capture-start calls are different.
+        server.sensors[
+            "f.gpucbf_antenna_channelised_voltage.0.steady-state-timestamp"
+        ].value = 23456
+        await client.request("capture-start", "gpucbf_tied_array_resampled_voltage")
+
+        await self._verify_capture_call(client, "gpucbf_baseline_correlation_products", "up")
+        await self._verify_capture_call(client, "gpucbf_tied_array_resampled_voltage", "up")
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
         katcp_client.request.assert_any_call(
             "capture-start", "gpucbf_baseline_correlation_products", 12345
         )
+        # NOTE: Underlying V-engine does not require a stream-name in the
+        # capture-start request.
+        katcp_client.request.assert_any_call("capture-start", 23456)
 
     async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
+        await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
         katcp_client.request.assert_any_call("capture-stop", "gpucbf_baseline_correlation_products")
+        # TODO: Problem is FakeVgpuDeviceServer doesn't use stream-name
+        # This is not the most robust assertion
+        katcp_client.request.assert_called_with("capture-stop")
         # Check that the state changed to down in capture-list
-        _, informs = await client.request("capture-list", "gpucbf_baseline_correlation_products")
-        assert len(informs) == 1
-        assert informs[0].arguments[2] == b"down"
+        await self._verify_capture_call(client, "gpucbf_baseline_correlation_products", "down")
+        await self._verify_capture_call(client, "gpucbf_tied_array_resampled_voltage", "down")
 
     async def test_capture_list_no_args(self, client: aiokatcp.Client) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
