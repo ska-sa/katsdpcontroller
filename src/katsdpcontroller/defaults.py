@@ -74,8 +74,6 @@ VGPU_THRESHOLD = 0.969
 #: Interval over which power is measured and normalisation is performed
 #: in the gpucbf V-engine.
 VGPU_POWER_INT_TIME = 1
-#: Number of sidebands produced by the gpucbf V-engine
-VGPU_N_SIDEBANDS = 2
 #: Minimum update period (in seconds) for katcp sensors which aggregate many
 #: underlying sensors and hence may be updated much more often than any one
 #: of the underlying sensors.

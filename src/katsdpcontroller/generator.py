@@ -1533,7 +1533,6 @@ def _make_vgpu(
     sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
-    # TODO: Perhaps change the prefix of this gpucbf stream to *v*
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
@@ -1785,13 +1784,12 @@ def _make_vgpu(
             "rx.missing-unixtime",
         ]:
             vgpu.sensor_renames[f"{pol}.{name}"] = f"{stream.name}.{pol}.{name}"
-            for channel in range(defaults.VGPU_N_SIDEBANDS):
-                for polchan_name in [
-                    "mean-power",
-                ]:
-                    vgpu.sensor_renames[
-                        f"{pol}{channel}.{polchan_name}"
-                    ] = f"{stream.name}.{pol}{channel}.{polchan_name}"
+        for channel in range(stream.n_chans):
+            for perthread_name in ["mean-power"]:
+                vgpu.sensor_renames[
+                    f"{pol}{channel}.{perthread_name}"
+                ] = f"{stream.name}.{pol}{channel}.{perthread_name}"
+
     _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu

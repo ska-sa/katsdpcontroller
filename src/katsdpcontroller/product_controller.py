@@ -263,16 +263,6 @@ async def _resolve_model(
     return (str(_relative_url(base, yarl.URL(config))), str(_relative_url(base, yarl.URL(fixed))))
 
 
-def _has_multicast(node: tasks.ProductAnyPhysicalTask, stream_name: str) -> bool:
-    """Confirm a node's type and name to be multicast."""
-    if (
-        isinstance(node, generator.PhysicalMulticast)
-        and node.logical_node.name == "multicast." + stream_name
-    ):
-        return True
-    return False
-
-
 class KatcpImageLookup(scheduler.ImageLookup):
     """Image lookup that asks the master controller to do the work.
 
@@ -702,6 +692,15 @@ class SubarrayProduct:
             if indices is not None and logical_node.index not in indices:
                 continue
             yield node
+
+    def find_multicast_node(self, stream_name: str) -> generator.PhysicalMulticast:
+        for node in self.physical_graph.nodes:
+            if (
+                isinstance(node, generator.PhysicalMulticast)
+                and node.logical_node.name == "multicast." + stream_name
+            ):
+                return node
+        raise KeyError(f"Multicast node for {stream_name!r} not found")
 
     async def _exec_node_transition(
         self,
@@ -1514,12 +1513,9 @@ class SubarrayProduct:
         if not isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
             raise FailReply(f"Stream {stream_name!r} is of the wrong type")
         # Check transmit state
-        for node in self.physical_graph.nodes:
-            if _has_multicast(node, stream_name):
-                if node.transmit_state == TransmitState.UP:
-                    raise FailReply(
-                        f"Cannot set VLBI delay when stream {stream_name!r} is transmitting"
-                    )
+        node = self.find_multicast_node(stream_name)
+        if node.transmit_state == TransmitState.UP:
+            raise FailReply(f"Cannot set VLBI delay when stream {stream_name!r} is transmitting")
         # NOTE: The V-engine does not require the stream identifier for this request.
         # Additionally, the timeout doesn't need to be as tight as this request is
         # explicitly done while not capturing data. Still, good practice to ensure
@@ -1620,14 +1616,11 @@ class SubarrayProduct:
                 ),
             ):
                 args += [stream_name]
-            elif isinstance(stream, product_config.GpucbfTiedArrayResampledVoltageStream):
-                # The V-engine does not require the stream name for this request
-                pass
+            # The V-engine does not require the stream name for this request
             await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))
 
-        for node in self.physical_graph.nodes:
-            if _has_multicast(node, stream_name):
-                node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
+        node = self.find_multicast_node(stream_name)
+        node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:
         """Return all :class:`.PhysicalMulticast` nodes that have known stream state."""
