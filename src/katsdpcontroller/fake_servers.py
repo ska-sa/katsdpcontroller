@@ -59,11 +59,11 @@ def _add_device_status_sensor(sensors: SensorSet) -> None:
     asyncio.get_running_loop().call_later(0.5, sensor.set_value, DeviceStatus.OK)
 
 
-def _add_rx_device_status_sensor(sensors: SensorSet, description: str) -> None:
+def _add_rx_device_status_sensor(sensors: SensorSet) -> None:
     sensor = Sensor(
         DeviceStatus,
         "rx.device-status",
-        description,
+        "Engine is receiving a good, clean data stream",
         default=DeviceStatus.DEGRADED,
         initial_status=Sensor.Status.WARN,
     )
@@ -255,9 +255,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
-        _add_rx_device_status_sensor(
-            self.sensors, "The F-engine is receiving a good, clean digitiser stream"
-        )
+        _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
 
     def _check_stream_name(self, stream_name: str) -> None:
@@ -461,9 +459,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
 
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
-        _add_rx_device_status_sensor(
-            self.sensors, "The XB-engine is receiving a good, clean F-engine stream"
-        )
+        _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
 
     async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
@@ -481,6 +477,58 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
             parts = [float(x) for x in coefficient_set.split(":")]
             params.extend(parts)
         self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
+
+
+class FakeVgpuDeviceServer(FakeDeviceServer):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.sensors.add(
+            Sensor(
+                float,
+                "delay",
+                "Delay introduced by processing",
+                units="s",
+                default=0.0,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+        )
+        self.sensors.add(
+            Sensor(
+                int,
+                "rx.timestamp",
+                "The timestamp (in samples) of the last chunk of data received",
+                default=-1,
+                initial_status=Sensor.Status.ERROR,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "rx.unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received",
+                default=Timestamp(-1.0),
+                initial_status=Sensor.Status.ERROR,
+            )
+        )
+        self.sensors.add(
+            Sensor(
+                Timestamp,
+                "rx.missing-unixtime",
+                "The timestamp (in UNIX time) when missing data was last detected",
+                default=Timestamp(-1.0),
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+
+        _add_time_sync_sensors(self.sensors)
+        _add_device_status_sensor(self.sensors)
+        _add_rx_device_status_sensor(self.sensors)
+        _add_steady_state_timestamp_sensor(self.sensors)
+
+    async def request_vlbi_delay(self, ctx, value: float) -> None:
+        """Set the VLBI delay."""
+        self.sensors["delay"].value = value
 
 
 class FakeIngestDeviceServer(FakeDeviceServer):
