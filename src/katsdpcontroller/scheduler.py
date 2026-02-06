@@ -1633,7 +1633,6 @@ class AgentGPU(GPUResources):
         self.uuid = spec.get("uuid")
         self.name = spec["name"]
         self.compute_capability = tuple(spec["compute_capability"])
-        self.device_attributes = spec["device_attributes"]
         self.numa_node = spec.get("numa_node")
 
 
