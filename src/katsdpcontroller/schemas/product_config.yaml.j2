@@ -249,6 +249,9 @@ properties:
               - sdp.flags
               - sdp.continuum_image
               - sdp.spectral_image
+{% if version >= "4.7" %}
+              - sdp.vdif
+{% endif %}
               - sdp.beamformer
               - sdp.beamformer_engineering
           src_streams:
@@ -474,6 +477,20 @@ properties:
               required:
                 - src_streams
               additionalProperties: false
+{% if version >= "4.7" %}
+          - if:
+              properties:
+                type:
+                  const: sdp.vdif
+            then:
+              properties:
+                type: {}
+                src_streams:
+                  $ref: "#/definitions/singleton"
+              required:
+                - src_streams
+              additionalProperties: false
+{% endif %}
           - if:
               properties:
                 type:

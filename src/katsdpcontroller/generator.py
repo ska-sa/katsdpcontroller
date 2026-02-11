@@ -122,6 +122,7 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -1719,13 +1720,14 @@ def _make_cbf_simulator(
             sim.cpus = 2 * min(1.0, scale)
             # 4 entries per Jones matrix, complex64 each
             gains_size = stream.n_antennas * stream.n_chans * 4 * 8
-            # Factor of 4 is conservative; only actually double-buffered
-            sim.mem = (4 * _mb(stream.size) + _mb(gains_size)) / n_sim + 512
+            # Factor of 4 is conservative; only actually double-buffered. Apply a
+            # floor so katcbfsim autotune has enough headroom even for small arrays.
+            sim.mem = max(8192, (4 * _mb(stream.size) + _mb(gains_size)) / n_sim + 512)
             sim.cores = [None, None]
             sim.gpus = [scheduler.GPURequest()]
             # Scale for 20% at 16 ant, 32K channels
             sim.gpus[0].compute = min(1.0, 0.2 * scale)
-            sim.gpus[0].mem = (2 * _mb(stream.size) + _mb(gains_size)) / n_sim + 256
+            sim.gpus[0].mem = max(8192, (2 * _mb(stream.size) + _mb(gains_size)) / n_sim + 256)
         else:
             sim.command = ["cbfsim.py", "--create-beamformer-stream", escape_format(stream.name)]
             # The beamformer simulator only simulates data shape, not content. The
@@ -2884,6 +2886,8 @@ def build_logical_graph(
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbi(g, configuration, vdif_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -2940,11 +2944,13 @@ def build_logical_graph(
     for stream in configuration.by_class(product_config.BeamformerEngineeringStream):
         _make_beamformer_engineering(g, configuration, stream)
 
-    # Collect all tied-array-channelised-voltage streams and make signal displays for them
-    for stream in configuration.by_class(product_config.TiedArrayChannelisedVoltageStream):
-        _make_timeplot_beamformer(g, configuration, stream)
-    for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
-        _make_timeplot_beamformer(g, configuration, stream)
+    # Collect all tied-array-channelised-voltage streams and make signal displays for them.
+    # In low-resource development mode skip these display/etc tasks to reduce resource req
+    if not configuration.options.develop.less_resources:
+        for stream in configuration.by_class(product_config.TiedArrayChannelisedVoltageStream):
+            _make_timeplot_beamformer(g, configuration, stream)
+        for stream in configuration.by_class(product_config.SimTiedArrayChannelisedVoltageStream):
+            _make_timeplot_beamformer(g, configuration, stream)
 
     for stream in configuration.by_class(product_config.ContinuumImageStream):
         _make_imager_writers(g, configuration, "continuum", stream)
@@ -3400,6 +3406,66 @@ async def _make_spectral_imager(
     )
     return data_url, nodes
 
+def _make_vlbi(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VdifStream
+) -> scheduler.LogicalNode:
+    """Create a capture-time sink task for writing VDIF frames to disk."""
+    source_stream = stream.source_stream
+    source_multicast = find_node(g, "multicast." + source_stream.name)
+    assert isinstance(source_multicast, LogicalMulticast)
+    task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0 if configuration.options.develop.less_resources else 4.0
+    task.mem = 4 * 1024 if configuration.options.develop.less_resources else 64 * 1024
+    size_bytes = getattr(source_stream, "size", None)
+    if size_bytes is not None:
+        task.disk = _mb(1024 * size_bytes + 1024)
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
+    task.command = [
+        "vlbi_pipeline.py",
+        f"{{endpoints[multicast.{source_stream.name}_spead]}}",
+        escape_format(DATA_VOL.container_path),
+        escape_format(stream.name),
+    ]
+    g.add_node(task)
+    g.add_edge(
+        task,
+        source_multicast,
+        port="spead",
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+    )
+    return task
+
+
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction and transfer."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+    ]
+    g.add_node(task)
+    return task
+
 
 def _make_spectral_imager_report(
     g: networkx.MultiDiGraph,
@@ -3452,6 +3518,9 @@ async def build_postprocess_logical_graph(
         await _make_continuum_imager(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
+
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbimeta(g, capture_block_id, vdif_stream)
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
