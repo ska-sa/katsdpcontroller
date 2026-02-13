@@ -113,12 +113,10 @@ class GPU:
             self.domain = None
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
         self.name = pynvml.nvmlDeviceGetName(handle)
-        # NVML doesn't report compute capability, so we need CUDA
         pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
         if not isinstance(pci_bus_id, str):
             pci_bus_id = pci_bus_id.decode("ascii")
-        self.compute_capability = pynvml.pynvml.nvmlDeviceGetCudaComputeCapability(handle)
-        self.device_attributes = {}
+        self.compute_capability = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
         self.uuid = pynvml.nvmlDeviceGetUUID(handle)
 
 def _descendant_or_self_elements(element: Element, predicate: str) -> List[Element]:
@@ -412,7 +410,6 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
             config = {
                 "name": gpu.name,
                 "compute_capability": gpu.compute_capability,
-                "device_attributes": gpu.device_attributes,
                 "uuid": gpu.uuid,
             }
             if gpu.domain is not None:
