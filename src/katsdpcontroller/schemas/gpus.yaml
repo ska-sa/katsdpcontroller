@@ -27,5 +27,4 @@ items:
   required:
     - name
     - compute_capability
-    - device_attributes
     - uuid

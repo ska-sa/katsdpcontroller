@@ -40,13 +40,9 @@ import netifaces
 import psutil
 
 try:
-    import pycuda.driver
     import pynvml
-
-    pycuda.driver.init()
 except ImportError:
     pynvml = None
-    pycuda = None
 
 
 class DomainType(enum.Enum):
@@ -117,24 +113,11 @@ class GPU:
             self.domain = None
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
         self.name = pynvml.nvmlDeviceGetName(handle)
-        # NVML doesn't report compute capability, so we need CUDA
         pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
-        # In Python 3 pci_bus_id is bytes but pycuda wants str
         if not isinstance(pci_bus_id, str):
             pci_bus_id = pci_bus_id.decode("ascii")
-        cuda_device = pycuda.driver.Device(pci_bus_id)
-        self.compute_capability = cuda_device.compute_capability()
-        self.device_attributes = {}
+        self.compute_capability = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
         self.uuid = pynvml.nvmlDeviceGetUUID(handle)
-        for key, value in cuda_device.get_attributes().items():
-            if isinstance(value, (int, float, str)):
-                # Some of the attributes use Boost.Python's enum, which is
-                # derived from int but which leads to invalid JSON when passed
-                # to json.dumps.
-                if isinstance(value, int) and type(value) is not int:
-                    value = str(value)
-                self.device_attributes[str(key)] = value
-
 
 def _descendant_or_self_elements(element: Element, predicate: str) -> List[Element]:
     """Find all descendants (including the element) matching an XPath predicate."""
@@ -427,7 +410,6 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
             config = {
                 "name": gpu.name,
                 "compute_capability": gpu.compute_capability,
-                "device_attributes": gpu.device_attributes,
                 "uuid": gpu.uuid,
             }
             if gpu.domain is not None:

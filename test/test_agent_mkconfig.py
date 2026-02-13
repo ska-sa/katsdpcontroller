@@ -38,12 +38,7 @@ def mock_gpu(mocker, memory_affinity: int) -> None:
     pynvml.nvmlDeviceGetName.return_value = "NVIDIA GeForce RTX 3070 Ti"
     pynvml.nvmlDeviceGetPciInfo.return_value.busId = b"0000:81:00.0"
     pynvml.nvmlDeviceGetUUID.return_value = "GPU-2854ce83-bd19-0424-de81-c437df8f47a2"
-
-    pycuda = mocker.patch("katsdpcontroller.agent_mkconfig.pycuda")
-    device = pycuda.driver.Device.return_value
-    device.compute_capability.return_value = (8, 6)
-    device.get_attributes.return_value = {}
-
+    pynvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 6)
 
 @dataclass
 class FakeNic:
@@ -155,7 +150,6 @@ def test_attributes_resources_numa(mocker, fs) -> None:
             {
                 "name": "NVIDIA GeForce RTX 3070 Ti",
                 "compute_capability": (8, 6),
-                "device_attributes": {},
                 "uuid": "GPU-2854ce83-bd19-0424-de81-c437df8f47a2",
                 "numa_node": 1,
             }
@@ -303,7 +297,6 @@ def test_attributes_resources_l3_domains(mocker, fs) -> None:
             {
                 "name": "NVIDIA GeForce RTX 3070 Ti",
                 "compute_capability": (8, 6),
-                "device_attributes": {},
                 "uuid": "GPU-2854ce83-bd19-0424-de81-c437df8f47a2",
                 "numa_node": 0,
             }
