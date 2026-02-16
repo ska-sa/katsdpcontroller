@@ -119,6 +119,7 @@ class GPU:
         self.compute_capability = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
         self.uuid = pynvml.nvmlDeviceGetUUID(handle)
 
+
 def _descendant_or_self_elements(element: Element, predicate: str) -> List[Element]:
     """Find all descendants (including the element) matching an XPath predicate."""
     # ElementTree only implements a small subset of XPath, so we can't use

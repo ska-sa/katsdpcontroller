@@ -40,6 +40,7 @@ def mock_gpu(mocker, memory_affinity: int) -> None:
     pynvml.nvmlDeviceGetUUID.return_value = "GPU-2854ce83-bd19-0424-de81-c437df8f47a2"
     pynvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 6)
 
+
 @dataclass
 class FakeNic:
     ifname: str
