@@ -113,9 +113,6 @@ class GPU:
             self.domain = None
         self.mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
         self.name = pynvml.nvmlDeviceGetName(handle)
-        pci_bus_id = pynvml.nvmlDeviceGetPciInfo(handle).busId
-        if not isinstance(pci_bus_id, str):
-            pci_bus_id = pci_bus_id.decode("ascii")
         self.compute_capability = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
         self.uuid = pynvml.nvmlDeviceGetUUID(handle)
 
