@@ -1528,7 +1528,7 @@ def _make_vgpu(
 ) -> scheduler.LogicalNode:
     n_engines = 1
     n_substreams = 1
-    n_recv_batches_per_chunk = 32  # TODO: Revisit once vgpu is complete
+    n_recv_batches_per_chunk = 8  # TODO: Revisit once vgpu is complete
     acv = stream.antenna_channelised_voltage
     sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
