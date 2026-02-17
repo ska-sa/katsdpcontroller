@@ -55,7 +55,6 @@ class TestDiagnoseInsufficient:
             [
                 {
                     "name": "Dummy GPU",
-                    "device_attributes": {},
                     "compute_capability": (5, 2),
                     "numa_node": 1,
                     "uuid": "GPU-123",

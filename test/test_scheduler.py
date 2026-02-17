@@ -782,14 +782,12 @@ class TestAgent:
             [
                 {
                     "name": "Dummy GPU",
-                    "device_attributes": {},
                     "compute_capability": (5, 2),
                     "numa_node": 1,
                     "uuid": "GPU-123",
                 },
                 {
                     "name": "Dummy GPU",
-                    "device_attributes": {},
                     "compute_capability": (5, 2),
                     "numa_node": 0,
                     "uuid": "GPU-456",
@@ -1482,13 +1480,11 @@ class TestScheduler:
                         {
                             "uuid": "GPU-123",
                             "name": "Dummy GPU",
-                            "device_attributes": {},
                             "compute_capability": (5, 2),
                         },
                         {
                             "uuid": "GPU-456",
                             "name": "Dummy GPU",
-                            "device_attributes": {},
                             "compute_capability": (5, 2),
                         },
                     ],
