@@ -123,6 +123,8 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
+        "vlbimeta",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
