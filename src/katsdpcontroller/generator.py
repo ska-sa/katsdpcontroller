@@ -1539,6 +1539,10 @@ def _make_vgpu(
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
     vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
+    # Temporary local sandbox workaround: emulate vgpu so that controller-side
+    # VLBI plumbing can be tested before the real katgpucbf vgpu path is ready.
+    logger.warning("Using fake vgpu workaround for %s", stream.name)
+    vgpu.physical_factory = ProductFakePhysicalTask
     # vgpu doesn't use katsdpservices for configuration, or telstate
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
@@ -3128,6 +3132,11 @@ def build_logical_graph(
         if isinstance(node, ProductLogicalTask):
             if node.pass_telstate or node.katsdpservices_config:
                 need_telstate = True
+    if configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
+        # VLBI-only gpucbf graphs may not otherwise require telstate from the
+        # task wiring perspective, but external clients (e.g. kattelmod) still
+        # expect a telstate endpoint after product-configure.
+        need_telstate = True
     if need_telstate:
         telstate: Optional[scheduler.LogicalNode] = _make_telstate(g, configuration)
     else:
