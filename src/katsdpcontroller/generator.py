@@ -3591,6 +3591,7 @@ def _make_vlbi(
     task.katsdpservices_logging = False
     task.pass_telstate = False
     task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
     task.ports = ["port"]
     task.wait_ports = ["port"]
     task.command = [
