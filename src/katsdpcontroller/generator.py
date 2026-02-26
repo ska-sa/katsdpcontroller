@@ -3624,6 +3624,32 @@ def _make_vlbi(
     return task
 
 
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "vlbimeta"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+    ]
+    g.add_node(task)
+    return task
+
+
 def _make_spectral_imager_report(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
@@ -3675,6 +3701,9 @@ async def build_postprocess_logical_graph(
         await _make_continuum_imager(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
+
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbimeta(g, capture_block_id, vdif_stream)
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
