@@ -1697,8 +1697,6 @@ def _make_vgpu(
             str(n_recv_batches_per_chunk),
             "--recv-sample-bits",
             str(tacv[0].bits_per_sample),
-            "--recv-bandwidth",
-            str(tacv[0].bandwidth),
             "--recv-pols=-y,+x",
             "--send-bandwidth",
             str(stream.bandwidth),
