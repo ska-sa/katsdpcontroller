@@ -929,6 +929,7 @@ class SubarrayProduct:
             nodes = {node.logical_node.name: node for node in physical_graph}
             telstate_node = nodes["telstate"]
             telstate_node.host = self.telstate_node.host
+            telstate_node.address = self.telstate_node.address
             telstate_node.ports = dict(self.telstate_node.ports)
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch
