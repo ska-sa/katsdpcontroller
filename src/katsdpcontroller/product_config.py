@@ -1878,6 +1878,52 @@ class FlagsStream(Stream):
         )
 
 
+class VdifStream(Stream):
+    """VDIF-encapsulated voltages from a tied-array stream."""
+
+    stream_type: ClassVar[str] = "sdp.vdif"
+    _valid_src_types: ClassVar[_ValidTypes] = {
+        "gpucbf.tied_array_resampled_voltage",
+        "sim.cbf.tied_array_channelised_voltage",
+    }
+
+    def __init__(self, name: str, src_streams: Sequence[Stream]) -> None:
+        if len(src_streams) != 1:
+            raise ValueError("Exactly one tied-array resampled voltage source is required")
+        super().__init__(name, src_streams)
+
+    @property
+    def source_stream(
+        self,
+    ) -> Union[GpucbfTiedArrayResampledVoltageStream, SimTiedArrayChannelisedVoltageStream]:
+        return cast(
+            Union[GpucbfTiedArrayResampledVoltageStream, SimTiedArrayChannelisedVoltageStream],
+            self.src_streams[0],
+        )
+
+    @property
+    def n_chans(self) -> int:
+        return self.source_stream.n_chans
+
+    @property
+    def pols(self) -> Tuple[str, str]:
+        pols = getattr(self.source_stream, "pols", None)
+        if pols is None:
+            return ("x", "y")
+        return cast(Tuple[str, str], tuple(pols))
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any],
+    ) -> "VdifStream":
+        return cls(name, src_streams)
+
+
 class ImageStream(Stream):
     """A base class for spectral and continuum image streams."""
 
@@ -2011,6 +2057,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "sdp.flags": FlagsStream,
     "sdp.continuum_image": ContinuumImageStream,
     "sdp.spectral_image": SpectralImageStream,
+    "sdp.vdif": VdifStream,
 }
 
 

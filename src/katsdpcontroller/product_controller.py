@@ -314,8 +314,12 @@ class Resources:
         return reply[0].decode()
 
     @staticmethod
-    async def get_port() -> int:
-        """Return an assigned port for a multicast group"""
+    async def get_port(port_name: str = "spead") -> int:
+        """Return an assigned port for a multicast group."""
+        # Keep SPEAD on the historical port, but isolate VDIF traffic to avoid
+        # cross-talk with high-rate SPEAD streams on the same host.
+        if port_name == "vdif":
+            return 7149
         return 7148
 
 
@@ -929,6 +933,7 @@ class SubarrayProduct:
             nodes = {node.logical_node.name: node for node in physical_graph}
             telstate_node = nodes["telstate"]
             telstate_node.host = self.telstate_node.host
+            telstate_node.address = self.telstate_node.address
             telstate_node.ports = dict(self.telstate_node.ports)
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch

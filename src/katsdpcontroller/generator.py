@@ -62,7 +62,6 @@ from .fake_servers import (
     FakeDsimDeviceServer,
     FakeFgpuDeviceServer,
     FakeIngestDeviceServer,
-    FakeVgpuDeviceServer,
     FakeXbgpuDeviceServer,
 )
 from .product_config import BYTES_PER_FLAG, BYTES_PER_VFW, BYTES_PER_VIS, Configuration, data_rate
@@ -123,6 +122,8 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
+        "vlbimeta",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -190,9 +191,15 @@ class PhysicalMulticast(scheduler.PhysicalExternal):
         if self.logical_node.endpoint is not None:
             self.host = self.logical_node.endpoint.host
             self.ports = {port_name: self.logical_node.endpoint.port}
+        elif resolver.localhost and port_name == "vdif":
+            # Local jive5ab recording works reliably over unicast localhost,
+            # while the localhost multicast path does not deliver a first
+            # frame to the recorder.
+            self.host = LOCALHOST
+            self.ports = {port_name: await resolver.resources.get_port(port_name)}
         else:
             self.host = await resolver.resources.get_multicast_groups(self.logical_node.n_addresses)
-            self.ports = {port_name: await resolver.resources.get_port()}
+            self.ports = {port_name: await resolver.resources.get_port(port_name)}
         # It should already be resolved. Note that it might NOT be a valid
         # IP address if it represents multiple multicast groups in the form
         # a.b.c.d+N.
@@ -1290,6 +1297,12 @@ def _make_xbgpu(
         task_names.append(xbgpu.name)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
+        xbgpu.transitions = {
+            CaptureBlockState.CAPTURING: [
+                KatcpTransition("capture-start", stream.name, 0, timeout=30) for stream in streams
+            ],
+            CaptureBlockState.BURNDOWN: [KatcpTransition("capture-stop", stream.name, timeout=240) for stream in streams],
+        }
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
         xbgpu.mem = 1024 + _mb(recv_buffer)
@@ -1536,10 +1549,14 @@ def _make_vgpu(
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
-    vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
+    # jive5ab in this setup expects little-endian UDPS sequence numbering.
+    vgpu.taskinfo.command.environment.setdefault("variables", []).append(
+        {"name": "KATGPUCBF_VDIF_SEQ_LITTLE_ENDIAN", "value": "1"}
+    )
     # vgpu doesn't use katsdpservices for configuration, or telstate
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
+    vgpu.transitions = CAPTURE_TRANSITIONS
     g.add_node(vgpu)
 
     stream_sensors: List[Sensor] = [
@@ -1665,10 +1682,16 @@ def _make_vgpu(
     vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
 
     vgpu.gpus = [scheduler.GPURequest()]
-    # TODO: To ensure vgpu doesn't share the GPU with anything else.
-    # Revisit once vgpu is complete.
-    vgpu.gpus[0].compute = 1.0
-    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
+    # Full-GPU reservation is too strict for single-GPU sandbox runs where
+    # fgpu/xbgpu/vgpu must co-schedule.
+    if configuration.options.develop.less_resources:
+        vgpu.gpus[0].compute = 0.2
+        vgpu.gpus[0].mem = 2048
+    else:
+        # TODO: To ensure vgpu doesn't share the GPU with anything else.
+        # Revisit once vgpu is complete.
+        vgpu.gpus[0].compute = 1.0
+        vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
 
     vgpu.command = (
         ["schedrr"]
@@ -3037,6 +3060,8 @@ def build_logical_graph(
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbi(g, configuration, vdif_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -3124,6 +3149,11 @@ def build_logical_graph(
         if isinstance(node, ProductLogicalTask):
             if node.pass_telstate or node.katsdpservices_config:
                 need_telstate = True
+    if configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
+        # VLBI-only gpucbf graphs may not otherwise require telstate from the
+        # task wiring perspective, but external clients (e.g. kattelmod) still
+        # expect a telstate endpoint after product-configure.
+        need_telstate = True
     if need_telstate:
         telstate: Optional[scheduler.LogicalNode] = _make_telstate(g, configuration)
     else:
@@ -3554,6 +3584,101 @@ async def _make_spectral_imager(
     return data_url, nodes
 
 
+def _make_vlbi(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VdifStream
+) -> scheduler.LogicalNode:
+    """Create a capture-time VLBI recorder task for a VDIF stream."""
+    source_stream = stream.source_stream
+    if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+        raise NotImplementedError("sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage")
+    source_multicast = find_node(g, "multicast." + source_stream.name)
+    assert isinstance(source_multicast, LogicalMulticast)
+    task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0 if configuration.options.develop.less_resources else 2.0
+    task.mem = 4 * 1024 if configuration.options.develop.less_resources else 8 * 1024
+    size_bytes = getattr(source_stream, "size", None)
+    if size_bytes is not None:
+        task.disk = _mb(1024 * size_bytes + 1024)
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
+    task.ports = ["port"]
+    task.wait_ports = ["port"]
+    payload_bytes = (defaults.VGPU_SAMPLES_PER_FRAME * source_stream.bits_per_sample) // 8
+    frame_bytes = 32 + payload_bytes
+    n_threads = source_stream.n_chans * len(source_stream.pols)
+    j5a_mode = f"vdif_{payload_bytes}-{frame_bytes}-{source_stream.bits_per_sample}-{n_threads}"
+    command_lines = [
+        'endpoint="$1"',
+        'katcp_port="$2"',
+        'export J5A_NETPORT="${{endpoint/:/@}}"',
+        "export J5A_PROTOCOL=udps",
+        f"export J5A_MODE={j5a_mode}",
+        'export KATCP_PORT="$katcp_port"',
+        "export KATCP_ENABLE=true",
+        "export AUTOSTART_RECORD=false",
+        f"export DISK_PATHS={escape_format(DATA_VOL.container_path)}",
+    ]
+    if frame_bytes + 8 > 1500:
+        # Larger VDIF frames need jumbo receive MTU on the recorder, otherwise
+        # jive5ab truncates the incoming UDPS datagrams.
+        command_lines.append("export J5A_MTU=9000")
+        # The third net_protocol parameter is jive5ab's work buffer size for
+        # VBS output. Set it to 256 MiB so the recorder shards match the
+        # example_vdif reference layout instead of the 128 MiB default.
+        command_lines.append("export J5A_BUFF_SND=268435456")
+    command_lines.append("exec /usr/local/bin/entrypoint.sh")
+    task.command = [
+        "bash",
+        "-ceu",
+        "\n".join(command_lines),
+        "_",
+        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
+        "{ports[port]}",
+    ]
+    g.add_node(task)
+    g.add_edge(
+        task,
+        source_multicast,
+        port="vdif",
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+    )
+    return task
+
+
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "vlbimeta"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+    ]
+    g.add_node(task)
+    return task
+
+
 def _make_spectral_imager_report(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
@@ -3605,6 +3730,9 @@ async def build_postprocess_logical_graph(
         await _make_continuum_imager(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
+
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbimeta(g, capture_block_id, vdif_stream)
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager

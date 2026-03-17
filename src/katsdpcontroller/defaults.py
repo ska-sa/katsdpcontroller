@@ -60,7 +60,11 @@ WEIGHT_PASS = 0.005  # Keep in sync with katgpucbf
 #: Default payload size for gpucbf data products. Bigger is better to
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
-#: Default number of samples per VDIF frame for gpucbf V-engine
+#: Default number of samples per VDIF frame for gpucbf V-engine.
+#:
+#: 20000 samples -> 5032-byte VDIF frame (32-byte header + 5000-byte payload),
+#: which matches the local ``example_vdif`` reference set and reduces packet
+#: rate relative to the smaller sandbox framing previously used.
 VGPU_SAMPLES_PER_FRAME = 20000
 #: Default number of taps for the gpucbf V-engine rational filter
 VGPU_FIR_TAPS = 7201
