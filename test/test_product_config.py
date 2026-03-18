@@ -208,6 +208,7 @@ class TestOptions:
     def test_from_config_dict(self) -> None:
         config = {
             "develop": {"disable_ibverbs": True, "less_resources": True, "data_timeout": 2.4},
+            "vlbimeta": {"mode": "pass_through"},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
             "shutdown_delay": 5.0,
@@ -217,6 +218,7 @@ class TestOptions:
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.develop.data_timeout == 2.4
+        assert options.vlbimeta.mode == "pass_through"
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
@@ -242,9 +244,14 @@ class TestOptions:
         assert options.develop.any_gpu is False
         assert options.develop.disable_ibverbs is False
         assert options.develop.less_resources is False
+        assert options.vlbimeta.mode == "antab"
         assert options.wrapper is None
         assert options.service_overrides == {}
         assert options.shutdown_delay is None
+
+    def test_invalid_vlbimeta_mode(self) -> None:
+        with pytest.raises(ValueError, match="Unknown vlbimeta mode"):
+            Options.from_config({"vlbimeta": {"mode": "bad"}})
 
 
 class TestSimulation:

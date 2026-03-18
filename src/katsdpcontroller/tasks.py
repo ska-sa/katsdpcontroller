@@ -29,6 +29,7 @@ from typing import (
     Callable,
     List,
     MutableMapping,
+    Optional,
     Set,
     Type,
     TypeVar,
@@ -334,6 +335,55 @@ class DeviceStatusObserver:
         self.sensor.detach(self)
 
 
+class TelstateSensorHistoryObserver:
+    """Persist selected mirrored sensor readings into the active capture-block telstate view."""
+
+    def __init__(self, sensor: Sensor, task: "ProductPhysicalTaskMixin", key: str):
+        self.sensor = sensor
+        self.task = task
+        self.key = key
+        self._pending: Set[asyncio.Task] = set()
+        sensor.attach(self)
+        asyncio.get_event_loop().call_soon(self, sensor, sensor.reading)
+
+    def _capture_block_id(self) -> Optional[str]:
+        current = self.task.subarray_product.current_capture_block
+        if current is not None:
+            return current.name
+        if len(self.task._capture_blocks) == 1:
+            return next(iter(self.task._capture_blocks))
+        return None
+
+    def __call__(self, sensor: Sensor, reading) -> None:
+        if not reading.status.valid_value():
+            return
+        telstate = self.task.subarray_product.telstate
+        capture_block_id = self._capture_block_id()
+        if telstate is None or capture_block_id is None:
+            return
+
+        async def persist() -> None:
+            try:
+                await telstate.view(capture_block_id).add(self.key, reading.value, ts=reading.timestamp)
+            except Exception:
+                self.task.logger.exception(
+                    "Failed to persist sensor %s to telstate key %s for capture block %s",
+                    sensor.name,
+                    self.key,
+                    capture_block_id,
+                )
+
+        pending = asyncio.get_event_loop().create_task(persist())
+        self._pending.add(pending)
+        pending.add_done_callback(self._pending.discard)
+
+    def close(self) -> None:
+        self.sensor.detach(self)
+        for pending in self._pending:
+            pending.cancel()
+        self._pending.clear()
+
+
 class _ElidedArgs:
     """Reports request arguments elided from a log message."""
 
@@ -431,6 +481,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         self.katcp_connection = None
         self.capture_block_state_observer = None
         self.device_status_observer = None
+        self.telstate_sensor_observers: List[TelstateSensorHistoryObserver] = []
 
     @property
     def subarray_product_id(self):
@@ -533,6 +584,17 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                     sensor = self.sdp_controller.sensors.get(prefix + "device-status")
                     if sensor is not None:
                         self.device_status_observer = DeviceStatusObserver(sensor, self)
+                    if self.logical_node.task_type == "vgpu":
+                        for renamed in self.logical_node.sensor_renames.values():
+                            names = [renamed] if isinstance(renamed, str) else list(renamed)
+                            for sensor_name in names:
+                                if not sensor_name.endswith(".mean-power"):
+                                    continue
+                                sensor = self.sdp_controller.sensors.get(sensor_name)
+                                if sensor is not None:
+                                    self.telstate_sensor_observers.append(
+                                        TelstateSensorHistoryObserver(sensor, self, sensor_name)
+                                    )
                     break
                 except RuntimeError:
                     self.katcp_connection.close()
@@ -590,6 +652,9 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         if self.device_status_observer is not None:
             self.device_status_observer.close()
             self.device_status_observer = None
+        for observer in self.telstate_sensor_observers:
+            observer.close()
+        self.telstate_sensor_observers.clear()
 
     def kill(self, driver, **kwargs):
         force = kwargs.pop("force", False)

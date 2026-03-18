@@ -283,11 +283,27 @@ class DevelopOptions:
         )
 
 
+class VlbimetaOptions:
+    VALID_MODES = frozenset({"antab", "pass_through", "disabled"})
+
+    def __init__(self, *, mode: str = "antab") -> None:
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Unknown vlbimeta mode {mode!r}. Expected one of: {', '.join(sorted(self.VALID_MODES))}"
+            )
+        self.mode = mode
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> "VlbimetaOptions":
+        return cls(mode=config.get("mode", "antab"))
+
+
 class Options:
     def __init__(
         self,
         *,
         develop: Union[bool, Mapping[str, bool]] = False,
+        vlbimeta: Mapping[str, Any] = {},
         wrapper: Optional[str] = None,
         image_tag: Optional[str] = None,
         image_overrides: Mapping[str, str] = {},
@@ -299,6 +315,7 @@ class Options:
             self.develop = DevelopOptions.from_bool(develop)
         else:
             self.develop = DevelopOptions.from_config(develop)
+        self.vlbimeta = VlbimetaOptions.from_config(vlbimeta)
         self.wrapper = wrapper
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
@@ -316,6 +333,7 @@ class Options:
         }
         return cls(
             develop=config.get("develop", False),
+            vlbimeta=config.get("vlbimeta", {}),
             wrapper=config.get("wrapper"),
             image_tag=config.get("image_tag"),
             image_overrides=config.get("image_overrides", {}),
