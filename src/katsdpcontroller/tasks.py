@@ -364,7 +364,9 @@ class TelstateSensorHistoryObserver:
 
         async def persist() -> None:
             try:
-                await telstate.view(capture_block_id).add(self.key, reading.value, ts=reading.timestamp)
+                await telstate.view(capture_block_id).add(
+                    self.key, reading.value, ts=reading.timestamp
+                )
             except Exception:
                 self.task.logger.exception(
                     "Failed to persist sensor %s to telstate key %s for capture block %s",

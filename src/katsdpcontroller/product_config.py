@@ -288,8 +288,9 @@ class VlbimetaOptions:
 
     def __init__(self, *, mode: str = "antab") -> None:
         if mode not in self.VALID_MODES:
+            valid_modes = ", ".join(sorted(self.VALID_MODES))
             raise ValueError(
-                f"Unknown vlbimeta mode {mode!r}. Expected one of: {', '.join(sorted(self.VALID_MODES))}"
+                f"Unknown vlbimeta mode {mode!r}. Expected one of: {valid_modes}"
             )
         self.mode = mode
 

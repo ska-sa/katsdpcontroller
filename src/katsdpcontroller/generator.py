@@ -1089,7 +1089,7 @@ def _make_xbgpu(
                     for p1 in range(2):
                         for p2 in range(2):
                             idx = get_baseline_index(a1, a2) * 4 + p1 + p2 * 2
-                            bls_ordering[idx] = (ants[a1, p1], ants[a2, p2])
+                            bls_ordering[idx] = (str(ants[a1, p1]), str(ants[a2, p2]))
             n_accs = round(
                 stream.int_time * acv.adc_sample_rate / acv.n_samples_between_spectra
             )  # type: ignore
