@@ -111,7 +111,7 @@ GPUCBF_DATA_STREAMS: List[Tuple[bytes, bytes, bytes]] = [
         rb"239\.192\.\d+\.\d+\+3:7148",
         b"down",
     ),
-    (b"gpucbf_tied_array_resampled_voltage", rb"239\.192\.\d+\.\d+\:7148", b"down"),
+    (b"gpucbf_tied_array_resampled_voltage", rb"127\.0\.0\.1:7149", b"down"),
 ]
 SUBARRAY_PRODUCT = "array_1_0"
 CAPTURE_BLOCK = "1122334455"
@@ -1588,6 +1588,15 @@ class TestController(BaseTestController):
         grouped_calls = [k for k, g in itertools.groupby(sorted_calls)]
         expected_calls = [
             mock.call("capture-init", CAPTURE_BLOCK),
+            mock.call("capture-start", "gpucbf_baseline_correlation_products", 0),
+            mock.call("capture-start", "gpucbf_tied_array_channelised_voltage_0x", 0),
+            mock.call(
+                "capture-start", "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi", 0
+            ),
+            mock.call("capture-start", "gpucbf_tied_array_channelised_voltage_0y", 0),
+            mock.call(
+                "capture-start", "gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi", 0
+            ),
             mock.call("capture-start", "i0_baseline_correlation_products", mock.ANY),
             mock.call("capture-start", "i0_tied_array_channelised_voltage_0x", mock.ANY),
             mock.call("capture-start", "i0_tied_array_channelised_voltage_0y", mock.ANY),

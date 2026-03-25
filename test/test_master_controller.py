@@ -1007,9 +1007,16 @@ class TestDeviceServer:
         # Check that the subarray was deconfigured cleanly
         assert server._manager.products == {}
 
-    async def test_product_configure_reuse_name(self, client: aiokatcp.Client) -> None:
+    async def test_product_configure_reuse_name(
+        self, client: aiokatcp.Client, server: DeviceServer
+    ) -> None:
         await client.request("product-configure", "product", CONFIG_CBF_ONLY)
         await client.request("product-deconfigure", "product")
+        for _ in range(10):
+            if "product" not in server._manager.products:
+                break
+            await asyncio.sleep(1)
+        assert "product" not in server._manager.products
         await client.request("product-configure", "product", CONFIG)
 
     async def test_product_configure_versions(self, client: aiokatcp.Client) -> None:

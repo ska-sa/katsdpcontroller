@@ -62,6 +62,7 @@ from .fake_servers import (
     FakeDsimDeviceServer,
     FakeFgpuDeviceServer,
     FakeIngestDeviceServer,
+    FakeVgpuDeviceServer,
     FakeXbgpuDeviceServer,
 )
 from .product_config import BYTES_PER_FLAG, BYTES_PER_VFW, BYTES_PER_VIS, Configuration, data_rate
@@ -1301,7 +1302,9 @@ def _make_xbgpu(
             CaptureBlockState.CAPTURING: [
                 KatcpTransition("capture-start", stream.name, 0, timeout=30) for stream in streams
             ],
-            CaptureBlockState.BURNDOWN: [KatcpTransition("capture-stop", stream.name, timeout=240) for stream in streams],
+            CaptureBlockState.BURNDOWN: [
+                KatcpTransition("capture-stop", stream.name, timeout=240) for stream in streams
+            ],
         }
         xbgpu.fake_katcp_server_cls = FakeXbgpuDeviceServer
         xbgpu.cpus = 0.5 * bw_scale if configuration.options.develop.less_resources else 1.5
@@ -1549,6 +1552,7 @@ def _make_vgpu(
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
+    vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
     # jive5ab in this setup expects little-endian UDPS sequence numbering.
     vgpu.taskinfo.command.environment.setdefault("variables", []).append(
         {"name": "KATGPUCBF_VDIF_SEQ_LITTLE_ENDIAN", "value": "1"}
@@ -3590,7 +3594,9 @@ def _make_vlbi(
     """Create a capture-time VLBI recorder task for a VDIF stream."""
     source_stream = stream.source_stream
     if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
-        raise NotImplementedError("sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage")
+        raise NotImplementedError(
+            "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
+        )
     source_multicast = find_node(g, "multicast." + source_stream.name)
     assert isinstance(source_multicast, LogicalMulticast)
     task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
