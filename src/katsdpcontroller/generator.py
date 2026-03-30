@@ -1787,6 +1787,11 @@ def _make_vgpu(
                     f"{pol}{channel}.{perthread_name}"
                 ] = f"{stream.name}.{pol}{channel}.{perthread_name}"
 
+    vgpu.static_gauges["vgpu_expected_input_heaps_per_second"] = sum(
+        s.n_substreams / s.int_time for s in tacv
+    )
+    vgpu.static_gauges["vgpu_expected_engines"] = 1.0
+
     _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu

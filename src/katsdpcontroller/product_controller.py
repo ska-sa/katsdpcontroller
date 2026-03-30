@@ -103,6 +103,10 @@ STATIC_GAUGES = [
         "Number of heaps that should be received per second",
     ),
     Gauge("xbgpu_expected_engines", "Number of XB-engines that should be present"),
+    Gauge(
+        "vgpu_expected_input_heaps_per_second", "Number of heaps that should be received per second"
+    ),
+    Gauge("vgpu_expected_engines", "Number of V-engines that should be present"),
 ]
 logger = logging.getLogger(__name__)
 
