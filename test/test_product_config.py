@@ -57,6 +57,7 @@ from katsdpcontroller.product_config import (
     Simulation,
     SpectralImageStream,
     TiedArrayChannelisedVoltageStream,
+    VdifStream,
     VisStream,
 )
 
@@ -1232,6 +1233,61 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         with pytest.raises(ValueError, match="n_chans must be 2"):
             GpucbfTiedArrayResampledVoltageStream.from_config(
                 Options(), "", config, tacv_streams, {}
+            )
+
+
+class TestVdifStream:
+    """Test :class:`~.VdifStream`."""
+
+    @pytest.fixture
+    def source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
+        narrowband_config = GpucbfNarrowbandConfig.from_config(
+            {
+                "decimation_factor": DECIMATION,
+                "centre_frequency": 200e6,
+                "vlbi": {"pass_bandwidth": 64e6},
+            }
+        )
+        acv = make_gpucbf_antenna_channelised_voltage(
+            stream_name="vlbi_acv", narrowband_config=narrowband_config
+        )
+        tacv_streams = [
+            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0x", src_pol=0),
+            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0y", src_pol=1),
+        ]
+        config = {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": ["beam_0x", "beam_0y"],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me",
+        }
+        return GpucbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "gpucbf_tied_array_resampled_voltage", config, tacv_streams, {}
+        )
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {"type": "sdp.vdif", "src_streams": ["gpucbf_tied_array_resampled_voltage"]}
+
+    def test_from_config(
+        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        vdif = VdifStream.from_config(Options(), "sdp_vdif", config, [source_stream], {})
+        assert vdif.source_stream is source_stream
+        assert vdif.n_chans == source_stream.n_chans
+        assert vdif.pols == tuple(source_stream.pols)
+
+    def test_requires_single_source(
+        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        with pytest.raises(ValueError, match="Exactly one tied-array resampled voltage source"):
+            VdifStream.from_config(
+                Options(),
+                "sdp_vdif",
+                config,
+                [source_stream, source_stream],
+                {},
             )
 
 
