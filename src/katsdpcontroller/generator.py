@@ -123,6 +123,7 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -3042,6 +3043,8 @@ def build_logical_graph(
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbi(g, configuration, vdif_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -3587,6 +3590,72 @@ def _make_spectral_imager_report(
     for node in spectral_nodes:
         g.add_edge(report, node, depends_finished=True, depends_finished_critical=False)
     return report
+
+
+def _make_vlbi(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VdifStream
+) -> scheduler.LogicalNode:
+    """Create a capture-time VLBI recorder task for a VDIF stream."""
+    source_stream = stream.source_stream
+    if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+        raise NotImplementedError(
+            "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
+        )
+    source_multicast = find_node(g, "multicast." + source_stream.name)
+    assert isinstance(source_multicast, LogicalMulticast)
+    task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 2.0
+    task.mem = 8 * 1024
+    size_bytes = getattr(source_stream, "size", None)
+    if size_bytes is not None:
+        task.disk = _mb(1024 * size_bytes + 1024)
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
+    task.ports = ["port"]
+    task.wait_ports = ["port"]
+    payload_bytes = (defaults.VGPU_SAMPLES_PER_FRAME * source_stream.bits_per_sample) // 8
+    frame_bytes = 32 + payload_bytes
+    n_threads = source_stream.n_chans * len(source_stream.pols)
+    j5a_mode = f"vdif_{payload_bytes}-{frame_bytes}-{source_stream.bits_per_sample}-{n_threads}"
+    command_lines = [
+        'endpoint="$1"',
+        'katcp_port="$2"',
+        'export J5A_NETPORT="${{endpoint/:/@}}"',
+        "export J5A_PROTOCOL=udps",
+        f"export J5A_MODE={j5a_mode}",
+        'export KATCP_PORT="$katcp_port"',
+        "export KATCP_ENABLE=true",
+        "export AUTOSTART_RECORD=false",
+        f"export DISK_PATHS={escape_format(DATA_VOL.container_path)}",
+    ]
+    if frame_bytes + 8 > 1500:
+        command_lines.append("export J5A_MTU=9000")
+        command_lines.append("export J5A_BUFF_SND=268435456")
+    command_lines.append("exec /usr/local/bin/entrypoint.sh")
+    task.command = [
+        "bash",
+        "-ceu",
+        "\n".join(command_lines),
+        "_",
+        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
+        "{ports[port]}",
+    ]
+    g.add_node(task)
+    g.add_edge(
+        task,
+        source_multicast,
+        port="vdif",
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+    )
+    return task
 
 
 async def build_postprocess_logical_graph(
