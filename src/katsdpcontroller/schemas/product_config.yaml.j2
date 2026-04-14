@@ -755,6 +755,17 @@ properties:
           - type: boolean
             default: false
         default: false
+      vlbimeta:
+        type: object
+        additionalProperties: false
+        properties:
+          mode:
+            type: string
+            enum:
+              - antab
+              - pass_through
+              - disabled
+            default: antab
       wrapper:
         type: string
         format: uri
