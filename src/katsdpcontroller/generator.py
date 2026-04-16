@@ -124,6 +124,7 @@ IMAGES = frozenset(
         "katsdpmetawriter",
         "katsdptelstate",
         "katsdpvlbi",
+        "vlbimeta",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -3658,6 +3659,35 @@ def _make_vlbi(
     return task
 
 
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "vlbimeta"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = True
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+        "--mode",
+        configuration.options.vlbimeta.mode,
+    ]
+    g.add_node(task)
+    return task
+
+
 async def build_postprocess_logical_graph(
     configuration: Configuration,
     capture_block_id: str,
@@ -3680,6 +3710,10 @@ async def build_postprocess_logical_graph(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
 
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        if configuration.options.vlbimeta.mode != "disabled":
+            _make_vlbimeta(g, configuration, capture_block_id, vdif_stream)
+
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
@@ -3700,6 +3734,10 @@ async def build_postprocess_logical_graph(
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
+            if node.pass_telstate:
+                node.command.extend(
+                    ["--telstate", "{endpoints[telstate_telstate]}", "--name", node.name]
+                )
             g.add_edge(node, telstate_node, port="telstate", depends_ready=True, depends_kill=True)
 
     return g
