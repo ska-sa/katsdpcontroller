@@ -750,6 +750,12 @@ properties:
               less_resources:
                 type: boolean
                 default: false
+              vlbi_recorder_protocol:
+                type: string
+                enum:
+                  - udps
+                  - udpsnor
+                default: udps
             additionalProperties: false
 {% endif %}
           - type: boolean

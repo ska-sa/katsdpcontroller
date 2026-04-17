@@ -252,6 +252,8 @@ class ServiceOverride:
 
 
 class DevelopOptions:
+    VALID_VLBI_RECORDER_PROTOCOLS = frozenset({"udps", "udpsnor"})
+
     def __init__(
         self,
         *,
@@ -259,19 +261,27 @@ class DevelopOptions:
         disable_ibverbs: bool = False,
         less_resources: bool = False,
         data_timeout: float = 0.0,
+        vlbi_recorder_protocol: str = "udps",
     ) -> None:
+        if vlbi_recorder_protocol not in self.VALID_VLBI_RECORDER_PROTOCOLS:
+            valid = ", ".join(sorted(self.VALID_VLBI_RECORDER_PROTOCOLS))
+            raise ValueError(
+                f"Unknown VLBI recorder protocol {vlbi_recorder_protocol!r}. Expected one of: {valid}"
+            )
         self.any_gpu = any_gpu
         self.disable_ibverbs = disable_ibverbs
         self.less_resources = less_resources
         self.data_timeout = data_timeout
+        self.vlbi_recorder_protocol = vlbi_recorder_protocol
 
     @classmethod
-    def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
+    def from_config(cls, config: Mapping[str, Any]) -> "DevelopOptions":
         return cls(
             any_gpu=config.get("any_gpu", False),
             disable_ibverbs=config.get("disable_ibverbs", False),
             less_resources=config.get("less_resources", False),
             data_timeout=config.get("data_timeout", 0.0),
+            vlbi_recorder_protocol=config.get("vlbi_recorder_protocol", "udps"),
         )
 
     @classmethod

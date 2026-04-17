@@ -3602,6 +3602,7 @@ def _make_vlbi(
         raise NotImplementedError(
             "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
         )
+    develop = configuration.options.develop
     source_multicast = find_node(g, "multicast." + source_stream.name)
     assert isinstance(source_multicast, LogicalMulticast)
     task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
@@ -3611,6 +3612,15 @@ def _make_vlbi(
     size_bytes = getattr(source_stream, "size", None)
     if size_bytes is not None:
         task.disk = _mb(1024 * size_bytes + 1024)
+    task.interfaces = [
+        scheduler.InterfaceRequest(
+            "cbf",
+            affinity=not develop.disable_ibverbs,
+            infiniband=not develop.disable_ibverbs,
+            multicast_in={source_stream.name},
+        )
+    ]
+    task.interfaces[0].bandwidth_in = source_stream.data_rate()
     task.volumes = [DATA_VOL]
     task.image = "katsdpvlbi"
     task.katsdpservices_config = False
@@ -3628,8 +3638,9 @@ def _make_vlbi(
         'endpoint="$1"',
         'katcp_port="$2"',
         'export J5A_NETPORT="${{endpoint/:/@}}"',
-        "export J5A_PROTOCOL=udps",
+        f"export J5A_PROTOCOL={develop.vlbi_recorder_protocol}",
         f"export J5A_MODE={j5a_mode}",
+        'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"',
         'export KATCP_PORT="$katcp_port"',
         "export KATCP_ENABLE=true",
         "export AUTOSTART_RECORD=false",

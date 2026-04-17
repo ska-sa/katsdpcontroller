@@ -17,6 +17,7 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import copy
+import json
 import re
 from fractions import Fraction
 from typing import Any, Dict, List, Optional
@@ -27,8 +28,9 @@ import katpoint
 import katportalclient
 import pytest
 import yarl
+from aiokatcp import SensorSet
 
-from katsdpcontroller import defaults, product_config
+from katsdpcontroller import defaults, generator, product_config
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -62,6 +64,7 @@ from katsdpcontroller.product_config import (
 )
 
 from . import fake_katportalclient
+from .utils import CONFIG
 
 _M000 = katpoint.Antenna(
     "m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14"  # noqa: E501
@@ -208,7 +211,12 @@ class TestOptions:
 
     def test_from_config_dict(self) -> None:
         config = {
-            "develop": {"disable_ibverbs": True, "less_resources": True, "data_timeout": 2.4},
+            "develop": {
+                "disable_ibverbs": True,
+                "less_resources": True,
+                "data_timeout": 2.4,
+                "vlbi_recorder_protocol": "udpsnor",
+            },
             "vlbimeta": {"mode": "pass_through"},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
@@ -219,6 +227,7 @@ class TestOptions:
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.develop.data_timeout == 2.4
+        assert options.develop.vlbi_recorder_protocol == "udpsnor"
         assert options.vlbimeta.mode == "pass_through"
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
@@ -245,6 +254,7 @@ class TestOptions:
         assert options.develop.any_gpu is False
         assert options.develop.disable_ibverbs is False
         assert options.develop.less_resources is False
+        assert options.develop.vlbi_recorder_protocol == "udps"
         assert options.vlbimeta.mode == "antab"
         assert options.wrapper is None
         assert options.service_overrides == {}
@@ -253,6 +263,10 @@ class TestOptions:
     def test_invalid_vlbimeta_mode(self) -> None:
         with pytest.raises(ValueError, match="Unknown vlbimeta mode"):
             Options.from_config({"vlbimeta": {"mode": "bad"}})
+
+    def test_invalid_vlbi_recorder_protocol(self) -> None:
+        with pytest.raises(ValueError, match="Unknown VLBI recorder protocol"):
+            Options.from_config({"develop": {"vlbi_recorder_protocol": "udp"}})
 
 
 class TestSimulation:
@@ -2047,6 +2061,20 @@ class TestConfiguration:
         }
         with pytest.raises(ValueError, match="Only a single band is supported, found 'l', 'u'"):
             await Configuration.from_config(config)
+
+    async def test_vlbi_recorder_uses_cbf_multicast_interface(self) -> None:
+        config = json.loads(CONFIG)
+        configuration = await Configuration.from_config(config)
+        graph = generator.build_logical_graph(configuration, config, SensorSet())
+        vlbi_node = next(node for node in graph if node.name == "vlbi.sdp_vdif")
+        request = vlbi_node.interfaces[0]
+        assert request.network == "cbf"
+        assert request.multicast_in == {"gpucbf_tied_array_resampled_voltage"}
+        assert request.infiniband is True
+        assert request.affinity is True
+        command = vlbi_node.command[2]
+        assert "export J5A_PROTOCOL=udps" in command
+        assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
 
 
 def test_stream_classes():
