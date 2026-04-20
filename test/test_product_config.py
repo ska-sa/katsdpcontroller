@@ -26,6 +26,8 @@ from unittest import mock
 import jsonschema
 import katpoint
 import katportalclient
+import katsdptelstate.aio
+import katsdptelstate.aio.memory
 import pytest
 import yarl
 from aiokatcp import SensorSet
@@ -2075,6 +2077,30 @@ class TestConfiguration:
         command = vlbi_node.command[2]
         assert "export J5A_PROTOCOL=udps" in command
         assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
+
+    async def test_vlbimeta_uses_cal_vis_stream(self) -> None:
+        config = json.loads(CONFIG)
+        del config["outputs"]["continuum_image"]
+        del config["outputs"]["spectral_image"]
+        configuration = await Configuration.from_config(config)
+        telstate = katsdptelstate.aio.TelescopeState(katsdptelstate.aio.memory.MemoryBackend())
+        graph = await generator.build_postprocess_logical_graph(
+            configuration,
+            "1234567890",
+            telstate,
+            "telstate.invalid:31000",
+        )
+        vlbimeta_node = next(node for node in graph if node.name == "vlbimeta.sdp_vdif")
+        assert vlbimeta_node.command[:7] == [
+            "vlbimeta.py",
+            "/var/kat/data",
+            "1234567890",
+            "sdp_vdif",
+            "--dataset-stream-name",
+            "sdp_l0",
+            "--mode",
+        ]
+        assert vlbimeta_node.command[7] == "antab"
 
 
 def test_stream_classes():

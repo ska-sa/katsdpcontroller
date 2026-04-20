@@ -935,6 +935,11 @@ class SubarrayProduct:
             telstate_node.host = self.telstate_node.host
             telstate_node.address = self.telstate_node.address
             telstate_node.ports = dict(self.telstate_node.ports)
+            for stream in capture_block.configuration.by_class(product_config.VdifStream):
+                recorder_node = capture_block._nodes.get(f"vlbi.{stream.name}")
+                vlbimeta_node = nodes.get(f"vlbimeta.{stream.name}")
+                if recorder_node is not None and vlbimeta_node is not None:
+                    vlbimeta_node.logical_node.host = recorder_node.host
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch
             # queue, but that doesn't matter because our real tasks will block too.

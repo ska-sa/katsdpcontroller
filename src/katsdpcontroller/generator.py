@@ -3675,6 +3675,7 @@ def _make_vlbimeta(
     configuration: Configuration,
     capture_block_id: str,
     stream: product_config.VdifStream,
+    dataset_stream: product_config.VisStream,
 ) -> scheduler.LogicalNode:
     """Create a post-processing task for VLBI metadata extraction."""
     task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
@@ -3692,6 +3693,8 @@ def _make_vlbimeta(
         escape_format(DATA_VOL.container_path),
         escape_format(capture_block_id),
         escape_format(stream.name),
+        "--dataset-stream-name",
+        escape_format(dataset_stream.name),
         "--mode",
         configuration.options.vlbimeta.mode,
     ]
@@ -3721,9 +3724,27 @@ async def build_postprocess_logical_graph(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
 
+    cal_streams = list(configuration.by_class(product_config.CalStream))
+    if len(cal_streams) == 1:
+        vlbimeta_dataset_stream = cal_streams[0].vis
+    else:
+        vis_streams = list(configuration.by_class(product_config.VisStream))
+        if len(vis_streams) != 1:
+            raise ValueError(
+                "vlbimeta currently requires either exactly one sdp.cal stream or exactly one "
+                "sdp.vis stream"
+            )
+        vlbimeta_dataset_stream = vis_streams[0]
+
     for vdif_stream in configuration.by_class(product_config.VdifStream):
         if configuration.options.vlbimeta.mode != "disabled":
-            _make_vlbimeta(g, configuration, capture_block_id, vdif_stream)
+            _make_vlbimeta(
+                g,
+                configuration,
+                capture_block_id,
+                vdif_stream,
+                vlbimeta_dataset_stream,
+            )
 
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
