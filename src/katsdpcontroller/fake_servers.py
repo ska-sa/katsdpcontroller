@@ -16,6 +16,7 @@
 
 """Katcp device servers that emulate various container images."""
 
+import re
 import asyncio
 import json
 import numbers
@@ -27,6 +28,9 @@ from aiokatcp import ClockState, DeviceStatus, FailReply, Sensor, SensorSet, Tim
 
 from .tasks import FakeDeviceServer
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def _format_complex(value: numbers.Complex) -> str:
     """Format a complex number for a katcp request.
@@ -125,6 +129,33 @@ def _add_steady_state_timestamp_sensor(sensors: SensorSet) -> None:
     )
 
 
+def update_sensors(sensors, patterns):
+    for name, sensor in list(sensors.items()):
+        if any(regex.search(name) for regex in patterns):
+            now = time.time()
+            if sensor.stype == int:
+                if sensor.value == 0:
+                    sensor.set_value(1, Sensor.Status.NOMINAL, now)
+                else:
+                    sensor.set_value(0, Sensor.Status.NOMINAL, now)
+            if sensor.stype == float:
+                if sensor.value == 0.0:
+                    sensor.set_value(1.0, Sensor.Status.NOMINAL, now)
+                else:
+                    sensor.set_value(0.0, Sensor.Status.NOMINAL, now)
+            if sensor.stype == bool:
+                if sensor.value == True:
+                    sensor.set_value(False, Sensor.Status.NOMINAL, now)
+                else:
+                    sensor.set_value(True, Sensor.Status.NOMINAL, now)
+            if sensor.stype == str:
+                if sensor.value == "a":
+                    sensor.set_value("b", Sensor.Status.NOMINAL, now)
+                else:
+                    sensor.set_value("a", Sensor.Status.NOMINAL, now)
+            if sensor.stype == Timestamp:
+                sensor.set_value(Timestamp(time.time() + 1), Sensor.Status.NOMINAL, now)
+
 class FakeDsimDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -147,6 +178,22 @@ class FakeDsimDeviceServer(FakeDeviceServer):
 class FakeFgpuDeviceServer(FakeDeviceServer):
     N_POLS = 2
     DEFAULT_GAIN = 1.0
+
+    UPDATE_SENSOR_PATTERN_STRINGS = [
+        r"dig-rms-dbfs",
+        r"dig-clip-cnt",
+        r"feng-clip-cnt",
+        r".*rx.*timestamp",
+        r".*rx.*unixtime",
+        r".*time.*esterror",
+        r".*time.*maxerror",
+        r".*time.*state",
+        r".*time.*synchronised"
+    ]
+
+    UPDATE_SENSOR_PATTERNS = [
+        re.compile(p) for p in UPDATE_SENSOR_PATTERN_STRINGS
+    ]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -257,6 +304,25 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
+        self.start_sensor_updates()
+
+    def start_sensor_updates(self):
+        asyncio.create_task(self.update_sensors())
+
+    async def update_sensors(self):
+        try:
+            while True:
+                try:
+                    update_sensors(self.sensors, self.UPDATE_SENSOR_PATTERNS)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception('Error updating sensors.')
+
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+
 
     def _check_stream_name(self, stream_name: str) -> None:
         """Validate that a stream name matches one of the outputs.
@@ -316,6 +382,17 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
 
 
 class FakeXbgpuDeviceServer(FakeDeviceServer):
+
+    UPDATE_SENSOR_PATTERN_STRINGS = [
+        r"baseline-correlation-products.*rx.*synchronised",
+        r"\.xeng-clip-cnt",
+        r"\.tx\.next-timestamp"
+    ]
+
+    UPDATE_SENSOR_PATTERNS = [
+        re.compile(p) for p in UPDATE_SENSOR_PATTERN_STRINGS
+    ]
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         antennas = self.get_command_argument(int, "--array-size")
@@ -461,6 +538,7 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
+        self.start_sensor_updates()
 
     async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
         """Set beam weights."""
@@ -477,6 +555,23 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
             parts = [float(x) for x in coefficient_set.split(":")]
             params.extend(parts)
         self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
+
+    def start_sensor_updates(self):
+        asyncio.create_task(self.update_sensors())
+
+    async def update_sensors(self):
+        try:
+            while True:
+                try:
+                    update_sensors(self.sensors, self.UPDATE_SENSOR_PATTERNS)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception('Error updating sensors.')
+
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
 
 
 class FakeVgpuDeviceServer(FakeDeviceServer):
