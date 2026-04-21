@@ -266,7 +266,8 @@ class DevelopOptions:
         if vlbi_recorder_protocol not in self.VALID_VLBI_RECORDER_PROTOCOLS:
             valid = ", ".join(sorted(self.VALID_VLBI_RECORDER_PROTOCOLS))
             raise ValueError(
-                f"Unknown VLBI recorder protocol {vlbi_recorder_protocol!r}. Expected one of: {valid}"
+                f"Unknown VLBI recorder protocol {vlbi_recorder_protocol!r}. "
+                f"Expected one of: {valid}"
             )
         self.any_gpu = any_gpu
         self.disable_ibverbs = disable_ibverbs
