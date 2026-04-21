@@ -1770,6 +1770,28 @@ class TestController(BaseTestController):
         await exhaust_callbacks()
         assert dummy_sched.n_batch_tasks == 4  # 4 continuum, no spectral
 
+    async def test_capture_done_with_vlbimeta(
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        dummy_sched: DummyScheduler,
+    ) -> None:
+        """Checks that vlbimeta postprocessing is launched for a VDIF stream."""
+        config = json.loads(CONFIG)
+        config["config"]["vlbimeta"] = {"mode": "pass_through"}
+        await client.request("product-configure", SUBARRAY_PRODUCT, json.dumps(config))
+        await client.request("capture-init", CAPTURE_BLOCK)
+        cal_sensor = server.sensors["cal.1.capture-block-state"]
+        cal_sensor.value = b'{"1122334455": "capturing"}'
+        await client.request("capture-done")
+        cal_sensor.value = b"{}"
+        await exhaust_callbacks()
+
+        product = server.product
+        assert product is not None
+        assert product.capture_blocks == {}
+        assert dummy_sched.n_batch_tasks == 12  # Default postprocess tasks plus vlbimeta
+
     async def test_capture_done_busy(self, client: aiokatcp.Client):
         """Capture-done fails if an asynchronous operation is already in progress"""
         await self._test_busy(client, "capture-done")

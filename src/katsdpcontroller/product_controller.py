@@ -936,7 +936,7 @@ class SubarrayProduct:
             telstate_node.address = self.telstate_node.address
             telstate_node.ports = dict(self.telstate_node.ports)
             for stream in capture_block.configuration.by_class(product_config.VdifStream):
-                recorder_node = capture_block._nodes.get(f"vlbi.{stream.name}")
+                recorder_node = self._nodes.get(f"vlbi.{stream.name}")
                 vlbimeta_node = nodes.get(f"vlbimeta.{stream.name}")
                 if recorder_node is not None and vlbimeta_node is not None:
                     vlbimeta_node.logical_node.host = recorder_node.host
