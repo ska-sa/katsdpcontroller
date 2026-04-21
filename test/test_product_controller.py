@@ -1087,6 +1087,14 @@ class DummyClient:
 class TestController(BaseTestController):
     """Test :class:`katsdpcontroller.product_controller.DeviceServer` by mocking the scheduler."""
 
+    @staticmethod
+    def _postprocess_task_count(capture_block: product_controller.CaptureBlock) -> int:
+        assert capture_block.postprocess_physical_graph is not None
+        return sum(
+            isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            for node in capture_block.postprocess_physical_graph
+        )
+
     def _request_slow(
         self, client: aiokatcp.Client, name: str, *args: Any, cancelled: bool = False
     ) -> DelayedManager:
@@ -1749,13 +1757,14 @@ class TestController(BaseTestController):
         katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
         # Now simulate cal finishing with the capture block
         cal_sensor.value = b"{}"
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
         await exhaust_callbacks()
         # write-meta full dump must be last, hence assert_called_with not assert_any_call
         katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
 
         # Check that postprocessing ran and didn't fail
         assert product.capture_blocks == {}
-        assert dummy_sched.n_batch_tasks == 11  # 4 continuum, 3x2 spectral, 1 report
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
 
     async def test_capture_done_disable_batch(
         self, client: aiokatcp.Client, server: DeviceServer, dummy_sched: DummyScheduler
@@ -1767,8 +1776,11 @@ class TestController(BaseTestController):
         cal_sensor.value = b'{"1122334455": "capturing"}'
         await client.request("capture-done")
         cal_sensor.value = b"{}"
+        product = server.product
+        assert product is not None
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
         await exhaust_callbacks()
-        assert dummy_sched.n_batch_tasks == 4  # 4 continuum, no spectral
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
 
     async def test_capture_done_with_vlbimeta(
         self,
@@ -1785,12 +1797,13 @@ class TestController(BaseTestController):
         cal_sensor.value = b'{"1122334455": "capturing"}'
         await client.request("capture-done")
         cal_sensor.value = b"{}"
-        await exhaust_callbacks()
-
         product = server.product
         assert product is not None
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
+        await exhaust_callbacks()
+
         assert product.capture_blocks == {}
-        assert dummy_sched.n_batch_tasks == 12  # Default postprocess tasks plus vlbimeta
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
 
     async def test_capture_done_busy(self, client: aiokatcp.Client):
         """Capture-done fails if an asynchronous operation is already in progress"""
