@@ -1608,7 +1608,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         except Exception as exc:
             logger.error(
                 f"Failed to configure product {name}: {exc}",
-                exc_info=exc,
+                exc_info=True,
                 extra=dict(subarray_product_id=name),
             )
             raise FailReply(f"Failed to configure product {name}: {exc}") from exc
