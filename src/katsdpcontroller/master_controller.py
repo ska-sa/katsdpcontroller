@@ -1606,12 +1606,13 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             product = await self.product_configure(name, config_dict)
         except Exception as exc:
-            logger.error(
-                f"Failed to configure product {name}: {exc}",
-                exc_info=True,
+            logger.exception(
+                "Failed to configure product %s: %s",
+                name,
+                exc,
                 extra=dict(subarray_product_id=name),
             )
-            raise FailReply(f"Failed to configure product {name}: {exc}") from exc
+            raise
         assert product.host is not None and product.ports
         return product.name, str(product.host), product.ports["katcp"]
 
