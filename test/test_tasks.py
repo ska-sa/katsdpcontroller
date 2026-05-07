@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2013-2023, National Research Foundation (SARAO)
+# Copyright (c) 2013-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -14,7 +14,16 @@
 # limitations under the License.
 ################################################################################
 
-from katsdpcontroller.tasks import KatcpTransition
+import asyncio
+from types import SimpleNamespace
+from unittest import mock
+
+from aiokatcp import Sensor
+import katsdptelstate
+import katsdptelstate.aio
+import pytest
+
+from katsdpcontroller.tasks import KatcpTransition, TelstateSensorHistoryObserver
 
 
 class TestKatcpTransition:
@@ -31,3 +40,41 @@ class TestKatcpTransition:
             repr(KatcpTransition("name", "arg1", True, timeout=10))
             == "KatcpTransition('name', 'arg1', True, timeout=10)"
         )
+
+
+class TestTelstateSensorHistoryObserver:
+    @pytest.mark.asyncio
+    async def test_persist_to_active_capture_block(self) -> None:
+        sensor = Sensor(
+            float,
+            "gpucbf_tied_array_resampled_voltage.x0.mean-power",
+            default=0.0,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+        telstate = katsdptelstate.aio.TelescopeState()
+        task = SimpleNamespace(
+            subarray_product=SimpleNamespace(
+                telstate=telstate,
+                current_capture_block=None,
+            ),
+            _capture_blocks=set(),
+            logger=mock.Mock(),
+        )
+        observer = TelstateSensorHistoryObserver(
+            sensor, task, "gpucbf_tied_array_resampled_voltage.x0.mean-power"
+        )
+        await asyncio.sleep(0)
+        task.subarray_product.current_capture_block = SimpleNamespace(name="cbid")
+        sensor.set_value(12.5, timestamp=34567.0)
+        await asyncio.sleep(0)
+        history = await telstate.view("cbid").get_range(
+            "gpucbf_tied_array_resampled_voltage.x0.mean-power"
+        )
+        assert history == [(12.5, 34567.0)]
+        assert (
+            await telstate.view("cbid").key_type(
+                "gpucbf_tied_array_resampled_voltage.x0.mean-power"
+            )
+            == katsdptelstate.KeyType.MUTABLE
+        )
+        observer.close()
