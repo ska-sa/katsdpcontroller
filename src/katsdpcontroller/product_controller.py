@@ -905,6 +905,8 @@ class SubarrayProduct:
         """
         assert self.telstate is not None
         assert self.telstate_node is not None
+        logger.info('telstate_node is %s', self.telstate_node)
+        logger.info('telstate_endpoint is %s', self.telstate_endpoint)
         try:
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING
@@ -923,6 +925,8 @@ class SubarrayProduct:
             telstate_node = nodes["telstate"]
             telstate_node.host = self.telstate_node.host
             telstate_node.ports = dict(self.telstate_node.ports)
+            logger.info("telstate_node host %s", telstate_node.host)
+            logger.info("telstate_node ports %s", telstate_node.ports) 
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch
             # queue, but that doesn't matter because our real tasks will block too.
