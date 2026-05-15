@@ -905,8 +905,8 @@ class SubarrayProduct:
         """
         assert self.telstate is not None
         assert self.telstate_node is not None
-        logger.info('telstate_node is %s', self.telstate_node)
-        logger.info('telstate_endpoint is %s', self.telstate_endpoint)
+        logger.info("telstate_node is %s", self.telstate_node)
+        logger.info("telstate_endpoint is %s", self.telstate_endpoint)
         try:
             await self.exec_transitions(CaptureBlockState.POSTPROCESSING, False, capture_block)
             capture_block.state = CaptureBlockState.POSTPROCESSING

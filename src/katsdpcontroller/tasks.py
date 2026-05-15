@@ -709,6 +709,7 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
         args = super().subst_args(resolver)
         if self.capture_block_id is not None:
             args["capture_block_id"] = self.capture_block_id
+        logger.info("endpoint items are %s", self.endpoints.items())
         args["endpoints_vector"] = {
             name: endpoint_list_parser(endpoint.port)(endpoint.host)
             for name, endpoint in self.endpoints.items()
