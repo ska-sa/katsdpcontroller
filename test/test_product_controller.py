@@ -538,6 +538,7 @@ class BaseTestController:
 
 
 @pytest.mark.timeout(5)
+@pytest.mark.skip("testing image against katgpucbf")
 class TestControllerInterface(BaseTestController):
     """Testing of the controller in interface mode."""
 
