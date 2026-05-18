@@ -868,7 +868,7 @@ class SubarrayProduct:
         missing: Set[str] = set()  # Task names we're still waiting for
         future = asyncio.get_running_loop().create_future()
         for task in self.physical_graph:
-            if task.logical_node.task_type == 'v':
+            if task.logical_node.task_type == "v":
                 continue
             if isinstance(task, tasks.ProductPhysicalTaskMixin):
                 sensor = self.sdp_controller.sensors.get(f"{task.name}.rx.device-status")
