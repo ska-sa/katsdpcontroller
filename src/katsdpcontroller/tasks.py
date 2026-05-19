@@ -371,6 +371,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
     ) -> None:
         # Turn .status into a property that updates a sensor
         self._status = None
+        self.task_type = logical_task.task_type
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
         self.capture_block_id = capture_block_id  # Only useful for batch tasks
