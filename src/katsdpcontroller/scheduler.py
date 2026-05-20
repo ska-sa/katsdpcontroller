@@ -272,8 +272,6 @@ from addict import Dict
 from decorator import decorator
 from katsdptelstate.endpoint import Endpoint
 
-from katsdpcontroller.tasks import ProductLogicalTask
-
 from . import schemas
 from .defaults import DNS_ATTEMPTS, DNS_RETRY_TIME, DNS_TIMEOUT, LOCALHOST
 
@@ -2565,9 +2563,9 @@ class FakePhysicalTask(PhysicalNode):
        It does not currently handle task_stats, start_time, stop_time or status.
     """
 
-    logical_node: ProductLogicalTask
+    logical_node: LogicalTask
 
-    def __init__(self, logical_task: ProductLogicalTask) -> None:
+    def __init__(self, logical_task: LogicalTask) -> None:
         super().__init__(logical_task)
         self.queue = None
         self.host = LOCALHOST
@@ -2830,10 +2828,7 @@ def subgraph(graph, edge_filter, nodes=None):
         nodes = graph.nodes()
     if not callable(edge_filter):
         attr = edge_filter
-
-        def edge_filter(data):
-            return bool(data.get(attr))  # noqa: E731
-
+        edge_filter = lambda data: bool(data.get(attr))  # noqa: E731
     nodes = set(nodes)
     out = graph.__class__()
     out.add_nodes_from(nodes)
