@@ -2828,7 +2828,10 @@ def subgraph(graph, edge_filter, nodes=None):
         nodes = graph.nodes()
     if not callable(edge_filter):
         attr = edge_filter
-        edge_filter = lambda data: bool(data.get(attr))  # noqa: E731
+
+        def edge_filter(data):
+            return bool(data.get(attr))  # noqa: E731
+
     nodes = set(nodes)
     out = graph.__class__()
     out.add_nodes_from(nodes)

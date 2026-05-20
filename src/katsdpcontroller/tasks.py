@@ -362,6 +362,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         ingest.sdp_l0.1.input_rate
     """
 
+    logical_node: ProductLogicalTask
+
     def __init__(
         self,
         logical_task: ProductLogicalTask,
@@ -370,8 +372,8 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         capture_block_id: str,
     ) -> None:
         # Turn .status into a property that updates a sensor
+        assert isinstance(self.logical_node, ProductLogicalTask)
         self._status = None
-        self.task_type = logical_task.task_type
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
         self.capture_block_id = capture_block_id  # Only useful for batch tasks
