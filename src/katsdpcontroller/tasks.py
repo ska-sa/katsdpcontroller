@@ -363,6 +363,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
     """
 
     logical_node: ProductLogicalTask
+    name: str
 
     def __init__(
         self,
@@ -685,8 +686,6 @@ class ProductPhysicalTask(ConfigMixin, ProductPhysicalTaskMixin, scheduler.Physi
     - Registers the service with consul for Prometheus metrics, if there is
       a port called ``prometheus``.
     """
-
-    logical_node: ProductLogicalTask
 
     def __init__(self, logical_task, sdp_controller, subarray_product, capture_block_id):
         scheduler.PhysicalTask.__init__(self, logical_task)
