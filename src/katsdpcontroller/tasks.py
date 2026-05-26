@@ -372,7 +372,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
         capture_block_id: str,
     ) -> None:
         # Turn .status into a property that updates a sensor
-        assert isinstance(self.logical_node, ProductLogicalTask)
         self._status = None
         self.sdp_controller = sdp_controller
         self.subarray_product = subarray_product
