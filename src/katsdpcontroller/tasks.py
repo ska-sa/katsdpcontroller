@@ -363,7 +363,6 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
     """
 
     logical_node: ProductLogicalTask
-    name: str
 
     def __init__(
         self,
