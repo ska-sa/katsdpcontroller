@@ -152,6 +152,11 @@ class InsufficientRequesterVolume(InsufficientRequester):
         return f"{self.task.name} (volume {self.request.name})"
 
 
+class NoAgentsError(InsufficientResourcesError):
+    def __str__(self) -> str:
+        return "No usable (non-maintenance) agents were found"
+
+
 class TaskNoAgentError(InsufficientResourcesError):
     """No agent was suitable for a task.
 
@@ -538,6 +543,8 @@ def diagnose_insufficient(
         include non-tasks, which will be ignored.
     """
     with decimal.localcontext(DECIMAL_CONTEXT):
+        if not agents:
+            raise NoAgentsError()
         # Non-tasks aren't relevant, so filter them out.
         tasks = [node for node in nodes if isinstance(node, PhysicalTask)]
 
