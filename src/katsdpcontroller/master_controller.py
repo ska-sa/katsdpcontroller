@@ -1603,7 +1603,16 @@ class DeviceServer(aiokatcp.DeviceServer):
             config_dict = load_json_dict(config)
         except ValueError as exc:
             raise FailReply(f"Config is not valid JSON: {exc}") from None
-        product = await self.product_configure(name, config_dict)
+        try:
+            product = await self.product_configure(name, config_dict)
+        except Exception as exc:
+            logger.exception(
+                "Failed to configure product %s: %s",
+                name,
+                exc,
+                extra=dict(subarray_product_id=name),
+            )
+            raise
         assert product.host is not None and product.ports
         return product.name, str(product.host), product.ports["katcp"]
 

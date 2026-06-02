@@ -24,6 +24,7 @@ from katsdpcontroller.diagnose_insufficient import (
     InsufficientRequesterVolume,
     InsufficientResource,
     InsufficientResourcesError,
+    NoAgentsError,
     ResourceGroup,
     TaskHostMissingError,
     TaskInsufficientResourcesError,
@@ -145,6 +146,11 @@ class TestDiagnoseInsufficient:
         self.physical_tasks = [task.physical_factory(task) for task in self.logical_tasks]
         for i, task in enumerate(self.physical_tasks):
             task.name = f"physical{i}"
+
+    def test_no_agents(self):
+        """There were no offers received."""
+        with pytest.raises(NoAgentsError, match=r"No usable \(non-maintenance\) agents were found"):
+            diagnose_insufficient([], self.physical_tasks)
 
     def test_task_insufficient_scalar_resource(self):
         """A task requests more of a scalar resource than any agent has"""

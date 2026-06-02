@@ -869,6 +869,11 @@ class SubarrayProduct:
         future = asyncio.get_running_loop().create_future()
         for task in self.physical_graph:
             if isinstance(task, tasks.ProductPhysicalTaskMixin):
+                # V Engine currently doesn't support this check, as it only starts after the
+                # capture-start signal.
+                # TODO(NGC-1977): Improve this.
+                if task.logical_node.task_type == "v":
+                    continue
                 sensor = self.sdp_controller.sensors.get(f"{task.name}.rx.device-status")
                 if sensor is not None and sensor.status != Sensor.Status.NOMINAL:
                     sensors.append(sensor)
