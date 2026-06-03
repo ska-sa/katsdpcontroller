@@ -2852,6 +2852,8 @@ def _make_beamformer_engineering_pol(
         bf_ingest.command = ["schedrr", "capambel", "-c", "cap_net_raw+p", "--", "bf_ingest.py"]
         bf_ingest.capabilities.append("NET_RAW")  # For ibverbs raw QPs
     if timeplot:
+        # Actual usage is about 600MB, more-or-less independent of the
+        # parameters.
         bf_ingest.mem = 1024
     elif not ram:
         # SSD-backed capture. HDF5 chunk writing can exceed 1 GiB allocation
