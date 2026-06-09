@@ -1138,7 +1138,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                 digest = response.headers["Docker-Content-Digest"]
                 manifest_data = await response.json(content_type=None)
         except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
+            raise ImageError(f"Failed to get index from {manifest_url}: {error}") from error
         except KeyError:
             raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
         except ValueError:
@@ -1174,21 +1174,35 @@ class HTTPImageLookup(_RegistryImageLookup):
                 response.raise_for_status()
                 digest = response.headers["Docker-Content-Digest"]
                 manifest_data = await response.json(content_type=None)
-        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
+        except asyncio.TimeoutError as error:
+            raise ImageError(
+                f"Failed to get digest from legacy manifest {manifest_url}: {error}"
+            ) from error
         except KeyError:
             raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
         except ValueError:
             raise ImageError(f"Invalid manifest for {manifest_url}")
-        try:
-            content_type = manifest_data["config"]["mediaType"]
-            if content_type != "application/vnd.docker.container.image.v1+json":
-                raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
-            image_blob = manifest_data["config"]["digest"]
-            valid_manifest = True
-        except (KeyError, TypeError):
-            # try the new manifest type
-            pass
+        except aiohttp.client.ClientError as error:
+            if isinstance(error, aiohttp.client.ClientResponseError) and error.status == 404:
+                # try the new manifest type
+                pass
+            else:
+                raise ImageError(
+                    f"Failed to get digest from legacy manifest {manifest_url}: {error}"
+                ) from error
+        else:
+            # the legacy manifest was data was retrieved successfully
+            try:
+                content_type = manifest_data["config"]["mediaType"]
+                if content_type != "application/vnd.docker.container.image.v1+json":
+                    raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
+                image_blob = manifest_data["config"]["digest"]
+                valid_manifest = True
+            except (KeyError, TypeError):
+                # the legacy manifest was not a valid manifest mediaType/format
+                # try the new manifest type
+                pass
+
         if not valid_manifest:
             headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.manifest.v1+json"}
             if auth_header:
