@@ -1217,7 +1217,9 @@ class HTTPImageLookup(_RegistryImageLookup):
                     digest = response.headers["Docker-Content-Digest"]
                     manifest_data = await response.json(content_type=None)
             except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-                raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
+                raise ImageError(
+                    f"Failed to get OCI digest from {manifest_url}: {error}"
+                ) from error
             except KeyError:
                 raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
             except ValueError:
