@@ -1121,6 +1121,9 @@ class HTTPImageLookup(_RegistryImageLookup):
         registry_url = registry_url.with_path("/v2" + registry_url.path)
         repo_url = registry_url / repo
         manifest_url = repo_url / "manifests" / tag
+        # first we check the old manifest type
+        # TODO: Remove once docker registry updated and all images pushed
+        valid_manifest: bool = False
         headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.v2+json"}
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
@@ -1139,13 +1142,44 @@ class HTTPImageLookup(_RegistryImageLookup):
             raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
         except ValueError:
             raise ImageError(f"Invalid manifest for {manifest_url}")
-
         try:
             content_type = manifest_data["config"]["mediaType"]
             if content_type != "application/vnd.docker.container.image.v1+json":
                 raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
             image_blob = manifest_data["config"]["digest"]
+            valid_manifest = True
         except (KeyError, TypeError):
+            # try the new manifest type
+            pass
+        if not valid_manifest:
+            headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.index.v1+json"}
+            if auth_header:
+                headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
+            try:
+                # Use a lowish timeout, so that we don't wedge the entire launch if
+                # there is a connection problem.
+                async with session.get(
+                    manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    digest = response.headers["Docker-Content-Digest"]
+                    manifest_data = await response.json(content_type=None)
+            except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+                raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
+            except KeyError:
+                raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
+            except ValueError:
+                raise ImageError(f"Invalid manifest for {manifest_url}")
+            try:
+                content_type = manifest_data["config"]["mediaType"]
+                if content_type != "application/vnd.docker.container.image.v1+json":
+                    raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
+                image_blob = manifest_data["config"]["digest"]
+                valid_manifest = True
+            except (KeyError, TypeError):
+                # error on if
+                pass
+        if not valid_manifest:
             raise ImageError(f"Could not find image blob in {manifest_url}")
 
         image_url = repo_url / "blobs" / image_blob
@@ -2828,7 +2862,10 @@ def subgraph(graph, edge_filter, nodes=None):
         nodes = graph.nodes()
     if not callable(edge_filter):
         attr = edge_filter
-        edge_filter = lambda data: bool(data.get(attr))  # noqa: E731
+
+        def edge_filter(data):
+            return bool(data.get(attr))  # noqa: E731
+
     nodes = set(nodes)
     out = graph.__class__()
     out.add_nodes_from(nodes)
