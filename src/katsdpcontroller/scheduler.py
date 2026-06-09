@@ -1121,6 +1121,44 @@ class HTTPImageLookup(_RegistryImageLookup):
         registry_url = registry_url.with_path("/v2" + registry_url.path)
         repo_url = registry_url / repo
         manifest_url = repo_url / "manifests" / tag
+        # first we check if the tag is a image or a index
+        # mediatypes defined at:
+        # https://github.com/opencontainers/image-spec/blob/main/specs-go/v1/mediatype.go
+        manifest_index = True
+        headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.list.v2+json"}
+        if auth_header:
+            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
+        try:
+            # Use a lowish timeout, so that we don't wedge the entire launch if
+            # there is a connection problem.
+            async with session.get(
+                manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
+            ) as response:
+                response.raise_for_status()
+                digest = response.headers["Docker-Content-Digest"]
+                manifest_data = await response.json(content_type=None)
+        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+            raise ImageError(f"Failed to get digest from {manifest_url}: {error}") from error
+        except KeyError:
+            raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
+        except ValueError:
+            raise ImageError(f"Invalid manifest for {manifest_url}")
+        try:
+            content_type = manifest_data["mediaType"]
+            if content_type != "application/vnd.docker.container.image.v1+json":
+                manifest_index = False
+        except (KeyError, TypeError):
+            # probably not a index
+            manifest_index = False
+
+        if manifest_index:
+            linux_digest = (
+                manifest_data["manifests"]
+                .filter(lambda x: x["platform"]["os"] == "linux")
+                .first()["digest"]
+            )
+            manifest_url = repo_url / "manifests" / linux_digest
+
         # first we check the old manifest type
         # TODO: Remove once docker registry updated and all images pushed
         valid_manifest: bool = False
@@ -1152,7 +1190,7 @@ class HTTPImageLookup(_RegistryImageLookup):
             # try the new manifest type
             pass
         if not valid_manifest:
-            headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.index.v1+json"}
+            headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.manifest.v1+json"}
             if auth_header:
                 headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
             try:
@@ -1172,7 +1210,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                 raise ImageError(f"Invalid manifest for {manifest_url}")
             try:
                 content_type = manifest_data["config"]["mediaType"]
-                if content_type != "application/vnd.docker.container.image.v1+json":
+                if content_type != "application/vnd.oci.image.manifest.v1+json":
                     raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
                 image_blob = manifest_data["config"]["digest"]
                 valid_manifest = True
