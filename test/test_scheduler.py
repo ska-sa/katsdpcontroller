@@ -433,19 +433,6 @@ class TestHTTPImageLookup:
         # payloads are stripped down to the essentials needed by the test.
         rmock.get(
             url,
-            content_type="application/vnd.oci.image.index.v1+json",
-            headers={
-                "Content-Length": "1234",
-                "Docker-Content-Digest": digest,
-                "Docker-Distribution-Api-Version": "registry/2.0",
-                "Etag": f'"{digest}"',
-                "X-Content-Type-Options": "nosniff",
-                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
-            },
-            status=404,
-        )
-        rmock.get(
-            url,
             content_type="application/vnd.docker.distribution.manifest.v2+json",
             headers={
                 "Content-Length": "1234",
@@ -526,19 +513,6 @@ class TestHTTPImageLookup:
             **kwargs,
         )
         manifest_url = url.parent.parent / "manifests/sha256:cafebeef"
-        rmock.get(
-            manifest_url,
-            content_type="application/vnd.docker.distribution.manifest.v2+json",
-            headers={
-                "Content-Length": "1234",
-                "Docker-Content-Digest": digest,
-                "Docker-Distribution-Api-Version": "registry/2.0",
-                "Etag": f'"{digest}"',
-                "X-Content-Type-Options": "nosniff",
-                "Date": "Thu, 26 Jan 2017 11:32:22 GMT",
-            },
-            status=404,
-        )
         rmock.get(
             manifest_url,
             content_type="application/vnd.oci.image.manifest.v1+json",
