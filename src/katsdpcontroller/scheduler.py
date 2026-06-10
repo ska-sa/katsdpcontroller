@@ -1125,11 +1125,16 @@ class ManifestType(Enum):
             return ""
 
     def validate(self, manifest_data: Any) -> None:
-        if self._get_response_media_type(manifest_data) != self.media_type():
+        try:
+            if self._get_response_media_type(manifest_data) != self.media_type():
+                raise UnsupportedManifestType(
+                    f"Invalid mediatype found: {self._get_response_media_type(manifest_data)},"
+                    f" expected: {self.media_type()}"
+                )
+        except KeyError as error:
             raise UnsupportedManifestType(
-                f"Invalid mediatype found: {self._get_response_media_type(manifest_data)},"
-                f" expected: {self.media_type()}"
-            )
+                f"Invalid manifest response for type {self.media_type()}"
+            ) from error
 
 
 class HTTPImageLookup(_RegistryImageLookup):

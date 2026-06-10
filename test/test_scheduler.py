@@ -433,6 +433,19 @@ class TestHTTPImageLookup:
         # payloads are stripped down to the essentials needed by the test.
         rmock.get(
             url,
+            content_type="application/vnd.oci.image.index.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            status=404,
+        )
+        rmock.get(
+            url,
             content_type="application/vnd.docker.distribution.manifest.v2+json",
             headers={
                 "Content-Length": "1234",
@@ -482,6 +495,86 @@ class TestHTTPImageLookup:
             **kwargs,
         )
 
+    def _prepare_oci_image(self, rmock, url, digest, **kwargs) -> None:
+        url = URL(url)
+        # Response headers are modelled on some actual registry responses, but
+        # payloads are stripped down to the essentials needed by the test.
+        rmock.get(
+            url,
+            content_type="application/vnd.oci.image.index.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            payload={
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:cafebeef",
+                        "platform": {
+                            "os": "linux",
+                            "arch": "amd64",
+                        },
+                    }
+                ],
+            },
+            **kwargs,
+        )
+        manifest_url = url.parent.parent / "manifests/sha256:cafebeef"
+        rmock.get(
+            manifest_url,
+            content_type="application/vnd.docker.distribution.manifest.v2+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Thu, 26 Jan 2017 11:32:22 GMT",
+            },
+            status=404,
+        )
+        rmock.get(
+            manifest_url,
+            content_type="application/vnd.oci.image.manifest.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Thu, 26 Jan 2017 11:32:22 GMT",
+            },
+            payload={
+                "config": {
+                    "mediaType": "application/vnd.oci.image.config.v1+json",
+                    "digest": "sha256:caacffddf",
+                }
+            },
+            **kwargs,
+        )
+        blob_url = url.parent.parent / "blobs/sha256:caacffddf"
+        rmock.get(
+            blob_url,
+            content_type="application/octet-stream",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "max-age=31536000",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Wed, 07 Dec 2022 09:16:26 GMT",
+            },
+            payload={"config": {"Labels": {"label1": "value1"}}},
+            **kwargs,
+        )
+
     @staticmethod
     def _check_basic(auth: aiohttp.BasicAuth) -> Callable:
         """Create aioresponses callback to ensure that basic auth credentials were provided."""
@@ -511,6 +604,19 @@ class TestHTTPImageLookup:
     async def test_relative(self, rmock) -> None:
         """Resolve an image without a registry, using the default registry."""
         self._prepare_image(
+            rmock,
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+            self.digest1,
+            callback=self._check_basic(self.auth1),
+        )
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        image = await lookup("myimage", "latest")
+        assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
+        assert image.labels["label1"] == "value1"
+
+    async def test_oci_image(self, rmock) -> None:
+        """Resolve an image without a registry, using the default registry."""
+        self._prepare_oci_image(
             rmock,
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             self.digest1,
