@@ -247,6 +247,7 @@ from enum import Enum
 
 # Note: don't include Dict here, because it conflicts with addict.Dict.
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncContextManager,
     ClassVar,
@@ -1098,85 +1099,37 @@ class HTTPImageLookup(_RegistryImageLookup):
         self._authconfig = docker.auth.load_config()
 
     @staticmethod
-    async def _get_image(
+    async def _get_manifest_config_with_type(
         session: aiohttp.ClientSession,
-        registry: str,
-        repo: str,
-        tag: str,
+        manifest_url: yarl.URL,
         ssl_context: Optional[ssl.SSLContext],
         auth_header: Optional[str],
-    ) -> Image:
-        """Make a single attempt to get the image information.
-
-        This fails if there is an authorization error, leaving the caller to
-        obtain a token and try again.
-        """
-        if "://" not in registry:
-            # If no scheme is specified, assume https
-            registry = "https://" + registry
-        registry_url = yarl.URL(registry)
-        # The /v2 for the API has to inserted at the root. So a registry argument of
-        # foo.bar/baz with repository spam needs be accessed at
-        # https://foo.bar/v2/baz/spam.
-        registry_url = registry_url.with_path("/v2" + registry_url.path)
-        repo_url = registry_url / repo
-        manifest_url = repo_url / "manifests" / tag
-        # first we check if the tag is a image or a index
-        # mediatypes defined at:
-        # https://github.com/opencontainers/image-spec/blob/main/specs-go/v1/mediatype.go
-        manifest_index = True
-        headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.list.v2+json"}
+        manifest_type: str,  # TODO: collapse these two into one enum and map?
+        expected_media_type: str,
+    ) -> Tuple[str, str, bool]:
+        """Get the index of the manifest for the given image."""
+        headers = {aiohttp.hdrs.ACCEPT: manifest_type}
+        image_blob = ""
+        valid_manifest = False
+        digest = ""
         if auth_header:
             headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
         try:
+            manifest_data = None
             # Use a lowish timeout, so that we don't wedge the entire launch if
             # there is a connection problem.
             async with session.get(
-                manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
-            ) as response:
-                response.raise_for_status()
-                digest = response.headers["Docker-Content-Digest"]
-                manifest_data = await response.json(content_type=None)
-        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f"Failed to get index from {manifest_url}: {error}") from error
-        except KeyError:
-            raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
-        except ValueError:
-            raise ImageError(f"Invalid manifest for {manifest_url}")
-        try:
-            content_type = manifest_data["mediaType"]
-            if content_type != "application/vnd.docker.container.image.v1+json":
-                manifest_index = False
-        except (KeyError, TypeError):
-            # probably not a index
-            manifest_index = False
-
-        if manifest_index:
-            linux_digest = (
-                manifest_data["manifests"]
-                .filter(lambda x: x["platform"]["os"] == "linux")
-                .first()["digest"]
-            )
-            manifest_url = repo_url / "manifests" / linux_digest
-
-        # first we check the old manifest type
-        # TODO: Remove once docker registry updated and all images pushed
-        valid_manifest: bool = False
-        headers = {aiohttp.hdrs.ACCEPT: "application/vnd.docker.distribution.manifest.v2+json"}
-        if auth_header:
-            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
-        try:
-            # Use a lowish timeout, so that we don't wedge the entire launch if
-            # there is a connection problem.
-            async with session.get(
-                manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
+                manifest_url,
+                timeout=15,
+                ssl_context=ssl_context,
+                headers=headers,
             ) as response:
                 response.raise_for_status()
                 digest = response.headers["Docker-Content-Digest"]
                 manifest_data = await response.json(content_type=None)
         except asyncio.TimeoutError as error:
             raise ImageError(
-                f"Failed to get digest from legacy manifest {manifest_url}: {error}"
+                f"Failed to get digest from {manifest_type} manifest at {manifest_url}: {error}"
             ) from error
         except KeyError:
             raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
@@ -1194,53 +1147,137 @@ class HTTPImageLookup(_RegistryImageLookup):
             # the legacy manifest was data was retrieved successfully
             try:
                 content_type = manifest_data["config"]["mediaType"]
-                if content_type != "application/vnd.docker.container.image.v1+json":
+                if content_type != expected_media_type:
                     raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
-                image_blob = manifest_data["config"]["digest"]
+                image_blob = str(manifest_data["config"]["digest"])
                 valid_manifest = True
             except (KeyError, TypeError):
                 # the legacy manifest was not a valid manifest mediaType/format
                 # try the new manifest type
                 pass
+        return image_blob, digest, valid_manifest
 
-        if not valid_manifest:
-            headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.manifest.v1+json"}
-            if auth_header:
-                headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
-            try:
-                # Use a lowish timeout, so that we don't wedge the entire launch if
-                # there is a connection problem.
-                async with session.get(
-                    manifest_url, timeout=15, ssl_context=ssl_context, headers=headers
-                ) as response:
-                    response.raise_for_status()
-                    digest = response.headers["Docker-Content-Digest"]
-                    manifest_data = await response.json(content_type=None)
-            except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-                raise ImageError(
-                    f"Failed to get OCI digest from {manifest_url}: {error}"
-                ) from error
-            except KeyError:
-                raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
-            except ValueError:
-                raise ImageError(f"Invalid manifest for {manifest_url}")
-            try:
-                content_type = manifest_data["config"]["mediaType"]
-                if content_type != "application/vnd.oci.image.manifest.v1+json":
-                    raise ImageError(f"Unknown mediaType {content_type!r} in {manifest_url}")
-                image_blob = manifest_data["config"]["digest"]
-                valid_manifest = True
-            except (KeyError, TypeError):
-                # error on if
+    @staticmethod
+    async def _get_manifest_digest(
+        session: aiohttp.ClientSession,
+        repo_url: yarl.URL,
+        tag: str,
+        ssl_context: Optional[ssl.SSLContext],
+        auth_header: Optional[str],
+    ) -> Tuple[str, str, str]:
+        """Get the digest of the manifest for the given image."""
+
+        manifest_url = repo_url / "manifests" / tag
+        # First, we check if the tag is an image or an index.
+        # Media types are defined at:
+        # https://github.com/opencontainers/image-spec/blob/main/specs-go/v1/mediatype.go
+        manifest_index = False
+        manifest_data = None
+        headers = {aiohttp.hdrs.ACCEPT: "application/vnd.oci.image.index.v1+json"}
+        if auth_header:
+            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
+        try:
+            # Use a lowish timeout, so that we don't wedge the entire launch if
+            # there is a connection problem.
+            async with session.get(
+                manifest_url,
+                timeout=15,
+                ssl_context=ssl_context,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                digest = response.headers["Docker-Content-Digest"]
+                manifest_data = await response.json(content_type=None)
+                if manifest_data["mediaType"] == "application/vnd.oci.image.index.v1+json":
+                    manifest_index = True
+        except asyncio.TimeoutError as error:
+            raise ImageError(f"Failed to get index from {manifest_url}: {error}") from error
+        except KeyError:
+            raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
+        except ValueError:
+            raise ImageError(f"Invalid manifest for {manifest_url}")
+        except aiohttp.client.ClientError as error:
+            if isinstance(error, aiohttp.client.ClientResponseError) and error.status == 404:
                 pass
-        if not valid_manifest:
-            raise ImageError(f"Could not find image blob in {manifest_url}")
+            else:
+                raise ImageError(f"Failed to get index from {manifest_url}: {error}") from error
+
+        if manifest_index:
+            try:
+                if TYPE_CHECKING:
+                    assert manifest_data is not None
+                linux_digest = next(
+                    manifest["digest"]
+                    for manifest in manifest_data["manifests"]
+                    if manifest["platform"]["os"] == "linux"
+                )
+            except StopIteration:
+                raise ImageError(f"No linux manifest found in index for {manifest_url}")
+            manifest_url = repo_url / "manifests" / linux_digest
+
+        # Get the image digest from manifest, starting with the old manifest format
+        # TODO: Remove old format once docker registry updated and all images pushed use oci format
+        for content_type, expected_media_type in [
+            (
+                "application/vnd.docker.distribution.manifest.v2+json",
+                "application/vnd.docker.container.image.v1+json",
+            ),
+            (
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.oci.image.config.v1+json",
+            ),
+        ]:
+            (
+                image_blob,
+                digest,
+                valid_manifest,
+            ) = await HTTPImageLookup._get_manifest_config_with_type(
+                session, manifest_url, ssl_context, auth_header, content_type, expected_media_type
+            )
+            if valid_manifest:
+                return image_blob, content_type, digest
+
+        raise ImageError(f"Could not find any valid image blob in {manifest_url}")
+
+    @staticmethod
+    async def _get_image(
+        session: aiohttp.ClientSession,
+        registry: str,
+        repo: str,
+        tag: str,
+        ssl_context: Optional[ssl.SSLContext],
+        auth_header: Optional[str],
+    ) -> Image:
+        """Make a single attempt to get the image information.
+
+        This fails if there is an authorization error, leaving the caller to
+        obtain a token and try again.
+        """
+        if "://" not in registry:
+            # If no scheme is specified, assume https
+            registry = "https://" + registry
+
+        registry_url = yarl.URL(registry)
+        # The /v2 for the API has to inserted at the root. So a registry argument of
+        # foo.bar/baz with repository spam needs be accessed at
+        # https://foo.bar/v2/baz/spam.
+        registry_url = registry_url.with_path("/v2" + registry_url.path)
+        repo_url = registry_url / repo
+
+        image_blob, content_type, digest = await HTTPImageLookup._get_manifest_digest(
+            session, repo_url, tag, ssl_context, auth_header
+        )
 
         image_url = repo_url / "blobs" / image_blob
-        headers[aiohttp.hdrs.ACCEPT] = content_type
+        headers = {aiohttp.hdrs.ACCEPT: content_type}
+        if auth_header:
+            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
         try:
             async with session.get(
-                image_url, timeout=15, ssl_context=ssl_context, headers=headers
+                image_url,
+                timeout=15,
+                ssl_context=ssl_context,
+                headers=headers,
             ) as response:
                 response.raise_for_status()
                 # Docker registry returns Content-Type of
