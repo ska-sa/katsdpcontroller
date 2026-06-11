@@ -1668,7 +1668,7 @@ def _make_vgpu(
     # TODO: To ensure vgpu doesn't share the GPU with anything else.
     # Revisit once vgpu is complete.
     vgpu.gpus[0].compute = 1.0
-    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
+    vgpu.gpus[0].mem = (-245 * 4 * 128) / stream.bandwidth + 6648 + 1300
 
     vgpu.command = (
         ["schedrr"]
