@@ -32,7 +32,7 @@ import pytest
 import yarl
 from aiokatcp import SensorSet
 
-from katsdpcontroller import defaults, generator, product_config
+from katsdpcontroller import defaults, generator, product_config, schemas
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -1878,6 +1878,30 @@ class TestValidate:
         with pytest.raises(jsonschema.ValidationError):
             product_config._validate(config)
 
+    def test_versions_include_4_8(self) -> None:
+        assert "4.8" in {str(version) for version in schemas.PRODUCT_CONFIG.versions}
+
+    def test_sdp_vdif_requires_4_8(self) -> None:
+        config = json.loads(CONFIG)
+        config["version"] = "4.7"
+        with pytest.raises(jsonschema.ValidationError):
+            product_config._validate(config)
+
+    def test_sdp_vdif_accepts_4_8(self) -> None:
+        product_config._validate(json.loads(CONFIG))
+
+    def test_sdp_vdif_rejects_extra_keys(self) -> None:
+        config = json.loads(CONFIG)
+        config["outputs"]["sdp_vdif"]["extra"] = True
+        with pytest.raises(jsonschema.ValidationError):
+            product_config._validate(config)
+
+    def test_cbf_tied_array_resampled_voltage_alias(self) -> None:
+        config = json.loads(CONFIG)
+        stream_config = config["outputs"]["gpucbf_tied_array_resampled_voltage"]
+        stream_config["type"] = "cbf.tied_array_resampled_voltage"
+        product_config._validate(config)
+
     def test_input_bad_property(self, config: Dict[str, Any]) -> None:
         """Test that the error message on an invalid input is sensible"""
         del config["inputs"]["i0_antenna_channelised_voltage"]["instrument_dev_name"]
@@ -1943,11 +1967,13 @@ class TestUpgrade:
     def test_upgrade_v3(self, config_v3: Dict[str, Any], config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config_v3)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
     def test_upgrade_v4(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
 

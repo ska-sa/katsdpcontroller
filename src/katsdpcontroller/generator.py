@@ -3600,7 +3600,7 @@ def _make_vlbi(
     source_stream = stream.source_stream
     if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
         raise NotImplementedError(
-            "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
+            "sdp.vdif capture currently requires a tied-array-resampled-voltage stream"
         )
     develop = configuration.options.develop
     source_multicast = find_node(g, "multicast." + source_stream.name)

@@ -1520,6 +1520,12 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         )
 
 
+class CbfTiedArrayResampledVoltageStream(GpucbfTiedArrayResampledVoltageStream):
+    """ICD-facing alias for a tied-array-resampled-voltage stream."""
+
+    stream_type: ClassVar[str] = "cbf.tied_array_resampled_voltage"
+
+
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
 
@@ -1911,6 +1917,7 @@ class VdifStream(Stream):
 
     stream_type: ClassVar[str] = "sdp.vdif"
     _valid_src_types: ClassVar[_ValidTypes] = {
+        "cbf.tied_array_resampled_voltage",
         "gpucbf.tied_array_resampled_voltage",
         "sim.cbf.tied_array_channelised_voltage",
     }
@@ -2067,6 +2074,7 @@ class SpectralImageStream(ImageStream):
 STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "cbf.antenna_channelised_voltage": AntennaChannelisedVoltageStream,
     "cbf.tied_array_channelised_voltage": TiedArrayChannelisedVoltageStream,
+    "cbf.tied_array_resampled_voltage": CbfTiedArrayResampledVoltageStream,
     "cbf.baseline_correlation_products": BaselineCorrelationProductsStream,
     "dig.baseband_voltage": DigBasebandVoltageStream,
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,

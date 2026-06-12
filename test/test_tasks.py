@@ -16,14 +16,19 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
-from aiokatcp import Sensor
 import katsdptelstate
 import katsdptelstate.aio
 import pytest
+from aiokatcp import Sensor
 
-from katsdpcontroller.tasks import KatcpTransition, TelstateSensorHistoryObserver
+from katsdpcontroller.tasks import (
+    KatcpTransition,
+    ProductPhysicalTaskMixin,
+    TelstateSensorHistoryObserver,
+)
 
 
 class TestKatcpTransition:
@@ -52,13 +57,16 @@ class TestTelstateSensorHistoryObserver:
             initial_status=Sensor.Status.NOMINAL,
         )
         telstate = katsdptelstate.aio.TelescopeState()
-        task = SimpleNamespace(
-            subarray_product=SimpleNamespace(
-                telstate=telstate,
-                current_capture_block=None,
+        task = cast(
+            ProductPhysicalTaskMixin,
+            SimpleNamespace(
+                subarray_product=SimpleNamespace(
+                    telstate=telstate,
+                    current_capture_block=None,
+                ),
+                _capture_blocks=set(),
+                logger=mock.Mock(),
             ),
-            _capture_blocks=set(),
-            logger=mock.Mock(),
         )
         observer = TelstateSensorHistoryObserver(
             sensor, task, "gpucbf_tied_array_resampled_voltage.x0.mean-power"

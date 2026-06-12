@@ -13,6 +13,7 @@
 - "4.5"
 - "4.6"
 - "4.7"
+- "4.8"
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -244,10 +245,13 @@ properties:
 {% if version >= "4.7" %}
               - gpucbf.tied_array_resampled_voltage
 {% endif %}
+{% if version >= "4.8" %}
+              - cbf.tied_array_resampled_voltage
+{% endif %}
               - sdp.vis
               - sdp.cal
               - sdp.flags
-{% if version >= "4.7" %}
+{% if version >= "4.8" %}
               - sdp.vdif
 {% endif %}
               - sdp.continuum_image
@@ -314,7 +318,7 @@ properties:
               required:
                 - src_streams
               additionalProperties: false
-{% if version >= "4.7" %}
+{% if version >= "4.8" %}
           - if:
               properties:
                 type:
@@ -727,6 +731,32 @@ properties:
                 - n_chans
                 - pols
                 - station_id
+{% if version >= "4.8" %}
+          - if:
+              properties:
+                type:
+                  const: cbf.tied_array_resampled_voltage
+            then:
+              properties:
+                type: {}
+                src_streams:
+                  $ref: "#/definitions/pair"
+                n_chans:
+                  $ref: "#/definitions/positive_integer"
+                pols:
+                  enum:
+                    - ["x", "y"]
+                    - ["R", "L"]
+                station_id:
+                  type: string
+                  pattern: "^[0-~][ -~]$"
+              additionalProperties: false
+              required:
+                - src_streams
+                - n_chans
+                - pols
+                - station_id
+{% endif %}
   config:
     type: object
     additionalProperties: false
