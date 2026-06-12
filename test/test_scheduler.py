@@ -488,6 +488,46 @@ class TestHTTPImageLookup:
         # payloads are stripped down to the essentials needed by the test.
         rmock.get(
             url,
+            content_type="application/vnd.oci.image.manifest.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Thu, 26 Jan 2017 11:32:22 GMT",
+            },
+            payload={
+                "config": {
+                    "mediaType": "application/vnd.oci.image.config.v1+json",
+                    "digest": "sha256:cafebeef",
+                }
+            },
+            **kwargs,
+        )
+        blob_url = url.parent.parent / "blobs/sha256:cafebeef"
+        rmock.get(
+            blob_url,
+            content_type="application/octet-stream",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "max-age=31536000",
+                "Docker-Content-Digest": digest,
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Etag": f'"{digest}"',
+                "X-Content-Type-Options": "nosniff",
+                "Date": "Wed, 07 Dec 2022 09:16:26 GMT",
+            },
+            payload={"config": {"Labels": {"label1": "value1"}}},
+            **kwargs,
+        )
+
+    def _prepare_oci_index(self, rmock, url, digest, **kwargs) -> None:
+        url = URL(url)
+        # Response headers are modelled on some actual registry responses, but
+        # payloads are stripped down to the essentials needed by the test.
+        rmock.get(
+            url,
             content_type="application/vnd.oci.image.index.v1+json",
             headers={
                 "Content-Length": "1234",
@@ -588,6 +628,19 @@ class TestHTTPImageLookup:
         assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
         assert image.labels["label1"] == "value1"
 
+    async def test_oci_index(self, rmock) -> None:
+        """Resolve an image without a registry, using the default registry."""
+        self._prepare_oci_index(
+            rmock,
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+            self.digest1,
+            callback=self._check_basic(self.auth1),
+        )
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        image = await lookup("myimage", "latest")
+        assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
+        assert image.labels["label1"] == "value1"
+
     async def test_oci_image(self, rmock) -> None:
         """Resolve an image without a registry, using the default registry."""
         self._prepare_oci_image(
@@ -658,6 +711,32 @@ class TestHTTPImageLookup:
         image = await lookup("myimage", "latest")
         assert image.path == "registry.invalid:5000/project/myimage@" + self.digest1
         assert image.labels["label1"] == "value1"
+
+    async def test_unknown_manifest(self, rmock) -> None:
+        """Test that appropriate error is raised if unknown manifest is returned."""
+        rmock.get(
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+            content_type="application/json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            payload={
+                "errors": [
+                    {
+                        "code": "SomeErrorCode",
+                        "message": "Some error message",
+                    }
+                ]
+            },
+            status=404,
+        )
+
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        with pytest.raises(scheduler.ImageError) as e:
+            await lookup("myimage", "latest")
+            assert "Some error message" in str(e)
 
     async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""

@@ -148,7 +148,7 @@ services:
       - "127.0.0.1:9118:8080"
 
   registry:
-    image: registry:2.8.1
+    image: registry:latest
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
