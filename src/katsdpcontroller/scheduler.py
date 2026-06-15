@@ -1097,8 +1097,13 @@ class DockerManifestResponseType(Enum):
     # TODO: Remove old format once docker registry updated and all images pushed use oci format
     DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json"
 
-    def _retrieve_next_media_type(self, manifest_data: DictType[str, Any]) -> str:
-        """Retrieve the mediatype of the next request we need to make.
+    def _retrieve_metadata_media_type(self, manifest_data: DictType[str, Any]) -> str:
+        """Retrieve value we use to validate the manifest data is correct.
+
+        Since the docker registry can return a manifest of unsupported type,
+        we retrieve the mediatype of the metadata nodes where we expect to find the supported type.
+        For indexes, we support the OCI Index's mediaType.
+        For images manifests, we support the config node's mediaType.
 
         Parameters
         ----------
@@ -1120,8 +1125,8 @@ class DockerManifestResponseType(Enum):
         else:
             return "unknown"
 
-    def expected_next_media_type(self) -> str:
-        """Get the mediatype of the next request we need to make.
+    def supported_media_type(self) -> str:
+        """Get the media type we support for the `DockerManifestResponseType`.
 
         Returns
         -------
@@ -1136,21 +1141,21 @@ class DockerManifestResponseType(Enum):
             return "application/vnd.docker.container.image.v1+json"
 
     def validate(self, response_data: Any) -> None:
-        """Validate the manifest data by checking the mediatype of the next request we need to make.
+        """Validate the manifest data by checking the response from the docker registry.
 
         Parameters
         ----------
-            manifest_data: The manifest data to validate.
+            manifest_data: The docker response manifest data to validate.
 
         Raises
         ------
             UnsupportedManifestError
-               If the manifest data is invalid.
+               If the docker response manifest data is invalid or unsupported.
         """
-        next_media_type = self._retrieve_next_media_type(response_data)
-        if next_media_type != self.expected_next_media_type():
+        next_media_type = self._retrieve_metadata_media_type(response_data)
+        if next_media_type != self.supported_media_type():
             raise UnsupportedManifestError(
-                f"Invalid mediatype found, expected: {self.expected_next_media_type()}"
+                f"Invalid mediatype found, expected: {self.supported_media_type()}"
                 f" found: {next_media_type}"
             )
 
@@ -1308,7 +1313,7 @@ class HTTPImageLookup(_RegistryImageLookup):
             manifest_url, manifest_data, headers
         )
 
-        return image_blob, manifest_type.expected_next_media_type(), digest
+        return image_blob, manifest_type.supported_media_type(), digest
 
     @staticmethod
     async def _get_image(
