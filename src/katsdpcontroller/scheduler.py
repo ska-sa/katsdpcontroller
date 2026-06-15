@@ -1256,16 +1256,16 @@ class HTTPImageLookup(_RegistryImageLookup):
             raise ImageError(f"Invalid manifest response for {manifest_url}") from error
 
     @staticmethod
-    async def _get_manifest_digest(
+    async def _get_manifest_labels_and_digest(
         session: aiohttp.ClientSession,
         repo_url: yarl.URL,
         tag: str,
         ssl_context: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
-    ) -> Tuple[str, str, str]:
-        """Get the image blob digest and the docker content digest.
+    ) -> Tuple[dict, str]:
+        """Get the labels Docker content digest from the manifest of the tag on Docker registry.
 
-        If the image is an index, get the digest of the Linux image's manifest."""
+        If the tag is an index, get the labels fromf the Linux image's manifest."""
 
         manifest_url = repo_url / "manifests" / tag
         # First, we check if the tag is an image or an index,
@@ -1313,7 +1313,29 @@ class HTTPImageLookup(_RegistryImageLookup):
             manifest_url, manifest_data, headers
         )
 
-        return image_blob, manifest_type.supported_media_type(), digest
+        image_url = repo_url / "blobs" / image_blob
+        request_headers = {aiohttp.hdrs.ACCEPT: manifest_type.supported_media_type()}
+        if auth_header:
+            request_headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
+        try:
+            async with session.get(
+                image_url,
+                timeout=15,
+                ssl=ssl_context,
+                headers=request_headers,
+            ) as response:
+                response.raise_for_status()
+                # Docker registry returns Content-Type of
+                # application/octet-stream. Passing content_type=None
+                # here suppresses the content-type check.
+                response_json = await response.json(content_type=None)
+            labels = response_json.get("config", {}).get("Labels", {})
+            if not isinstance(labels, dict):
+                labels = {}
+        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
+            raise ImageError(f"Failed to get labels from {image_url}: {error}") from error
+
+        return labels, digest
 
     @staticmethod
     async def _get_image(
@@ -1340,31 +1362,10 @@ class HTTPImageLookup(_RegistryImageLookup):
         registry_url = registry_url.with_path("/v2" + registry_url.path)
         repo_url = registry_url / repo
 
-        image_blob, content_type, digest = await HTTPImageLookup._get_manifest_digest(
+        labels, digest = await HTTPImageLookup._get_manifest_labels_and_digest(
             session, repo_url, tag, ssl_context, auth_header
         )
 
-        image_url = repo_url / "blobs" / image_blob
-        headers = {aiohttp.hdrs.ACCEPT: content_type}
-        if auth_header:
-            headers[aiohttp.hdrs.AUTHORIZATION] = auth_header
-        try:
-            async with session.get(
-                image_url,
-                timeout=15,
-                ssl=ssl_context,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                # Docker registry returns Content-Type of
-                # application/octet-stream. Passing content_type=None
-                # here suppresses the content-type check.
-                response_json = await response.json(content_type=None)
-            labels = response_json.get("config", {}).get("Labels", {})
-            if not isinstance(labels, dict):
-                labels = {}
-        except (aiohttp.client.ClientError, asyncio.TimeoutError) as error:
-            raise ImageError(f"Failed to get labels from {image_url}: {error}") from error
         return Image(registry=registry, repo=repo, tag=tag, digest=digest, labels=labels)
 
     async def _get_token(
