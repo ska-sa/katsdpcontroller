@@ -1207,7 +1207,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                 response_data = await response.json(content_type=None)
                 response.raise_for_status()
                 content_type = response.headers["Content-Type"]
-                if content_type not in supported_metadata_manifests:
+                if DockerManifestResponseType(content_type) not in supported_metadata_manifests:
                     raise UnsupportedManifestError(
                         f"Unknown response type {content_type} for {manifest_url}"
                     )
