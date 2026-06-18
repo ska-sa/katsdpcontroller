@@ -263,6 +263,7 @@ from addict import Dict
 from decorator import decorator
 from katsdptelstate.endpoint import Endpoint
 from multidict import CIMultiDictProxy
+from typing_extensions import assert_never
 
 from . import schemas
 from .defaults import DNS_ATTEMPTS, DNS_RETRY_TIME, DNS_TIMEOUT, LOCALHOST
@@ -1094,7 +1095,6 @@ class DockerManifestResponseType(Enum):
 
     OCI_INDEX = "application/vnd.oci.image.index.v1+json"
     OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
-    # TODO: Remove old format once docker registry updated and all images pushed use oci format
     DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json"
 
     def _retrieve_metadata_media_type(self, manifest_data: DictType[str, Any]) -> str:
@@ -1107,37 +1107,37 @@ class DockerManifestResponseType(Enum):
 
         Parameters
         ----------
-            manifest_data: dict[str, Any]
-                The manifest data to retrieve the mediatype from.
+        manifest_data: dict[str, Any]
+            The manifest data to retrieve the mediatype from.
 
         Returns
         -------
-            str
-                The mediatype of the next request we need to make.
+        str
+            The media type value we use to validate the manifest data.
         """
-        if self == DockerManifestResponseType.OCI_INDEX:
+        if self is DockerManifestResponseType.OCI_INDEX:
             return manifest_data["mediaType"]
-        elif self in [
-            DockerManifestResponseType.OCI_MANIFEST,
-            DockerManifestResponseType.DOCKER_MANIFEST,
-        ]:
+        elif (
+            self is DockerManifestResponseType.OCI_MANIFEST
+            or self is DockerManifestResponseType.DOCKER_MANIFEST
+        ):
             return manifest_data["config"]["mediaType"]
         else:
-            return "unknown"
+            assert_never()
 
     def supported_media_type(self) -> str:
         """Get the media type we support for the `DockerManifestResponseType`.
 
         Returns
         -------
-            str
-                The mediatype of the next request we need to make.
+        str
+            The mediatype of the next request we need to make.
         """
-        if self == DockerManifestResponseType.OCI_INDEX:
+        if self is DockerManifestResponseType.OCI_INDEX:
             return "application/vnd.oci.image.index.v1+json"
-        elif self == DockerManifestResponseType.OCI_MANIFEST:
+        elif self is DockerManifestResponseType.OCI_MANIFEST:
             return "application/vnd.oci.image.config.v1+json"
-        elif self == DockerManifestResponseType.DOCKER_MANIFEST:
+        elif self is DockerManifestResponseType.DOCKER_MANIFEST:
             return "application/vnd.docker.container.image.v1+json"
 
     def validate(self, response_data: Any) -> None:
@@ -1145,12 +1145,13 @@ class DockerManifestResponseType(Enum):
 
         Parameters
         ----------
-            manifest_data: The docker response manifest data to validate.
+        manifest_data
+            The docker response manifest data to validate.
 
         Raises
         ------
-            UnsupportedManifestError
-               If the docker response manifest data is invalid or unsupported.
+        UnsupportedManifestError
+            If the docker response manifest data is invalid or unsupported.
         """
         next_media_type = self._retrieve_metadata_media_type(response_data)
         if next_media_type != self.supported_media_type():
@@ -1179,14 +1180,23 @@ class HTTPImageLookup(_RegistryImageLookup):
 
         Raises
         ------
-            ImageError
-                If the manifest is not found or the response is invalid.
-            UnsupportedManifestType
-                If the manifest type is not supported,
+        ImageError
+            If the manifest is not found or the response is invalid.
+        UnsupportedManifestType
+            If the manifest type is not supported,
             either because the returned next request mediatype is unexpected,
             or the registry did not present a manifest.
             aiohttp.client.ClientError
                 If the request fails.
+
+        Returns
+        -------
+        dict
+            The manifest data.
+        CIMultiDictProxy[str]
+            The headers.
+        DockerManifestResponseType
+            The manifest type received from the registry.
         """
         headers = {
             aiohttp.hdrs.ACCEPT: ",".join(
@@ -1207,11 +1217,11 @@ class HTTPImageLookup(_RegistryImageLookup):
                 response_data = await response.json(content_type=None)
                 response.raise_for_status()
                 content_type = response.headers["Content-Type"]
-                if DockerManifestResponseType(content_type) not in supported_metadata_manifests:
+                metadata_manifest_type = DockerManifestResponseType(content_type)
+                if metadata_manifest_type not in supported_metadata_manifests:
                     raise UnsupportedManifestError(
                         f"Unknown response type {content_type} for {manifest_url}"
                     )
-                metadata_manifest_type = DockerManifestResponseType(content_type)
                 metadata_manifest_type.validate(response_data)
                 return response_data, response.headers, metadata_manifest_type
         except asyncio.TimeoutError as error:
@@ -1232,40 +1242,26 @@ class HTTPImageLookup(_RegistryImageLookup):
                         f"Manifest not found for {manifest_url}:"
                         f" {response_data['errors'][0]['message']}"
                     ) from error
-                except (ValueError, KeyError) as error:
-                    raise ImageError(f"Invalid manifest response for {manifest_url}") from error
+                except Exception:
+                    raise ImageError(
+                        f"Invalid manifest response for {manifest_url}"
+                    ) from client_error
             else:
                 raise ImageError(
                     f"Failed to get digest from manifest {manifest_url}"
                 ) from client_error
 
     @staticmethod
-    def _get_manifest_config(
-        manifest_url: yarl.URL,
-        manifest_data: dict,
-        headers: CIMultiDictProxy[str],
-    ) -> Tuple[str, str]:
-        """Get the image blob digest and the Docker content digest."""
-        try:
-            if headers["Docker-Content-Digest"] is None:
-                raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
-            digest = headers["Docker-Content-Digest"]
-            image_blob = str(manifest_data["config"]["digest"])
-            return image_blob, digest
-        except (KeyError, TypeError) as error:
-            raise ImageError(f"Invalid manifest response for {manifest_url}") from error
-
-    @staticmethod
     async def _get_manifest_labels_and_digest(
         session: aiohttp.ClientSession,
         repo_url: yarl.URL,
         tag: str,
-        ssl_context: Union[ssl.SSLContext, bool],
+        ssl: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
     ) -> Tuple[dict, str]:
-        """Get the labels Docker content digest from the manifest of the tag on Docker registry.
+        """Get the labels and Docker content digest from the manifest of the tag on Docker registry.
 
-        If the tag is an index, get the labels fromf the Linux image's manifest."""
+        If the tag is an index, get the labels from the first Linux image's manifest."""
 
         manifest_url = repo_url / "manifests" / tag
         # First, we check if the tag is an image or an index,
@@ -1277,12 +1273,8 @@ class HTTPImageLookup(_RegistryImageLookup):
         ) = await HTTPImageLookup._get_docker_manifest_helper(
             session,
             manifest_url,
-            [
-                DockerManifestResponseType.DOCKER_MANIFEST,
-                DockerManifestResponseType.OCI_INDEX,
-                DockerManifestResponseType.OCI_MANIFEST,
-            ],
-            ssl_context,
+            list(DockerManifestResponseType),
+            ssl,
             auth_header,
         )
 
@@ -1297,6 +1289,12 @@ class HTTPImageLookup(_RegistryImageLookup):
                 manifest_url = repo_url / "manifests" / linux_manifest["digest"]
             except StopIteration:
                 raise ImageError(f"No Linux manifest found in index for {manifest_url}") from None
+            try:
+                mediatype = DockerManifestResponseType(linux_manifest["mediaType"])
+            except ValueError:
+                raise UnsupportedManifestError(
+                    f"Unsupported manifest type {linux_manifest['mediaType']}"
+                ) from None
             (
                 manifest_data,
                 headers,
@@ -1304,14 +1302,19 @@ class HTTPImageLookup(_RegistryImageLookup):
             ) = await HTTPImageLookup._get_docker_manifest_helper(
                 session,
                 manifest_url,
-                [DockerManifestResponseType(linux_manifest["mediaType"])],
-                ssl_context,
+                [mediatype],
+                ssl,
                 auth_header,
             )
 
-        image_blob, digest = HTTPImageLookup._get_manifest_config(
-            manifest_url, manifest_data, headers
-        )
+        digest = headers.get("Docker-Content-Digest", None)
+        if digest is None:
+            raise ImageError(f"Docker-Content-Digest header not found for {manifest_url}")
+
+        try:
+            image_blob = str(manifest_data["config"]["digest"])
+        except (KeyError, TypeError) as error:
+            raise ImageError(f"Invalid manifest response for {manifest_url}") from error
 
         image_url = repo_url / "blobs" / image_blob
         request_headers = {aiohttp.hdrs.ACCEPT: manifest_type.supported_media_type()}
@@ -1321,7 +1324,7 @@ class HTTPImageLookup(_RegistryImageLookup):
             async with session.get(
                 image_url,
                 timeout=15,
-                ssl=ssl_context,
+                ssl=ssl,
                 headers=request_headers,
             ) as response:
                 response.raise_for_status()
@@ -1343,7 +1346,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         registry: str,
         repo: str,
         tag: str,
-        ssl_context: Union[ssl.SSLContext, bool],
+        ssl: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
     ) -> Image:
         """Make a single attempt to get the image information.
@@ -1363,7 +1366,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         repo_url = registry_url / repo
 
         labels, digest = await HTTPImageLookup._get_manifest_labels_and_digest(
-            session, repo_url, tag, ssl_context, auth_header
+            session, repo_url, tag, ssl, auth_header
         )
 
         return Image(registry=registry, repo=repo, tag=tag, digest=digest, labels=labels)
