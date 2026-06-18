@@ -806,6 +806,23 @@ class TestHTTPImageLookup:
             await lookup("myimage", "latest")
             assert expected_error in str(e)
 
+    async def test_unknown_content_type(self, rmock) -> None:
+        """Test that appropriate error is raised if the content type is unknown."""
+        rmock.get(
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+            content_type="application/vnd.oci.image.index.v2+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            payload={},
+        )
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        with pytest.raises(scheduler.ImageError) as e:
+            await lookup("myimage", "latest")
+            assert ("Unknown response type application/vnd.oci.image.index.v2+json") in str(e)
+
     async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
         self._prepare_docker_image(
