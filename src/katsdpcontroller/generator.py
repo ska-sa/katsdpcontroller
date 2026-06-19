@@ -963,6 +963,22 @@ def _make_fgpu(
     return fgpu_group
 
 
+def _has_downstream_dependencies(
+    src_stream: product_config.Stream,
+    dst_streams: Sequence[product_config.Stream],
+    check_by_name: bool = False,
+) -> bool:
+    """Check if `src_stream` is used by any of the `dst_streams`."""
+    for dst_stream in dst_streams:
+        if check_by_name:
+            if src_stream.name in [stream.name for stream in dst_stream.src_streams]:
+                return True
+        else:
+            if src_stream in dst_stream.src_streams:
+                return True
+    return False
+
+
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
@@ -1284,6 +1300,8 @@ def _make_xbgpu(
     recv_buffer = free_chunks * chunk_size
 
     task_names = []
+    # Needed for send_enabled command-line arg for beam data streams
+    vgpu_streams = configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream)
     for i in range(n_engines):
         # One engine per section of the band
         xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
@@ -1420,6 +1438,9 @@ def _make_xbgpu(
                     "name": escape_format(stream.name),
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
+                    "send_enabled": _has_downstream_dependencies(
+                        stream, vgpu_streams, check_by_name=True
+                    ),
                 }
                 if stream.dither is not None:
                     output_config["dither"] = stream.dither
