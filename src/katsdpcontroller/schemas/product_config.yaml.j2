@@ -13,6 +13,7 @@
 - "4.5"
 - "4.6"
 - "4.7"
+- "4.8"
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -247,7 +248,7 @@ properties:
               - sdp.vis
               - sdp.cal
               - sdp.flags
-{% if version >= "4.7" %}
+{% if version >= "4.8" %}
               - sdp.vdif
 {% endif %}
               - sdp.continuum_image
@@ -314,7 +315,7 @@ properties:
               required:
                 - src_streams
               additionalProperties: false
-{% if version >= "4.7" %}
+{% if version >= "4.8" %}
           - if:
               properties:
                 type:

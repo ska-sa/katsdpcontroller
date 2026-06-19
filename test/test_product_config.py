@@ -1943,11 +1943,13 @@ class TestUpgrade:
     def test_upgrade_v3(self, config_v3: Dict[str, Any], config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config_v3)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
     def test_upgrade_v4(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
 
