@@ -244,10 +244,8 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-
-# Note: don't include Dict here, because it conflicts with addict.Dict.
 from typing import Any, AsyncContextManager, ClassVar
-from typing import Dict as DictType
+from typing import Dict as DictType  # Rename Dict here, because it conflicts with addict.Dict.
 from typing import List, Mapping, Optional, Set, Tuple, Type, Union
 
 import aiohttp.web
