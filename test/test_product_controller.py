@@ -2099,6 +2099,15 @@ class TestController(BaseTestController):
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
+
+        gpucbf_tarv_src_stream_name = "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi"
+        with pytest.raises(
+            FailReply,
+            match=f"Cannot stop stream {gpucbf_tarv_src_stream_name!r} "
+            "because it has downstream dependents",
+        ):
+            await client.request("capture-stop", gpucbf_tarv_src_stream_name)
+
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
         await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client

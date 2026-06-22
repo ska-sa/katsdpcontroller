@@ -63,7 +63,7 @@ from .controller import (
     log_task_exceptions,
 )
 from .defaults import CONNECTION_MAX_BACKLOG, LOCALHOST, SHUTDOWN_DELAY
-from .generator import TransmitState
+from .generator import TransmitState, _has_downstream_dependencies
 from .product_config import Configuration
 from .tasks import (
     DEPENDS_INIT,
@@ -1625,6 +1625,11 @@ class SubarrayProduct:
                     product_config.GpucbfTiedArrayChannelisedVoltageStream,
                 ),
             ):
+                # NOTE: GpucbfTACV streams cannot be stopped if they feed a GpucbfTARV stream.
+                if _has_downstream_dependencies(stream, self.configuration.streams):
+                    raise FailReply(
+                        f"Cannot stop stream {stream_name!r} because it has downstream dependents"
+                    )
                 args += [stream_name]
             # The V-engine does not require the stream name for this request
             await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))

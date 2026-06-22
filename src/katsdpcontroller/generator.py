@@ -1438,10 +1438,26 @@ def _make_xbgpu(
                     "name": escape_format(stream.name),
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
-                    "send_enabled": _has_downstream_dependencies(
-                        stream, vgpu_streams, check_by_name=True
-                    ),
                 }
+                if _has_downstream_dependencies(stream, vgpu_streams, check_by_name=True):
+                    output_config["send_enabled"] = True
+                    gpucbf_tacv_dst_mcast = list(
+                        filter(
+                            lambda dst_mcast: dst_mcast.name == f"multicast.{stream.name}",
+                            dst_multicasts,
+                        )
+                    )
+                    if len(gpucbf_tacv_dst_mcast) == 1:
+                        gpucbf_tacv_dst_mcast[0].initial_transmit_state = TransmitState.UP
+                    else:
+                        # Found more than one or none, which is unexpected
+                        raise ValueError(
+                            f"Expected exactly one multicast for stream {stream.name}, "
+                            "found {len(gpucbf_tacv_dst_mcast)}"
+                        )
+                else:
+                    output_config["send_enabled"] = False
+
                 if stream.dither is not None:
                     output_config["dither"] = stream.dither
                 xbgpu.command += [
