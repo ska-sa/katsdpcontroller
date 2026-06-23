@@ -412,18 +412,14 @@ def _make_dsim(
     dsim.interfaces[0].bandwidth_out = sum(stream.data_rate() for stream in streams)
     dsim.command = [
         "dsim",
-        "--interface",
-        "{interfaces[gpucbf].name}",
-        "--adc-sample-rate",
-        str(streams[0].adc_sample_rate),
-        "--ttl",
-        "4",
-        "--sync-time",
-        str(streams[0].sync_time),
-        "--katcp-port",
-        "{ports[port]}",
-        "--prometheus-port",
-        "{ports[prometheus]}",
+        "--interface={interfaces[gpucbf].name}",
+        f"--adc-sample-rate={streams[0].adc_sample_rate}",
+        "--ttl=4",
+        f"--sample-bits={streams[0].bits_per_sample}",
+        f"--heap-samples={streams[0].samples_per_heap}",
+        f"--sync-time={streams[0].sync_time}",
+        "--katcp-port={ports[port]}",
+        "--prometheus-port={ports[prometheus]}",
     ]
     dsim.sensor_renames["sync-time"] = [f"{stream.name}.sync-time" for stream in streams]
     # Allow dsim task to set a realtime scheduling priority itself
@@ -442,12 +438,9 @@ def _make_dsim(
         # of signals.
         dsim.cores = ["main", "send", None, None]
         dsim.command = dsim.command + [
-            "--affinity",
-            "{cores[send]}",
-            "--comp-vector",
-            "{cores[send]}",
-            "--main-affinity",
-            "{cores[main]}",
+            "--affinity={cores[send]}",
+            "--comp-vector={cores[send]}",
+            "--main-affinity={cores[main]}",
         ]
     if ibv:
         dsim.capabilities.append("NET_RAW")  # For ibverbs raw QPs
@@ -814,6 +807,8 @@ def _make_fgpu(
                 "--send-interface={interfaces[gpucbf].name}",
                 f"--send-packet-payload={GPUCBF_PACKET_PAYLOAD_BYTES}",
                 f"--adc-sample-rate={srcs[0].adc_sample_rate}",
+                f"--dig-sample-bits={srcs[0].bits_per_sample}",
+                f"--recv-packet-samples={srcs[0].samples_per_heap}",
                 f"--feng-id={i}",
                 f"--array-size={n_engines}",
                 f"--sync-time={srcs[0].sync_time}",
@@ -2938,9 +2933,14 @@ def build_logical_graph(
         cam2telstate = _make_cam2telstate(g, configuration, cam_http[0])
 
     # Simulators
-    def dsim_key(stream: product_config.SimDigBasebandVoltageStream) -> Tuple[str, float]:
+    def dsim_key(stream: product_config.SimDigBasebandVoltageStream) -> Tuple[str, float, int, int]:
         """Key for dsim streams that should be run in the same process."""
-        return (stream.antenna.name, stream.adc_sample_rate)
+        return (
+            stream.antenna.name,
+            stream.adc_sample_rate,
+            stream.bits_per_sample,
+            stream.samples_per_heap,
+        )
 
     for dig_streams in _groupby(
         configuration.by_class(product_config.SimDigBasebandVoltageStream), key=dsim_key
