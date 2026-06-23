@@ -104,12 +104,12 @@ GPUCBF_DATA_STREAMS: List[Tuple[bytes, bytes, bytes]] = [
     (
         b"gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
         rb"239\.192\.\d+\.\d+\+3:7148",
-        b"down",
+        b"up",
     ),
     (
         b"gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi",
         rb"239\.192\.\d+\.\d+\+3:7148",
-        b"down",
+        b"up",
     ),
     (b"gpucbf_tied_array_resampled_voltage", rb"239\.192\.\d+\.\d+\:7148", b"down"),
 ]
