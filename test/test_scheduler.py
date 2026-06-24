@@ -737,6 +737,25 @@ class TestHTTPImageLookup:
             (
                 "application/vnd.oci.image.index.v1+json",
                 {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "manifests": [
+                        {
+                            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                            "digest": "sha256:caacbbbbb",
+                            "platform": {
+                                "os": "linux",
+                                "arch": "unknown",
+                            },
+                        }
+                    ],
+                },
+                "Unsupported response: application/vnd.oci.image.index.v1+json "
+                + "got unexpected media type application/vnd.oci.image.manifest.v1+json, "
+                + "expected application/vnd.oci.image.index.v1+json",
+            ),
+            (
+                "application/vnd.oci.image.index.v1+json",
+                {
                     "mediaType": "application/vnd.oci.image.index.v1+json",
                     "manifests": [
                         {
@@ -777,7 +796,9 @@ class TestHTTPImageLookup:
                         "digest": "sha256:cafebeef",
                     }
                 },
-                "Unsupported response: application/vnd.oci.image.manifest.v1+json",
+                "Unsupported response: application/vnd.oci.image.manifest.v1+json "
+                + "got unexpected media type application/vnd.oci.image.config.v2+json, "
+                + "expected application/vnd.oci.image.config.v1+json",
             ),
             (
                 "application/vnd.oci.image.manifest.v1+json",
@@ -792,10 +813,15 @@ class TestHTTPImageLookup:
             ),
             ("application/vnd.oci.image.index.v1+json", {}, "Invalid metadata response for"),
             (
-                "application/vnd.oci.image.index.v1+json",
+                "application/vnd.oci.image.manifest.v1+json",
                 {
-                    "mediaType": "application/vnd.oci.image.index.v2+json",
+                    "mediaType": "unknown/type",
                 },
+                "Invalid metadata response",
+            ),
+            (
+                "unknown/type",
+                {},
                 "Invalid metadata response",
             ),
         ],
@@ -857,7 +883,7 @@ class TestHTTPImageLookup:
         with pytest.raises(scheduler.ImageError) as e:
             await lookup("myimage", "latest")
         assert (
-            "Invalid metadata response for "
+            "Docker-Content-Digest header not found for "
             + "https://registry.invalid:5000/v2/project/myimage/manifests/latest"
         ) in str(e)
 
