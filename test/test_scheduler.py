@@ -19,6 +19,7 @@ import base64
 import ipaddress
 import logging
 import math
+import re
 import socket
 import time
 from collections import Counter
@@ -700,14 +701,15 @@ class TestHTTPImageLookup:
         )
 
         lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
-        with pytest.raises(scheduler.ImageError) as e:
+        with pytest.raises(
+            scheduler.ImageError,
+            match=(
+                r"Manifest not found for "
+                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest: "
+                r"Some error message"
+            ),
+        ):
             await lookup("myimage", "latest")
-        assert (
-            "Manifest not found for "
-            + "https://registry.invalid:5000/v2/project/myimage/manifests/latest:"
-            in str(e)
-        )
-        assert "Some error message" in str(e)
 
     @pytest.mark.parametrize(
         "content_type, payload, expected_error",
@@ -843,9 +845,8 @@ class TestHTTPImageLookup:
         )
 
         lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
-        with pytest.raises(scheduler.ImageError) as e:
+        with pytest.raises(scheduler.ImageError, match=re.escape(expected_error)):
             await lookup("myimage", "latest")
-        assert expected_error in str(e)
 
     async def test_invalid_content_type_header(self, rmock) -> None:
         """Test that appropriate error is raised if the content type is unknown."""
@@ -860,12 +861,14 @@ class TestHTTPImageLookup:
             payload={},
         )
         lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
-        with pytest.raises(scheduler.ImageError) as e:
+        with pytest.raises(
+            scheduler.ImageError,
+            match=(
+                r"Invalid metadata response for "
+                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest"
+            ),
+        ):
             await lookup("myimage", "latest")
-        assert (
-            "Invalid metadata response for "
-            + "https://registry.invalid:5000/v2/project/myimage/manifests/latest"
-        ) in str(e)
 
     async def test_missing_docker_content_digest_header(self, rmock) -> None:
         """Test that appropriate error is raised if the Docker-Content-Digest header is missing."""
@@ -880,12 +883,14 @@ class TestHTTPImageLookup:
             payload={"mediaType": "application/vnd.oci.image.index.v1+json"},
         )
         lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
-        with pytest.raises(scheduler.ImageError) as e:
+        with pytest.raises(
+            scheduler.ImageError,
+            match=(
+                r"Docker-Content-Digest header not found for "
+                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest"
+            ),
+        ):
             await lookup("myimage", "latest")
-        assert (
-            "Docker-Content-Digest header not found for "
-            + "https://registry.invalid:5000/v2/project/myimage/manifests/latest"
-        ) in str(e)
 
     async def test_http_fail(self, rmock) -> None:
         """Test that appropriate error is raised if bad HTTP status is returned."""
