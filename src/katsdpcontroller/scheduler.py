@@ -1109,13 +1109,20 @@ class ManifestOrIndexResponse:
         self.body = body
         self.validate()
 
-    def get_manifest_digest(self) -> Tuple[str, str]:
-        """Get the digest of the manifest from the response data.
+    def get_image_config_digest(self) -> Tuple[str, str]:
+        """Get the digest of the image config from the response data.
 
         Raises
         ------
         UnsupportedManifestError:
             If not a manifest type.
+
+        Returns
+        -------
+        str
+            The digest of the image config.
+        str
+            The media type of the image config.
         """
         if self.media_type == ManifestOrIndexType.OCI_INDEX:
             raise UnsupportedManifestError("OCI index is not a manifest")
@@ -1139,7 +1146,8 @@ class ManifestOrIndexResponse:
         Raises
         ------
         UnsupportedManifestError
-            If the docker response is unsupported.
+            If the manifest's image config's media type is a unsupported type,
+            or the index's linux manifest's media type is a unsupported type.
         KeyError:
             If the response is invalid.
         """
@@ -1157,7 +1165,7 @@ class ManifestOrIndexResponse:
                 ) from None
 
         else:
-            _, response_media_type = self.get_manifest_digest()
+            _, response_media_type = self.get_image_config_digest()
             expected = self.media_type.image_config_media_type()
 
         if expected != response_media_type:
@@ -1204,23 +1212,22 @@ class HTTPImageLookup(_RegistryImageLookup):
         ssl_context: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
     ) -> Tuple[str, ManifestOrIndexResponse]:
-        """Get the metadata response from the docker registry.
+        """Get the response from the docker registry.
 
         Raises
         ------
         ImageError
-            If the metadata is not found or the response is invalid.
+            If the manifest or index is not found or the response is invalid.
         UnsupportedManifestError
-            If the manifest type is a unsupported type,
-            either because the returned config mediatype is unexpected,
-            or the registry did not present a supported metadata type.
+            If the manifest's image config media type is a unsupported type,
+            or the index's manifest media type is a unsupported type.
 
         Returns
         -------
         str
             The digest of the manifest.
-        MetadataResponse
-            The metadata type received from the registry.
+        ManifestOrIndexResponse
+            The manifest or index type received from the registry.
         """
         headers = {
             aiohttp.hdrs.ACCEPT: ",".join(
@@ -1305,7 +1312,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                 auth_header,
             )
 
-        manifest_digest, image_type = manifest_or_index.get_manifest_digest()
+        manifest_digest, image_type = manifest_or_index.get_image_config_digest()
 
         request_headers = {aiohttp.hdrs.ACCEPT: image_type}
 

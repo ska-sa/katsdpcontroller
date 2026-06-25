@@ -580,8 +580,7 @@ class TestHTTPImageLookup:
         return None  # Tells aioresponses to use its normal mechanisms
 
     async def test_relative_docker_image(self, rmock) -> None:
-        """Resolve an image without a registry, using the default registry,
-        with the url pointing to a Docker image."""
+        """Resolve an image by path, for a Docker image."""
         self._prepare_docker_image(
             rmock,
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
@@ -594,8 +593,7 @@ class TestHTTPImageLookup:
         assert image.labels["label1"] == "value1"
 
     async def test_relative_oci_index(self, rmock) -> None:
-        """Resolve an image without a registry, using the default registry,
-        with the url pointing to an OCI index."""
+        """Resolve an image by path, for an OCI index."""
         self._prepare_oci_index(
             rmock,
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
@@ -608,8 +606,7 @@ class TestHTTPImageLookup:
         assert image.labels["label1"] == "value1"
 
     async def test_relative_oci_image(self, rmock) -> None:
-        """Resolve an image without a registry, using the default registry,
-        with the url pointing to an OCI image."""
+        """Resolve an image by path, for an OCI image."""
         self._prepare_oci_image(
             rmock,
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
@@ -878,7 +875,8 @@ class TestHTTPImageLookup:
         with pytest.raises(
             scheduler.ImageError,
             match=(
-                "Response type unknown/type is not supported for https://registry.invalid:5000/v2/project/myimage/manifests/latest"  # noqa: E501
+                "Response type unknown/type is not supported "
+                "for https://registry.invalid:5000/v2/project/myimage/manifests/latest"
             ),
         ):
             await lookup("myimage", "latest")
@@ -923,7 +921,8 @@ class TestHTTPImageLookup:
             scheduler.ImageError,
             match=(
                 re.escape(
-                    "Response type application/vnd.oci.image.index.v1+json is not supported for https://registry.invalid:5000/v2/project/myimage/manifests/sha256:caacbbbbb"  # noqa: E501
+                    "Response type application/vnd.oci.image.index.v1+json is not supported for "
+                    "https://registry.invalid:5000/v2/project/myimage/manifests/sha256:caacbbbbb"
                 )
             ),
         ):
