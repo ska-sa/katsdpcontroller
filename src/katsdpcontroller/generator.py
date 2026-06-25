@@ -1665,12 +1665,15 @@ def _make_vgpu(
     vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
 
     vgpu.gpus = [scheduler.GPURequest()]
-    # TODO: To ensure vgpu doesn't share the GPU with anything else.
-    # Revisit once vgpu is complete.
-    vgpu.gpus[0].compute = 1.0
+    # NOTE: Modeled estimate of the required GPU usage to accommodate the observed GPU usage
+    # for bandwidths of 32 MHz, 64 MHz, and 128 MHz. The observed GPU usage percentages
+    # are 45%, 29%, and 15%, respectively.
+    vgpu.gpus[0].compute = (0.303e-6 * stream.bandwidth + 10) / 100
 
-    # NOTE: Please see https://skaafrica.atlassian.net/browse/NGC-1815,
-    # on how mem formula is derived.
+    # NOTE: Ensure there is enough GPU memory to accommodate the observed GPU usage
+    # for bandwidths of 32 MHz, 64 MHz, and 128 MHz. The observed GPU usage is 6152 MiB,
+    # 3956 MiB, and 2964 MiB, respectively.
+
     vgpu.gpus[0].mem = 33.4 * stream.bandwidth + 2766
 
     vgpu.command = (
