@@ -680,7 +680,7 @@ class TestHTTPImageLookup:
         assert image.labels["label1"] == "value1"
 
     async def test_unknown_manifest(self, rmock) -> None:
-        """Test that appropriate error is raised if the manifest is not found on the registry."""
+        """Test that appropriate error is raised if the manifest or index is not found on the registry."""  # noqa: E501
         rmock.get(
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             content_type="application/json",
@@ -704,9 +704,9 @@ class TestHTTPImageLookup:
         with pytest.raises(
             scheduler.ImageError,
             match=(
-                r"Manifest not found for "
-                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest: "
-                r"Some error message"
+                "Manifest not found for "
+                "https://registry.invalid:5000/v2/project/myimage/manifests/latest: "
+                "Some error message"
             ),
         ):
             await lookup("myimage", "latest")
@@ -714,12 +714,13 @@ class TestHTTPImageLookup:
     @pytest.mark.parametrize(
         "content_type, payload, expected_error",
         [
-            (
+            pytest.param(
                 "application/vnd.oci.image.index.v1+json",
                 {"mediaType": "application/vnd.oci.image.index.v1+json", "manifests": []},
                 "No Linux manifest found in index",
+                id="empty-index",
             ),
-            (
+            pytest.param(
                 "application/vnd.oci.image.index.v1+json",
                 {
                     "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -735,8 +736,9 @@ class TestHTTPImageLookup:
                     ],
                 },
                 "No Linux manifest found in index",
+                id="only-unknown-platform-manifest-in-index",
             ),
-            (
+            pytest.param(
                 "application/vnd.oci.image.index.v1+json",
                 {
                     "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -754,8 +756,9 @@ class TestHTTPImageLookup:
                 "Unsupported response: application/vnd.oci.image.index.v1+json "
                 + "got unexpected media type application/vnd.oci.image.manifest.v1+json, "
                 + "expected application/vnd.oci.image.index.v1+json",
+                id="invalid-media-type-for-index",
             ),
-            (
+            pytest.param(
                 "application/vnd.oci.image.index.v1+json",
                 {
                     "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -770,10 +773,17 @@ class TestHTTPImageLookup:
                         }
                     ],
                 },
-                "Unsupported manifest metadata type "
+                "Unsupported manifest or index type "
                 + "application/vnd.oci.image.index.v1+json for index entry",
+                id="index-with-unsupported-manifest-type",
             ),
-            (
+            pytest.param(
+                "application/vnd.oci.image.index.v1+json",
+                {},
+                "Invalid response for",
+                id="invalid-response-for-index",
+            ),
+            pytest.param(
                 "application/vnd.oci.image.index.v1+json",
                 {
                     "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -787,10 +797,11 @@ class TestHTTPImageLookup:
                         }
                     ],
                 },
-                "Invalid metadata response for "
+                "Invalid response for "
                 + "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+                id="index-with-invalid-manifest-digest",
             ),
-            (
+            pytest.param(
                 "application/vnd.oci.image.manifest.v1+json",
                 {
                     "config": {
@@ -801,8 +812,9 @@ class TestHTTPImageLookup:
                 "Unsupported response: application/vnd.oci.image.manifest.v1+json "
                 + "got unexpected media type application/vnd.oci.image.config.v2+json, "
                 + "expected application/vnd.oci.image.config.v1+json",
+                id="invalid-media-type-for-image-config",
             ),
-            (
+            pytest.param(
                 "application/vnd.oci.image.manifest.v1+json",
                 {
                     "config": {
@@ -810,28 +822,30 @@ class TestHTTPImageLookup:
                         "different_digest_key": "sha256:cafebeef",
                     }
                 },
-                "Invalid metadata response for "
+                "Invalid response for "
                 + "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+                id="invalid-image-config-digest",
             ),
-            ("application/vnd.oci.image.index.v1+json", {}, "Invalid metadata response for"),
-            (
+            pytest.param(
                 "application/vnd.oci.image.manifest.v1+json",
                 {
                     "mediaType": "unknown/type",
                 },
-                "Invalid metadata response",
+                "Invalid response",
+                id="invalid-media-type-for-manifest",
             ),
-            (
-                "unknown/type",
+            pytest.param(
+                "application/vnd.oci.image.manifest.v1+json",
                 {},
-                "Invalid metadata response",
+                "Invalid response",
+                id="invalid-response-for-manifest",
             ),
         ],
     )
     async def test_error_in_docker_response(
         self, rmock, content_type, payload, expected_error
     ) -> None:
-        """Test that appropriate error is raised when the index metadata response is erroneous."""
+        """Test that appropriate error is raised when the response is erroneous."""
         rmock.get(
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
             content_type=content_type,
@@ -848,11 +862,11 @@ class TestHTTPImageLookup:
         with pytest.raises(scheduler.ImageError, match=re.escape(expected_error)):
             await lookup("myimage", "latest")
 
-    async def test_invalid_content_type_header(self, rmock) -> None:
+    async def test_unexpected_content_type_header(self, rmock) -> None:
         """Test that appropriate error is raised if the content type is unknown."""
         rmock.get(
             "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
-            content_type="application/vnd.oci.image.index.v2+json",
+            content_type="unknown/type",
             headers={
                 "Content-Length": "1234",
                 "Docker-Distribution-Api-Version": "registry/2.0",
@@ -864,8 +878,53 @@ class TestHTTPImageLookup:
         with pytest.raises(
             scheduler.ImageError,
             match=(
-                r"Invalid metadata response for "
-                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest"
+                "Response type unknown/type is not supported for https://registry.invalid:5000/v2/project/myimage/manifests/latest"  # noqa: E501
+            ),
+        ):
+            await lookup("myimage", "latest")
+
+    async def test_unexpected_content_type_header_for_indexed_manifest(self, rmock) -> None:
+        """Test that appropriate error is raised if the content type is unknown."""
+        rmock.get(
+            "https://registry.invalid:5000/v2/project/myimage/manifests/latest",
+            content_type="application/vnd.oci.image.index.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Content-Digest": "sha256:caacbbbbb",
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            payload={
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:caacbbbbb",
+                        "platform": {
+                            "os": "linux",
+                            "arch": "amd64",
+                        },
+                    },
+                ],
+            },
+        )
+        rmock.get(
+            "https://registry.invalid:5000/v2/project/myimage/manifests/sha256:caacbbbbb",
+            content_type="application/vnd.oci.image.index.v1+json",
+            headers={
+                "Content-Length": "1234",
+                "Docker-Distribution-Api-Version": "registry/2.0",
+                "Date": "Thu, 26 Jan 2017 11:31:22 GMT",
+            },
+            payload={},
+        )
+        lookup = scheduler.HTTPImageLookup("registry.invalid:5000/project")
+        with pytest.raises(
+            scheduler.ImageError,
+            match=(
+                re.escape(
+                    "Response type application/vnd.oci.image.index.v1+json is not supported for https://registry.invalid:5000/v2/project/myimage/manifests/sha256:caacbbbbb"  # noqa: E501
+                )
             ),
         ):
             await lookup("myimage", "latest")
@@ -886,8 +945,8 @@ class TestHTTPImageLookup:
         with pytest.raises(
             scheduler.ImageError,
             match=(
-                r"Docker-Content-Digest header not found for "
-                r"https://registry\.invalid:5000/v2/project/myimage/manifests/latest"
+                "Docker-Content-Digest header not found for "
+                "https://registry.invalid:5000/v2/project/myimage/manifests/latest"
             ),
         ):
             await lookup("myimage", "latest")

@@ -1079,8 +1079,8 @@ class SimpleImageLookup(_RegistryImageLookup):
         return Image(registry=registry, repo=repo, tag=tag)
 
 
-class DockerMetadataResponseType(Enum):
-    """Docker content-types we expect to be returned by the docker registry's metadata endpoint.
+class ManifestOrIndexType(Enum):
+    """Docker content-types we expect to be returned by the docker registry's manifest endpoint.
 
     Since indexes are also returned from the same endpoint as manifests,
     we use the same enum for both.
@@ -1093,19 +1093,20 @@ class DockerMetadataResponseType(Enum):
     OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
     DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json"
 
-    def manifest_metadata_media_type(self) -> str:
+    def image_config_media_type(self) -> str:
+        """Get the media type of the image config from the response data."""
         media_type_map = {
-            DockerMetadataResponseType.OCI_MANIFEST: "application/vnd.oci.image.config.v1+json",
-            DockerMetadataResponseType.DOCKER_MANIFEST: ""
+            ManifestOrIndexType.OCI_MANIFEST: "application/vnd.oci.image.config.v1+json",
+            ManifestOrIndexType.DOCKER_MANIFEST: ""
             + "application/vnd.docker.container.image.v1+json",
         }
         return media_type_map[self]
 
 
-class MetadataResponse:
-    def __init__(self, media_type: str, metadata: DictType):
-        self.media_type = DockerMetadataResponseType(media_type)
-        self.metadata = metadata
+class ManifestOrIndexResponse:
+    def __init__(self, media_type: str, body: DictType):
+        self.media_type = ManifestOrIndexType(media_type)
+        self.body = body
         self.validate()
 
     def get_manifest_digest(self) -> Tuple[str, str]:
@@ -1116,17 +1117,19 @@ class MetadataResponse:
         UnsupportedManifestError:
             If not a manifest type.
         """
-        if self.media_type == DockerMetadataResponseType.OCI_INDEX:
+        if self.media_type == ManifestOrIndexType.OCI_INDEX:
             raise UnsupportedManifestError("OCI index is not a manifest")
 
-        media_type = self.metadata["config"]["mediaType"]
-        digest = self.metadata["config"]["digest"]
+        media_type = self.body["config"]["mediaType"]
+        digest = self.body["config"]["digest"]
 
         return digest, media_type
 
     def validate(self) -> None:
-        """Validate the metadata response from the docker registry has what we need to get
-        the image annotations.
+        """Validate the response from the docker registry.
+
+        The docker image config is validated if the response is a manifest.
+        The linux manifest is validated if the response is an index.
 
         Parameters
         ----------
@@ -1136,26 +1139,26 @@ class MetadataResponse:
         Raises
         ------
         UnsupportedManifestError
-            If the docker response metadata is unsupported.
+            If the docker response is unsupported.
         KeyError:
-            If the metadata response is invalid.
+            If the response is invalid.
         """
 
-        if self.media_type == DockerMetadataResponseType.OCI_INDEX:
-            response_media_type = self.metadata["mediaType"]
-            expected = DockerMetadataResponseType.OCI_INDEX.value
-            mediatype, _ = self.linux_manifest_digest()
-            if DockerMetadataResponseType(mediatype) not in [
-                DockerMetadataResponseType.OCI_MANIFEST,
-                DockerMetadataResponseType.DOCKER_MANIFEST,
+        if self.media_type == ManifestOrIndexType.OCI_INDEX:
+            response_media_type = self.body["mediaType"]
+            expected = ManifestOrIndexType.OCI_INDEX.value
+            media_type, _ = self.linux_manifest_digest()
+            if media_type not in [
+                ManifestOrIndexType.OCI_MANIFEST,
+                ManifestOrIndexType.DOCKER_MANIFEST,
             ]:
                 raise UnsupportedManifestError(
-                    f"Unsupported manifest metadata type {mediatype} for index entry"
+                    f"Unsupported manifest or index type {media_type.value} for index entry"
                 ) from None
 
         else:
             _, response_media_type = self.get_manifest_digest()
-            expected = self.media_type.manifest_metadata_media_type()
+            expected = self.media_type.image_config_media_type()
 
         if expected != response_media_type:
             raise UnsupportedManifestError(
@@ -1163,7 +1166,7 @@ class MetadataResponse:
                 + f"{response_media_type}, expected {expected}"
             )
 
-    def linux_manifest_digest(self) -> Tuple[str, str]:
+    def linux_manifest_digest(self) -> Tuple[ManifestOrIndexType, str]:
         """Get the media type and digest of the first Linux manifest from the response data.
 
         Raises
@@ -1174,14 +1177,14 @@ class MetadataResponse:
             If the response data is invalid.
         """
         try:
-            linux_manifest_metadata = next(
+            linux_manifest = next(
                 manifest
-                for manifest in self.metadata["manifests"]
+                for manifest in self.body["manifests"]
                 if manifest["platform"]["os"] == "linux"
             )
-            mediatype = linux_manifest_metadata["mediaType"]
-            digest = linux_manifest_metadata["digest"]
-            return mediatype, digest
+            media_type = ManifestOrIndexType(linux_manifest["mediaType"])
+            digest = linux_manifest["digest"]
+            return media_type, digest
         except StopIteration:
             raise UnsupportedManifestError("No Linux manifest found in index") from None
 
@@ -1194,13 +1197,13 @@ class HTTPImageLookup(_RegistryImageLookup):
         self._authconfig = docker.auth.load_config()
 
     @staticmethod
-    async def _get_docker_metadata_helper(
+    async def _get_docker_manifest_or_index_helper(
         session: aiohttp.ClientSession,
-        metadata_url: yarl.URL,
-        supported_metadata_types: List[DockerMetadataResponseType],
+        url: yarl.URL,
+        supported_response_types: List[ManifestOrIndexType],
         ssl_context: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
-    ) -> Tuple[str, MetadataResponse]:
+    ) -> Tuple[str, ManifestOrIndexResponse]:
         """Get the metadata response from the docker registry.
 
         Raises
@@ -1221,7 +1224,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         """
         headers = {
             aiohttp.hdrs.ACCEPT: ",".join(
-                manifest_type.value for manifest_type in supported_metadata_types
+                response_type.value for response_type in supported_response_types
             )
         }
         if auth_header:
@@ -1230,7 +1233,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         # there is a connection problem.
         try:
             async with session.get(
-                metadata_url,
+                url,
                 timeout=15,
                 ssl=ssl_context,
                 headers=headers,
@@ -1238,32 +1241,30 @@ class HTTPImageLookup(_RegistryImageLookup):
                 if response.status == 404:
                     response_data = await response.json(content_type=None)
                     raise ImageError(
-                        f"Manifest not found for {metadata_url}:"
-                        f" {response_data['errors'][0]['message']}"
+                        f"Manifest not found for {url}:" f" {response_data['errors'][0]['message']}"
                     )
 
                 response.raise_for_status()
                 response_data = await response.json(content_type=None)
                 content_type = response.headers["Content-Type"]
-                metadata_type = DockerMetadataResponseType(content_type)
-                if metadata_type not in supported_metadata_types:
+                if content_type not in [
+                    response_type.value for response_type in supported_response_types
+                ]:
                     raise UnsupportedManifestError(
-                        f"Response type {content_type} is not expected for index response"
+                        f"Response type {content_type} is not supported for {url}"
                     )
                 digest = response.headers.get("Docker-Content-Digest", None)
                 if digest is None:
-                    raise ImageError(f"Docker-Content-Digest header not found for {metadata_url}")
+                    raise ImageError(f"Docker-Content-Digest header not found for {url}")
 
-            return digest, MetadataResponse(content_type, response_data)
+            return digest, ManifestOrIndexResponse(response.headers["Content-Type"], response_data)
 
         except asyncio.TimeoutError as error:
-            raise ImageError(
-                f"Failed to get digest from supported metadata at {metadata_url}: {error}"
-            ) from error
+            raise ImageError(f"Failed to get digest from docker at {url}: {error}") from error
         except (KeyError, ValueError) as error:
-            raise ImageError(f"Invalid metadata response for {metadata_url}") from error
+            raise ImageError(f"Invalid response for {url}") from error
         except aiohttp.client.ClientError as error:
-            raise ImageError(f"Failed to get digest from metadata at {metadata_url}") from error
+            raise ImageError(f"Failed to get digest from response at {url}") from error
 
     @staticmethod
     async def _get_manifest_labels_and_digest(
@@ -1277,31 +1278,34 @@ class HTTPImageLookup(_RegistryImageLookup):
 
         If the tag is an index, get the labels from the first Linux image's manifest."""
 
-        metadata_url = repo_url / "manifests" / tag
         # First, we check if the tag is an image or an index,
         # while also allowing for the docker manifest format in one request.
-        image_digest, metadata = await HTTPImageLookup._get_docker_metadata_helper(
+        (
+            image_digest,
+            manifest_or_index,
+        ) = await HTTPImageLookup._get_docker_manifest_or_index_helper(
             session,
-            metadata_url,
-            list(DockerMetadataResponseType),
+            repo_url / "manifests" / tag,
+            list(ManifestOrIndexType),
             ssl,
             auth_header,
         )
 
         # If the manifest is an index, get the digest of the linux image's manifest.
-        if metadata.media_type == DockerMetadataResponseType.OCI_INDEX:
-            manifest_metadata_type, image_digest = metadata.linux_manifest_digest()
-            metadata_url = repo_url / "manifests" / image_digest
-            media_type = DockerMetadataResponseType(manifest_metadata_type)
-            image_digest, metadata = await HTTPImageLookup._get_docker_metadata_helper(
+        if manifest_or_index.media_type == ManifestOrIndexType.OCI_INDEX:
+            manifest_media_type, image_digest = manifest_or_index.linux_manifest_digest()
+            (
+                image_digest,
+                manifest_or_index,
+            ) = await HTTPImageLookup._get_docker_manifest_or_index_helper(
                 session,
-                metadata_url,
-                [media_type],
+                repo_url / "manifests" / image_digest,
+                [manifest_media_type],
                 ssl,
                 auth_header,
             )
 
-        manifest_digest, image_type = metadata.get_manifest_digest()
+        manifest_digest, image_type = manifest_or_index.get_manifest_digest()
 
         request_headers = {aiohttp.hdrs.ACCEPT: image_type}
 
