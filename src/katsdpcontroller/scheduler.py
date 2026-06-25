@@ -1183,6 +1183,13 @@ class ManifestOrIndexResponse:
             If no Linux manifest is found in the response data.
         KeyError:
             If the response data is invalid.
+
+        Returns
+        -------
+        ManifestOrIndexType
+            The media type of the linux manifest.
+        str
+            The digest of the linux manifest.
         """
         try:
             linux_manifest = next(
