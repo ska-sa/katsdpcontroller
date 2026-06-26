@@ -139,7 +139,7 @@ jsonschema==4.21.1
     # via katsdpcontroller (setup.cfg)
 jsonschema-specifications==2023.12.1
     # via jsonschema
-katcp-codec==0.2.0
+katcp-codec==0.2.1
     # via aiokatcp
 katdal==0.22
     # via katsdpcontroller (setup.cfg)
