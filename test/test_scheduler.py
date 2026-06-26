@@ -770,8 +770,7 @@ class TestHTTPImageLookup:
                         }
                     ],
                 },
-                "Unsupported manifest or index type "
-                + "application/vnd.oci.image.index.v1+json for index entry",
+                "Unsupported manifest type application/vnd.oci.image.index.v1+json for index entry",
                 id="index-with-unsupported-manifest-type",
             ),
             pytest.param(
