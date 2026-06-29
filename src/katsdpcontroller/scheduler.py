@@ -1258,7 +1258,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         Returns
         -------
         str
-            The digest of the manifest.
+            The digest of the manifest or index.
         ManifestOrIndexResponse
             The manifest or index type received from the registry.
         """
