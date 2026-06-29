@@ -1123,7 +1123,7 @@ class ManifestOrIndexResponse:
 
         Raises
         ------
-        UnsupportedManifestError:
+        UnsupportedManifestError
             If not a manifest type.
 
         Returns
@@ -1136,8 +1136,8 @@ class ManifestOrIndexResponse:
         if not isinstance(self.media_type, ManifestType):
             raise UnsupportedManifestError("OCI index is not a manifest")
 
-        media_type = self.body["config"]["mediaType"]
         digest = self.body["config"]["digest"]
+        media_type = self.body["config"]["mediaType"]
 
         return digest, media_type
 
@@ -1146,12 +1146,11 @@ class ManifestOrIndexResponse:
 
         Raises
         ------
-        UnsupportedManifestError:
-            If no Linux manifest is found in the response data.
+        UnsupportedManifestError
+            If no Linux manifest is found in the response data or the media type is not
+            a supported ManifestType.
         KeyError
             If the response data is invalid.
-        ValueError
-            If the linux manifest's media type is not a valid ManifestType.
         Returns
         -------
         ManifestType
@@ -1171,7 +1170,7 @@ class ManifestOrIndexResponse:
             ]:
                 raise UnsupportedManifestError(
                     f"Unsupported manifest type {linux_manifest['mediaType']} for index entry"
-                ) from None
+                )
             media_type = ManifestType(linux_manifest["mediaType"])
             digest = linux_manifest["digest"]
             return media_type, digest
@@ -1191,8 +1190,6 @@ class ManifestOrIndexResponse:
             or the index's linux manifest's media type is a unsupported type.
         KeyError
             If the response is invalid.
-        ValueError
-            If the index's linux manifest's media type is not a valid ManifestType.
         """
 
         if not isinstance(self.media_type, ManifestType):
@@ -1223,7 +1220,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         self._authconfig = docker.auth.load_config()
 
     @staticmethod
-    async def _get_docker_manifest_or_index_helper(
+    async def _get_manifest_or_index_helper(
         session: aiohttp.ClientSession,
         url: yarl.URL,
         supported_response_types: List[str],
@@ -1298,10 +1295,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         If the tag is an index, get the labels from the first Linux image's manifest."""
         # First, we check if the tag is an image or an index,
         # while also allowing for the docker manifest format in one request.
-        (
-            image_digest,
-            manifest_or_index,
-        ) = await HTTPImageLookup._get_docker_manifest_or_index_helper(
+        (image_digest, manifest_or_index,) = await HTTPImageLookup._get_manifest_or_index_helper(
             session,
             repo_url / "manifests" / tag,
             [
@@ -1315,19 +1309,18 @@ class HTTPImageLookup(_RegistryImageLookup):
 
         # If the manifest is an index, get the digest of the linux image's manifest.
         if not isinstance(manifest_or_index.media_type, ManifestType):
-            manifest_media_type, image_config_digest = manifest_or_index.linux_manifest_digest()
-            (
-                image_digest,
-                manifest_or_index,
-            ) = await HTTPImageLookup._get_docker_manifest_or_index_helper(
+            manifest_media_type, manifest_digest = manifest_or_index.linux_manifest_digest()
+            (_, manifest,) = await HTTPImageLookup._get_manifest_or_index_helper(
                 session,
-                repo_url / "manifests" / image_config_digest,
+                repo_url / "manifests" / manifest_digest,
                 [manifest_media_type.value],
                 ssl,
                 auth_header,
             )
+        else:
+            manifest = manifest_or_index
 
-        image_config_digest, image_config_type = manifest_or_index.get_image_config_digest()
+        image_config_digest, image_config_type = manifest.get_image_config_digest()
 
         request_headers = {aiohttp.hdrs.ACCEPT: image_config_type}
 
