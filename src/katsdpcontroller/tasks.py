@@ -854,14 +854,28 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
     def get_command_argument(self, value_type: Callable[[str], _T], argument_name: str) -> _T:
         """Return the value passed to the fake device as a CLI parameter.
 
-        This function is not completely robust, as it assumes that parameters are
-        only passed as separate strings, such as ``--foo bar``, and not using
-        ``--foo=bar`` syntax. The argument name (e.g. ``--foo``) is located in
-        the logical tasks's comamnd list, and it is assumed that the "value"
-        passed is simply the next string in the list.
+        This supports both ``--foo bar`` syntax (separate strings) and
+        ``--foo=bar`` syntax. If the argument is passed more than once, it
+        will return the last instance (since that's how argparse tends to
+        handle repetitions).
+
+        Note that there is no special treatment of ``--``. This is deliberate
+        as the "real" command is often prefixed with a wrapper and ``--`` is
+        used to separate the arguments to the real command from those to the
+        wrapper.
+
+        Raises
+        ------
+        ValueError
+            if the argument was not found at all, or it was the last argument
+            and there was no ``=``.
+        Exception
+            if `value_type` raises.
         """
-        position = self.logical_task.command.index(argument_name)
-        return value_type(self.logical_task.command[position + 1])
+        values = self.get_command_arguments(value_type, argument_name)
+        if not values:
+            raise ValueError(f"argument {argument_name} not found")
+        return values[-1]
 
     def get_command_arguments(
         self, value_type: Callable[[str], _T], argument_name: str
@@ -875,7 +889,11 @@ class FakeDeviceServer(aiokatcp.DeviceServer):
         ret = []
         for i, arg in enumerate(self.logical_task.command):
             if arg == argument_name:
+                if i == len(self.logical_task.command) - 1:
+                    raise ValueError(f"argument {arg} found but it was the last argument")
                 ret.append(value_type(self.logical_task.command[i + 1]))
+            elif arg.startswith(argument_name + "="):
+                ret.append(value_type(arg[len(argument_name) + 1 :]))
         return ret
 
 
