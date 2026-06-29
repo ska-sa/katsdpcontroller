@@ -1295,7 +1295,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         If the tag is an index, get the labels from the first Linux image's manifest."""
         # First, we check if the tag is an image or an index,
         # while also allowing for the docker manifest format in one request.
-        (image_digest, manifest_or_index,) = await HTTPImageLookup._get_manifest_or_index_helper(
+        image_digest, manifest_or_index = await HTTPImageLookup._get_manifest_or_index_helper(
             session,
             repo_url / "manifests" / tag,
             [
@@ -1310,7 +1310,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         # If the manifest is an index, get the digest of the linux image's manifest.
         if not isinstance(manifest_or_index.media_type, ManifestType):
             manifest_media_type, manifest_digest = manifest_or_index.linux_manifest_digest()
-            (_, manifest,) = await HTTPImageLookup._get_manifest_or_index_helper(
+            _, manifest = await HTTPImageLookup._get_manifest_or_index_helper(
                 session,
                 repo_url / "manifests" / manifest_digest,
                 [manifest_media_type.value],
