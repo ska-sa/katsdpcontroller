@@ -63,7 +63,7 @@ from .controller import (
     log_task_exceptions,
 )
 from .defaults import CONNECTION_MAX_BACKLOG, LOCALHOST, SHUTDOWN_DELAY
-from .generator import TransmitState, _has_downstream_dependencies
+from .generator import TransmitState
 from .product_config import Configuration
 from .tasks import (
     DEPENDS_INIT,
@@ -1597,6 +1597,15 @@ class SubarrayProduct:
 
         nodes = list(self.find_nodes(streams=[stream]))
         args: List[Any] = []
+
+        node = self.find_multicast_node(stream_name)
+        if node.logical_node.initial_transmit_state == TransmitState.UP:
+            # NOTE: MeerKAT Extension CBF-CAM ICD outlines criteria for this. Additionally,
+            # GpucbfTACV streams cannot be stopped if they are required by GpucbfTARV streams.
+            raise FailReply(
+                f"Cannot stop stream {stream_name!r} because it is required by another stream"
+            )
+
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
@@ -1625,16 +1634,10 @@ class SubarrayProduct:
                     product_config.GpucbfTiedArrayChannelisedVoltageStream,
                 ),
             ):
-                # NOTE: GpucbfTACV streams cannot be stopped if they feed a GpucbfTARV stream.
-                if _has_downstream_dependencies(stream, self.configuration.streams):
-                    raise FailReply(
-                        f"Cannot stop stream {stream_name!r} because it has downstream dependents"
-                    )
                 args += [stream_name]
             # The V-engine does not require the stream name for this request
             await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))
 
-        node = self.find_multicast_node(stream_name)
         node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:

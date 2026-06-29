@@ -966,16 +966,11 @@ def _make_fgpu(
 def _has_downstream_dependencies(
     src_stream: product_config.Stream,
     dst_streams: Sequence[product_config.Stream],
-    check_by_name: bool = False,
 ) -> bool:
     """Check if `src_stream` is used by any of the `dst_streams`."""
     for dst_stream in dst_streams:
-        if check_by_name:
-            if src_stream.name in [stream.name for stream in dst_stream.src_streams]:
-                return True
-        else:
-            if src_stream in dst_stream.src_streams:
-                return True
+        if src_stream in dst_stream.src_streams:
+            return True
     return False
 
 
@@ -1422,7 +1417,7 @@ def _make_xbgpu(
             ]
         )
 
-        for stream in streams:
+        for stream, dst_multicast in zip(streams, dst_multicasts):
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 output_config = {
                     "name": escape_format(stream.name),
@@ -1439,24 +1434,12 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
-                if _has_downstream_dependencies(stream, vgpu_streams, check_by_name=True):
+                if _has_downstream_dependencies(stream, vgpu_streams):
                     output_config["send_enabled"] = True
-                    gpucbf_tacv_dst_mcast = list(
-                        filter(
-                            lambda dst_mcast: dst_mcast.name == f"multicast.{stream.name}",
-                            dst_multicasts,
-                        )
-                    )
-                    if len(gpucbf_tacv_dst_mcast) == 1:
-                        gpucbf_tacv_dst_mcast[0].initial_transmit_state = TransmitState.UP
-                    else:
-                        # Found more than one or none, which is unexpected
-                        raise ValueError(
-                            f"Expected exactly one multicast for stream {stream.name}, "
-                            "found {len(gpucbf_tacv_dst_mcast)}"
-                        )
+                    dst_multicast.initial_transmit_state = TransmitState.UP
                 else:
                     output_config["send_enabled"] = False
+                    # initial_transmit_state is already initialised to TransmitState.DOWN
 
                 if stream.dither is not None:
                     output_config["dither"] = stream.dither
