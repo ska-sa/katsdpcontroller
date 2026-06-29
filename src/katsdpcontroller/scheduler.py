@@ -1110,6 +1110,24 @@ class ManifestType(Enum):
 
 
 class ManifestOrIndexResponse:
+    """Response from the registry containing a manifest or index.
+
+    Parameters
+    ----------
+    media_type : str
+        The media type of the response.
+    body : DictType
+        The body of the response.
+
+    Raises
+    ------
+    UnsupportedManifestError
+        If the manifest's image config's media type is a unsupported type,
+        or the index's linux manifest's media type is a unsupported type.
+    KeyError
+        If the response data is invalid.
+    """
+
     def __init__(self, media_type: str, body: DictType) -> None:
         if media_type == OCI_INDEX_MEDIA_TYPE:
             self.media_type: Union[ManifestType, str] = media_type
