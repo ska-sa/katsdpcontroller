@@ -1084,7 +1084,7 @@ OCI_INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
 
 
 class ManifestType(Enum):
-    """Content-types we expect to be returned by the registry's manifest endpoint.
+    """Manifest content-types we expect to be returned by the registry.
 
     The Content types could be either OCI or Docker.
 
@@ -1151,10 +1151,10 @@ class ManifestOrIndexResponse:
         KeyError
             If the response data is invalid.
         ValueError
-            If the linux manifest's media type is not a valid ManifestOrIndexType.
+            If the linux manifest's media type is not a valid ManifestType.
         Returns
         -------
-        ManifestOrIndexType
+        ManifestType
             The media type of the linux manifest.
         str
             The digest of the linux manifest.
@@ -1293,7 +1293,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         ssl: Union[ssl.SSLContext, bool],
         auth_header: Optional[str],
     ) -> Tuple[dict, str]:
-        """Get the labels and Docker content digest from the manifest of the tag on Docker registry.
+        """Get the labels and Docker content digest from the manifest of the tag in the registry.
 
         If the tag is an index, get the labels from the first Linux image's manifest."""
         # First, we check if the tag is an image or an index,
