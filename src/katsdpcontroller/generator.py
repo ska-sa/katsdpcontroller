@@ -1638,9 +1638,14 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
+    # NOTE: Observed vgpu cpu usage is 12%, 21%, 42%, for corresponding
+    # bandwidths of 32 MHz, 64 MHz, and 128 MHz, respectively.
+    vgpu.cpus = (0.315e-6 * stream.bandwidth + 1) / 100
 
-    vgpu.cpus = 2.0
-    vgpu.mem = 8192
+    # NOTE: Observed vgpu resident memory usage is 1200M, 1299M, 1629M for
+    # corresponding bandwidths of 32 MHz, 64 MHz, and 128 MHz, respectively.
+    vgpu.mem = 4.6 * stream.bandwidth + 1065
+
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
     if not configuration.options.develop.less_resources:
@@ -1663,17 +1668,16 @@ def _make_vgpu(
         stream.tied_array_channelised_voltage[0].data_rate() / n_engines
     )
     vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
-
     vgpu.gpus = [scheduler.GPURequest()]
+
     # NOTE: Modeled estimate of the required GPU usage to accommodate the observed GPU usage
     # for bandwidths of 32 MHz, 64 MHz, and 128 MHz. The observed GPU usage percentages
-    # are 45%, 29%, and 15%, respectively.
+    # are 15%, 29%, and 45%, respectively.
     vgpu.gpus[0].compute = (0.303e-6 * stream.bandwidth + 10) / 100
 
     # NOTE: Ensure there is enough GPU memory to accommodate the observed GPU usage
-    # for bandwidths of 32 MHz, 64 MHz, and 128 MHz. The observed GPU usage is 6152 MiB,
-    # 3956 MiB, and 2964 MiB, respectively.
-
+    # for bandwidths of 32 MHz, 64 MHz, and 128 MHz. The observed GPU usage is
+    # 2964 MiB, 3956 MiB, and 6152 MiB, respectively.
     vgpu.gpus[0].mem = 33.4 * stream.bandwidth + 2766
 
     vgpu.command = (
