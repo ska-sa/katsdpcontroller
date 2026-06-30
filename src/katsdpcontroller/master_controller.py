@@ -1341,7 +1341,10 @@ class DeviceServer(aiokatcp.DeviceServer):
                         draining_machines.add(machine["id"]["hostname"])
                 async with session.get(url / "master/slaves") as resp:
                     data = await resp.json()
+                    logger.error("\nMesos agents:\n")
+                    logger.error(f"\n\n{json.dumps(data, indent=2)}\n\n")
                     for agent in data["slaves"]:
+                        logger.error(f"\n\t{agent}")
                         attributes = agent.get("attributes", {})
                         try:
                             subsystems_raw = attributes["katsdpcontroller.subsystems"]
