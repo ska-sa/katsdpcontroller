@@ -1341,10 +1341,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                         draining_machines.add(machine["id"]["hostname"])
                 async with session.get(url / "master/slaves") as resp:
                     data = await resp.json()
-                    logger.error("\nMesos agents:\n")
-                    logger.error(f"\n\n{json.dumps(data, indent=2)}\n\n")
                     for agent in data["slaves"]:
-                        logger.error(f"\n\t{agent}")
                         attributes = agent.get("attributes", {})
                         try:
                             subsystems_raw = attributes["katsdpcontroller.subsystems"]
@@ -1358,7 +1355,14 @@ class DeviceServer(aiokatcp.DeviceServer):
                         if not is_cbf:
                             continue
                         cbf_resources_total += 1
-                        if agent["hostname"] in draining_machines:
+
+                        interfaces_raw = attributes["katsdpcontroller.interfaces"]
+                        if decode_json_base64(interfaces_raw) == []:
+                            hostname = agent.get("hostname", "HOSTNAME")
+                            logger.error(f"Found {hostname} with interfaces:")
+                            logger.error(f"\n\t{interfaces_raw}")
+                            continue
+                        elif agent["hostname"] in draining_machines:
                             cbf_resources_maintenance += 1
                         elif agent["used_resources"]["cpus"] == 0:
                             cbf_resources_free += 1
