@@ -37,6 +37,7 @@ import yarl
 from aiokatcp import Client, DeviceStatus, Sensor
 
 from katsdpcontroller import scheduler
+from katsdpcontroller.agent_mkconfig import encode
 from katsdpcontroller.controller import (
     ProductState,
     device_server_sockname,
@@ -1285,6 +1286,12 @@ class TestDeviceServerReal:
                 "draining_machines": [{"id": {"hostname": "machine2", "ip": "10.0.0.2"}}],
             },
         )
+
+        # A simple example of what is configured on Mesos agents
+        _katsdpcontroller_interfaces = [
+            {"ipv4_address": "11.22.33.44", "name": "enp193s0np0", "network": "gpucbf"}
+        ]
+        _katsdpcontroller_interfaces_encoded = encode(_katsdpcontroller_interfaces)
         # This is only a tiny subset of what is returned, sufficient for
         # what the code expects to find.
         rmock.get(
@@ -1293,7 +1300,10 @@ class TestDeviceServerReal:
                 "slaves": [
                     {
                         # Draining machine
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        "attributes": {
+                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",  # {"cbf"}
+                            "katsdpcontroller.interfaces": _katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine2",
                         "used_resources": {"cpus": 0},
                     },
@@ -1312,7 +1322,10 @@ class TestDeviceServerReal:
                     },
                     {
                         # Machine that's usable but unused
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        "attributes": {
+                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",
+                            "katsdpcontroller.interfaces": _katsdpcontroller_interfaces_encoded,
+                        },  # {"cbf"}
                         "hostname": "machine5",
                         "used_resources": {"cpus": 0},
                     },
@@ -1322,12 +1335,22 @@ class TestDeviceServerReal:
                         "hostname": "machine6",
                         "used_resources": {"cpus": 16},
                     },
+                    {
+                        # Machine that is not usable for CBF, but is used for something else.
+                        # It is not counted.
+                        "attributes": {
+                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",
+                            "katsdpcontroller.interfaces": encode([]),
+                        },
+                        "hostname": "machine7",
+                        "used_resources": {"cpus": 0},
+                    },
                 ]
             },
         )
 
         await asyncio.sleep(5)  # Give the polling loop time to run
-        assert server.sensors["cbf-resources-total"].value == 3
+        assert server.sensors["cbf-resources-total"].value == 4
         assert server.sensors["cbf-resources-total"].status == Sensor.Status.NOMINAL
         assert server.sensors["cbf-resources-maintenance"].value == 1
         assert server.sensors["cbf-resources-maintenance"].status == Sensor.Status.NOMINAL
