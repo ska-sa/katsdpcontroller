@@ -1652,7 +1652,7 @@ def _make_vgpu(
     # Estimate required cpu resources
     vgpu.cpus = (0.315e-6 * stream.bandwidth + 1) / 100
 
-    # Estimate required memory
+    # Estimate required host memory
     vgpu.mem = 4.6 * stream.bandwidth + 1065
 
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
