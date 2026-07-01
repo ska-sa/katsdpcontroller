@@ -1638,7 +1638,7 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
-    # NOTE: Observed data
+    # Observed data
     # +-------------------------------------+
     # |Narrowband         |16   |8    |4    |
     # +-------------------------------------+
