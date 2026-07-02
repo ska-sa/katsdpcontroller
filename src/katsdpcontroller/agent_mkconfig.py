@@ -25,11 +25,11 @@ import argparse
 import base64
 import contextlib
 import enum
-import glob
 import json
 import numbers
 import os
 import os.path
+import stat
 import subprocess
 import sys
 import xml.etree.ElementTree
@@ -377,7 +377,16 @@ def attributes_resources(args: argparse.Namespace) -> Tuple[Mapping[str, Any], M
         resources[f"katsdpcontroller.interface.{i}.bandwidth_in"] = speed
         resources[f"katsdpcontroller.interface.{i}.bandwidth_out"] = speed
     attributes["katsdpcontroller.interfaces"] = interfaces
-    attributes["katsdpcontroller.infiniband_devices"] = glob.glob("/dev/infiniband/*")
+    # Find just the character device files in the directory. On some systems,
+    # there are also non-device files such as /dev/infiniband/by-ibdev (a
+    # directory).
+    if os.path.exists("/dev/infiniband"):
+        with os.scandir("/dev/infiniband") as it:
+            attributes["katsdpcontroller.infiniband_devices"] = [
+                entry.path
+                for entry in it
+                if stat.S_ISCHR(entry.stat(follow_symlinks=False).st_mode)
+            ]
 
     volumes = []
     for volume_spec in args.volumes:
