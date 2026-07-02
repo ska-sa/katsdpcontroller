@@ -21,6 +21,7 @@ import base64
 import json
 import pathlib
 import re
+import stat
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -69,7 +70,7 @@ def mock_nics(mocker, fs, nics: List[FakeNic]) -> None:
                 contents=f"{nic.ifname}\n",
             )
             fs.create_dir(f"/sys/class/infiniband/{ibdev}/device/infiniband_verbs/{uverbs}")
-            fs.create_file(f"/dev/infiniband/{uverbs}")
+            fs.create_file(f"/dev/infiniband/{uverbs}", st_mode=stat.S_IFCHR | 0o666)
             fs.create_file(
                 f"/sys/class/net/{nic.ifname}/settings/force_local_lb_disable",
                 contents=(
