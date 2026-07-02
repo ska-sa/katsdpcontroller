@@ -13,6 +13,7 @@
 - "4.5"
 - "4.6"
 - "4.7"
+- "4.9"
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -139,14 +140,22 @@ properties:
                 sync_time:
                   type: number
 {% endif %}
-                adc_sample_rate: 
+                adc_sample_rate:
                   $ref: "#/definitions/positive_number"
-                centre_frequency: 
+                centre_frequency:
                   $ref: "#/definitions/positive_number"
                 band:
                   type: string
                 antenna:
                   type: string
+{% if version >= "4.9" %}
+                bits_per_sample:
+                  $ref: "#/definitions/positive_integer"
+                  default: 10
+                samples_per_heap:
+                  $ref: "#/definitions/positive_integer"
+                  default: 4096
+{% endif %}
               additionalProperties: false
               required:
 {% if version >= "4.0" %}
@@ -562,6 +571,14 @@ properties:
                   type: string
                 antenna:
                   type: string
+{% if version >= "4.9" %}
+                bits_per_sample:
+                  $ref: "#/definitions/positive_integer"
+                  default: 10
+                samples_per_heap:
+                  $ref: "#/definitions/positive_integer"
+                  default: 4096
+{% endif %}
                 command_line_extra:
                   type: array
                   items:

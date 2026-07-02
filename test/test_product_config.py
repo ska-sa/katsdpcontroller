@@ -312,7 +312,8 @@ class TestDigBasebandVoltageStream:
         assert dig.band == config["band"]
         assert dig.antenna_name == config["antenna"]
         assert dig.antenna is None
-        assert dig.bits_per_sample == 10
+        assert dig.bits_per_sample == defaults.DIG_BITS_PER_SAMPLE
+        assert dig.samples_per_heap == defaults.DIG_SAMPLES_PER_HEAP
         assert dig.data_rate(1.0, 0) == 1712e7
 
     def test_from_config_description(self, config: Dict[str, Any]) -> None:
@@ -321,6 +322,20 @@ class TestDigBasebandVoltageStream:
         dig = DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.antenna_name == "m000"
         assert dig.antenna == _M000
+
+    def test_from_config_non_default(self, config: Dict[str, Any]) -> None:
+        """Test with default values being overridden."""
+        config["bits_per_sample"] = 6
+        config["samples_per_heap"] = 8192
+        dig = DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
+        assert dig.bits_per_sample == 6
+        assert dig.samples_per_heap == 8192
+
+    def test_samples_per_heap_npot(self, config: Dict[str, Any]) -> None:
+        """Test with a non-power-of-two samples_per_heap."""
+        config["samples_per_heap"] = 1234
+        with pytest.raises(ValueError, match="samples_per_heap is not a power of 2"):
+            DigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
 
 
 class TestSimDigBasebandVoltageStream:
@@ -345,7 +360,8 @@ class TestSimDigBasebandVoltageStream:
         assert dig.band == config["band"]
         assert dig.antenna == _M000
         assert dig.antenna_name == "m000"
-        assert dig.bits_per_sample == 10
+        assert dig.bits_per_sample == defaults.DIG_BITS_PER_SAMPLE
+        assert dig.samples_per_heap == defaults.DIG_SAMPLES_PER_HEAP
         assert dig.data_rate(1.0, 0) == 1712e7
         assert dig.command_line_extra == []
 
@@ -358,6 +374,20 @@ class TestSimDigBasebandVoltageStream:
         config["command_line_extra"] = ["--extra-arg"]
         dig = SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
         assert dig.command_line_extra == config["command_line_extra"]
+
+    def test_from_config_non_default(self, config: Dict[str, Any]) -> None:
+        """Test with default values being overridden."""
+        config["bits_per_sample"] = 6
+        config["samples_per_heap"] = 8192
+        dig = SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
+        assert dig.bits_per_sample == 6
+        assert dig.samples_per_heap == 8192
+
+    def test_samples_per_heap_npot(self, config: Dict[str, Any]) -> None:
+        """Test with a non-power-of-two samples_per_heap."""
+        config["samples_per_heap"] = 1234
+        with pytest.raises(ValueError, match="samples_per_heap is not a power of 2"):
+            SimDigBasebandVoltageStream.from_config(Options(), "m000h", config, [], {})
 
 
 class TestAntennaChannelisedVoltageStream:
@@ -410,6 +440,8 @@ def make_dig_baseband_voltage(name: str) -> DigBasebandVoltageStream:
         centre_frequency=1284000000.0,
         band="l",
         antenna_name=name[:-1],
+        bits_per_sample=10,
+        samples_per_heap=4096,
     )
 
 
@@ -422,6 +454,8 @@ def make_sim_dig_baseband_voltage(name: str) -> SimDigBasebandVoltageStream:
         centre_frequency=1284000000.0,
         band="l",
         antenna=_M000 if name.startswith("m000") else _M002,
+        bits_per_sample=10,
+        samples_per_heap=4096,
     )
 
 
@@ -1662,7 +1696,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.7",
+        "version": "4.9",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {

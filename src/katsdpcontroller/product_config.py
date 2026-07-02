@@ -69,6 +69,10 @@ BYTES_PER_WEIGHT = 1
 BYTES_PER_VFW = BYTES_PER_VIS + BYTES_PER_FLAG + BYTES_PER_WEIGHT
 
 
+def _is_power_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
 def _url_n_endpoints(url: Union[str, yarl.URL]) -> int:
     """Return the number of endpoints in a ``spead://`` URL.
 
@@ -435,15 +439,19 @@ class DigBasebandVoltageStreamBase(Stream):
         centre_frequency: float,
         band: str,
         antenna_name: str,
+        bits_per_sample: int,
+        samples_per_heap: int,
     ) -> None:
+        if not _is_power_two(samples_per_heap):
+            raise ValueError("samples_per_heap is not a power of 2")
         super().__init__(name, [])
         self.sync_time = sync_time
         self.adc_sample_rate = adc_sample_rate
         self.centre_frequency = centre_frequency
         self.band = band
         self.antenna_name = antenna_name
-        self.bits_per_sample = 10
-        self.samples_per_heap = 4096
+        self.bits_per_sample = bits_per_sample
+        self.samples_per_heap = samples_per_heap
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
         """Network bandwidth in bits per second."""
@@ -467,6 +475,8 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         band: str,
         antenna_name: str,
         antenna: Optional[katpoint.Antenna] = None,
+        bits_per_sample: int,
+        samples_per_heap: int,
     ) -> None:
         super().__init__(
             name,
@@ -476,6 +486,8 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             centre_frequency=centre_frequency,
             band=band,
             antenna_name=antenna_name,
+            bits_per_sample=bits_per_sample,
+            samples_per_heap=samples_per_heap,
         )
         self.antenna = antenna
         self.url = url
@@ -508,6 +520,8 @@ class DigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             band=config["band"],
             antenna_name=antenna_name,
             antenna=antenna,
+            bits_per_sample=config.get("bits_per_sample", defaults.DIG_BITS_PER_SAMPLE),
+            samples_per_heap=config.get("samples_per_heap", defaults.DIG_SAMPLES_PER_HEAP),
         )
 
 
@@ -524,6 +538,8 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
         centre_frequency: float,
         band: str,
         antenna: katpoint.Antenna,
+        bits_per_sample: int,
+        samples_per_heap: int,
         command_line_extra: Iterable[str] = (),
     ) -> None:
         super().__init__(
@@ -534,6 +550,8 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             centre_frequency=centre_frequency,
             band=band,
             antenna_name=antenna.name,
+            bits_per_sample=bits_per_sample,
+            samples_per_heap=samples_per_heap,
         )
         self.antenna = antenna
         self.command_line_extra = list(command_line_extra)
@@ -557,6 +575,8 @@ class SimDigBasebandVoltageStream(DigBasebandVoltageStreamBase):
             centre_frequency=config["centre_frequency"],
             band=config["band"],
             antenna=_make_antenna(config["antenna"]),
+            bits_per_sample=config.get("bits_per_sample", defaults.DIG_BITS_PER_SAMPLE),
+            samples_per_heap=config.get("samples_per_heap", defaults.DIG_SAMPLES_PER_HEAP),
             command_line_extra=config.get("command_line_extra", []),
         )
 
@@ -721,7 +741,7 @@ class GpucbfAntennaChannelisedVoltageStream(AntennaChannelisedVoltageStreamBase)
         dither: Optional[str] = None,
         command_line_extra: Iterable[str] = (),
     ) -> None:
-        if n_chans < 1 or (n_chans & (n_chans - 1)) != 0:
+        if not _is_power_two(n_chans):
             raise ValueError("n_chans is not a power of 2")
         if len(src_streams) % 2 != 0:
             raise ValueError("src_streams does not have an even number of elements")
