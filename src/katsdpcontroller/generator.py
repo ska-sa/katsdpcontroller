@@ -1600,9 +1600,23 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
+    # Observed data
+    # +-------------------------------------+
+    # |Narrowband         |16   |8    |4    |
+    # +-------------------------------------+
+    # |Bandwidth  (Mhz)   |32   |64   |128  |
+    # |vgpu cpu usage (%) |12   |21   |42   |
+    # |vgpu res memory(M) |1200 |1299 |1629 |
+    # |vgpu gpu usage (%) |15   |29   |45   |
+    # |vgpu gpu memory(M) |2964 |3956 |6152 |
+    # +-------------------------------------+
 
-    vgpu.cpus = 2.0
-    vgpu.mem = 8192
+    # Estimate required cpu resources
+    vgpu.cpus = (0.315e-6 * stream.bandwidth + 1) / 100
+
+    # Estimate required host memory
+    vgpu.mem = 4.6 * stream.bandwidth + 1065
+
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
     if not configuration.options.develop.less_resources:
@@ -1625,12 +1639,13 @@ def _make_vgpu(
         stream.tied_array_channelised_voltage[0].data_rate() / n_engines
     )
     vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
-
     vgpu.gpus = [scheduler.GPURequest()]
-    # TODO: To ensure vgpu doesn't share the GPU with anything else.
-    # Revisit once vgpu is complete.
-    vgpu.gpus[0].compute = 1.0
-    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
+
+    # Estimate required GPU usage
+    vgpu.gpus[0].compute = (0.303e-6 * stream.bandwidth + 10) / 100
+
+    # Estimate required GPU memory
+    vgpu.gpus[0].mem = 33.4 * stream.bandwidth + 2766
 
     vgpu.command = (
         ["schedrr"]
