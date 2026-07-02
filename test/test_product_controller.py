@@ -104,12 +104,12 @@ GPUCBF_DATA_STREAMS: List[Tuple[bytes, bytes, bytes]] = [
     (
         b"gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi",
         rb"239\.192\.\d+\.\d+\+3:7148",
-        b"down",
+        b"up",
     ),
     (
         b"gpucbf_tied_array_channelised_voltage_0y_narrowband_vlbi",
         rb"239\.192\.\d+\.\d+\+3:7148",
-        b"down",
+        b"up",
     ),
     (b"gpucbf_tied_array_resampled_voltage", rb"239\.192\.\d+\.\d+\:7148", b"down"),
 ]
@@ -1962,6 +1962,8 @@ class TestController(BaseTestController):
             ("capture-start", "gpucbf_antenna_channelised_voltage"),
             # stream has wrong type
             ("capture-list", "sdp_l0"),
+            # stream cannot be stopped
+            ("capture-stop", "gpucbf_tied_array_channelised_voltage_0x_narrowband_vlbi"),
         ],
     )
     async def test_request_fails(self, client: aiokatcp.Client, katcp_request: tuple) -> None:
@@ -2099,6 +2101,7 @@ class TestController(BaseTestController):
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
+
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
         await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client

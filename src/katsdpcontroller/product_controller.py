@@ -1597,6 +1597,15 @@ class SubarrayProduct:
 
         nodes = list(self.find_nodes(streams=[stream]))
         args: List[Any] = []
+
+        node = self.find_multicast_node(stream_name)
+        if node.logical_node.initial_transmit_state == TransmitState.UP:
+            # NOTE: MeerKAT Extension CBF-CAM ICD outlines criteria for this. Additionally,
+            # GpucbfTACV streams cannot be stopped if they are required by GpucbfTARV streams.
+            raise FailReply(
+                f"Cannot stop stream {stream_name!r} because it is required by another stream"
+            )
+
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
@@ -1629,7 +1638,6 @@ class SubarrayProduct:
             # The V-engine does not require the stream name for this request
             await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))
 
-        node = self.find_multicast_node(stream_name)
         node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:

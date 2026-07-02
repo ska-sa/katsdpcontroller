@@ -947,6 +947,17 @@ def _make_fgpu(
     return fgpu_group
 
 
+def _has_downstream_dependencies(
+    src_stream: product_config.Stream,
+    dst_streams: Sequence[product_config.Stream],
+) -> bool:
+    """Check if `src_stream` is used by any of the `dst_streams`."""
+    for dst_stream in dst_streams:
+        if src_stream in dst_stream.src_streams:
+            return True
+    return False
+
+
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
@@ -1268,6 +1279,8 @@ def _make_xbgpu(
     recv_buffer = free_chunks * chunk_size
 
     task_names = []
+    # Needed for send_enabled command-line arg for beam data streams
+    vgpu_streams = configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream)
     for i in range(n_engines):
         # One engine per section of the band
         xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
@@ -1370,7 +1383,7 @@ def _make_xbgpu(
             ]
         )
 
-        for stream in streams:
+        for stream, dst_multicast in zip(streams, dst_multicasts):
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 output_config = {
                     "name": escape_format(stream.name),
@@ -1387,6 +1400,13 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
+                if _has_downstream_dependencies(stream, vgpu_streams):
+                    output_config["send_enabled"] = True
+                    dst_multicast.initial_transmit_state = TransmitState.UP
+                else:
+                    output_config["send_enabled"] = False
+                    # initial_transmit_state is already initialised to TransmitState.DOWN
+
                 if stream.dither is not None:
                     output_config["dither"] = stream.dither
                 xbgpu.command += [
