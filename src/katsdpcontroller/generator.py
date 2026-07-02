@@ -123,6 +123,8 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
+        "vlbimeta",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -2974,6 +2976,8 @@ def build_logical_graph(
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbi(g, configuration, vdif_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -3521,6 +3525,115 @@ def _make_spectral_imager_report(
     return report
 
 
+def _make_vlbi(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VdifStream
+) -> scheduler.LogicalNode:
+    """Create a capture-time VLBI recorder task for a VDIF stream."""
+    source_stream = stream.source_stream
+    if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
+        raise NotImplementedError(
+            "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
+        )
+    develop = configuration.options.develop
+    source_multicast = find_node(g, "multicast." + source_stream.name)
+    assert isinstance(source_multicast, LogicalMulticast)
+    task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 2.0
+    task.mem = 8 * 1024
+    size_bytes = getattr(source_stream, "size", None)
+    if size_bytes is not None:
+        task.disk = _mb(1024 * size_bytes + 1024)
+    task.interfaces = [
+        scheduler.InterfaceRequest(
+            "cbf",
+            affinity=not develop.disable_ibverbs,
+            infiniband=not develop.disable_ibverbs,
+            multicast_in={source_stream.name},
+        )
+    ]
+    task.interfaces[0].bandwidth_in = source_stream.data_rate()
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
+    task.ports = ["port"]
+    task.wait_ports = ["port"]
+    payload_bytes = (defaults.VGPU_SAMPLES_PER_FRAME * source_stream.bits_per_sample) // 8
+    frame_bytes = 32 + payload_bytes
+    n_threads = source_stream.n_chans * len(source_stream.pols)
+    j5a_mode = f"vdif_{payload_bytes}-{frame_bytes}-{source_stream.bits_per_sample}-{n_threads}"
+    command_lines = [
+        'endpoint="$1"',
+        'katcp_port="$2"',
+        'export J5A_NETPORT="${{endpoint/:/@}}"',
+        f"export J5A_PROTOCOL={develop.vlbi_recorder_protocol}",
+        f"export J5A_MODE={j5a_mode}",
+        'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"',
+        'export KATCP_PORT="$katcp_port"',
+        "export KATCP_ENABLE=true",
+        "export AUTOSTART_RECORD=false",
+        f"export DISK_PATHS={escape_format(DATA_VOL.container_path)}",
+    ]
+    if frame_bytes + 8 > 1500:
+        command_lines.append("export J5A_MTU=9000")
+        command_lines.append("export J5A_BUFF_SND=268435456")
+    command_lines.append("exec /usr/local/bin/entrypoint.sh")
+    task.command = [
+        "bash",
+        "-ceu",
+        "\n".join(command_lines),
+        "_",
+        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
+        "{ports[port]}",
+    ]
+    g.add_node(task)
+    g.add_edge(
+        task,
+        source_multicast,
+        port="vdif",
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+    )
+    return task
+
+
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+    dataset_stream: product_config.VisStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "vlbimeta"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = True
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+        "--dataset-stream-name",
+        escape_format(dataset_stream.name),
+        "--mode",
+        configuration.options.vlbimeta.mode,
+    ]
+    g.add_node(task)
+    return task
+
+
 async def build_postprocess_logical_graph(
     configuration: Configuration,
     capture_block_id: str,
@@ -3543,6 +3656,28 @@ async def build_postprocess_logical_graph(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
 
+    cal_streams = list(configuration.by_class(product_config.CalStream))
+    if len(cal_streams) == 1:
+        vlbimeta_dataset_stream = cal_streams[0].vis
+    else:
+        vis_streams = list(configuration.by_class(product_config.VisStream))
+        if len(vis_streams) != 1:
+            raise ValueError(
+                "vlbimeta currently requires either exactly one sdp.cal stream or exactly one "
+                "sdp.vis stream"
+            )
+        vlbimeta_dataset_stream = vis_streams[0]
+
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        if configuration.options.vlbimeta.mode != "disabled":
+            _make_vlbimeta(
+                g,
+                configuration,
+                capture_block_id,
+                vdif_stream,
+                vlbimeta_dataset_stream,
+            )
+
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
@@ -3563,6 +3698,10 @@ async def build_postprocess_logical_graph(
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
+            if node.pass_telstate:
+                node.command.extend(
+                    ["--telstate", "{endpoints[telstate_telstate]}", "--name", node.name]
+                )
             g.add_edge(node, telstate_node, port="telstate", depends_ready=True, depends_kill=True)
 
     return g

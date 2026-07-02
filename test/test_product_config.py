@@ -17,6 +17,7 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import copy
+import json
 import re
 from fractions import Fraction
 from typing import Any, Dict, List, Optional
@@ -25,10 +26,13 @@ from unittest import mock
 import jsonschema
 import katpoint
 import katportalclient
+import katsdptelstate.aio
+import katsdptelstate.aio.memory
 import pytest
 import yarl
+from aiokatcp import SensorSet
 
-from katsdpcontroller import defaults, product_config
+from katsdpcontroller import defaults, generator, product_config
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -57,10 +61,12 @@ from katsdpcontroller.product_config import (
     Simulation,
     SpectralImageStream,
     TiedArrayChannelisedVoltageStream,
+    VdifStream,
     VisStream,
 )
 
 from . import fake_katportalclient
+from .utils import CONFIG
 
 _M000 = katpoint.Antenna(
     "m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14"  # noqa: E501
@@ -207,7 +213,13 @@ class TestOptions:
 
     def test_from_config_dict(self) -> None:
         config = {
-            "develop": {"disable_ibverbs": True, "less_resources": True, "data_timeout": 2.4},
+            "develop": {
+                "disable_ibverbs": True,
+                "less_resources": True,
+                "data_timeout": 2.4,
+                "vlbi_recorder_protocol": "udpsnor",
+            },
+            "vlbimeta": {"mode": "pass_through"},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
             "shutdown_delay": 5.0,
@@ -217,6 +229,8 @@ class TestOptions:
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.develop.data_timeout == 2.4
+        assert options.develop.vlbi_recorder_protocol == "udpsnor"
+        assert options.vlbimeta.mode == "pass_through"
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
@@ -242,9 +256,19 @@ class TestOptions:
         assert options.develop.any_gpu is False
         assert options.develop.disable_ibverbs is False
         assert options.develop.less_resources is False
+        assert options.develop.vlbi_recorder_protocol == "udps"
+        assert options.vlbimeta.mode == "antab"
         assert options.wrapper is None
         assert options.service_overrides == {}
         assert options.shutdown_delay is None
+
+    def test_invalid_vlbimeta_mode(self) -> None:
+        with pytest.raises(ValueError, match="Unknown vlbimeta mode"):
+            Options.from_config({"vlbimeta": {"mode": "bad"}})
+
+    def test_invalid_vlbi_recorder_protocol(self) -> None:
+        with pytest.raises(ValueError, match="Unknown VLBI recorder protocol"):
+            Options.from_config({"develop": {"vlbi_recorder_protocol": "udp"}})
 
 
 class TestSimulation:
@@ -1235,6 +1259,61 @@ class TestGpucbfTiedArrayResampledVoltageStream:
             )
 
 
+class TestVdifStream:
+    """Test :class:`~.VdifStream`."""
+
+    @pytest.fixture
+    def source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
+        narrowband_config = GpucbfNarrowbandConfig.from_config(
+            {
+                "decimation_factor": DECIMATION,
+                "centre_frequency": 200e6,
+                "vlbi": {"pass_bandwidth": 64e6},
+            }
+        )
+        acv = make_gpucbf_antenna_channelised_voltage(
+            stream_name="vlbi_acv", narrowband_config=narrowband_config
+        )
+        tacv_streams = [
+            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0x", src_pol=0),
+            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0y", src_pol=1),
+        ]
+        config = {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": ["beam_0x", "beam_0y"],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me",
+        }
+        return GpucbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "gpucbf_tied_array_resampled_voltage", config, tacv_streams, {}
+        )
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {"type": "sdp.vdif", "src_streams": ["gpucbf_tied_array_resampled_voltage"]}
+
+    def test_from_config(
+        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        vdif = VdifStream.from_config(Options(), "sdp_vdif", config, [source_stream], {})
+        assert vdif.source_stream is source_stream
+        assert vdif.n_chans == source_stream.n_chans
+        assert vdif.pols == tuple(source_stream.pols)
+
+    def test_requires_single_source(
+        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        with pytest.raises(ValueError, match="Exactly one tied-array resampled voltage source"):
+            VdifStream.from_config(
+                Options(),
+                "sdp_vdif",
+                config,
+                [source_stream, source_stream],
+                {},
+            )
+
+
 class TestVisStream:
     """Test :class:`~.VisStream`."""
 
@@ -1864,11 +1943,13 @@ class TestUpgrade:
     def test_upgrade_v3(self, config_v3: Dict[str, Any], config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config_v3)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
     def test_upgrade_v4(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
+        config["version"] = "4.8"
         assert upgraded == config
 
 
@@ -1984,6 +2065,44 @@ class TestConfiguration:
         }
         with pytest.raises(ValueError, match="Only a single band is supported, found 'l', 'u'"):
             await Configuration.from_config(config)
+
+    async def test_vlbi_recorder_uses_cbf_multicast_interface(self) -> None:
+        config = json.loads(CONFIG)
+        configuration = await Configuration.from_config(config)
+        graph = generator.build_logical_graph(configuration, config, SensorSet())
+        vlbi_node = next(node for node in graph if node.name == "vlbi.sdp_vdif")
+        request = vlbi_node.interfaces[0]
+        assert request.network == "cbf"
+        assert request.multicast_in == {"gpucbf_tied_array_resampled_voltage"}
+        assert request.infiniband is True
+        assert request.affinity is True
+        command = vlbi_node.command[2]
+        assert "export J5A_PROTOCOL=udps" in command
+        assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
+
+    async def test_vlbimeta_uses_cal_vis_stream(self) -> None:
+        config = json.loads(CONFIG)
+        del config["outputs"]["continuum_image"]
+        del config["outputs"]["spectral_image"]
+        configuration = await Configuration.from_config(config)
+        telstate = katsdptelstate.aio.TelescopeState(katsdptelstate.aio.memory.MemoryBackend())
+        graph = await generator.build_postprocess_logical_graph(
+            configuration,
+            "1234567890",
+            telstate,
+            "telstate.invalid:31000",
+        )
+        vlbimeta_node = next(node for node in graph if node.name == "vlbimeta.sdp_vdif")
+        assert vlbimeta_node.command[:7] == [
+            "vlbimeta.py",
+            "/var/kat/data",
+            "1234567890",
+            "sdp_vdif",
+            "--dataset-stream-name",
+            "sdp_l0",
+            "--mode",
+        ]
+        assert vlbimeta_node.command[7] == "antab"
 
 
 def test_stream_classes():

@@ -44,7 +44,7 @@ _T = TypeVar("_T")
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
 CONFIG = """{
-    "version": "4.7",
+    "version": "4.8",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -129,6 +129,10 @@ CONFIG = """{
             "n_chans": 2,
             "pols": ["x", "y"],
             "station_id": "me"
+        },
+        "sdp_vdif": {
+            "type": "sdp.vdif",
+            "src_streams": ["gpucbf_tied_array_resampled_voltage"]
         },
 
         "i0_antenna_channelised_voltage": {
@@ -254,7 +258,7 @@ CONFIG = """{
 }"""  # noqa: E501
 
 CONFIG_CBF_ONLY = """{
-    "version": "4.7",
+    "version": "4.8",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -348,6 +352,10 @@ CONFIG_CBF_ONLY = """{
             "n_chans": 2,
             "pols": ["x", "y"],
             "station_id": "me"
+        },
+        "sdp_vdif": {
+            "type": "sdp.vdif",
+            "src_streams": ["gpucbf_tied_array_resampled_voltage"]
         }
     },
     "config": {}
