@@ -1602,8 +1602,9 @@ class SubarrayProduct:
         if node.logical_node.initial_transmit_state == TransmitState.UP:
             # NOTE: MeerKAT Extension CBF-CAM ICD outlines criteria for this. Additionally,
             # GpucbfTACV streams cannot be stopped if they are required by GpucbfTARV streams.
+            action = "start" if start else "stop"
             raise FailReply(
-                f"Cannot stop stream {stream_name!r} because it is required by another stream"
+                f"Cannot {action} stream {stream_name!r} because it is required by another stream"
             )
 
         if start:

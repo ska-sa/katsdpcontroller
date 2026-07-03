@@ -2101,7 +2101,6 @@ class TestController(BaseTestController):
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
-
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
         await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
         katcp_client = sensor_proxy_client
