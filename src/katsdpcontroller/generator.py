@@ -1685,6 +1685,13 @@ def _make_vgpu(
     # Estimate required GPU memory
     vgpu.gpus[0].mem = 33.4 * stream.bandwidth + 2766
 
+    print("---------------COMPARISONS--------------------")
+    print("vgpu.cpus:", [2.0, vgpu.cpus])
+    print("vgpu.mem:", [8192, vgpu.mem])
+    print("gpu.compute:", [1.0, vgpu.gpus[0].compute])
+    print("gpu.mem:", [_mb(6e9), vgpu.gpus[0].mem])
+    print("---------------END COMPARISONS----------------")
+
     vgpu.command = (
         ["schedrr"]
         + taskset
