@@ -1338,8 +1338,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             interfaces = decode_json_base64(interfaces_raw)
             return bool(interfaces)
-        except Exception:
-            # Lots of possible exceptions: bad base64, bad JSON...
+        except ValueError:
+            # Lots of possible ValueErrors: bad base64, bad JSON...
             return False
 
     async def _update_resource_sensors(self, zk: aiozk.ZKClient) -> None:
@@ -1371,14 +1371,13 @@ class DeviceServer(aiokatcp.DeviceServer):
                             is_cbf = False
                         if not is_cbf:
                             continue
-                        cbf_resources_total += 1
-                        # Empty list is a valid value for the interfaces attribute
                         if not self._has_interfaces(
                             attributes.get("katsdpcontroller.interfaces", None)
                         ):
                             # Agent is likely used for other purposes, so ignore it
                             continue
-                        elif agent["hostname"] in draining_machines:
+                        cbf_resources_total += 1
+                        if agent["hostname"] in draining_machines:
                             cbf_resources_maintenance += 1
                         elif agent["used_resources"]["cpus"] == 0:
                             cbf_resources_free += 1

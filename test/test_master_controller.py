@@ -1260,6 +1260,12 @@ class TestDeviceServerReal:
         rmock: aioresponses.aioresponses,
         mock_zk: Dict[Optional[str], fake_zk.ZKClient],
     ) -> None:
+        """Exercise logic populating cbf-resource-* sensors.
+
+        CBF does not count agents with an empty interfaces attribute, nor agents
+        marked for subsystems other than CBF. The test sets up a variety of agents to
+        verify that the counting logic is correct.
+        """
         # Let the loop run once. It should fail to populate the sensors because
         # it won't be able to find a Mesos master in zookeeper.
         await asyncio.sleep(1)
@@ -1288,10 +1294,12 @@ class TestDeviceServerReal:
         )
 
         # A simple example of what is configured on Mesos agents
-        _katsdpcontroller_interfaces = [
+        katsdpcontroller_interfaces = [
             {"ipv4_address": "11.22.33.44", "name": "enp193s0np0", "network": "gpucbf"}
         ]
-        _katsdpcontroller_interfaces_encoded = encode(_katsdpcontroller_interfaces)
+        katsdpcontroller_interfaces_encoded = encode(katsdpcontroller_interfaces)
+        cbf_subsystems_encoded = encode(["cbf"])
+        sdp_subsystems_encoded = encode(["sdp"])
         # This is only a tiny subset of what is returned, sufficient for
         # what the code expects to find.
         rmock.get(
@@ -1299,17 +1307,19 @@ class TestDeviceServerReal:
             payload={
                 "slaves": [
                     {
-                        # Draining machine
+                        # CBF Machine, marked for maintenance
                         "attributes": {
-                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",  # {"cbf"}
-                            "katsdpcontroller.interfaces": _katsdpcontroller_interfaces_encoded,
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
                         },
                         "hostname": "machine2",
                         "used_resources": {"cpus": 0},
                     },
                     {
                         # Machine that's not marked for CBF
-                        "attributes": {"katsdpcontroller.subsystems": "WyJzZHAiXSAg"},  # {"sdp"}
+                        "attributes": {
+                            "katsdpcontroller.subsystems": sdp_subsystems_encoded
+                        },  # {"sdp"}
                         "hostname": "machine3",
                         "used_resources": {"cpus": 0},
                     },
@@ -1321,17 +1331,20 @@ class TestDeviceServerReal:
                         "used_resources": {"cpus": 0},
                     },
                     {
-                        # Machine that's usable but unused
+                        # Machine that's usable for CBF and free
                         "attributes": {
-                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",
-                            "katsdpcontroller.interfaces": _katsdpcontroller_interfaces_encoded,
-                        },  # {"cbf"}
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine5",
                         "used_resources": {"cpus": 0},
                     },
                     {
-                        # Machine that's usable and at least partly used
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        # CBF Machine that's usable and at least partly used
+                        "attributes": {
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine6",
                         "used_resources": {"cpus": 16},
                     },
@@ -1339,7 +1352,7 @@ class TestDeviceServerReal:
                         # Machine that is not usable for CBF, but is used for something else.
                         # It is not counted.
                         "attributes": {
-                            "katsdpcontroller.subsystems": "WyJjYmYiXSAg",
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
                             "katsdpcontroller.interfaces": encode([]),
                         },
                         "hostname": "machine7",
@@ -1350,7 +1363,7 @@ class TestDeviceServerReal:
         )
 
         await asyncio.sleep(5)  # Give the polling loop time to run
-        assert server.sensors["cbf-resources-total"].value == 4
+        assert server.sensors["cbf-resources-total"].value == 3
         assert server.sensors["cbf-resources-total"].status == Sensor.Status.NOMINAL
         assert server.sensors["cbf-resources-maintenance"].value == 1
         assert server.sensors["cbf-resources-maintenance"].status == Sensor.Status.NOMINAL
