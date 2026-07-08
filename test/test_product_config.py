@@ -41,6 +41,7 @@ from katsdpcontroller.product_config import (
     BeamformerStream,
     CalStream,
     CamHttpStream,
+    CbfTiedArrayResampledVoltageStream,
     Configuration,
     ContinuumImageStream,
     DigBasebandVoltageStream,
@@ -1255,7 +1256,7 @@ class TestVdifStream:
     """Test :class:`~.VdifStream`."""
 
     @pytest.fixture
-    def source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
+    def gpucbf_source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
         narrowband_config = GpucbfNarrowbandConfig.from_config(
             {
                 "decimation_factor": DECIMATION,
@@ -1282,19 +1283,31 @@ class TestVdifStream:
         )
 
     @pytest.fixture
+    def source_stream(
+        self, gpucbf_source_stream: GpucbfTiedArrayResampledVoltageStream
+    ) -> CbfTiedArrayResampledVoltageStream:
+        config = {
+            "type": "cbf.tied_array_resampled_voltage",
+            "src_streams": ["gpucbf_tied_array_resampled_voltage"],
+        }
+        return CbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "cbf_tied_array_resampled_voltage", config, [gpucbf_source_stream], {}
+        )
+
+    @pytest.fixture
     def config(self) -> Dict[str, Any]:
-        return {"type": "sdp.vdif", "src_streams": ["gpucbf_tied_array_resampled_voltage"]}
+        return {"type": "sdp.vdif", "src_streams": ["cbf_tied_array_resampled_voltage"]}
 
     def test_from_config(
-        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+        self, source_stream: CbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
     ) -> None:
         vdif = VdifStream.from_config(Options(), "sdp_vdif", config, [source_stream], {})
         assert vdif.source_stream is source_stream
         assert vdif.n_chans == source_stream.n_chans
-        assert vdif.pols == tuple(source_stream.pols)
+        assert vdif.pols == source_stream.pols
 
     def test_requires_single_source(
-        self, source_stream: GpucbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+        self, source_stream: CbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
     ) -> None:
         with pytest.raises(ValueError, match="Exactly one tied-array resampled voltage source"):
             VdifStream.from_config(

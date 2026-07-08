@@ -130,9 +130,13 @@ CONFIG = """{
             "pols": ["x", "y"],
             "station_id": "me"
         },
+        "cbf_tied_array_resampled_voltage": {
+            "type": "cbf.tied_array_resampled_voltage",
+            "src_streams": ["gpucbf_tied_array_resampled_voltage"]
+        },
         "sdp_vdif": {
             "type": "sdp.vdif",
-            "src_streams": ["gpucbf_tied_array_resampled_voltage"]
+            "src_streams": ["cbf_tied_array_resampled_voltage"]
         },
 
         "i0_antenna_channelised_voltage": {
@@ -352,10 +356,6 @@ CONFIG_CBF_ONLY = """{
             "n_chans": 2,
             "pols": ["x", "y"],
             "station_id": "me"
-        },
-        "sdp_vdif": {
-            "type": "sdp.vdif",
-            "src_streams": ["gpucbf_tied_array_resampled_voltage"]
         }
     },
     "config": {}

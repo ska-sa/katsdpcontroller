@@ -1507,6 +1507,54 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         )
 
 
+class CbfTiedArrayResampledVoltageStream(Stream):
+    """VDIF-ready tied-array-resampled-voltage stream from CBF."""
+
+    stream_type: ClassVar[str] = "cbf.tied_array_resampled_voltage"
+    _valid_src_types: ClassVar[_ValidTypes] = {"gpucbf.tied_array_resampled_voltage"}
+
+    def __init__(self, name: str, src_streams: Sequence[Stream]) -> None:
+        if len(src_streams) != 1:
+            raise ValueError("Exactly one tied-array resampled voltage source is required")
+        if not isinstance(src_streams[0], GpucbfTiedArrayResampledVoltageStream):
+            raise ValueError("Source stream must be gpucbf.tied_array_resampled_voltage")
+        super().__init__(name, src_streams)
+
+    @property
+    def source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
+        return cast(GpucbfTiedArrayResampledVoltageStream, self.src_streams[0])
+
+    @property
+    def n_chans(self) -> int:
+        return self.source_stream.n_chans
+
+    @property
+    def pols(self) -> Sequence[str]:
+        return self.source_stream.pols
+
+    @property
+    def bits_per_sample(self) -> int:
+        return self.source_stream.bits_per_sample
+
+    @property
+    def bandwidth(self) -> float:
+        return self.source_stream.bandwidth
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        return self.source_stream.data_rate(ratio, overhead)
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any],
+    ) -> "CbfTiedArrayResampledVoltageStream":
+        return cls(name, src_streams)
+
+
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
 
@@ -1897,10 +1945,7 @@ class VdifStream(Stream):
     """VDIF-encapsulated voltages from a tied-array stream."""
 
     stream_type: ClassVar[str] = "sdp.vdif"
-    _valid_src_types: ClassVar[_ValidTypes] = {
-        "gpucbf.tied_array_resampled_voltage",
-        "sim.cbf.tied_array_channelised_voltage",
-    }
+    _valid_src_types: ClassVar[_ValidTypes] = {"cbf.tied_array_resampled_voltage"}
 
     def __init__(self, name: str, src_streams: Sequence[Stream]) -> None:
         if len(src_streams) != 1:
@@ -1908,24 +1953,16 @@ class VdifStream(Stream):
         super().__init__(name, src_streams)
 
     @property
-    def source_stream(
-        self,
-    ) -> Union[GpucbfTiedArrayResampledVoltageStream, SimTiedArrayChannelisedVoltageStream]:
-        return cast(
-            Union[GpucbfTiedArrayResampledVoltageStream, SimTiedArrayChannelisedVoltageStream],
-            self.src_streams[0],
-        )
+    def source_stream(self) -> CbfTiedArrayResampledVoltageStream:
+        return cast(CbfTiedArrayResampledVoltageStream, self.src_streams[0])
 
     @property
     def n_chans(self) -> int:
         return self.source_stream.n_chans
 
     @property
-    def pols(self) -> Tuple[str, str]:
-        pols = getattr(self.source_stream, "pols", None)
-        if pols is None:
-            return ("x", "y")
-        return cast(Tuple[str, str], tuple(pols))
+    def pols(self) -> Sequence[str]:
+        return self.source_stream.pols
 
     @classmethod
     def from_config(
@@ -2055,6 +2092,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "cbf.antenna_channelised_voltage": AntennaChannelisedVoltageStream,
     "cbf.tied_array_channelised_voltage": TiedArrayChannelisedVoltageStream,
     "cbf.baseline_correlation_products": BaselineCorrelationProductsStream,
+    "cbf.tied_array_resampled_voltage": CbfTiedArrayResampledVoltageStream,
     "dig.baseband_voltage": DigBasebandVoltageStream,
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,

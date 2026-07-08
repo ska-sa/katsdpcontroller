@@ -3598,12 +3598,9 @@ def _make_vlbi(
 ) -> scheduler.LogicalNode:
     """Create a capture-time VLBI recorder task for a VDIF stream."""
     source_stream = stream.source_stream
-    if not isinstance(source_stream, product_config.GpucbfTiedArrayResampledVoltageStream):
-        raise NotImplementedError(
-            "sdp.vdif capture currently requires gpucbf.tied_array_resampled_voltage"
-        )
+    multicast_stream = source_stream.source_stream
     develop = configuration.options.develop
-    source_multicast = find_node(g, "multicast." + source_stream.name)
+    source_multicast = find_node(g, "multicast." + multicast_stream.name)
     assert isinstance(source_multicast, LogicalMulticast)
     task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
     task.subsystem = "sdp"
@@ -3617,7 +3614,7 @@ def _make_vlbi(
             "cbf",
             affinity=not develop.disable_ibverbs,
             infiniband=not develop.disable_ibverbs,
-            multicast_in={source_stream.name},
+            multicast_in={multicast_stream.name},
         )
     ]
     task.interfaces[0].bandwidth_in = source_stream.data_rate()
@@ -3655,7 +3652,7 @@ def _make_vlbi(
         "-ceu",
         "\n".join(command_lines),
         "_",
-        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
+        f"{{endpoints[multicast.{multicast_stream.name}_vdif]}}",
         "{ports[port]}",
     ]
     g.add_node(task)

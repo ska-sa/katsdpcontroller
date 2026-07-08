@@ -245,6 +245,9 @@ properties:
 {% if version >= "4.7" %}
               - gpucbf.tied_array_resampled_voltage
 {% endif %}
+{% if version >= "4.8" %}
+              - cbf.tied_array_resampled_voltage
+{% endif %}
               - sdp.vis
               - sdp.cal
               - sdp.flags
@@ -316,6 +319,18 @@ properties:
                 - src_streams
               additionalProperties: false
 {% if version >= "4.8" %}
+          - if:
+              properties:
+                type:
+                  const: cbf.tied_array_resampled_voltage
+            then:
+              properties:
+                type: {}
+                src_streams:
+                  $ref: "#/definitions/singleton"
+              required:
+                - src_streams
+              additionalProperties: false
           - if:
               properties:
                 type:
