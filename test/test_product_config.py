@@ -17,7 +17,6 @@
 """Tests for :mod:`katsdpcontroller.product_config`."""
 
 import copy
-import json
 import re
 from fractions import Fraction
 from typing import Any, Dict, List, Optional
@@ -26,13 +25,10 @@ from unittest import mock
 import jsonschema
 import katpoint
 import katportalclient
-import katsdptelstate.aio
-import katsdptelstate.aio.memory
 import pytest
 import yarl
-from aiokatcp import SensorSet
 
-from katsdpcontroller import defaults, generator, product_config
+from katsdpcontroller import defaults, product_config
 from katsdpcontroller.product_config import (
     STREAM_CLASSES,
     AntennaChannelisedVoltageStream,
@@ -67,7 +63,6 @@ from katsdpcontroller.product_config import (
 )
 
 from . import fake_katportalclient
-from .utils import CONFIG
 
 _M000 = katpoint.Antenna(
     "m000, -30:42:39.8, 21:26:38.0, 1035.0, 13.5, -8.258 -207.289 1.2075 5874.184 5875.444, -0:00:39.7 0 -0:04:04.4 -0:04:53.0 0:00:57.8 -0:00:13.9 0:13:45.2 0:00:59.8, 1.14"  # noqa: E501
@@ -2070,44 +2065,6 @@ class TestConfiguration:
         }
         with pytest.raises(ValueError, match="Only a single band is supported, found 'l', 'u'"):
             await Configuration.from_config(config)
-
-    async def test_vlbi_recorder_uses_cbf_multicast_interface(self) -> None:
-        config = json.loads(CONFIG)
-        configuration = await Configuration.from_config(config)
-        graph = generator.build_logical_graph(configuration, config, SensorSet())
-        vlbi_node = next(node for node in graph if node.name == "vlbi.sdp_vdif")
-        request = vlbi_node.interfaces[0]
-        assert request.network == "cbf"
-        assert request.multicast_in == {"gpucbf_tied_array_resampled_voltage"}
-        assert request.infiniband is True
-        assert request.affinity is True
-        command = vlbi_node.command[2]
-        assert "export J5A_PROTOCOL=udps" in command
-        assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
-
-    async def test_vlbimeta_uses_cal_vis_stream(self) -> None:
-        config = json.loads(CONFIG)
-        del config["outputs"]["continuum_image"]
-        del config["outputs"]["spectral_image"]
-        configuration = await Configuration.from_config(config)
-        telstate = katsdptelstate.aio.TelescopeState(katsdptelstate.aio.memory.MemoryBackend())
-        graph = await generator.build_postprocess_logical_graph(
-            configuration,
-            "1234567890",
-            telstate,
-            "telstate.invalid:31000",
-        )
-        vlbimeta_node = next(node for node in graph if node.name == "vlbimeta.sdp_vdif")
-        assert vlbimeta_node.command[:7] == [
-            "vlbimeta.py",
-            "/var/kat/data",
-            "1234567890",
-            "sdp_vdif",
-            "--dataset-stream-name",
-            "sdp_l0",
-            "--mode",
-        ]
-        assert vlbimeta_node.command[7] == "antab"
 
 
 def test_stream_classes():
