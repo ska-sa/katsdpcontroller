@@ -751,17 +751,20 @@ properties:
               less_resources:
                 type: boolean
                 default: false
+{% if version >= "4.8" %}
               vlbi_recorder_protocol:
                 type: string
                 enum:
                   - udps
                   - udpsnor
                 default: udps
+{% endif %}
             additionalProperties: false
 {% endif %}
           - type: boolean
             default: false
         default: false
+{% if version >= "4.8" %}
       vlbimeta:
         type: object
         additionalProperties: false
@@ -773,6 +776,7 @@ properties:
               - pass_through
               - disabled
             default: antab
+{% endif %}
       wrapper:
         type: string
         format: uri
