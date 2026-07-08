@@ -252,8 +252,6 @@ class ServiceOverride:
 
 
 class DevelopOptions:
-    VALID_VLBI_RECORDER_PROTOCOLS = frozenset({"udps", "udpsnor"})
-
     def __init__(
         self,
         *,
@@ -263,12 +261,6 @@ class DevelopOptions:
         data_timeout: float = 0.0,
         vlbi_recorder_protocol: str = "udps",
     ) -> None:
-        if vlbi_recorder_protocol not in self.VALID_VLBI_RECORDER_PROTOCOLS:
-            valid = ", ".join(sorted(self.VALID_VLBI_RECORDER_PROTOCOLS))
-            raise ValueError(
-                f"Unknown VLBI recorder protocol {vlbi_recorder_protocol!r}. "
-                f"Expected one of: {valid}"
-            )
         self.any_gpu = any_gpu
         self.disable_ibverbs = disable_ibverbs
         self.less_resources = less_resources
@@ -295,12 +287,7 @@ class DevelopOptions:
 
 
 class VlbimetaOptions:
-    VALID_MODES = frozenset({"antab", "pass_through", "disabled"})
-
     def __init__(self, *, mode: str = "antab") -> None:
-        if mode not in self.VALID_MODES:
-            valid_modes = ", ".join(sorted(self.VALID_MODES))
-            raise ValueError(f"Unknown vlbimeta mode {mode!r}. Expected one of: {valid_modes}")
         self.mode = mode
 
     @classmethod

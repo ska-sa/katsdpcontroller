@@ -262,14 +262,6 @@ class TestOptions:
         assert options.service_overrides == {}
         assert options.shutdown_delay is None
 
-    def test_invalid_vlbimeta_mode(self) -> None:
-        with pytest.raises(ValueError, match="Unknown vlbimeta mode"):
-            Options.from_config({"vlbimeta": {"mode": "bad"}})
-
-    def test_invalid_vlbi_recorder_protocol(self) -> None:
-        with pytest.raises(ValueError, match="Unknown VLBI recorder protocol"):
-            Options.from_config({"develop": {"vlbi_recorder_protocol": "udp"}})
-
 
 class TestSimulation:
     """Test :class:`~.Simulation`."""
