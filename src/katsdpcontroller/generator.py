@@ -776,6 +776,7 @@ def _make_fgpu(
         recv_cpus = 1 if stream.adc_sample_rate <= _MAX_ADC_SAMPLE_RATE else 2
         if not configuration.options.develop.less_resources:
             fgpu.cpus = 2 + recv_cpus
+            # ignore is to work around https://github.com/python/mypy/issues/21710
             fgpu.cores = [f"recv{i}" for i in range(recv_cpus)] + ["send", "python"]  # type: ignore
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[python]}"]
