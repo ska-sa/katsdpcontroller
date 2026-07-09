@@ -1741,7 +1741,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.7",
+        "version": "4.8",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {
@@ -1943,13 +1943,11 @@ class TestUpgrade:
     def test_upgrade_v3(self, config_v3: Dict[str, Any], config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config_v3)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
-        config["version"] = "4.8"
         assert upgraded == config
 
     def test_upgrade_v4(self, config: Dict[str, Any]) -> None:
         upgraded = product_config._upgrade(config)
         config["outputs"]["m002h"]["sync_time"] = 123456789.0  # Added by _upgrade
-        config["version"] = "4.8"
         assert upgraded == config
 
 
