@@ -84,7 +84,9 @@ from .utils import (
     EXPECTED_INTERFACE_SENSOR_LIST,
     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
     S3_CONFIG,
+    VLBI_CBF_SENSOR_VALUES,
     DelayedManager,
+    add_vlbi_config,
     assert_request_fails,
     assert_sensor_value,
     assert_sensors,
@@ -532,6 +534,7 @@ class BaseTestController:
                 "cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap": 256,
                 "cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream": 256,
                 "cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample": 8,
+                **VLBI_CBF_SENSOR_VALUES,
             },
         )
         mocker.patch("katportalclient.KATPortalClient", return_value=dummy_client)
@@ -1790,6 +1793,7 @@ class TestController(BaseTestController):
     ) -> None:
         """Checks that vlbimeta postprocessing is launched for a VDIF stream."""
         config = json.loads(CONFIG)
+        add_vlbi_config(config)
         config["config"]["vlbimeta"] = {"mode": "pass_through"}
         await client.request("product-configure", SUBARRAY_PRODUCT, json.dumps(config))
         await client.request("capture-init", CAPTURE_BLOCK)

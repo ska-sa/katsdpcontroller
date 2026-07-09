@@ -20,6 +20,7 @@ import collections.abc
 import copy
 import enum
 import itertools
+import json
 import logging
 import math
 import re
@@ -1507,41 +1508,43 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         )
 
 
-class CbfTiedArrayResampledVoltageStream(Stream):
+class CbfTiedArrayResampledVoltageStream(CbfStream, Stream):
     """VDIF-ready tied-array-resampled-voltage stream from CBF."""
 
     stream_type: ClassVar[str] = "cbf.tied_array_resampled_voltage"
-    _valid_src_types: ClassVar[_ValidTypes] = {"gpucbf.tied_array_resampled_voltage"}
+    _class_sensors: ClassVar[Sequence[_Sensor]] = [
+        _CBFSensor("bandwidth", float),
+        _CBFSensor("n_chans", int),
+        _CBFSensor("veng_out_bits_per_sample", int),
+        _CBFSensor("pol_ordering", str),
+    ]
+    _valid_src_types: ClassVar[_ValidTypes] = {"cbf.tied_array_channelised_voltage"}
 
-    def __init__(self, name: str, src_streams: Sequence[Stream]) -> None:
-        if len(src_streams) != 1:
-            raise ValueError("Exactly one tied-array resampled voltage source is required")
-        if not isinstance(src_streams[0], GpucbfTiedArrayResampledVoltageStream):
-            raise ValueError("Source stream must be gpucbf.tied_array_resampled_voltage")
+    def __init__(
+        self,
+        name: str,
+        src_streams: Sequence[Stream],
+        *,
+        url: yarl.URL,
+        bandwidth: float,
+        n_chans: int,
+        bits_per_sample: int,
+        pols: Sequence[str],
+        instrument_dev_name: str,
+    ) -> None:
         super().__init__(name, src_streams)
-
-    @property
-    def source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
-        return cast(GpucbfTiedArrayResampledVoltageStream, self.src_streams[0])
-
-    @property
-    def n_chans(self) -> int:
-        return self.source_stream.n_chans
-
-    @property
-    def pols(self) -> Sequence[str]:
-        return self.source_stream.pols
-
-    @property
-    def bits_per_sample(self) -> int:
-        return self.source_stream.bits_per_sample
-
-    @property
-    def bandwidth(self) -> float:
-        return self.source_stream.bandwidth
+        self.url = url
+        self.bandwidth = bandwidth
+        self.n_chans = n_chans
+        self.bits_per_sample = bits_per_sample
+        self.pols = list(pols)
+        self.instrument_dev_name = instrument_dev_name
 
     def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
-        return self.source_stream.data_rate(ratio, overhead)
+        frame_size = defaults.VGPU_SAMPLES_PER_FRAME * self.bits_per_sample // 8
+        time_between_frames = defaults.VGPU_SAMPLES_PER_FRAME / self.bandwidth
+        n_threads = self.n_chans * len(self.pols)
+        return data_rate(frame_size, time_between_frames, ratio, overhead) * n_threads
 
     @classmethod
     def from_config(
@@ -1552,7 +1555,16 @@ class CbfTiedArrayResampledVoltageStream(Stream):
         src_streams: Sequence[Stream],
         sensors: Mapping[str, Any],
     ) -> "CbfTiedArrayResampledVoltageStream":
-        return cls(name, src_streams)
+        return cls(
+            name,
+            src_streams,
+            url=yarl.URL(config["url"]),
+            bandwidth=sensors["bandwidth"],
+            n_chans=sensors["n_chans"],
+            bits_per_sample=sensors["veng_out_bits_per_sample"],
+            pols=json.loads(sensors["pol_ordering"]),
+            instrument_dev_name=config["instrument_dev_name"],
+        )
 
 
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
@@ -1946,11 +1958,6 @@ class VdifStream(Stream):
 
     stream_type: ClassVar[str] = "sdp.vdif"
     _valid_src_types: ClassVar[_ValidTypes] = {"cbf.tied_array_resampled_voltage"}
-
-    def __init__(self, name: str, src_streams: Sequence[Stream]) -> None:
-        if len(src_streams) != 1:
-            raise ValueError("Exactly one tied-array resampled voltage source is required")
-        super().__init__(name, src_streams)
 
     @property
     def source_stream(self) -> CbfTiedArrayResampledVoltageStream:

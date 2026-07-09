@@ -25,17 +25,28 @@ from aiokatcp import SensorSet
 from katsdpcontroller import generator
 from katsdpcontroller.product_config import Configuration
 
-from .utils import CONFIG
+from . import fake_katportalclient
+from .utils import CONFIG, VLBI_CBF_SENSOR_VALUES, add_vlbi_config
 
 
-async def test_vlbi_recorder_uses_cbf_multicast_interface() -> None:
+def _mock_vlbi_cbf_sensors(mocker) -> None:
+    client = fake_katportalclient.KATPortalClient(
+        components={"cbf": "cbf_1", "sub": "subarray_1"},
+        sensors=VLBI_CBF_SENSOR_VALUES,
+    )
+    mocker.patch("katportalclient.KATPortalClient", return_value=client)
+
+
+async def test_vlbi_recorder_uses_cbf_multicast_interface(mocker) -> None:
     config = json.loads(CONFIG)
+    add_vlbi_config(config)
+    _mock_vlbi_cbf_sensors(mocker)
     configuration = await Configuration.from_config(config)
     graph = generator.build_logical_graph(configuration, config, SensorSet())
     vlbi_node = next(node for node in graph if node.name == "vlbi.sdp_vdif")
     request = vlbi_node.interfaces[0]
     assert request.network == "cbf"
-    assert request.multicast_in == {"gpucbf_tied_array_resampled_voltage"}
+    assert request.multicast_in == {"cbf_tied_array_resampled_voltage"}
     assert request.infiniband is True
     assert request.affinity is True
     command = vlbi_node.command[2]
@@ -43,8 +54,10 @@ async def test_vlbi_recorder_uses_cbf_multicast_interface() -> None:
     assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
 
 
-async def test_vlbimeta_uses_cal_vis_stream() -> None:
+async def test_vlbimeta_uses_cal_vis_stream(mocker) -> None:
     config = json.loads(CONFIG)
+    add_vlbi_config(config)
+    _mock_vlbi_cbf_sensors(mocker)
     del config["outputs"]["continuum_image"]
     del config["outputs"]["spectral_image"]
     configuration = await Configuration.from_config(config)

@@ -3598,9 +3598,8 @@ def _make_vlbi(
 ) -> scheduler.LogicalNode:
     """Create a capture-time VLBI recorder task for a VDIF stream."""
     source_stream = stream.source_stream
-    multicast_stream = source_stream.source_stream
     develop = configuration.options.develop
-    source_multicast = find_node(g, "multicast." + multicast_stream.name)
+    source_multicast = find_node(g, "multicast." + source_stream.name)
     assert isinstance(source_multicast, LogicalMulticast)
     task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
     task.subsystem = "sdp"
@@ -3614,7 +3613,7 @@ def _make_vlbi(
             "cbf",
             affinity=not develop.disable_ibverbs,
             infiniband=not develop.disable_ibverbs,
-            multicast_in={multicast_stream.name},
+            multicast_in={source_stream.name},
         )
     ]
     task.interfaces[0].bandwidth_in = source_stream.data_rate()
@@ -3652,14 +3651,14 @@ def _make_vlbi(
         "-ceu",
         "\n".join(command_lines),
         "_",
-        f"{{endpoints[multicast.{multicast_stream.name}_vdif]}}",
+        f"{{endpoints[multicast.{source_stream.name}_spead]}}",
         "{ports[port]}",
     ]
     g.add_node(task)
     g.add_edge(
         task,
         source_multicast,
-        port="vdif",
+        port="spead",
         depends_resolve=True,
         depends_init=True,
         depends_ready=True,

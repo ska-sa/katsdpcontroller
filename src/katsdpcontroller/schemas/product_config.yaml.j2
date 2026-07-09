@@ -120,6 +120,9 @@ properties:
               - cbf.antenna_channelised_voltage
               - cbf.baseline_correlation_products
               - cbf.tied_array_channelised_voltage
+{% if version >= "4.8" %}
+              - cbf.tied_array_resampled_voltage
+{% endif %}
               - cam.http
           url:
             type: string
@@ -209,6 +212,24 @@ properties:
               required:
                 - src_streams
                 - instrument_dev_name
+{% if version >= "4.8" %}
+          - if:
+              properties:
+                type:
+                  const: cbf.tied_array_resampled_voltage
+            then:
+              properties:
+                type: {}
+                url: {}
+                src_streams:
+                  $ref: "#/definitions/pair"
+                instrument_dev_name:
+                  type: string
+              additionalProperties: false
+              required:
+                - src_streams
+                - instrument_dev_name
+{% endif %}
           - if:
               properties:
                 type:
@@ -244,9 +265,6 @@ properties:
 {% endif %}
 {% if version >= "4.7" %}
               - gpucbf.tied_array_resampled_voltage
-{% endif %}
-{% if version >= "4.8" %}
-              - cbf.tied_array_resampled_voltage
 {% endif %}
               - sdp.vis
               - sdp.cal
@@ -319,18 +337,6 @@ properties:
                 - src_streams
               additionalProperties: false
 {% if version >= "4.8" %}
-          - if:
-              properties:
-                type:
-                  const: cbf.tied_array_resampled_voltage
-            then:
-              properties:
-                type: {}
-                src_streams:
-                  $ref: "#/definitions/singleton"
-              required:
-                - src_streams
-              additionalProperties: false
           - if:
               properties:
                 type:

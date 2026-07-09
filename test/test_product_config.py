@@ -1251,42 +1251,37 @@ class TestVdifStream:
     """Test :class:`~.VdifStream`."""
 
     @pytest.fixture
-    def gpucbf_source_stream(self) -> GpucbfTiedArrayResampledVoltageStream:
-        narrowband_config = GpucbfNarrowbandConfig.from_config(
-            {
-                "decimation_factor": DECIMATION,
-                "centre_frequency": 200e6,
-                "vlbi": {"pass_bandwidth": 64e6},
-            }
-        )
-        acv = make_gpucbf_antenna_channelised_voltage(
-            stream_name="vlbi_acv", narrowband_config=narrowband_config
-        )
+    def source_stream(self) -> CbfTiedArrayResampledVoltageStream:
+        acv = make_antenna_channelised_voltage()
         tacv_streams = [
-            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0x", src_pol=0),
-            make_gpucbf_tied_array_channelised_voltage(acv, name="beam_0y", src_pol=1),
+            make_tied_array_channelised_voltage(
+                acv,
+                "vlbi_tied_array_channelised_voltage_0x",
+                yarl.URL("spead://239.2.3.0+3:7148"),
+            ),
+            make_tied_array_channelised_voltage(
+                acv,
+                "vlbi_tied_array_channelised_voltage_0y",
+                yarl.URL("spead://239.2.4.0+3:7148"),
+            ),
         ]
         config = {
-            "type": "gpucbf.tied_array_resampled_voltage",
-            "src_streams": ["beam_0x", "beam_0y"],
-            "n_chans": 2,
-            "pols": ["x", "y"],
-            "station_id": "me",
-        }
-        return GpucbfTiedArrayResampledVoltageStream.from_config(
-            Options(), "gpucbf_tied_array_resampled_voltage", config, tacv_streams, {}
-        )
-
-    @pytest.fixture
-    def source_stream(
-        self, gpucbf_source_stream: GpucbfTiedArrayResampledVoltageStream
-    ) -> CbfTiedArrayResampledVoltageStream:
-        config = {
             "type": "cbf.tied_array_resampled_voltage",
-            "src_streams": ["gpucbf_tied_array_resampled_voltage"],
+            "url": "spead://239.2.5.0+3:7148",
+            "src_streams": [
+                "vlbi_tied_array_channelised_voltage_0x",
+                "vlbi_tied_array_channelised_voltage_0y",
+            ],
+            "instrument_dev_name": "i0",
+        }
+        sensors = {
+            "bandwidth": 64e6,
+            "n_chans": 2,
+            "veng_out_bits_per_sample": 2,
+            "pol_ordering": '["x", "y"]',
         }
         return CbfTiedArrayResampledVoltageStream.from_config(
-            Options(), "cbf_tied_array_resampled_voltage", config, [gpucbf_source_stream], {}
+            Options(), "cbf_tied_array_resampled_voltage", config, tacv_streams, sensors
         )
 
     @pytest.fixture
@@ -1300,18 +1295,6 @@ class TestVdifStream:
         assert vdif.source_stream is source_stream
         assert vdif.n_chans == source_stream.n_chans
         assert vdif.pols == source_stream.pols
-
-    def test_requires_single_source(
-        self, source_stream: CbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
-    ) -> None:
-        with pytest.raises(ValueError, match="Exactly one tied-array resampled voltage source"):
-            VdifStream.from_config(
-                Options(),
-                "sdp_vdif",
-                config,
-                [source_stream, source_stream],
-                {},
-            )
 
 
 class TestVisStream:
