@@ -810,31 +810,19 @@ def _make_fgpu(
             + taskset
             + [
                 "fgpu",
-                "--recv-interface",
-                "{interfaces[gpucbf].name}",
-                "--send-interface",
-                "{interfaces[gpucbf].name}",
-                "--send-packet-payload",
-                str(GPUCBF_PACKET_PAYLOAD_BYTES),
-                "--adc-sample-rate",
-                str(srcs[0].adc_sample_rate),
-                "--feng-id",
-                str(i),
-                "--array-size",
-                str(n_engines),
-                "--sync-time",
-                str(srcs[0].sync_time),
-                "--katcp-port",
-                "{ports[port]}",
-                "--prometheus-port",
-                "{ports[prometheus]}",
+                "--recv-interface={interfaces[gpucbf].name}",
+                "--send-interface={interfaces[gpucbf].name}",
+                f"--send-packet-payload={GPUCBF_PACKET_PAYLOAD_BYTES}",
+                f"--adc-sample-rate={srcs[0].adc_sample_rate}",
+                f"--feng-id={i}",
+                f"--array-size={n_engines}",
+                f"--sync-time={srcs[0].sync_time}",
+                "--katcp-port={ports[port]}",
+                "--prometheus-port={ports[prometheus]}",
                 "--aiomonitor",
-                "--aiomonitor-port",
-                "{ports[aiomonitor]}",
-                "--aiomonitor-webui-port",
-                "{ports[aiomonitor_webui]}",
-                "--aioconsole-port",
-                "{ports[aioconsole]}",
+                "--aiomonitor-port={ports[aiomonitor]}",
+                "--aiomonitor-webui-port={ports[aiomonitor_webui]}",
+                "--aioconsole-port={ports[aioconsole]}",
             ]
         )
         for stream in streams:
@@ -867,10 +855,8 @@ def _make_fgpu(
 
         if not configuration.options.develop.less_resources:
             fgpu.command += [
-                "--recv-affinity",
-                "{cores[recv]}",
-                "--send-affinity",
-                "{cores[send]}",
+                "--recv-affinity={cores[recv]}",
+                "--send-affinity={cores[send]}",
             ]
         fgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
@@ -884,10 +870,8 @@ def _make_fgpu(
                 # Use the core numbers as completion vectors. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
-                    "--recv-comp-vector",
-                    "{cores[recv]}",
-                    "--send-comp-vector",
-                    "{cores[send]}",
+                    "--recv-comp-vector={cores[recv]}",
+                    "--send-comp-vector={cores[send]}",
                 ]
         fgpu.command += streams[0].command_line_extra
         # fgpu doesn't use katsdpservices or telstate for config, but does use logging
@@ -1364,43 +1348,25 @@ def _make_xbgpu(
             + taskset
             + [
                 "xbgpu",
-                "--adc-sample-rate",
-                str(first_dig.adc_sample_rate),
-                "--array-size",
-                str(len(acv.src_streams) // 2),  # 2 pols per antenna
-                "--channels",
-                str(acv.n_chans),
-                "--channels-per-substream",
-                str(acv.n_chans_per_substream),
-                "--samples-between-spectra",
-                str(acv.n_samples_between_spectra),
-                "--jones-per-batch",
-                str(acv.n_jones_per_batch),
-                "--heaps-per-fengine-per-chunk",
-                str(batches_per_chunk),
-                "--channel-offset-value",
-                str(i * acv.n_chans_per_substream),
-                "--sample-bits",
-                str(acv.bits_per_sample),
-                "--recv-interface",
-                "{interfaces[gpucbf].name}",
-                "--send-interface",
-                "{interfaces[gpucbf].name}",
-                "--send-packet-payload",
-                str(GPUCBF_PACKET_PAYLOAD_BYTES),
-                "--sync-time",
-                str(sync_time),
-                "--katcp-port",
-                "{ports[port]}",
-                "--prometheus-port",
-                "{ports[prometheus]}",
+                f"--adc-sample-rate={first_dig.adc_sample_rate}",
+                f"--array-size={len(acv.src_streams) // 2}",  # 2 pols per antenna
+                f"--channels={acv.n_chans}",
+                f"--channels-per-substream={acv.n_chans_per_substream}",
+                f"--samples-between-spectra={acv.n_samples_between_spectra}",
+                f"--jones-per-batch={acv.n_jones_per_batch}",
+                f"--heaps-per-fengine-per-chunk={batches_per_chunk}",
+                f"--channel-offset-value={i * acv.n_chans_per_substream}",
+                f"--sample-bits={acv.bits_per_sample}",
+                "--recv-interface={interfaces[gpucbf].name}",
+                "--send-interface={interfaces[gpucbf].name}",
+                f"--send-packet-payload={GPUCBF_PACKET_PAYLOAD_BYTES}",
+                f"--sync-time={sync_time}",
+                "--katcp-port={ports[port]}",
+                "--prometheus-port={ports[prometheus]}",
                 "--aiomonitor",
-                "--aiomonitor-port",
-                "{ports[aiomonitor]}",
-                "--aiomonitor-webui-port",
-                "{ports[aiomonitor_webui]}",
-                "--aioconsole-port",
-                "{ports[aioconsole]}",
+                "--aiomonitor-port={ports[aiomonitor]}",
+                "--aiomonitor-webui-port={ports[aiomonitor_webui]}",
+                "--aioconsole-port={ports[aioconsole]}",
             ]
         )
 
@@ -1430,10 +1396,8 @@ def _make_xbgpu(
 
         if not configuration.options.develop.less_resources:
             xbgpu.command += [
-                "--recv-affinity",
-                "{cores[recv]}",
-                "--send-affinity",
-                "{cores[send]}",
+                "--recv-affinity={cores[recv]}",
+                "--send-affinity={cores[send]}",
             ]
         xbgpu.capabilities.append("SYS_NICE")  # For schedrr
         if ibv:
@@ -1447,10 +1411,8 @@ def _make_xbgpu(
                 # Use the core number as completion vector. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 xbgpu.command += [
-                    "--recv-comp-vector",
-                    "{cores[recv]}",
-                    "--send-comp-vector",
-                    "{cores[send]}",
+                    "--recv-comp-vector={cores[recv]}",
+                    "--send-comp-vector={cores[send]}",
                 ]
         xbgpu.command += streams[0].command_line_extra
         # xbgpu doesn't use katsdpservices for configuration, or telstate
@@ -1675,74 +1637,44 @@ def _make_vgpu(
         + taskset
         + [
             "vgpu",
-            "--adc-sample-rate",
-            str(acv.adc_sample_rate),
-            "--sync-time",
-            str(sync_time),
-            "--recv-channels",
-            str(acv.n_chans),
-            "--recv-channels-per-substream",
-            str(tacv[0].n_chans_per_substream),
-            "--recv-jones-per-batch",
-            str(tacv[0].n_jones_per_batch),
-            "--recv-samples-between-spectra",
-            str(acv.n_samples_between_spectra),
-            "--recv-batches-per-chunk",
-            str(n_recv_batches_per_chunk),
-            "--recv-sample-bits",
-            str(tacv[0].bits_per_sample),
+            f"--adc-sample-rate={acv.adc_sample_rate}",
+            f"--sync-time={sync_time}",
+            f"--recv-channels={acv.n_chans}",
+            f"--recv-channels-per-substream={tacv[0].n_chans_per_substream}",
+            f"--recv-jones-per-batch={tacv[0].n_jones_per_batch}",
+            f"--recv-samples-between-spectra={acv.n_samples_between_spectra}",
+            f"--recv-batches-per-chunk={n_recv_batches_per_chunk}",
+            f"--recv-sample-bits={tacv[0].bits_per_sample}",
             "--recv-pols=-y,+x",
-            "--send-bandwidth",
-            str(stream.bandwidth),
-            "--send-pols",
-            ",".join(stream.pols),
-            "--send-samples-per-frame",
-            str(defaults.VGPU_SAMPLES_PER_FRAME),
-            "--send-station",
-            str(stream.station_id),
-            "--fir-taps",
-            str(defaults.VGPU_FIR_TAPS),
-            "--hilbert-taps",
-            str(defaults.VGPU_HILBERT_TAPS),
-            "--passband",
-            str(defaults.VGPU_PASSBAND),
-            "--threshold",
-            str(defaults.VGPU_THRESHOLD),
-            "--power-int-time",
-            str(defaults.VGPU_POWER_INT_TIME),
-            "--recv-interface",
-            "{interfaces[gpucbf].name}",
-            "--send-interface",
-            "{interfaces[gpucbf].name}",
-            "--katcp-port",
-            "{ports[port]}",
-            "--prometheus-port",
-            "{ports[prometheus]}",
+            f"--send-bandwidth={stream.bandwidth}",
+            f"--send-pols={','.join(stream.pols)}",
+            f"--send-samples-per-frame={defaults.VGPU_SAMPLES_PER_FRAME}",
+            f"--send-station={stream.station_id}",
+            f"--fir-taps={defaults.VGPU_FIR_TAPS}",
+            f"--hilbert-taps={defaults.VGPU_HILBERT_TAPS}",
+            f"--passband={defaults.VGPU_PASSBAND}",
+            f"--threshold={defaults.VGPU_THRESHOLD}",
+            f"--power-int-time={defaults.VGPU_POWER_INT_TIME}",
+            "--recv-interface={interfaces[gpucbf].name}",
+            "--send-interface={interfaces[gpucbf].name}",
+            "--katcp-port={ports[port]}",
+            "--prometheus-port={ports[prometheus]}",
             "--aiomonitor",
-            "--aiomonitor-port",
-            "{ports[aiomonitor]}",
-            "--aiomonitor-webui-port",
-            "{ports[aiomonitor_webui]}",
-            "--aioconsole-port",
-            "{ports[aioconsole]}",
+            "--aiomonitor-port={ports[aiomonitor]}",
+            "--aiomonitor-webui-port={ports[aiomonitor_webui]}",
+            "--aioconsole-port={ports[aioconsole]}",
         ]
     )
 
     if not configuration.options.develop.less_resources:
-        vgpu.command += [
-            "--recv-affinity",
-            "{cores[recv]}",
-        ]
+        vgpu.command += ["--recv-affinity={cores[recv]}"]
 
     vgpu.capabilities.append("SYS_NICE")  # For schedrr
     if ibv:
         vgpu.capabilities.append("NET_RAW")
         vgpu.command += ["--recv-ibv"]
         if not configuration.options.develop.less_resources:
-            vgpu.command += [
-                "--recv-comp-vector",
-                "{cores[recv]}",
-            ]
+            vgpu.command += ["--recv-comp-vector={cores[recv]}"]
 
     for src_stream in stream.src_streams:
         src_multicast = find_node(g, f"multicast.{src_stream.name}")
