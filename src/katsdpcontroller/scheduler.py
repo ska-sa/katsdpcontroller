@@ -244,9 +244,20 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import Any, AsyncContextManager, ClassVar
-from typing import Dict as DictType  # Rename Dict here, because it conflicts with addict.Dict.
-from typing import List, Mapping, Optional, Set, Tuple, Type, Union
+
+# Note: don't include Dict here, because it conflicts with addict.Dict.
+from typing import (
+    Any,
+    AsyncContextManager,
+    ClassVar,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import aiohttp.web
 import async_timeout
@@ -1114,9 +1125,9 @@ class ManifestOrIndexResponse:
 
     Parameters
     ----------
-    media_type : str
+    media_type
         The media type of the response.
-    body : DictType
+    body
         The body of the response.
 
     Raises
@@ -1126,9 +1137,11 @@ class ManifestOrIndexResponse:
         or the index's linux manifest's media type is a unsupported type.
     KeyError
         If the response data is invalid.
+    ValueError
+        If the media_type is neither OCI_INDEX_MEDIA_TYPE nor a valid ManifestType.
     """
 
-    def __init__(self, media_type: str, body: DictType) -> None:
+    def __init__(self, media_type: str, body: dict) -> None:
         if media_type == OCI_INDEX_MEDIA_TYPE:
             self.media_type: Union[ManifestType, str] = media_type
         else:
@@ -1311,8 +1324,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         """Get the labels and Docker content digest from the manifest of the tag in the registry.
 
         If the tag is an index, get the labels from the first Linux image's manifest."""
-        # First, we check if the tag is an image or an index,
-        # while also allowing for the docker manifest format in one request.
+        # First, we check if the tag points to an image or an index
         image_digest, manifest_or_index = await HTTPImageLookup._get_manifest_or_index_helper(
             session,
             repo_url / "manifests" / tag,
