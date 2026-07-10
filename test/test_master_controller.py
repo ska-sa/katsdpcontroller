@@ -1309,7 +1309,7 @@ class TestDeviceServerReal:
                     {
                         # CBF Machine, marked for maintenance
                         "attributes": {
-                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
                             "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
                         },
                         "hostname": "machine2",
@@ -1317,9 +1317,7 @@ class TestDeviceServerReal:
                     },
                     {
                         # Machine that's not marked for CBF
-                        "attributes": {
-                            "katsdpcontroller.subsystems": sdp_subsystems_encoded
-                        },  # {"sdp"}
+                        "attributes": {"katsdpcontroller.subsystems": sdp_subsystems_encoded},
                         "hostname": "machine3",
                         "used_resources": {"cpus": 0},
                     },
@@ -1333,7 +1331,7 @@ class TestDeviceServerReal:
                     {
                         # Machine that's usable for CBF and free
                         "attributes": {
-                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
                             "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
                         },
                         "hostname": "machine5",
@@ -1342,17 +1340,16 @@ class TestDeviceServerReal:
                     {
                         # CBF Machine that's usable and at least partly used
                         "attributes": {
-                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
                             "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
                         },
                         "hostname": "machine6",
                         "used_resources": {"cpus": 16},
                     },
                     {
-                        # Machine that is not usable for CBF, but is used for something else.
-                        # It is not counted.
+                        # Machine that is not usable for CBF engines
                         "attributes": {
-                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,  # {"cbf"}
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
                             "katsdpcontroller.interfaces": encode([]),
                         },
                         "hostname": "machine7",
