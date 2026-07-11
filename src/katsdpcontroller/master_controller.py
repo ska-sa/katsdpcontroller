@@ -191,7 +191,7 @@ class Product:
     def connect(
         self,
         server: aiokatcp.DeviceServer,
-        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]],
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]],
         hostname: str,
         host: _IPAddress,
         ports: Dict[str, int],
@@ -218,13 +218,13 @@ class Product:
                 self.katcp_conn,
                 server.sensors,
                 f"{self.name}.",
-                rewrite_gui_urls=rewrite_gui_urls,
+                rewrite_readings=rewrite_readings,
                 enum_types=(DeviceStatus,),
                 filter=self._mirror_filter if not mirror_sensors else None,
                 notify=lambda: server.mass_inform("interface-changed", "sensor-list"),
             )
         )
-        # Make a copy of sensors without the effects of rewrite_gui_urls
+        # Make a copy of sensors without the effects of rewrite_readings
         # (used by web.py).
         # TODO: improve the type annotations and the unit tests so that we don't
         # need this to be conditional. It can probably also have a tighter filter
@@ -335,7 +335,7 @@ class ProductManagerBase(Generic[_P]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
@@ -344,7 +344,7 @@ class ProductManagerBase(Generic[_P]):
         self._products: Dict[str, _P] = {}
         self._next_capture_block_id = 1
         self._image_resolver_factory = image_resolver_factory
-        self._rewrite_gui_urls = rewrite_gui_urls
+        self._rewrite_readings = rewrite_readings
 
     async def start(self) -> None:
         pass
@@ -558,7 +558,7 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        product.connect(self._server, self._rewrite_gui_urls, hostname, host, ports)
+        product.connect(self._server, self._rewrite_readings, hostname, host, ports)
         assert product.katcp_conn is not None
         product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
@@ -738,9 +738,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
-        super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
+        super().__init__(args, server, image_resolver_factory, rewrite_readings)
         self._request_id_prefix = args.name + "_product_"
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.

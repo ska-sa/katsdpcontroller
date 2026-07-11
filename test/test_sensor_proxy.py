@@ -27,7 +27,7 @@ Still TODO:
 import asyncio
 import enum
 import functools
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, Mapping, Optional, Tuple
 
 import aiokatcp
 import pytest
@@ -41,6 +41,16 @@ from katsdpcontroller.sensor_proxy import (
     PrometheusWatcher,
     SensorWatcher,
 )
+
+
+def _rewrite_readings(sensor: aiokatcp.Sensor, reading: aiokatcp.Reading):
+    if sensor.name == "prefix-int-sensor":
+        return aiokatcp.Reading(
+            timestamp=reading.timestamp + 0.5,
+            status=aiokatcp.Sensor.Status.WARN,
+            value=reading.value + 1,
+        )
+    return reading
 
 
 class MyEnum(enum.Enum):
@@ -115,9 +125,19 @@ class TestSensorWatcher:
     def close_action(self) -> CloseAction:
         return CloseAction.REMOVE
 
+    @pytest.fixture
+    def rewrite_readings(
+        self,
+    ) -> Optional[Callable[[aiokatcp.Sensor, aiokatcp.Reading], aiokatcp.Reading]]:
+        return None
+
     @pytest.fixture(autouse=True)
     async def client_and_watcher(
-        self, mirror: aiokatcp.SensorSet, server: DummyServer, close_action: CloseAction
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        close_action: CloseAction,
+        rewrite_readings: Optional[Callable[[aiokatcp.Sensor, aiokatcp.Reading], aiokatcp.Reading]],
     ) -> AsyncGenerator[Tuple[aiokatcp.Client, SensorWatcher], None]:
         port = device_server_sockname(server)[1]
         client = aiokatcp.Client("127.0.0.1", port)
@@ -128,7 +148,10 @@ class TestSensorWatcher:
             renames={
                 "bytes-sensor": "custom-bytes-sensor",
                 "broadcast-sensor": ["copy01-broadcast-sensor", "copy02-broadcast-sensor"],
-            },
+            }
+            if not rewrite_readings
+            else None,
+            rewrite_readings=rewrite_readings,
             close_action=close_action,
         )
         client.add_sensor_watcher(watcher)
@@ -234,6 +257,18 @@ class TestSensorWatcher:
         client.handle_inform(changed)
         await watcher.synced.wait()
         self._check_sensors(mirror, server)
+
+    @pytest.mark.parametrize("rewrite_readings", [_rewrite_readings])
+    async def test_rewrite_readings(
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        client: aiokatcp.Client,
+    ) -> None:
+        await self._set(mirror, server, "int-sensor", 3, timestamp=1234567890.0)
+        assert mirror["prefix-int-sensor"].value == 4
+        assert mirror["prefix-int-sensor"].timestamp == 1234567890.5
+        assert mirror["prefix-int-sensor"].status == aiokatcp.Sensor.Status.WARN
 
     async def test_reconnect(
         self,

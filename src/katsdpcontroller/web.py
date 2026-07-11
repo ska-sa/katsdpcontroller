@@ -321,7 +321,11 @@ def gui_label(gui: dict) -> str:
 
 
 def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor, reading: Reading) -> Reading:
-    if reading.status != Sensor.Status.NOMINAL:
+    if (
+        not sensor.name.endswith(".gui-urls")
+        or sensor.stype is not bytes
+        or reading.status != Sensor.Status.NOMINAL
+    ):
         return reading
     parts = sensor.name.split(".")
     product = parts[0]
