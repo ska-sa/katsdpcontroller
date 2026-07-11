@@ -58,7 +58,10 @@ import pymesos
 import pytest
 import yarl
 from addict import Dict
-from aiokatcp import FailReply, Message, Sensor
+
+# Note: use Client from this module when you need to refer to the real
+# class. aiokatcp.Client may be mocked.
+from aiokatcp import Client, FailReply, Message, Sensor
 from aioresponses import aioresponses
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import CollectorRegistry
@@ -463,7 +466,7 @@ class BaseTestController:
     @pytest.fixture
     async def mc_client(self, mc_server) -> AsyncGenerator[aiokatcp.Client, None]:
         mc_address = device_server_sockname(mc_server)
-        mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
+        mc_client = await Client.connect(mc_address[0], mc_address[1])
         yield mc_client
         mc_client.close()
         await mc_client.wait_closed()
@@ -508,7 +511,7 @@ class BaseTestController:
     @pytest.fixture
     async def client(self, server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:
         bind_address = device_server_sockname(server)
-        client = await aiokatcp.Client.connect(bind_address[0], bind_address[1])
+        client = await Client.connect(bind_address[0], bind_address[1])
         yield client
         client.close()
         await client.wait_closed()
@@ -1096,10 +1099,8 @@ class TestController(BaseTestController):
         used to block it from completing.
         """
         # grab the mock
-        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # type: ignore
-        return DelayedManager(
-            client.request(name, *args), sensor_proxy_client.request, ([], []), cancelled
-        )
+        task_client = aiokatcp.Client.return_value  # type: ignore
+        return DelayedManager(client.request(name, *args), task_client.request, ([], []), cancelled)
 
     def _capture_init_slow(
         self, client: aiokatcp.Client, capture_block: str, cancelled: bool = False
@@ -1125,10 +1126,10 @@ class TestController(BaseTestController):
         product-configure in progress.
         """
         # grab the mock
-        sensor_proxy_client = sensor_proxy.SensorProxyClient.return_value  # type: ignore
+        watcher = sensor_proxy.SensorWatcher.return_value  # type: ignore
         return DelayedManager(
             client.request(*self._configure_args(subarray_product)),
-            sensor_proxy_client.wait_synced,
+            watcher.synced.wait,
             None,
             cancelled,
         )
@@ -1163,20 +1164,24 @@ class TestController(BaseTestController):
         return DummyClient()
 
     @pytest.fixture(autouse=True)
-    def sensor_proxy_client(self, dummy_client: DummyClient, mocker) -> mock.MagicMock:
+    def task_client(self, dummy_client: DummyClient, mocker) -> mock.MagicMock:
         # Future that is already resolved with no return value
         done_future: asyncio.Future[None] = asyncio.Future()
         done_future.set_result(None)
 
-        sensor_proxy_client_class = mocker.patch(
-            "katsdpcontroller.sensor_proxy.SensorProxyClient", autospec=True
-        )
-        sensor_proxy_client = sensor_proxy_client_class.return_value
-        sensor_proxy_client.wait_connected.return_value = done_future
-        sensor_proxy_client.wait_synced.return_value = done_future
-        sensor_proxy_client.wait_closed.return_value = done_future
-        sensor_proxy_client.request.side_effect = dummy_client.request
-        return sensor_proxy_client
+        client_class = mocker.patch("aiokatcp.Client", autospec=True)
+        client = client_class.return_value
+        client.wait_connected.return_value = done_future
+        client.wait_closed.return_value = done_future
+        client.request.side_effect = dummy_client.request
+
+        watcher_class = mocker.patch("katsdpcontroller.sensor_proxy.SensorWatcher", autospec=True)
+        watcher = watcher_class.return_value
+        # autospec can't see that SensorWatcher.__init__ creates this attribute
+        watcher.synced = mock.MagicMock(spec=asyncio.Event)
+        watcher.synced.wait.return_value = done_future
+
+        return client
 
     @pytest.fixture
     def server_kwargs(self, sched: mock.MagicMock) -> dict:
@@ -1569,7 +1574,7 @@ class TestController(BaseTestController):
         assert server.product is None
 
     async def test_capture_init(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock
     ) -> None:
         """Checks that capture-init succeeds and sets appropriate state"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1583,8 +1588,7 @@ class TestController(BaseTestController):
         # multiple times, depending on the number of instances of each child.
         # We thus collapse them into groups of equal calls and don't worry
         # about the number, which would otherwise make the test fragile.
-        katcp_client = sensor_proxy_client
-        sorted_calls = sorted(katcp_client.request.mock_calls, key=lambda call: call[1])
+        sorted_calls = sorted(task_client.request.mock_calls, key=lambda call: call[1])
         grouped_calls = [k for k, g in itertools.groupby(sorted_calls)]
         expected_calls = [
             mock.call("capture-init", CAPTURE_BLOCK),
@@ -1647,7 +1651,7 @@ class TestController(BaseTestController):
         client: aiokatcp.Client,
         server: DeviceServer,
         dummy_client: DummyClient,
-        sensor_proxy_client,
+        task_client: mock.MagicMock,
     ) -> None:
         """Capture-done fails on some task"""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1655,11 +1659,10 @@ class TestController(BaseTestController):
         reply, informs = await client.request("capture-init", CAPTURE_BLOCK)
         await assert_request_fails(client, "capture-done")
         # check that the subsequent transitions still run
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
         # check that postprocessing transitions still run.
         await exhaust_callbacks()
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
         # check that the subarray is in an appropriate state
         product = server.product
         assert product is not None
@@ -1729,7 +1732,7 @@ class TestController(BaseTestController):
         self,
         client: aiokatcp.Client,
         server: DeviceServer,
-        sensor_proxy_client,
+        task_client: mock.MagicMock,
         dummy_sched: DummyScheduler,
     ) -> None:
         """Checks that capture-done succeeds and sets appropriate state"""
@@ -1744,14 +1747,13 @@ class TestController(BaseTestController):
         assert not product.async_busy
         assert product.state == ProductState.IDLE
         # Check that the graph transitions succeeded
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call("capture-done")
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
+        task_client.request.assert_any_call("capture-done")
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
         # Now simulate cal finishing with the capture block
         cal_sensor.value = b"{}"
         await exhaust_callbacks()
         # write-meta full dump must be last, hence assert_called_with not assert_any_call
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
 
         # Check that postprocessing ran and didn't fail
         assert product.capture_blocks == {}
@@ -1778,7 +1780,7 @@ class TestController(BaseTestController):
         self,
         client: aiokatcp.Client,
         server: DeviceServer,
-        sensor_proxy_client,
+        task_client: mock.MagicMock,
         failfunc: Callable[[SubarrayProduct], None],
     ) -> None:
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
@@ -1792,28 +1794,25 @@ class TestController(BaseTestController):
         # In the background it will terminate the capture block
         await exhaust_callbacks()
         assert product.capture_blocks == {}
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
 
     async def test_process_dies_while_capturing(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock
     ) -> None:
-        await self._test_failure_while_capturing(
-            client, server, sensor_proxy_client, self._ingest_died
-        )
+        await self._test_failure_while_capturing(client, server, task_client, self._ingest_died)
 
     async def test_bad_device_status_while_capturing(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock
     ) -> None:
         await self._test_failure_while_capturing(
             client,
             server,
-            sensor_proxy_client,
+            task_client,
             functools.partial(self._ingest_bad_device_status, server),
         )
 
     async def test_capture_done_process_dies(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock
     ) -> None:
         """Capture-done fails if a child dies half-way through."""
         await client.request("product-configure", SUBARRAY_PRODUCT, CONFIG)
@@ -1829,21 +1828,20 @@ class TestController(BaseTestController):
         # writeback occurred.
         assert product.state == ProductState.ERROR
         await exhaust_callbacks()
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
+        task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
         assert product.capture_blocks == {}
 
     async def test_deconfigure_on_stop(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client, sched
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock, sched
     ) -> None:
         """Calling stop will force-deconfigure existing subarrays, even if capturing."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-init", CAPTURE_BLOCK)
         await server.stop()
 
-        sensor_proxy_client.request.assert_any_call("capture-done")
+        task_client.request.assert_any_call("capture-done")
         # Forced deconfigure, so we only get the light dump
-        sensor_proxy_client.request.assert_called_with("write-meta", mock.ANY, True)
+        task_client.request.assert_called_with("write-meta", mock.ANY, True)
         sched.kill.assert_called_with(mock.ANY, capture_blocks=mock.ANY, force=True)
 
     async def test_deconfigure_on_stop_busy(
@@ -1970,7 +1968,7 @@ class TestController(BaseTestController):
         await assert_request_fails(client, *katcp_request)
 
     async def test_gain_single(
-        self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
+        self, client: aiokatcp.Client, dummy_client: DummyClient, task_client: mock.MagicMock
     ) -> None:
         """Test gain with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1979,14 +1977,11 @@ class TestController(BaseTestController):
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", "1+2j"
         )
         # TODO: this doesn't check that it goes to the correct node
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call(
-            "gain", "gpucbf_antenna_channelised_voltage", 1, "1+2j"
-        )
+        task_client.request.assert_any_call("gain", "gpucbf_antenna_channelised_voltage", 1, "1+2j")
         assert reply == [b"1+2j"]
 
     async def test_gain_multi(
-        self, client: aiokatcp.Client, dummy_client: DummyClient, sensor_proxy_client
+        self, client: aiokatcp.Client, dummy_client: DummyClient, task_client: mock.MagicMock
     ) -> None:
         """Test gain with a different gain for each channel."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -1996,44 +1991,48 @@ class TestController(BaseTestController):
             "gain", "gpucbf_antenna_channelised_voltage", "gpucbf_m901h", *gains
         )
         # TODO: this doesn't check that it goes to the correct node
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "gain", "gpucbf_antenna_channelised_voltage", 1, *[g.decode() for g in gains]
         )
         assert reply == gains
 
-    async def test_gain_all_single(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_gain_all_single(
+        self, client: aiokatcp.Client, task_client: mock.MagicMock
+    ) -> None:
         """Test gain-all with a single gain to apply to all channels."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "1+2j")
         # TODO: this doesn't check that it goes to the correct nodes
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "gain-all", "gpucbf_antenna_channelised_voltage", "1+2j"
         )
 
-    async def test_gain_all_multi(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_gain_all_multi(
+        self, client: aiokatcp.Client, task_client: mock.MagicMock
+    ) -> None:
         """Test gain-all with a different gain for each channel."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         gains = [b"%d+2j" % i for i in range(4096)]
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", *gains)
         # TODO: this doesn't check that it goes to the correct nodes
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "gain-all", "gpucbf_antenna_channelised_voltage", *[g.decode() for g in gains]
         )
 
-    async def test_gain_all_default(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_gain_all_default(
+        self, client: aiokatcp.Client, task_client: mock.MagicMock
+    ) -> None:
         """Test setting gains to default with gain-all."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("gain-all", "gpucbf_antenna_channelised_voltage", "default")
         # TODO: this doesn't check that it goes to the correct nodes
-        katcp_client = sensor_proxy_client
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "gain-all", "gpucbf_antenna_channelised_voltage", "default"
         )
 
-    async def test_delays_success(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_delays_success(
+        self, client: aiokatcp.Client, task_client: mock.MagicMock
+    ) -> None:
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request(
             "delays",
@@ -2044,13 +2043,12 @@ class TestController(BaseTestController):
             "0,1:0,0",
             "0,1:0,1",
         )
-        katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,0:0,0", "0,0:0,1"
         )
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "delays", "gpucbf_antenna_channelised_voltage", 1234567890.0, "0,1:0,0", "0,1:0,1"
         )
 
@@ -2062,7 +2060,7 @@ class TestController(BaseTestController):
         assert informs[0].arguments[2].decode() == desired_state
 
     async def test_capture_start(
-        self, client: aiokatcp.Client, server: DeviceServer, sensor_proxy_client
+        self, client: aiokatcp.Client, server: DeviceServer, task_client: mock.MagicMock
     ) -> None:
         """Test capture-start in the success case."""
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
@@ -2085,29 +2083,27 @@ class TestController(BaseTestController):
 
         await self._verify_capture_call(client, "gpucbf_baseline_correlation_products", "up")
         await self._verify_capture_call(client, "gpucbf_tied_array_resampled_voltage", "up")
-        katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call(
+        task_client.request.assert_any_call(
             "capture-start", "gpucbf_baseline_correlation_products", 12345
         )
         # NOTE: Underlying V-engine does not require a stream-name in the
         # capture-start request.
-        katcp_client.request.assert_any_call("capture-start", 23456)
+        task_client.request.assert_any_call("capture-start", 23456)
 
-    async def test_capture_stop(self, client: aiokatcp.Client, sensor_proxy_client) -> None:
+    async def test_capture_stop(self, client: aiokatcp.Client, task_client: mock.MagicMock) -> None:
         # Note: most of the code for capture-stop is shared with capture-start,
         # so the testing does not need to be as thorough.
         await self._configure_subarray(client, SUBARRAY_PRODUCT)
         await client.request("capture-stop", "gpucbf_baseline_correlation_products")
         await client.request("capture-stop", "gpucbf_tied_array_resampled_voltage")
-        katcp_client = sensor_proxy_client
         # TODO: this doesn't check that the requests are going to the correct
         # nodes.
-        katcp_client.request.assert_any_call("capture-stop", "gpucbf_baseline_correlation_products")
+        task_client.request.assert_any_call("capture-stop", "gpucbf_baseline_correlation_products")
         # TODO: Problem is FakeVgpuDeviceServer doesn't use stream-name
         # This is not the most robust assertion
-        katcp_client.request.assert_called_with("capture-stop")
+        task_client.request.assert_called_with("capture-stop")
         # Check that the state changed to down in capture-list
         await self._verify_capture_call(client, "gpucbf_baseline_correlation_products", "down")
         await self._verify_capture_call(client, "gpucbf_tied_array_resampled_voltage", "down")
@@ -2198,7 +2194,7 @@ class TestResources:
     @pytest.fixture
     async def mc_client(self, mc_server) -> AsyncGenerator[aiokatcp.Client, None]:
         mc_address = device_server_sockname(mc_server)
-        mc_client = await aiokatcp.Client.connect(mc_address[0], mc_address[1])
+        mc_client = await Client.connect(mc_address[0], mc_address[1])
         yield mc_client
         mc_client.close()
         await mc_client.wait_closed()

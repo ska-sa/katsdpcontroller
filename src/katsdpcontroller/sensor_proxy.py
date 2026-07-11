@@ -80,7 +80,34 @@ class _FilterPredicate(Protocol):
 class SensorWatcher(aiokatcp.SensorWatcher):
     """Mirrors sensors from a client into a server.
 
-    See :class:`SensorProxyClient` for an explanation of the parameters.
+    Parameters
+    ----------
+    client
+        Client to watch
+    server
+        Server to which sensors will be added
+    prefix
+        String prepended to the remote server's sensor names to obtain names
+        used on `server`. These should be unique per `server` to avoid
+        collisions.
+    rewrite_gui_urls
+        If given, a function that is given a ``.gui-urls`` sensor and returns a
+        replacement value. Note that the function is responsible for decoding
+        and encoding between JSON and :class:`bytes`.
+    renames
+        Mapping from the remote server's sensor names to sensor names for
+        `server`. Sensors found in this mapping do not have `prefix` applied.
+        The values may also be lists of strings, in which case the sensor
+        will be duplicated under each of these names.
+    close_action
+        Defines what to do with the sensors when the connection is closed.
+    notify
+        Callback which is called when there are changes to the sensor list.
+        If not specified, it defaults to sending an ``interface-changed``
+        inform to all clients of the server.
+    filter
+        Predicate used to decide which sensors are required. The default is
+        to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
     """
 
     def __init__(
@@ -213,69 +240,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                 elif self.close_action == CloseAction.REMOVE:
                     self._sensor_removed(name)
             self.batch_stop()
-
-
-class SensorProxyClient(aiokatcp.Client):
-    """Client that mirrors sensors into a device server.
-
-    Parameters
-    ----------
-    server
-        Server to which sensors will be added
-    prefix
-        String prepended to the remote server's sensor names to obtain names
-        used on `server`. These should be unique per `server` to avoid
-        collisions.
-    rewrite_gui_urls
-        If given, a function that is given a ``.gui-urls`` sensor and returns a
-        replacement value. Note that the function is responsible for decoding
-        and encoding between JSON and :class:`bytes`.
-    renames
-        Mapping from the remote server's sensor names to sensor names for
-        `server`. Sensors found in this mapping do not have `prefix` applied.
-        The values may also be lists of strings, in which case the sensor
-        will be duplicated under each of these names.
-    close_action
-        Defines what to do with the sensors when the connection is closed.
-    notify
-        Callback which is called when there are changes to the sensor list.
-        If not specified, it defaults to sending an ``interface-changed``
-        inform to all clients of the server.
-    filter
-        Predicate used to decide which sensors are required. The default is
-        to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
-    kwargs
-        Passed to the base class
-    """
-
-    def __init__(
-        self,
-        server: aiokatcp.DeviceServer,
-        prefix: str,
-        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
-        enum_types: Sequence[Type[enum.Enum]] = (),
-        renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
-        close_action: CloseAction = CloseAction.REMOVE,
-        notify: Optional[Callable[[], Any]] = None,
-        filter: Optional[_FilterPredicate] = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        watcher = SensorWatcher(
-            self,
-            server,
-            prefix,
-            rewrite_gui_urls,
-            renames=renames,
-            close_action=close_action,
-            notify=notify,
-            filter=filter,
-        )
-        self._synced = watcher.synced
-        self.add_sensor_watcher(watcher)
-
-    async def wait_synced(self) -> None:
-        await self._synced.wait()
 
 
 class PrometheusInfo:

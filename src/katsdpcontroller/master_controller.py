@@ -1271,7 +1271,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             )
         )
 
-        # Updated by SensorProxyClient with sensor values prior to gui-url rewriting
+        # Updated by SensorWatcher with sensor values prior to gui-url rewriting
         self.orig_sensors = SensorSet()
         for sensor in self.sensors.values():
             self.orig_sensors.add(sensor)
