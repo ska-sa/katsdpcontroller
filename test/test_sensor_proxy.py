@@ -28,7 +28,6 @@ import asyncio
 import enum
 import functools
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional, Tuple
-from unittest import mock
 
 import aiokatcp
 import pytest
@@ -102,10 +101,8 @@ class FutureObserver:
 @pytest.mark.timeout(5)
 class TestSensorWatcher:
     @pytest.fixture
-    def mirror(self, mocker) -> mock.MagicMock:
-        mirror = mocker.create_autospec(aiokatcp.DeviceServer, instance=True)
-        mirror.sensors = aiokatcp.SensorSet()
-        return mirror
+    def mirror(self) -> aiokatcp.SensorSet:
+        return aiokatcp.SensorSet()
 
     @pytest.fixture
     async def server(self) -> AsyncGenerator[DummyServer, None]:
@@ -120,7 +117,7 @@ class TestSensorWatcher:
 
     @pytest.fixture(autouse=True)
     async def client_and_watcher(
-        self, mirror, server: DummyServer, close_action: CloseAction
+        self, mirror: aiokatcp.SensorSet, server: DummyServer, close_action: CloseAction
     ) -> AsyncGenerator[Tuple[aiokatcp.Client, SensorWatcher], None]:
         port = device_server_sockname(server)[1]
         client = aiokatcp.Client("127.0.0.1", port)
@@ -149,7 +146,7 @@ class TestSensorWatcher:
     def watcher(self, client_and_watcher: Tuple[aiokatcp.Client, SensorWatcher]) -> SensorWatcher:
         return client_and_watcher[1]
 
-    def _check_sensors(self, mirror, server: DummyServer) -> None:
+    def _check_sensors(self, mirror: aiokatcp.SensorSet, server: DummyServer) -> None:
         """Compare the upstream sensors against the mirror"""
         for sensor in server.sensors.values():
             qualnames = ["prefix-" + sensor.name]
@@ -158,8 +155,8 @@ class TestSensorWatcher:
             elif sensor.name == "broadcast-sensor":
                 qualnames = ["copy01-broadcast-sensor", "copy02-broadcast-sensor"]
             for qualname in qualnames:
-                assert qualname in mirror.sensors
-                sensor2 = mirror.sensors[qualname]
+                assert qualname in mirror
+                sensor2 = mirror[qualname]
                 assert sensor.description == sensor2.description
                 assert sensor.type_name == sensor2.type_name
                 assert sensor.units == sensor2.units
@@ -170,7 +167,7 @@ class TestSensorWatcher:
                 assert sensor.timestamp == sensor2.timestamp
                 assert sensor.status == sensor2.status
         # Check that we don't have any we shouldn't
-        for sensor2 in mirror.sensors.values():
+        for sensor2 in mirror.values():
             assert sensor2.name.startswith("prefix-") or sensor2.name in {
                 "custom-bytes-sensor",
                 "copy01-broadcast-sensor",
@@ -178,25 +175,31 @@ class TestSensorWatcher:
             }
             base_name = sensor2.name[7:]
             assert base_name in server.sensors
-        assert "prefix-bytes-sensor" not in mirror.sensors
+        assert "prefix-bytes-sensor" not in mirror
 
-    async def test_init(self, mirror, server: DummyServer) -> None:
+    async def test_init(self, mirror: aiokatcp.SensorSet, server: DummyServer) -> None:
         self._check_sensors(mirror, server)
 
-    async def _set(self, mirror, server: DummyServer, name: str, value: Any, **kwargs) -> None:
+    async def _set(
+        self, mirror: aiokatcp.SensorSet, server: DummyServer, name: str, value: Any, **kwargs
+    ) -> None:
         """Set a sensor on the server and wait for the mirror to observe it"""
         observer = FutureObserver()
-        mirror.sensors["prefix-" + name].attach(observer)
+        mirror["prefix-" + name].attach(observer)
         server.sensors[name].set_value(value, **kwargs)
         await observer.future
-        mirror.sensors["prefix-" + name].detach(observer)
+        mirror["prefix-" + name].detach(observer)
 
-    async def test_set_value(self, mirror, server: DummyServer) -> None:
+    async def test_set_value(self, mirror: aiokatcp.SensorSet, server: DummyServer) -> None:
         await self._set(mirror, server, "int-sensor", 2, timestamp=123456790.0)
         self._check_sensors(mirror, server)
 
     async def test_add_sensor(
-        self, mirror, server: DummyServer, client: aiokatcp.Client, watcher: SensorWatcher
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        client: aiokatcp.Client,
+        watcher: SensorWatcher,
     ) -> None:
         server.sensors.add(Sensor(int, "another", "another sensor", "", 234))
         # Rather than having server send an interface-changed inform, we invoke
@@ -207,7 +210,11 @@ class TestSensorWatcher:
         self._check_sensors(mirror, server)
 
     async def test_remove_sensor(
-        self, mirror, server: DummyServer, client: aiokatcp.Client, watcher: SensorWatcher
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        client: aiokatcp.Client,
+        watcher: SensorWatcher,
     ) -> None:
         del server.sensors["int-sensor"]
         changed = aiokatcp.Message.inform("interface-changed", b"sensor-list")
@@ -216,7 +223,11 @@ class TestSensorWatcher:
         self._check_sensors(mirror, server)
 
     async def test_replace_sensor(
-        self, mirror, server: DummyServer, client: aiokatcp.Client, watcher: SensorWatcher
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        client: aiokatcp.Client,
+        watcher: SensorWatcher,
     ) -> None:
         server.sensors.add(Sensor(bool, "int-sensor", "Replaced by bool"))
         changed = aiokatcp.Message.inform("interface-changed", b"sensor-list")
@@ -225,7 +236,11 @@ class TestSensorWatcher:
         self._check_sensors(mirror, server)
 
     async def test_reconnect(
-        self, mirror, server: DummyServer, client: aiokatcp.Client, watcher: SensorWatcher
+        self,
+        mirror: aiokatcp.SensorSet,
+        server: DummyServer,
+        client: aiokatcp.Client,
+        watcher: SensorWatcher,
     ) -> None:
         # Cheat: the client will disconnect if given a #disconnect inform, and
         # we don't actually need to kill the server.
@@ -234,16 +249,20 @@ class TestSensorWatcher:
         await watcher.synced.wait()
         self._check_sensors(mirror, server)
 
-    async def test_close_action_remove(self, client: aiokatcp.Client, mirror) -> None:
+    async def test_close_action_remove(
+        self, client: aiokatcp.Client, mirror: aiokatcp.SensorSet
+    ) -> None:
         client.close()
-        assert list(mirror.sensors) == []
+        assert list(mirror) == []
 
     @pytest.mark.parametrize("close_action", [CloseAction.UNREACHABLE])
-    async def test_close_action_unreachable(self, client: aiokatcp.Client, mirror) -> None:
+    async def test_close_action_unreachable(
+        self, client: aiokatcp.Client, mirror: aiokatcp.SensorSet
+    ) -> None:
         client.close()
-        assert mirror.sensors["custom-bytes-sensor"].status == Sensor.Status.UNREACHABLE
-        assert mirror.sensors["prefix-device-status"].status == Sensor.Status.ERROR
-        assert mirror.sensors["prefix-device-status"].value.value == b"fail"
+        assert mirror["custom-bytes-sensor"].status == Sensor.Status.UNREACHABLE
+        assert mirror["prefix-device-status"].status == Sensor.Status.ERROR
+        assert mirror["prefix-device-status"].value.value == b"fail"
 
 
 class TestPrometheusWatcher:

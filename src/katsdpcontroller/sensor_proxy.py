@@ -77,14 +77,14 @@ class _FilterPredicate(Protocol):
 
 
 class SensorWatcher(aiokatcp.SensorWatcher):
-    """Mirrors sensors from a client into a server.
+    """Mirrors sensors from a client into a sensor set.
 
     Parameters
     ----------
     client
         Client to watch
-    server
-        Server to which sensors will be added
+    sensors
+        Sensor set which will be updated
     prefix
         String prepended to the remote server's sensor names to obtain names
         used on `server`. These should be unique per `server` to avoid
@@ -107,12 +107,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     filter
         Predicate used to decide which sensors are required. The default is
         to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
+    orig_sensors
+        If provided, it will be populated similarly to `sensors`, except that
+        `rewrite_gui_urls` will not be applied.
     """
 
     def __init__(
         self,
         client: aiokatcp.Client,
-        server: aiokatcp.DeviceServer,
+        sensors: aiokatcp.SensorSet,
         prefix: str,
         rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
@@ -120,16 +123,18 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         close_action: CloseAction = CloseAction.REMOVE,
         notify: Optional[Callable[[], Any]] = None,
         filter: Optional[_FilterPredicate] = None,
+        orig_sensors: Optional[aiokatcp.SensorSet] = None,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
         self.renames = renames if renames is not None else {}
-        self.server = server
+        # Note: cannot just be called sensors, because the base class already
+        # uses that name for its internal mirror.
+        self.target_sensors = sensors
         # We keep track of the sensors after name rewriting but prior to gui-url rewriting
-        self.orig_sensors: aiokatcp.SensorSet
-        try:
-            self.orig_sensors = self.server.orig_sensors  # type: ignore
-        except AttributeError:
+        if orig_sensors is not None:
+            self.orig_sensors = orig_sensors
+        else:
             self.orig_sensors = aiokatcp.SensorSet()
 
         self.rewrite_gui_urls = rewrite_gui_urls
@@ -175,12 +180,12 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                     new_value,
                     sensor.status,
                 )
-            self.server.sensors.add(sensor)
+            self.target_sensors.add(sensor)
         self._need_notify = True
 
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the rewritten name"""
-        self.server.sensors.pop(name, None)
+        self.target_sensors.pop(name, None)
         self.orig_sensors.pop(name, None)
         self._need_notify = True
 
@@ -201,7 +206,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
                 and sensor.stype is bytes
             ):
                 value = self.rewrite_gui_urls(sensor)
-                self.server.sensors[rewritten_name].set_value(value, status, timestamp)
+                self.target_sensors[rewritten_name].set_value(value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
@@ -234,7 +239,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.batch_start()
             for name in self.sensors.keys():
                 if self.close_action == CloseAction.UNREACHABLE:
-                    self._mark_unreachable(self.server.sensors[name])
+                    self._mark_unreachable(self.target_sensors[name])
                     self._mark_unreachable(self.orig_sensors[name])
                 elif self.close_action == CloseAction.REMOVE:
                     self._sensor_removed(name)

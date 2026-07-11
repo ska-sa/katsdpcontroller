@@ -216,12 +216,13 @@ class Product:
         self.katcp_conn.add_sensor_watcher(
             sensor_proxy.SensorWatcher(
                 self.katcp_conn,
-                server,
+                server.sensors,
                 f"{self.name}.",
                 rewrite_gui_urls=rewrite_gui_urls,
                 enum_types=(DeviceStatus,),
                 filter=self._mirror_filter if not mirror_sensors else None,
                 notify=lambda: server.mass_inform("interface-changed", "sensor-list"),
+                orig_sensors=getattr(server, "orig_sensors", None),
             )
         )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)

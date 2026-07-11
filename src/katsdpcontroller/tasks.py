@@ -513,7 +513,7 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 self.katcp_connection = aiokatcp.Client(self.address, self.ports["port"])
                 sensor_watcher = sensor_proxy.SensorWatcher(
                     self.katcp_connection,
-                    self.sdp_controller,
+                    self.sdp_controller.sensors,
                     prefix,
                     renames=self.logical_node.sensor_renames,
                     close_action=sensor_proxy.CloseAction.UNREACHABLE,
