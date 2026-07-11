@@ -222,9 +222,23 @@ class Product:
                 enum_types=(DeviceStatus,),
                 filter=self._mirror_filter if not mirror_sensors else None,
                 notify=lambda: server.mass_inform("interface-changed", "sensor-list"),
-                orig_sensors=getattr(server, "orig_sensors", None),
             )
         )
+        # Make a copy of sensors without the effects of rewrite_gui_urls
+        # (used by web.py).
+        # TODO: improve the type annotations and the unit tests so that we don't
+        # need this to be conditional. It can probably also have a tighter filter
+        # since it's only needed for gui-urls sensors.
+        if hasattr(server, "orig_sensors"):
+            self.katcp_conn.add_sensor_watcher(
+                sensor_proxy.SensorWatcher(
+                    self.katcp_conn,
+                    server.orig_sensors,  # type: ignore
+                    f"{self.name}.",
+                    enum_types=(DeviceStatus,),
+                    filter=self._mirror_filter if not mirror_sensors else None,
+                )
+            )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)
         # TODO: start a watchdog
 

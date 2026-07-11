@@ -107,9 +107,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     filter
         Predicate used to decide which sensors are required. The default is
         to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
-    orig_sensors
-        If provided, it will be populated similarly to `sensors`, except that
-        `rewrite_gui_urls` will not be applied.
     """
 
     def __init__(
@@ -123,7 +120,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         close_action: CloseAction = CloseAction.REMOVE,
         notify: Optional[Callable[[], Any]] = None,
         filter: Optional[_FilterPredicate] = None,
-        orig_sensors: Optional[aiokatcp.SensorSet] = None,
     ) -> None:
         super().__init__(client, enum_types)
         self.prefix = prefix
@@ -131,12 +127,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         # Note: cannot just be called sensors, because the base class already
         # uses that name for its internal mirror.
         self.target_sensors = sensors
-        # We keep track of the sensors after name rewriting but prior to gui-url rewriting
-        if orig_sensors is not None:
-            self.orig_sensors = orig_sensors
-        else:
-            self.orig_sensors = aiokatcp.SensorSet()
-
         self.rewrite_gui_urls = rewrite_gui_urls
         self.close_action = close_action
         if notify is not None:
@@ -165,7 +155,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         super().sensor_added(name, description, units, type_name, *args)
         for rewritten_name in self.rewrite_name(name):
             sensor = self.sensors[rewritten_name]
-            self.orig_sensors.add(sensor)
             if (
                 self.rewrite_gui_urls is not None
                 and sensor.name.endswith(".gui-urls")
@@ -186,7 +175,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the rewritten name"""
         self.target_sensors.pop(name, None)
-        self.orig_sensors.pop(name, None)
         self._need_notify = True
 
     def sensor_removed(self, name: str) -> None:
@@ -240,7 +228,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             for name in self.sensors.keys():
                 if self.close_action == CloseAction.UNREACHABLE:
                     self._mark_unreachable(self.target_sensors[name])
-                    self._mark_unreachable(self.orig_sensors[name])
                 elif self.close_action == CloseAction.REMOVE:
                     self._sensor_removed(name)
             self.batch_stop()
