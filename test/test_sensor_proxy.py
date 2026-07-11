@@ -19,7 +19,7 @@
 Still TODO:
 
 - tests for Prometheus wrapping
-- test that mirror.mass_inform is called
+- test notify functionality
 - test for the server removing a sensor before we can subscribe to it
 - test for cancellation of the update in various cases
 """

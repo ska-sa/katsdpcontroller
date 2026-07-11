@@ -17,7 +17,6 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import enum
-import functools
 import logging
 from typing import (
     Any,
@@ -138,7 +137,7 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         if notify is not None:
             self.notify = notify
         else:
-            self.notify = functools.partial(server.mass_inform, "interface-changed", "sensor-list")
+            self.notify = lambda: None
         # Whether we need to call notify at the end of the batch
         self._need_notify = False
         self._filter = filter

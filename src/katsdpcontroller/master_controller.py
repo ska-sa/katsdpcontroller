@@ -221,6 +221,7 @@ class Product:
                 rewrite_gui_urls=rewrite_gui_urls,
                 enum_types=(DeviceStatus,),
                 filter=self._mirror_filter if not mirror_sensors else None,
+                notify=lambda: server.mass_inform("interface-changed", "sensor-list"),
             )
         )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)
