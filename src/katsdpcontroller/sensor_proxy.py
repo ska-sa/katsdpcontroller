@@ -90,14 +90,16 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         used on `server`. These should be unique per `server` to avoid
         collisions.
     rewrite_gui_urls
-        If given, a function that is given a ``.gui-urls`` sensor and returns a
-        replacement value. Note that the function is responsible for decoding
-        and encoding between JSON and :class:`bytes`.
+        If given, a function that is given a ``.gui-urls`` sensor and new reading
+        and returns a replacement reading. Note that the function is responsible
+        for decoding and encoding between JSON and :class:`bytes`.
     renames
         Mapping from the remote server's sensor names to sensor names for
         `server`. Sensors found in this mapping do not have `prefix` applied.
         The values may also be lists of strings, in which case the sensor
         will be duplicated under each of these names.
+
+        This cannot be combined with `rewrite_gui_urls`.
     close_action
         Defines what to do with the sensors when the connection is closed.
     notify
@@ -114,13 +116,17 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         client: aiokatcp.Client,
         sensors: aiokatcp.SensorSet,
         prefix: str,
-        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
+        rewrite_gui_urls: Optional[
+            Callable[[aiokatcp.Sensor, aiokatcp.Reading], aiokatcp.Reading]
+        ] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
         notify: Optional[Callable[[], Any]] = None,
         filter: Optional[_FilterPredicate] = None,
     ) -> None:
+        if renames is not None and rewrite_gui_urls is not None:
+            raise ValueError("cannot specify both renames and rewrite_gui_urls")
         super().__init__(client, enum_types)
         self.prefix = prefix
         self.renames = renames if renames is not None else {}
@@ -155,22 +161,8 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         super().sensor_added(name, description, units, type_name, *args)
         for rewritten_name in self.rewrite_name(name):
             sensor = self.sensors[rewritten_name]
-            if (
-                self.rewrite_gui_urls is not None
-                and sensor.name.endswith(".gui-urls")
-                and sensor.stype is bytes
-            ):
-                new_value = self.rewrite_gui_urls(sensor)
-                sensor = aiokatcp.Sensor(
-                    sensor.stype,
-                    sensor.name,
-                    sensor.description,
-                    sensor.units,
-                    new_value,
-                    sensor.status,
-                )
             self.target_sensors.add(sensor)
-        self._need_notify = True
+            self._need_notify = True
 
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the rewritten name"""
@@ -185,16 +177,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
     def sensor_updated(
         self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
     ) -> None:
-        super().sensor_updated(name, value, status, timestamp)
-        for rewritten_name in self.rewrite_name(name):
+        reading = aiokatcp.Reading(timestamp=timestamp, status=status, value=value)
+        if self.rewrite_gui_urls is not None:
+            # We don't allow custom renames, so this is guaranteed to
+            # have one exactly element.
+            rewritten_name = self.rewrite_name(name)[0]
             sensor = self.sensors[rewritten_name]
-            if (
-                self.rewrite_gui_urls is not None
-                and rewritten_name.endswith(".gui-urls")
-                and sensor.stype is bytes
-            ):
-                value = self.rewrite_gui_urls(sensor)
-                self.target_sensors[rewritten_name].set_value(value, status, timestamp)
+            if rewritten_name.endswith(".gui-urls") and sensor.stype is bytes:
+                reading = self.rewrite_gui_urls(sensor, reading)
+        super().sensor_updated(name, reading.value, reading.status, reading.timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()

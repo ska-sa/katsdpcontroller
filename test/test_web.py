@@ -255,9 +255,11 @@ class TestWeb:
         )
         for sensor in mc_server.orig_sensors.values():
             if use_haproxy and sensor.name.endswith(".gui-urls"):
-                new_value = web.rewrite_gui_urls(EXTERNAL_URL, sensor)
+                new_reading = web.rewrite_gui_urls(EXTERNAL_URL, sensor, sensor.reading)
                 new_sensor = Sensor(sensor.stype, sensor.name, sensor.description, sensor.units)
-                new_sensor.set_value(new_value, timestamp=sensor.timestamp, status=sensor.status)
+                new_sensor.set_value(
+                    new_reading.value, timestamp=new_reading.timestamp, status=new_reading.status
+                )
                 mc_server.sensors.add(new_sensor)
             else:
                 mc_server.sensors.add(sensor)

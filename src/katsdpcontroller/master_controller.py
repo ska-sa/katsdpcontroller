@@ -61,7 +61,7 @@ import async_timeout
 import jsonschema
 import katsdpservices
 import yarl
-from aiokatcp import Address, DeviceStatus, FailReply, Sensor, SensorSet
+from aiokatcp import Address, DeviceStatus, FailReply, Reading, Sensor, SensorSet
 
 import katsdpcontroller
 
@@ -191,7 +191,7 @@ class Product:
     def connect(
         self,
         server: aiokatcp.DeviceServer,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
+        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]],
         hostname: str,
         host: _IPAddress,
         ports: Dict[str, int],
@@ -335,7 +335,7 @@ class ProductManagerBase(Generic[_P]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
+        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
@@ -738,7 +738,7 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
+        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
         self._request_id_prefix = args.name + "_product_"
@@ -1212,7 +1212,9 @@ class DeviceServer(aiokatcp.DeviceServer):
     _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(
-        self, args: argparse.Namespace, rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None
+        self,
+        args: argparse.Namespace,
+        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
