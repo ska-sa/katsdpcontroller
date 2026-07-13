@@ -1650,10 +1650,10 @@ def _make_vgpu(
     # +-------------------------------------+
 
     # Estimate required cpu resources
-    vgpu.cpus = (0.315e-6 * stream.bandwidth + 1) / 100
+    vgpu.cpus = (0.315e-5 * stream.bandwidth + 5) / 100
 
     # Estimate required host memory
-    vgpu.mem = 4.6 * stream.bandwidth + 1065
+    vgpu.mem = round(4.6e-5 * stream.bandwidth) + 1435
 
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
@@ -1680,10 +1680,10 @@ def _make_vgpu(
     vgpu.gpus = [scheduler.GPURequest()]
 
     # Estimate required GPU usage
-    vgpu.gpus[0].compute = (0.303e-6 * stream.bandwidth + 10) / 100
+    vgpu.gpus[0].compute = (0.303e-5 * stream.bandwidth + 17) / 100
 
     # Estimate required GPU memory
-    vgpu.gpus[0].mem = 33.4 * stream.bandwidth + 2766
+    vgpu.gpus[0].mem = round(33.4e-5 * stream.bandwidth) + 2766
 
     logger.info("---------------COMPARISONS--------------------")
     logger.info("bandwidth: %s", str(stream.bandwidth))
