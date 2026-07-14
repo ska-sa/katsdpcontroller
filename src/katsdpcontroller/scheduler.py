@@ -1337,7 +1337,7 @@ class HTTPImageLookup(_RegistryImageLookup):
             auth_header,
         )
 
-        # If the response is an OCI index, we need to get the manifest from the Linux image config
+        # If the response is an OCI index, we need to get the manifest from the Linux manifest
         # inside the OCI index.
         if not isinstance(manifest_or_index.media_type, ManifestType):
             manifest_media_type, manifest_digest = manifest_or_index.linux_manifest_digest()
