@@ -1324,7 +1324,7 @@ class HTTPImageLookup(_RegistryImageLookup):
         """Get the labels and Docker content digest from the manifest of the tag in the registry.
 
         If the tag is an index, get the labels from the first Linux image's manifest."""
-        # First, we get the response for a Docker image or an OCI index.
+        # First, we get the response for a Docker or OCI compatible manifest.
         image_digest, manifest_or_index = await HTTPImageLookup._get_manifest_or_index_helper(
             session,
             repo_url / "manifests" / tag,
