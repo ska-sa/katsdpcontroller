@@ -37,6 +37,7 @@ import yarl
 from aiokatcp import Client, DeviceStatus, Sensor
 
 from katsdpcontroller import scheduler
+from katsdpcontroller.agent_mkconfig import encode
 from katsdpcontroller.controller import (
     ProductState,
     device_server_sockname,
@@ -1259,6 +1260,12 @@ class TestDeviceServerReal:
         rmock: aioresponses.aioresponses,
         mock_zk: Dict[Optional[str], fake_zk.ZKClient],
     ) -> None:
+        """Exercise logic populating cbf-resource-* sensors.
+
+        CBF does not count agents with an empty interfaces attribute, nor agents
+        marked for subsystems other than CBF. The test sets up a variety of agents to
+        verify that the counting logic is correct.
+        """
         # Let the loop run once. It should fail to populate the sensors because
         # it won't be able to find a Mesos master in zookeeper.
         await asyncio.sleep(1)
@@ -1285,6 +1292,14 @@ class TestDeviceServerReal:
                 "draining_machines": [{"id": {"hostname": "machine2", "ip": "10.0.0.2"}}],
             },
         )
+
+        # A simple example of what is configured on Mesos agents
+        katsdpcontroller_interfaces = [
+            {"ipv4_address": "11.22.33.44", "name": "enp193s0np0", "network": "gpucbf"}
+        ]
+        katsdpcontroller_interfaces_encoded = encode(katsdpcontroller_interfaces)
+        cbf_subsystems_encoded = encode(["cbf"])
+        sdp_subsystems_encoded = encode(["sdp"])
         # This is only a tiny subset of what is returned, sufficient for
         # what the code expects to find.
         rmock.get(
@@ -1292,14 +1307,17 @@ class TestDeviceServerReal:
             payload={
                 "slaves": [
                     {
-                        # Draining machine
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        # CBF Machine, marked for maintenance
+                        "attributes": {
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine2",
                         "used_resources": {"cpus": 0},
                     },
                     {
                         # Machine that's not marked for CBF
-                        "attributes": {"katsdpcontroller.subsystems": "WyJzZHAiXSAg"},  # {"sdp"}
+                        "attributes": {"katsdpcontroller.subsystems": sdp_subsystems_encoded},
                         "hostname": "machine3",
                         "used_resources": {"cpus": 0},
                     },
@@ -1311,16 +1329,31 @@ class TestDeviceServerReal:
                         "used_resources": {"cpus": 0},
                     },
                     {
-                        # Machine that's usable but unused
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        # Machine that's usable for CBF and free
+                        "attributes": {
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine5",
                         "used_resources": {"cpus": 0},
                     },
                     {
-                        # Machine that's usable and at least partly used
-                        "attributes": {"katsdpcontroller.subsystems": "WyJjYmYiXSAg"},  # {"cbf"}
+                        # CBF Machine that's usable and at least partly used
+                        "attributes": {
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
+                            "katsdpcontroller.interfaces": katsdpcontroller_interfaces_encoded,
+                        },
                         "hostname": "machine6",
                         "used_resources": {"cpus": 16},
+                    },
+                    {
+                        # Machine that is not usable for CBF engines
+                        "attributes": {
+                            "katsdpcontroller.subsystems": cbf_subsystems_encoded,
+                            "katsdpcontroller.interfaces": encode([]),
+                        },
+                        "hostname": "machine7",
+                        "used_resources": {"cpus": 0},
                     },
                 ]
             },
