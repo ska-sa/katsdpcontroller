@@ -511,17 +511,30 @@ class ProductPhysicalTaskMixin(scheduler.PhysicalNode):
                 )
                 prefix = self.name + "."
                 self.katcp_connection = aiokatcp.Client(self.address, self.ports["port"])
-                sensor_watcher = sensor_proxy.SensorWatcher(
-                    self.katcp_connection,
-                    self.sdp_controller.sensors,
-                    prefix,
-                    renames=self.logical_node.sensor_renames,
-                    close_action=sensor_proxy.CloseAction.UNREACHABLE,
-                    notify=self.subarray_product.notify_sensors_changed,
-                )
-                self.katcp_connection.add_sensor_watcher(sensor_watcher)
+                sensor_watchers = [
+                    # Main sensor watcher, that mirrors into the device server's sensors
+                    sensor_proxy.SensorWatcher(
+                        self.katcp_connection,
+                        self.sdp_controller.sensors,
+                        prefix,
+                        renames=self.logical_node.sensor_renames,
+                        close_action=sensor_proxy.CloseAction.UNREACHABLE,
+                        notify=self.subarray_product.notify_sensors_changed,
+                    ),
+                    # Sensor watcher that bypasses renames; these are available
+                    # for aggregate sensors to aggregate for example.
+                    sensor_proxy.SensorWatcher(
+                        self.katcp_connection,
+                        self.sdp_controller.task_sensors,
+                        prefix,
+                        close_action=sensor_proxy.CloseAction.UNREACHABLE,
+                    ),
+                ]
+                for sensor_watcher in sensor_watchers:
+                    self.katcp_connection.add_sensor_watcher(sensor_watcher)
                 try:
-                    await sensor_watcher.synced.wait()
+                    for sensor_watcher in sensor_watchers:
+                        await sensor_watcher.synced.wait()
                     self.logger.info(
                         "Connected to %s:%s for node %s",
                         self.address,

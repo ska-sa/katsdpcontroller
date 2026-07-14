@@ -950,7 +950,7 @@ def _make_fgpu(
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    sensors: SensorSet,
+    task_sensors: SensorSet,
     streams: Iterable[GpucbfXBStream],
 ) -> scheduler.LogicalNode:
     # Ensure that streams is a sequence, not just an iterable. Also put
@@ -976,8 +976,8 @@ def _make_xbgpu(
     ants = np.array(acv.input_labels).reshape(-1, 2)
     n_ants = ants.shape[0]
 
-    base_name = streams[0].name
-    xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
+    base_name = f"xb.{streams[0].name}"
+    xbgpu_group = LogicalGroup(base_name)
     g.add_node(xbgpu_group)
     dst_multicasts = []
     data_suspect_sensors = []
@@ -998,8 +998,8 @@ def _make_xbgpu(
             initial_status=Sensor.Status.NOMINAL,
         )
         data_suspect_sensors.append(data_suspect_sensor)
+        re_prefix = re.escape(f"{base_name}.") + "[0-9]+" + re.escape(f".{stream.name}.")
 
-        escaped_name = re.escape(stream.name)
         stream_sensors: List[Sensor] = [
             # The timestamps are simply ADC sample counts
             Sensor(
@@ -1125,20 +1125,20 @@ def _make_xbgpu(
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.xeng-clip-cnt",
                     "Number of visibilities that saturated",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.xeng-clip-cnt"),
+                    name_regex=re.compile(rf"{re_prefix}xeng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 SyncSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.rx.synchronised",
                     "For the latest accumulation, was data present from all F-Engines "
                     "for all X-Engines",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
+                    name_regex=re.compile(rf"{re_prefix}rx.synchronised"),
                     n_children=stream.n_substreams,
                 ),
             ]
@@ -1183,34 +1183,34 @@ def _make_xbgpu(
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.beng-clip-cnt"),
+                    name_regex=re.compile(rf"{re_prefix}beng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     float,
                     f"{stream.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.quantiser-gain"),
+                    name_regex=re.compile(rf"{re_prefix}quantiser-gain"),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     bytes,
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
+                    name_regex=re.compile(rf"{re_prefix}delay"),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     bytes,
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
+                    name_regex=re.compile(rf"{re_prefix}weight"),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
@@ -1270,7 +1270,7 @@ def _make_xbgpu(
     task_names = []
     for i in range(n_engines):
         # One engine per section of the band
-        xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
+        xbgpu = ProductLogicalTask(f"{base_name}.{i}", streams=streams, index=i)
         task_names.append(xbgpu.name)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
@@ -1454,22 +1454,23 @@ def _make_xbgpu(
         ]:
             xbgpu.sensor_renames[name] = [f"{stream.name}.{i}.{name}" for stream in streams]
 
-        # Rename sensors that are relevant to the stream rather than the Pipeline
+        # Rename sensors that are relevant to the stream rather than the Pipeline,
+        # and hide sensors that are only used to create aggregates.
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
+                hide = ["rx.synchronised", "xeng-clip-cnt"]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 renames = [
                     "chan-range",
-                    "delay",
-                    "quantiser-gain",
-                    "weight",
-                    "beng-clip-cnt",
                     "tx.next-timestamp",
                     "dither-seed",
                 ]
+                hide = ["delay", "quantiser-gain", "weight", "beng-clip-cnt"]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
+            for name in hide:
+                xbgpu.sensor_renames[f"{stream.name}.{name}"] = []
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
@@ -2893,7 +2894,7 @@ def _groupby(items: Iterable[_T], key: Callable[[_T], Any]) -> Iterable[Iterable
 
 
 def build_logical_graph(
-    configuration: Configuration, config_dict: dict, sensors: SensorSet
+    configuration: Configuration, config_dict: dict, task_sensors: SensorSet
 ) -> networkx.MultiDiGraph:
     # We mutate the configuration to align output channels to requirements.
     configuration = copy.deepcopy(configuration)
@@ -2970,7 +2971,7 @@ def build_logical_graph(
             g,
             configuration,
             streams=xbgpu_streams,
-            sensors=sensors,
+            task_sensors=task_sensors,
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)

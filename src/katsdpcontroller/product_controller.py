@@ -497,7 +497,7 @@ class SubarrayProduct:
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(
-            configuration, config_dict, sdp_controller.sensors
+            configuration, config_dict, sdp_controller.task_sensors
         )
         self.telstate_endpoint = ""
         self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
@@ -1856,6 +1856,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.master_controller = master_controller
         self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
+        #: Sensors from child tasks (prefixed but without any custom renaming)
+        self.task_sensors = aiokatcp.SensorSet()
 
         super().__init__(host, port, max_backlog=CONNECTION_MAX_BACKLOG)
         # setup sensors (note: ProductController adds other sensors)
