@@ -1458,7 +1458,7 @@ def _make_xbgpu(
         # and hide sensors that are only used to create aggregates.
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
-                renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
+                renames = ["chan-range"]
                 hide = ["rx.synchronised", "xeng-clip-cnt"]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 renames = [
