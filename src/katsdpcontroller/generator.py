@@ -1128,7 +1128,7 @@ def _make_xbgpu(
                     task_sensors,
                     f"{stream.name}.xeng-clip-cnt",
                     "Number of visibilities that saturated",
-                    name_regex=re.compile(rf"{re_prefix}xeng-clip-cnt"),
+                    name_regex=re.compile(f"{re_prefix}xeng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
@@ -1138,7 +1138,7 @@ def _make_xbgpu(
                     f"{stream.name}.rx.synchronised",
                     "For the latest accumulation, was data present from all F-Engines "
                     "for all X-Engines",
-                    name_regex=re.compile(rf"{re_prefix}rx.synchronised"),
+                    name_regex=re.compile(rf"{re_prefix}rx\.synchronised"),
                     n_children=stream.n_substreams,
                 ),
             ]
@@ -1186,7 +1186,7 @@ def _make_xbgpu(
                     task_sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
-                    name_regex=re.compile(rf"{re_prefix}beng-clip-cnt"),
+                    name_regex=re.compile(f"{re_prefix}beng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
@@ -1196,21 +1196,21 @@ def _make_xbgpu(
                     float,
                     f"{stream.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    name_regex=re.compile(rf"{re_prefix}quantiser-gain"),
+                    name_regex=re.compile(f"{re_prefix}quantiser-gain"),
                 ),
                 LatestSensor(
                     task_sensors,
                     bytes,
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
-                    name_regex=re.compile(rf"{re_prefix}delay"),
+                    name_regex=re.compile(f"{re_prefix}delay"),
                 ),
                 LatestSensor(
                     task_sensors,
                     bytes,
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    name_regex=re.compile(rf"{re_prefix}weight"),
+                    name_regex=re.compile(f"{re_prefix}weight"),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
