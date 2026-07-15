@@ -43,7 +43,7 @@ from katsdpcontroller.sensor_proxy import (
 )
 
 
-def _rewrite_readings(sensor: aiokatcp.Sensor, reading: aiokatcp.Reading):
+def _rewrite_readings(sensor: aiokatcp.Sensor, reading: aiokatcp.Reading) -> aiokatcp.Reading:
     if sensor.name == "prefix-int-sensor":
         return aiokatcp.Reading(
             timestamp=reading.timestamp + 0.5,
