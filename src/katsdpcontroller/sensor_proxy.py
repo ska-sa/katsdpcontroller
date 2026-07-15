@@ -97,8 +97,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         `server`. Sensors found in this mapping do not have `prefix` applied.
         The values may also be lists of strings, in which case the sensor
         will be duplicated under each of these names.
-
-        This cannot be combined with `rewrite_readings`.
     close_action
         Defines what to do with the sensors when the connection is closed.
     notify
@@ -124,8 +122,6 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         notify: Optional[Callable[[], Any]] = None,
         filter: Optional[_FilterPredicate] = None,
     ) -> None:
-        if renames is not None and rewrite_readings is not None:
-            raise ValueError("cannot specify both renames and rewrite_readings")
         super().__init__(client, enum_types)
         self.prefix = prefix
         self.renames = renames if renames is not None else {}
@@ -173,23 +169,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         for rewritten_name in self.rewrite_name(name):
             self._sensor_removed(rewritten_name)
 
-    def sensor_updated(
-        self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
+    def set_sensor_value(
+        self, sensor: aiokatcp.Sensor, value: Any, status: aiokatcp.Sensor.Status, timestamp: float
     ) -> None:
         if self.rewrite_readings is not None:
-            # We don't allow custom renames, so this is guaranteed to
-            # have one exactly element.
-            rewritten_name = self.rewrite_name(name)[0]
-            sensor = self.sensors[rewritten_name]
-            decoded_value = aiokatcp.decode(sensor.stype, value)
-            reading = aiokatcp.Reading(timestamp=timestamp, status=status, value=decoded_value)
+            reading = aiokatcp.Reading(timestamp=timestamp, status=status, value=value)
             reading = self.rewrite_readings(sensor, reading)
-            # TODO: move this functionality into aiokatcp so that we don't need
-            # to re-encode the value just for aiokatcp to decode it again.
-            value = aiokatcp.encode(reading.value)
-            status = reading.status
-            timestamp = reading.timestamp
-        super().sensor_updated(name, value, status, timestamp)
+            super().set_sensor_value(sensor, reading.value, reading.status, reading.timestamp)
+        else:
+            super().set_sensor_value(sensor, value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
