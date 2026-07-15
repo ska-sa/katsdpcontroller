@@ -1648,12 +1648,12 @@ def _make_vgpu(
     # |vgpu gpu usage (%) |15   |29   |45   |
     # |vgpu gpu memory(M) |2964 |3956 |6152 |
     # +-------------------------------------+
-
+    bandwidth = stream.bandwidth * 1e-6
     # Estimate required cpu resources
-    vgpu.cpus = (0.315e-5 * stream.bandwidth + 5) / 100
+    vgpu.cpus = (0.315 * bandwidth + 5) / 100
 
     # Estimate required host memory
-    vgpu.mem = round(4.6e-5 * stream.bandwidth) + 1435
+    vgpu.mem = round(4.6 * bandwidth) + 1435
 
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
@@ -1680,13 +1680,13 @@ def _make_vgpu(
     vgpu.gpus = [scheduler.GPURequest()]
 
     # Estimate required GPU usage
-    vgpu.gpus[0].compute = (0.303e-5 * stream.bandwidth + 17) / 100
+    vgpu.gpus[0].compute = (0.303 * bandwidth + 17) / 100
 
     # Estimate required GPU memory
-    vgpu.gpus[0].mem = round(33.4e-5 * stream.bandwidth) + 2766
+    vgpu.gpus[0].mem = round(33.4 * bandwidth) + 2766
 
     logger.info("---------------COMPARISONS--------------------")
-    logger.info("bandwidth: %s", str(stream.bandwidth))
+    logger.info("bandwidth: %s -> %s", str(stream.bandwidth), str(bandwidth))
     logger.info("vgpu.cpus: %s", str([2.0, vgpu.cpus]))
     logger.info("vgpu.mem: %s", str([8192, vgpu.mem]))
     logger.info("gpu.compute: %s", str([1.0, vgpu.gpus[0].compute]))
