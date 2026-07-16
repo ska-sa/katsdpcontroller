@@ -1325,6 +1325,23 @@ class DeviceServer(aiokatcp.DeviceServer):
             port = data["address"]["port"]
             return yarl.URL.build(scheme="http", host=ip_addr, port=port)
 
+    @staticmethod
+    def _has_interfaces(interfaces_raw: Optional[str]) -> bool:
+        """Determine if the agent has any interfaces.
+
+        An empty list is a valid value for the interfaces attribute, and
+        indicates that the agent is likely used for other purposes, so we
+        ignore it.
+        """
+        if interfaces_raw is None:
+            return False
+        try:
+            interfaces = decode_json_base64(interfaces_raw)
+            return bool(interfaces)
+        except ValueError:
+            # Lots of possible ValueErrors: bad base64, bad JSON...
+            return False
+
     async def _update_resource_sensors(self, zk: aiozk.ZKClient) -> None:
         try:
             cbf_resources_total = 0
@@ -1353,6 +1370,11 @@ class DeviceServer(aiokatcp.DeviceServer):
                             # bad JSON, schema error...
                             is_cbf = False
                         if not is_cbf:
+                            continue
+                        if not self._has_interfaces(
+                            attributes.get("katsdpcontroller.interfaces", None)
+                        ):
+                            # Agent is likely used for other purposes, so ignore it
                             continue
                         cbf_resources_total += 1
                         if agent["hostname"] in draining_machines:
