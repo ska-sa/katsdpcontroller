@@ -1685,14 +1685,6 @@ def _make_vgpu(
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth) + 2766
 
-    logger.info("---------------COMPARISONS--------------------")
-    logger.info("bandwidth: %s -> %s", str(stream.bandwidth), str(bandwidth))
-    logger.info("vgpu.cpus: %s", str([2.0, vgpu.cpus]))
-    logger.info("vgpu.mem: %s", str([8192, vgpu.mem]))
-    logger.info("gpu.compute: %s", str([1.0, vgpu.gpus[0].compute]))
-    logger.info("gpu.mem: %s", str([_mb(6e9), vgpu.gpus[0].mem]))
-    logger.info("---------------END COMPARISONS----------------")
-
     vgpu.command = (
         ["schedrr"]
         + taskset
