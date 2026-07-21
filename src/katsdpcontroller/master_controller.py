@@ -61,7 +61,7 @@ import async_timeout
 import jsonschema
 import katsdpservices
 import yarl
-from aiokatcp import Address, DeviceStatus, FailReply, Sensor, SensorSet
+from aiokatcp import Address, DeviceStatus, FailReply, Reading, Sensor, SensorSet
 
 import katsdpcontroller
 
@@ -191,7 +191,7 @@ class Product:
     def connect(
         self,
         server: aiokatcp.DeviceServer,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]],
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]],
         hostname: str,
         host: _IPAddress,
         ports: Dict[str, int],
@@ -216,13 +216,29 @@ class Product:
         self.katcp_conn.add_sensor_watcher(
             sensor_proxy.SensorWatcher(
                 self.katcp_conn,
-                server,
+                server.sensors,
                 f"{self.name}.",
-                rewrite_gui_urls=rewrite_gui_urls,
+                rewrite_readings=rewrite_readings,
                 enum_types=(DeviceStatus,),
                 filter=self._mirror_filter if not mirror_sensors else None,
+                notify=lambda: server.mass_inform("interface-changed", "sensor-list"),
             )
         )
+        # Make a copy of sensors without the effects of rewrite_readings
+        # (used by web.py).
+        # TODO: improve the type annotations and the unit tests so that we don't
+        # need this to be conditional. It can probably also have a tighter filter
+        # since it's only needed for gui-urls sensors.
+        if hasattr(server, "orig_sensors"):
+            self.katcp_conn.add_sensor_watcher(
+                sensor_proxy.SensorWatcher(
+                    self.katcp_conn,
+                    server.orig_sensors,  # type: ignore
+                    f"{self.name}.",
+                    enum_types=(DeviceStatus,),
+                    filter=self._mirror_filter if not mirror_sensors else None,
+                )
+            )
         self.katcp_conn.add_inform_callback("disconnect", self._disconnect_callback)
         # TODO: start a watchdog
 
@@ -319,7 +335,7 @@ class ProductManagerBase(Generic[_P]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         self._args = args
         self._multicast_network = ipaddress.IPv4Network(args.safe_multicast_cidr)
@@ -328,7 +344,7 @@ class ProductManagerBase(Generic[_P]):
         self._products: Dict[str, _P] = {}
         self._next_capture_block_id = 1
         self._image_resolver_factory = image_resolver_factory
-        self._rewrite_gui_urls = rewrite_gui_urls
+        self._rewrite_readings = rewrite_readings
 
     async def start(self) -> None:
         pass
@@ -542,7 +558,7 @@ class ProductManagerBase(Generic[_P]):
         `ports` must contain at least ``katcp``, but subclasses may include
         additional ports.
         """
-        product.connect(self._server, self._rewrite_gui_urls, hostname, host, ports)
+        product.connect(self._server, self._rewrite_readings, hostname, host, ports)
         assert product.katcp_conn is not None
         product.katcp_conn.add_sensor_watcher(DeviceStatusWatcher(self._update_device_status))
 
@@ -722,9 +738,9 @@ class SingularityProductManager(ProductManagerBase[SingularityProduct]):
         args: argparse.Namespace,
         server: aiokatcp.DeviceServer,
         image_resolver_factory: scheduler.ImageResolverFactory,
-        rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None,
+        rewrite_readings: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
-        super().__init__(args, server, image_resolver_factory, rewrite_gui_urls)
+        super().__init__(args, server, image_resolver_factory, rewrite_readings)
         self._request_id_prefix = args.name + "_product_"
         self._task_cache: Dict[str, dict] = {}  # Maps Singularity Task IDs to their info
         # Task IDs that we didn't expect to see, but have been seen once.
@@ -1196,7 +1212,9 @@ class DeviceServer(aiokatcp.DeviceServer):
     _interface_changed_callbacks: List[Callable[[], None]]
 
     def __init__(
-        self, args: argparse.Namespace, rewrite_gui_urls: Optional[Callable[[Sensor], bytes]] = None
+        self,
+        args: argparse.Namespace,
+        rewrite_gui_urls: Optional[Callable[[Sensor, Reading], Reading]] = None,
     ) -> None:
         if args.no_pull or args.interface_mode:
             self._image_lookup = scheduler.SimpleImageLookup(args.registry)
@@ -1271,7 +1289,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             )
         )
 
-        # Updated by SensorProxyClient with sensor values prior to gui-url rewriting
+        # Updated by SensorWatcher with sensor values prior to gui-url rewriting
         self.orig_sensors = SensorSet()
         for sensor in self.sensors.values():
             self.orig_sensors.add(sensor)
