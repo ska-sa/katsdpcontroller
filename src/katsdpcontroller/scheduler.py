@@ -1415,13 +1415,14 @@ class HTTPImageLookup(_RegistryImageLookup):
         realm: str,
         service: str,
         scope: str,
+        ssl: Union[ssl.SSLContext, bool],
         auth: Optional[aiohttp.BasicAuth],
     ) -> str:
         headers = {aiohttp.hdrs.ACCEPT: "application/json"}
         params = {"scope": scope, "service": service, "client_id": "katsdpcontroller"}
         try:
             async with session.get(
-                realm, params=params, headers=headers, timeout=15, auth=auth
+                realm, params=params, headers=headers, timeout=15, ssl=ssl, auth=auth
             ) as resp:
                 resp.raise_for_status()
                 content = await resp.json()
@@ -1471,7 +1472,7 @@ class HTTPImageLookup(_RegistryImageLookup):
                         raise error from None  # Raise the original error if we can't parse
                     # Note: since we're running images from this registry, we
                     # trust it, and don't bother checking the realm for CSRF.
-                    token = await self._get_token(session, realm, service, scope, auth)
+                    token = await self._get_token(session, realm, service, scope, ssl_option, auth)
                     auth_header = f"Bearer {token}"
                     image = await self._get_image(
                         session, registry, repo, tag, ssl_option, auth_header
