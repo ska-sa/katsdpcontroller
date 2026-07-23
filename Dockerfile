@@ -14,9 +14,9 @@
 # limitations under the License.
 ################################################################################
 
-ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
+ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:uvpipjammy AS build
 
 # Switch to Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -34,7 +34,7 @@ RUN pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime:uvpipjammy
 LABEL maintainer="sdpdev+katsdpcontroller@ska.ac.za"
 
 # Label the image with a list of images it uses
