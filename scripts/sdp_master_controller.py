@@ -72,7 +72,7 @@ async def async_main(argv: List[str]) -> None:
             "no actual command logic will be enacted."
         )
 
-    rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]]
+    rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor, aiokatcp.Reading], aiokatcp.Reading]]
     if args.haproxy:
         rewrite_gui_urls = functools.partial(web.rewrite_gui_urls, args.external_url)
     else:
