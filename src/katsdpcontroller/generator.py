@@ -1632,7 +1632,9 @@ def _make_vgpu(
         scheduler.InterfaceRequest(
             "gpucbf",
             infiniband=ibv,
-            multicast_in={src_stream.name for src_stream in stream.src_streams},
+            multicast_in={
+                (src_stream.name, i) for src_stream in tacv for i in range(src_stream.n_substreams)
+            },
             multicast_out={stream.name},
         )
     ]
