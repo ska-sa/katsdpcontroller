@@ -1294,7 +1294,7 @@ def _make_xbgpu(
                 "gpucbf",
                 infiniband=ibv,
                 multicast_in={acv.name},
-                multicast_out={(stream, i) for stream in streams},
+                multicast_out={(stream.name, i) for stream in streams},
             )
         ]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
