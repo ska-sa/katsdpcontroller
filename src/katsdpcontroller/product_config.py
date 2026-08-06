@@ -1509,7 +1509,7 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
 
 
 class CbfTiedArrayResampledVoltageStream(CbfStream, Stream):
-    """VDIF-ready tied-array-resampled-voltage stream from CBF."""
+    """Tied-array-resampled-voltage stream in VDIF format from CBF."""
 
     stream_type: ClassVar[str] = "cbf.tied_array_resampled_voltage"
     _class_sensors: ClassVar[Sequence[_Sensor]] = [
