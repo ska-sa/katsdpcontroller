@@ -44,6 +44,13 @@ async def test_vlbi_recorder_uses_cbf_multicast_interface(mocker) -> None:
     configuration = await Configuration.from_config(config)
     graph = generator.build_logical_graph(configuration, config, SensorSet())
     vlbi_node = next(node for node in graph if node.name == "vlbi.sdp_vdif")
+    source_multicast = next(
+        node for node in graph if node.name == "multicast.cbf_tied_array_resampled_voltage"
+    )
+    assert source_multicast.port_name == "vdif"
+    edge = next(iter(graph.get_edge_data(vlbi_node, source_multicast).values()))
+    assert edge["port"] == "vdif"
+    assert vlbi_node.command[4] == "{endpoints[multicast.cbf_tied_array_resampled_voltage_vdif]}"
     request = vlbi_node.interfaces[0]
     assert request.network == "cbf"
     assert request.multicast_in == {"cbf_tied_array_resampled_voltage"}

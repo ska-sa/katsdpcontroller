@@ -1857,14 +1857,14 @@ def _make_vlbi(
         "-ceu",
         "\n".join(command_lines),
         "_",
-        f"{{endpoints[multicast.{source_stream.name}_spead]}}",
+        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
         "{ports[port]}",
     ]
     g.add_node(task)
     g.add_edge(
         task,
         source_multicast,
-        port="spead",
+        port="vdif",
         depends_resolve=True,
         depends_init=True,
         depends_ready=True,
@@ -3066,12 +3066,18 @@ def build_logical_graph(
         stream_sensors=stream_sensors,
     )
 
-    # Add SPEAD endpoints to the graph.
+    # Add external stream endpoints to the graph.
     for stream in configuration.streams:
         if isinstance(stream, (product_config.CbfStream, product_config.DigBasebandVoltageStream)):
             url = stream.url
-            if url.scheme == "spead":
-                node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
+            if isinstance(stream, product_config.CbfTiedArrayResampledVoltageStream):
+                port_name = "vdif"
+            else:
+                port_name = "spead"
+            if url.scheme == port_name:
+                node = LogicalMulticast(
+                    stream.name, endpoint=Endpoint(url.host, url.port), port_name=port_name
+                )
                 g.add_node(node)
 
     # cam2telstate node (optional: if we're simulating, we don't need it)

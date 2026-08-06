@@ -299,7 +299,7 @@ def add_vlbi_config(config: Any) -> None:
             },
             "cbf_tied_array_resampled_voltage": {
                 "type": "cbf.tied_array_resampled_voltage",
-                "url": "spead://239.2.5.0+3:7148",
+                "url": "vdif://239.2.5.0+3:7148",
                 "src_streams": [
                     "vlbi_tied_array_channelised_voltage_0x",
                     "vlbi_tied_array_channelised_voltage_0y",
