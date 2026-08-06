@@ -520,6 +520,16 @@ class FakeVgpuDeviceServer(FakeDeviceServer):
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
+        self.sensors.add(
+            Sensor(
+                int,
+                "n-samples-per-frame",
+                "Number of samples per frame",
+                units="samples/frame",
+                default=2000,
+                initial_status=Sensor.Status.NOMINAL,
+            ),
+        )
 
         _add_time_sync_sensors(self.sensors)
         _add_device_status_sensor(self.sensors)
