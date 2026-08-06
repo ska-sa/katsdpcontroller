@@ -521,6 +521,7 @@ class BaseTestController:
         dummy_client = fake_katportalclient.KATPortalClient(
             components={"cbf": "cbf_1", "sub": "subarray_1"},
             sensors={
+                **VLBI_CBF_SENSOR_VALUES,
                 "cbf_1_i0_antenna_channelised_voltage_n_chans": 4096,
                 "cbf_1_i0_adc_sample_rate": 1712e6,
                 "cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra": 8192,
@@ -534,7 +535,6 @@ class BaseTestController:
                 "cbf_1_i0_tied_array_channelised_voltage_0y_spectra_per_heap": 256,
                 "cbf_1_i0_tied_array_channelised_voltage_0y_n_chans_per_substream": 256,
                 "cbf_1_i0_tied_array_channelised_voltage_0y_beng_out_bits_per_sample": 8,
-                **VLBI_CBF_SENSOR_VALUES,
             },
         )
         mocker.patch("katportalclient.KATPortalClient", return_value=dummy_client)
