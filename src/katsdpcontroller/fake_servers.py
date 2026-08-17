@@ -524,7 +524,7 @@ class FakeVgpuDeviceServer(FakeDeviceServer):
             Sensor(
                 int,
                 "n-samples-per-frame",
-                "Number of samples per frame in each stream.",
+                "Number of samples per frame in the stream.",
                 units="samples/frame",
                 default=2000,
                 initial_status=Sensor.Status.NOMINAL,
