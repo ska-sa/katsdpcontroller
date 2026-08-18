@@ -771,13 +771,17 @@ def _make_fgpu(
         fgpu.image = "katgpucbf"
         fgpu.fake_katcp_server_cls = FakeFgpuDeviceServer
         fgpu.mem = 1700  # Actual use is currently around 1.6GB when using narrowband
+        # When doing experiments with higher bandwidths than are supported in
+        # production, use a second core for receiving data.
+        recv_cpus = 1 if stream.adc_sample_rate <= _MAX_ADC_SAMPLE_RATE else 2
         if not configuration.options.develop.less_resources:
-            fgpu.cpus = 3
-            fgpu.cores = ["recv", "send", "python"]
+            fgpu.cpus = 2 + recv_cpus
+            # ignore is to work around https://github.com/python/mypy/issues/21710
+            fgpu.cores = [f"recv{i}" for i in range(recv_cpus)] + ["send", "python"]  # type: ignore
             fgpu.numa_nodes = 1.0  # It's easily starved of bandwidth
             taskset = ["taskset", "-c", "{cores[python]}"]
         else:
-            fgpu.cpus = 3 * stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE
+            fgpu.cpus = (2 + recv_cpus) * min(1.0, stream.adc_sample_rate / _MAX_ADC_SAMPLE_RATE)
             taskset = []
         fgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
         fgpu.wait_ports = ["port", "prometheus"]
@@ -850,9 +854,10 @@ def _make_fgpu(
                 ),
             ]
 
+        recv_cores_template = ",".join(f"{{cores[recv{i}]}}" for i in range(recv_cpus))
         if not configuration.options.develop.less_resources:
             fgpu.command += [
-                "--recv-affinity={cores[recv]}",
+                f"--recv-affinity={recv_cores_template}",
                 "--send-affinity={cores[send]}",
             ]
         fgpu.capabilities.append("SYS_NICE")  # For schedrr
@@ -867,7 +872,7 @@ def _make_fgpu(
                 # Use the core numbers as completion vectors. This ensures that
                 # multiple instances on a machine will use distinct vectors.
                 fgpu.command += [
-                    "--recv-comp-vector={cores[recv]}",
+                    f"--recv-comp-vector={recv_cores_template}",
                     "--send-comp-vector={cores[send]}",
                 ]
         fgpu.command += streams[0].command_line_extra
