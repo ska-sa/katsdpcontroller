@@ -39,6 +39,10 @@ CAL_BUFFER_TIME = 25 * 60.0  # 25 minutes (allows a single batch of 15 minutes)
 CAL_MAX_SCANS = 1000
 #: Speed at which flags are transmitted, relative to real time
 FLAGS_RATE_RATIO = 8.0
+#: Default bits_per_sample for dig.baseband_voltage streams
+DIG_BITS_PER_SAMPLE = 10
+#: Default samples_per_heap for dig.baseband_voltage streams
+DIG_SAMPLES_PER_HEAP = 4096
 #: Alignment constraint for `int_time` in katcbfsim
 KATCBFSIM_SPECTRA_PER_HEAP = 256
 #: Alignment constraint for `int_time` in xgpu
