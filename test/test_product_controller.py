@@ -87,7 +87,9 @@ from .utils import (
     EXPECTED_INTERFACE_SENSOR_LIST,
     EXPECTED_PRODUCT_CONTROLLER_SENSOR_LIST,
     S3_CONFIG,
+    VLBI_CBF_SENSOR_VALUES,
     DelayedManager,
+    add_vlbi_config,
     assert_request_fails,
     assert_sensor_value,
     assert_sensors,
@@ -522,6 +524,7 @@ class BaseTestController:
         dummy_client = fake_katportalclient.KATPortalClient(
             components={"cbf": "cbf_1", "sub": "subarray_1"},
             sensors={
+                **VLBI_CBF_SENSOR_VALUES,
                 "cbf_1_i0_antenna_channelised_voltage_n_chans": 4096,
                 "cbf_1_i0_adc_sample_rate": 1712e6,
                 "cbf_1_i0_antenna_channelised_voltage_n_samples_between_spectra": 8192,
@@ -1089,6 +1092,14 @@ class DummyClient:
 @pytest.mark.timeout(5)
 class TestController(BaseTestController):
     """Test :class:`katsdpcontroller.product_controller.DeviceServer` by mocking the scheduler."""
+
+    @staticmethod
+    def _postprocess_task_count(capture_block: product_controller.CaptureBlock) -> int:
+        assert capture_block.postprocess_physical_graph is not None
+        return sum(
+            isinstance(node, (scheduler.PhysicalTask, scheduler.FakePhysicalTask))
+            for node in capture_block.postprocess_physical_graph
+        )
 
     def _request_slow(
         self, client: aiokatcp.Client, name: str, *args: Any, cancelled: bool = False
@@ -1751,13 +1762,14 @@ class TestController(BaseTestController):
         task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, True)
         # Now simulate cal finishing with the capture block
         cal_sensor.value = b"{}"
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
         await exhaust_callbacks()
         # write-meta full dump must be last, hence assert_called_with not assert_any_call
         task_client.request.assert_called_with("write-meta", CAPTURE_BLOCK, False)
 
         # Check that postprocessing ran and didn't fail
         assert product.capture_blocks == {}
-        assert dummy_sched.n_batch_tasks == 11  # 4 continuum, 3x2 spectral, 1 report
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
 
     async def test_capture_done_disable_batch(
         self, client: aiokatcp.Client, server: DeviceServer, dummy_sched: DummyScheduler
@@ -1769,8 +1781,35 @@ class TestController(BaseTestController):
         cal_sensor.value = b'{"1122334455": "capturing"}'
         await client.request("capture-done")
         cal_sensor.value = b"{}"
+        product = server.product
+        assert product is not None
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
         await exhaust_callbacks()
-        assert dummy_sched.n_batch_tasks == 4  # 4 continuum, no spectral
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
+
+    async def test_capture_done_with_vlbimeta(
+        self,
+        client: aiokatcp.Client,
+        server: DeviceServer,
+        dummy_sched: DummyScheduler,
+    ) -> None:
+        """Checks that vlbimeta postprocessing is launched for a VDIF stream."""
+        config = json.loads(CONFIG)
+        add_vlbi_config(config)
+        config["config"]["vlbimeta"] = {"mode": "pass_through"}
+        await client.request("product-configure", SUBARRAY_PRODUCT, json.dumps(config))
+        await client.request("capture-init", CAPTURE_BLOCK)
+        cal_sensor = server.sensors["cal.1.capture-block-state"]
+        cal_sensor.value = b'{"1122334455": "capturing"}'
+        await client.request("capture-done")
+        cal_sensor.value = b"{}"
+        product = server.product
+        assert product is not None
+        capture_block = product.capture_blocks[CAPTURE_BLOCK]
+        await exhaust_callbacks()
+
+        assert product.capture_blocks == {}
+        assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
 
     async def test_capture_done_busy(self, client: aiokatcp.Client):
         """Capture-done fails if an asynchronous operation is already in progress"""

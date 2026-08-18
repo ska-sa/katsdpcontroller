@@ -37,6 +37,7 @@ from katsdpcontroller.product_config import (
     BeamformerStream,
     CalStream,
     CamHttpStream,
+    CbfTiedArrayResampledVoltageStream,
     Configuration,
     ContinuumImageStream,
     DigBasebandVoltageStream,
@@ -57,6 +58,7 @@ from katsdpcontroller.product_config import (
     Simulation,
     SpectralImageStream,
     TiedArrayChannelisedVoltageStream,
+    VdifStream,
     VisStream,
 )
 
@@ -207,7 +209,13 @@ class TestOptions:
 
     def test_from_config_dict(self) -> None:
         config = {
-            "develop": {"disable_ibverbs": True, "less_resources": True, "data_timeout": 2.4},
+            "develop": {
+                "disable_ibverbs": True,
+                "less_resources": True,
+                "data_timeout": 2.4,
+                "vlbi_recorder_protocol": "udpsnor",
+            },
+            "vlbimeta": {"mode": "pass_through"},
             "wrapper": "http://test.invalid/wrapper.sh",
             "service_overrides": {"service1": {"host": "testhost"}},
             "shutdown_delay": 5.0,
@@ -217,6 +225,8 @@ class TestOptions:
         assert options.develop.disable_ibverbs is True
         assert options.develop.less_resources is True
         assert options.develop.data_timeout == 2.4
+        assert options.develop.vlbi_recorder_protocol == "udpsnor"
+        assert options.vlbimeta.mode == "pass_through"
         assert options.wrapper == config["wrapper"]
         assert list(options.service_overrides.keys()) == ["service1"]
         assert options.service_overrides["service1"].host == "testhost"
@@ -242,6 +252,8 @@ class TestOptions:
         assert options.develop.any_gpu is False
         assert options.develop.disable_ibverbs is False
         assert options.develop.less_resources is False
+        assert options.develop.vlbi_recorder_protocol == "udps"
+        assert options.vlbimeta.mode == "antab"
         assert options.wrapper is None
         assert options.service_overrides == {}
         assert options.shutdown_delay is None
@@ -1235,6 +1247,56 @@ class TestGpucbfTiedArrayResampledVoltageStream:
             )
 
 
+class TestVdifStream:
+    """Test :class:`~.VdifStream`."""
+
+    @pytest.fixture
+    def source_stream(self) -> CbfTiedArrayResampledVoltageStream:
+        acv = make_antenna_channelised_voltage()
+        tacv_streams = [
+            make_tied_array_channelised_voltage(
+                acv,
+                "vlbi_tied_array_channelised_voltage_0x",
+                yarl.URL("spead://239.2.3.0+3:7148"),
+            ),
+            make_tied_array_channelised_voltage(
+                acv,
+                "vlbi_tied_array_channelised_voltage_0y",
+                yarl.URL("spead://239.2.4.0+3:7148"),
+            ),
+        ]
+        config = {
+            "type": "cbf.tied_array_resampled_voltage",
+            "url": "vdif://239.2.5.0+3:7148",
+            "src_streams": [
+                "vlbi_tied_array_channelised_voltage_0x",
+                "vlbi_tied_array_channelised_voltage_0y",
+            ],
+            "instrument_dev_name": "i0",
+        }
+        sensors = {
+            "bandwidth": 64e6,
+            "n_chans": 2,
+            "veng_out_bits_per_sample": 2,
+            "pol_ordering": '["x", "y"]',
+        }
+        return CbfTiedArrayResampledVoltageStream.from_config(
+            Options(), "cbf_tied_array_resampled_voltage", config, tacv_streams, sensors
+        )
+
+    @pytest.fixture
+    def config(self) -> Dict[str, Any]:
+        return {"type": "sdp.vdif", "src_streams": ["cbf_tied_array_resampled_voltage"]}
+
+    def test_from_config(
+        self, source_stream: CbfTiedArrayResampledVoltageStream, config: Dict[str, Any]
+    ) -> None:
+        vdif = VdifStream.from_config(Options(), "sdp_vdif", config, [source_stream], {})
+        assert vdif.source_stream is source_stream
+        assert vdif.n_chans == source_stream.n_chans
+        assert vdif.pols == source_stream.pols
+
+
 class TestVisStream:
     """Test :class:`~.VisStream`."""
 
@@ -1662,7 +1724,7 @@ class TestSpectralImageStream:
 @pytest.fixture
 def config() -> Dict[str, Any]:
     return {
-        "version": "4.7",
+        "version": "4.8",
         "inputs": {
             "camdata": {"type": "cam.http", "url": "http://10.8.67.235/api/client/1"},
             "i0_antenna_channelised_voltage": {

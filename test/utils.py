@@ -44,7 +44,7 @@ _T = TypeVar("_T")
 # The "gpucbf" correlator components are not connected up to any SDP components.
 # They're there just as a smoke test for generator.py.
 CONFIG = """{
-    "version": "4.7",
+    "version": "4.8",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",
@@ -130,7 +130,6 @@ CONFIG = """{
             "pols": ["x", "y"],
             "station_id": "me"
         },
-
         "i0_antenna_channelised_voltage": {
             "type": "sim.cbf.antenna_channelised_voltage",
             "antennas": [
@@ -253,8 +252,70 @@ CONFIG = """{
     "config": {}
 }"""  # noqa: E501
 
+VLBI_CBF_SENSOR_VALUES = {
+    "cbf_1_vlbi_antenna_channelised_voltage_n_chans": 4096,
+    "cbf_1_i0_adc_sample_rate": 1712e6,
+    "cbf_1_vlbi_antenna_channelised_voltage_n_samples_between_spectra": 8192,
+    "subarray_1_streams_vlbi_antenna_channelised_voltage_bandwidth": 856e6,
+    "subarray_1_streams_vlbi_antenna_channelised_voltage_centre_frequency": 1284e6,
+    "subarray_1_band": "l",
+    "cbf_1_vlbi_tied_array_channelised_voltage_0x_spectra_per_heap": 256,
+    "cbf_1_vlbi_tied_array_channelised_voltage_0x_n_chans_per_substream": 256,
+    "cbf_1_vlbi_tied_array_channelised_voltage_0x_beng_out_bits_per_sample": 8,
+    "cbf_1_vlbi_tied_array_channelised_voltage_0y_spectra_per_heap": 256,
+    "cbf_1_vlbi_tied_array_channelised_voltage_0y_n_chans_per_substream": 256,
+    "cbf_1_vlbi_tied_array_channelised_voltage_0y_beng_out_bits_per_sample": 8,
+    "cbf_1_cbf_tied_array_resampled_voltage_bandwidth": 64e6,
+    "cbf_1_cbf_tied_array_resampled_voltage_n_chans": 2,
+    "cbf_1_cbf_tied_array_resampled_voltage_veng_out_bits_per_sample": 2,
+    "cbf_1_cbf_tied_array_resampled_voltage_pol_ordering": '["x", "y"]',
+}
+
+
+def add_vlbi_config(config: Any) -> None:
+    config.setdefault("inputs", {}).update(
+        {
+            "camdata": {
+                "type": "cam.http",
+                "url": "http://127.0.0.1:8999",
+            },
+            "vlbi_antenna_channelised_voltage": {
+                "type": "cbf.antenna_channelised_voltage",
+                "url": "spead://239.2.2.0+3:7148",
+                "antennas": ["m900", "m901"],
+                "instrument_dev_name": "i0",
+            },
+            "vlbi_tied_array_channelised_voltage_0x": {
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.2.3.0+3:7148",
+                "src_streams": ["vlbi_antenna_channelised_voltage"],
+                "instrument_dev_name": "i0",
+            },
+            "vlbi_tied_array_channelised_voltage_0y": {
+                "type": "cbf.tied_array_channelised_voltage",
+                "url": "spead://239.2.4.0+3:7148",
+                "src_streams": ["vlbi_antenna_channelised_voltage"],
+                "instrument_dev_name": "i0",
+            },
+            "cbf_tied_array_resampled_voltage": {
+                "type": "cbf.tied_array_resampled_voltage",
+                "url": "vdif://239.2.5.0+3:7148",
+                "src_streams": [
+                    "vlbi_tied_array_channelised_voltage_0x",
+                    "vlbi_tied_array_channelised_voltage_0y",
+                ],
+                "instrument_dev_name": "i0",
+            },
+        }
+    )
+    config["outputs"]["sdp_vdif"] = {
+        "type": "sdp.vdif",
+        "src_streams": ["cbf_tied_array_resampled_voltage"],
+    }
+
+
 CONFIG_CBF_ONLY = """{
-    "version": "4.7",
+    "version": "4.8",
     "outputs": {
         "gpucbf_m900v": {
             "type": "sim.dig.baseband_voltage",

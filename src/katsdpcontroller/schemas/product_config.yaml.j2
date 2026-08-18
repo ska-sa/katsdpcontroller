@@ -13,6 +13,7 @@
 - "4.5"
 - "4.6"
 - "4.7"
+- "4.8"
 {% endmacro %}
 
 {% macro validate(version) %}
@@ -119,6 +120,9 @@ properties:
               - cbf.antenna_channelised_voltage
               - cbf.baseline_correlation_products
               - cbf.tied_array_channelised_voltage
+{% if version >= "4.8" %}
+              - cbf.tied_array_resampled_voltage
+{% endif %}
               - cam.http
           url:
             type: string
@@ -208,6 +212,24 @@ properties:
               required:
                 - src_streams
                 - instrument_dev_name
+{% if version >= "4.8" %}
+          - if:
+              properties:
+                type:
+                  const: cbf.tied_array_resampled_voltage
+            then:
+              properties:
+                type: {}
+                url: {}
+                src_streams:
+                  $ref: "#/definitions/pair"
+                instrument_dev_name:
+                  type: string
+              additionalProperties: false
+              required:
+                - src_streams
+                - instrument_dev_name
+{% endif %}
           - if:
               properties:
                 type:
@@ -247,6 +269,9 @@ properties:
               - sdp.vis
               - sdp.cal
               - sdp.flags
+{% if version >= "4.8" %}
+              - sdp.vdif
+{% endif %}
               - sdp.continuum_image
               - sdp.spectral_image
               - sdp.beamformer
@@ -311,6 +336,20 @@ properties:
               required:
                 - src_streams
               additionalProperties: false
+{% if version >= "4.8" %}
+          - if:
+              properties:
+                type:
+                  const: sdp.vdif
+            then:
+              properties:
+                type: {}
+                src_streams:
+                  $ref: "#/definitions/singleton"
+              required:
+                - src_streams
+              additionalProperties: false
+{% endif %}
           - if:
               properties:
                 type:
@@ -733,11 +772,31 @@ properties:
               less_resources:
                 type: boolean
                 default: false
+{% if version >= "4.8" %}
+              vlbi_recorder_protocol:
+                enum:
+                  - udps
+                  - udpsnor
+                default: udps
+{% endif %}
             additionalProperties: false
 {% endif %}
           - type: boolean
             default: false
         default: false
+{% if version >= "4.8" %}
+      vlbimeta:
+        type: object
+        additionalProperties: false
+        properties:
+          mode:
+            type: string
+            enum:
+              - antab
+              - pass_through
+              - disabled
+            default: antab
+{% endif %}
       wrapper:
         type: string
         format: uri

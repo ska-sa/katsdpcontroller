@@ -20,6 +20,7 @@ import collections.abc
 import copy
 import enum
 import itertools
+import json
 import logging
 import math
 import re
@@ -259,19 +260,22 @@ class DevelopOptions:
         disable_ibverbs: bool = False,
         less_resources: bool = False,
         data_timeout: float = 0.0,
+        vlbi_recorder_protocol: str = "udps",
     ) -> None:
         self.any_gpu = any_gpu
         self.disable_ibverbs = disable_ibverbs
         self.less_resources = less_resources
         self.data_timeout = data_timeout
+        self.vlbi_recorder_protocol = vlbi_recorder_protocol
 
     @classmethod
-    def from_config(cls, config: Mapping[str, bool]) -> "DevelopOptions":
+    def from_config(cls, config: Mapping[str, Any]) -> "DevelopOptions":
         return cls(
             any_gpu=config.get("any_gpu", False),
             disable_ibverbs=config.get("disable_ibverbs", False),
             less_resources=config.get("less_resources", False),
             data_timeout=config.get("data_timeout", 0.0),
+            vlbi_recorder_protocol=config.get("vlbi_recorder_protocol", "udps"),
         )
 
     @classmethod
@@ -283,11 +287,21 @@ class DevelopOptions:
         )
 
 
+class VlbimetaOptions:
+    def __init__(self, *, mode: str = "antab") -> None:
+        self.mode = mode
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> "VlbimetaOptions":
+        return cls(mode=config.get("mode", "antab"))
+
+
 class Options:
     def __init__(
         self,
         *,
         develop: Union[bool, Mapping[str, bool]] = False,
+        vlbimeta: Mapping[str, Any] = {},
         wrapper: Optional[str] = None,
         image_tag: Optional[str] = None,
         image_overrides: Mapping[str, str] = {},
@@ -299,6 +313,7 @@ class Options:
             self.develop = DevelopOptions.from_bool(develop)
         else:
             self.develop = DevelopOptions.from_config(develop)
+        self.vlbimeta = VlbimetaOptions.from_config(vlbimeta)
         self.wrapper = wrapper
         self.image_tag = image_tag
         self.image_overrides = dict(image_overrides)
@@ -316,6 +331,7 @@ class Options:
         }
         return cls(
             develop=config.get("develop", False),
+            vlbimeta=config.get("vlbimeta", {}),
             wrapper=config.get("wrapper"),
             image_tag=config.get("image_tag"),
             image_overrides=config.get("image_overrides", {}),
@@ -1492,6 +1508,65 @@ class GpucbfTiedArrayResampledVoltageStream(Stream):
         )
 
 
+class CbfTiedArrayResampledVoltageStream(CbfStream, Stream):
+    """Tied-array-resampled-voltage stream in VDIF format from CBF."""
+
+    stream_type: ClassVar[str] = "cbf.tied_array_resampled_voltage"
+    _class_sensors: ClassVar[Sequence[_Sensor]] = [
+        _CBFSensor("bandwidth", float),
+        _CBFSensor("n_chans", int),
+        _CBFSensor("veng_out_bits_per_sample", int),
+        _CBFSensor("pol_ordering", str),
+    ]
+    _valid_src_types: ClassVar[_ValidTypes] = {"cbf.tied_array_channelised_voltage"}
+
+    def __init__(
+        self,
+        name: str,
+        src_streams: Sequence[Stream],
+        *,
+        url: yarl.URL,
+        bandwidth: float,
+        n_chans: int,
+        bits_per_sample: int,
+        pols: Sequence[str],
+        instrument_dev_name: str,
+    ) -> None:
+        super().__init__(name, src_streams)
+        self.url = url
+        self.bandwidth = bandwidth
+        self.n_chans = n_chans
+        self.bits_per_sample = bits_per_sample
+        self.pols = list(pols)
+        self.instrument_dev_name = instrument_dev_name
+
+    def data_rate(self, ratio: float = 1.05, overhead: int = 128) -> float:
+        frame_size = defaults.VGPU_SAMPLES_PER_FRAME * self.bits_per_sample // 8
+        time_between_frames = defaults.VGPU_SAMPLES_PER_FRAME / self.bandwidth
+        n_threads = self.n_chans * len(self.pols)
+        return data_rate(frame_size, time_between_frames, ratio, overhead) * n_threads
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any],
+    ) -> "CbfTiedArrayResampledVoltageStream":
+        return cls(
+            name,
+            src_streams,
+            url=yarl.URL(config["url"]),
+            bandwidth=sensors["bandwidth"],
+            n_chans=sensors["n_chans"],
+            bits_per_sample=sensors["veng_out_bits_per_sample"],
+            pols=json.loads(sensors["pol_ordering"]),
+            instrument_dev_name=config["instrument_dev_name"],
+        )
+
+
 class SimTiedArrayChannelisedVoltageStream(TiedArrayChannelisedVoltageStreamBase):
     """Simulated tied-array-channelised-voltage stream."""
 
@@ -1878,6 +1953,36 @@ class FlagsStream(Stream):
         )
 
 
+class VdifStream(Stream):
+    """VDIF-encapsulated voltages from a tied-array stream."""
+
+    stream_type: ClassVar[str] = "sdp.vdif"
+    _valid_src_types: ClassVar[_ValidTypes] = {"cbf.tied_array_resampled_voltage"}
+
+    @property
+    def source_stream(self) -> CbfTiedArrayResampledVoltageStream:
+        return cast(CbfTiedArrayResampledVoltageStream, self.src_streams[0])
+
+    @property
+    def n_chans(self) -> int:
+        return self.source_stream.n_chans
+
+    @property
+    def pols(self) -> Sequence[str]:
+        return self.source_stream.pols
+
+    @classmethod
+    def from_config(
+        cls,
+        options: Options,
+        name: str,
+        config: Mapping[str, Any],
+        src_streams: Sequence[Stream],
+        sensors: Mapping[str, Any],
+    ) -> "VdifStream":
+        return cls(name, src_streams)
+
+
 class ImageStream(Stream):
     """A base class for spectral and continuum image streams."""
 
@@ -1994,6 +2099,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "cbf.antenna_channelised_voltage": AntennaChannelisedVoltageStream,
     "cbf.tied_array_channelised_voltage": TiedArrayChannelisedVoltageStream,
     "cbf.baseline_correlation_products": BaselineCorrelationProductsStream,
+    "cbf.tied_array_resampled_voltage": CbfTiedArrayResampledVoltageStream,
     "dig.baseband_voltage": DigBasebandVoltageStream,
     "gpucbf.antenna_channelised_voltage": GpucbfAntennaChannelisedVoltageStream,
     "gpucbf.baseline_correlation_products": GpucbfBaselineCorrelationProductsStream,
@@ -2009,6 +2115,7 @@ STREAM_CLASSES: Mapping[str, Type[Stream]] = {
     "sdp.beamformer_engineering": BeamformerEngineeringStream,
     "sdp.cal": CalStream,
     "sdp.flags": FlagsStream,
+    "sdp.vdif": VdifStream,
     "sdp.continuum_image": ContinuumImageStream,
     "sdp.spectral_image": SpectralImageStream,
 }
