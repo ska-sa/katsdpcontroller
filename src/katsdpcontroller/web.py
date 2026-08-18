@@ -320,16 +320,20 @@ def gui_label(gui: dict) -> str:
     return re.sub(r"[^a-z0-9_-]", "-", gui["title"].lower())
 
 
-def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
-    if sensor.status != Sensor.Status.NOMINAL:
-        return sensor.value
+def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor, reading: Reading) -> Reading:
+    if (
+        not sensor.name.endswith(".gui-urls")
+        or sensor.stype is not bytes
+        or reading.status != Sensor.Status.NOMINAL
+    ):
+        return reading
     parts = sensor.name.split(".")
     product = parts[0]
     service = ".".join(parts[1:-1])
     if service == "":
         service = "product"
     try:
-        value = json.loads(sensor.value)
+        value = json.loads(reading.value)
         for gui in value:
             label = gui_label(gui)
             prefix = f"gui/{product}/{service}/{label}/"
@@ -342,10 +346,12 @@ def rewrite_gui_urls(external_url: yarl.URL, sensor: Sensor) -> bytes:
             if orig_path.startswith(prefix):
                 prefix = orig_path
             gui["href"] = str(external_url / prefix)
-        return json.dumps(value).encode()
+        return Reading(
+            value=json.dumps(value).encode(), timestamp=reading.timestamp, status=reading.status
+        )
     except (TypeError, ValueError, KeyError) as exc:
         logger.warning("Invalid gui-url in %s: %s", sensor.name, exc)
-        return sensor.value
+        return reading
 
 
 def make_app(

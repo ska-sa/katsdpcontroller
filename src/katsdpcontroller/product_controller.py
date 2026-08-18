@@ -497,7 +497,7 @@ class SubarrayProduct:
         self.subarray_product_id = subarray_product_id
         self.sdp_controller = sdp_controller
         self.logical_graph = generator.build_logical_graph(
-            configuration, config_dict, sdp_controller.sensors
+            configuration, config_dict, sdp_controller.task_sensors
         )
         self.telstate_endpoint = ""
         self.telstate: Optional[katsdptelstate.aio.TelescopeState] = None
@@ -869,11 +869,6 @@ class SubarrayProduct:
         future = asyncio.get_running_loop().create_future()
         for task in self.physical_graph:
             if isinstance(task, tasks.ProductPhysicalTaskMixin):
-                # V Engine currently doesn't support this check, as it only starts after the
-                # capture-start signal.
-                # TODO(NGC-1977): Improve this.
-                if task.logical_node.task_type == "v":
-                    continue
                 sensor = self.sdp_controller.sensors.get(f"{task.name}.rx.device-status")
                 if sensor is not None and sensor.status != Sensor.Status.NOMINAL:
                     sensors.append(sensor)
@@ -940,6 +935,11 @@ class SubarrayProduct:
             telstate_node.host = self.telstate_node.host
             telstate_node.address = self.telstate_node.address
             telstate_node.ports = dict(self.telstate_node.ports)
+            for stream in capture_block.configuration.by_class(product_config.VdifStream):
+                recorder_node = self._nodes.get(f"vlbi.{stream.name}")
+                vlbimeta_node = nodes.get(f"vlbimeta.{stream.name}")
+                if recorder_node is not None and vlbimeta_node is not None:
+                    vlbimeta_node.logical_node.host = recorder_node.host
             # This doesn't actually run anything, just marks the fake telstate node
             # as READY. It could block for a while behind real tasks in the batch
             # queue, but that doesn't matter because our real tasks will block too.
@@ -1597,6 +1597,16 @@ class SubarrayProduct:
 
         nodes = list(self.find_nodes(streams=[stream]))
         args: List[Any] = []
+
+        node = self.find_multicast_node(stream_name)
+        if node.logical_node.initial_transmit_state == TransmitState.UP:
+            # NOTE: MeerKAT Extension CBF-CAM ICD outlines criteria for this. Additionally,
+            # GpucbfTACV streams cannot be stopped if they are required by GpucbfTARV streams.
+            action = "start" if start else "stop"
+            raise FailReply(
+                f"Cannot {action} stream {stream_name!r} because it is required by another stream"
+            )
+
         if start:
             start_timestamp = 0
             for sensor in self.sdp_controller.sensors.values():
@@ -1629,7 +1639,6 @@ class SubarrayProduct:
             # The V-engine does not require the stream name for this request
             await self._multi_request(nodes, itertools.repeat(("capture-stop", *args)))
 
-        node = self.find_multicast_node(stream_name)
         node.transmit_state = TransmitState.UP if start else TransmitState.DOWN
 
     def capture_list(self) -> Sequence[generator.PhysicalMulticast]:
@@ -1856,6 +1865,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.master_controller = master_controller
         self.product: Optional[SubarrayProduct] = None
         self.shutdown_delay = shutdown_delay
+        #: Sensors from child tasks (prefixed but without any custom renaming)
+        self.task_sensors = aiokatcp.SensorSet()
 
         super().__init__(host, port, max_backlog=CONNECTION_MAX_BACKLOG)
         # setup sensors (note: ProductController adds other sensors)

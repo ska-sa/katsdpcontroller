@@ -123,6 +123,8 @@ IMAGES = frozenset(
         "katsdpdatawriter",
         "katsdpmetawriter",
         "katsdptelstate",
+        "katsdpvlbi",
+        "vlbimeta",
     ]
 )
 #: Number of bytes used by spectral imager per visibility
@@ -942,10 +944,21 @@ def _make_fgpu(
     return fgpu_group
 
 
+def _has_downstream_dependencies(
+    src_stream: product_config.Stream,
+    dst_streams: Sequence[product_config.Stream],
+) -> bool:
+    """Check if `src_stream` is used by any of the `dst_streams`."""
+    for dst_stream in dst_streams:
+        if src_stream in dst_stream.src_streams:
+            return True
+    return False
+
+
 def _make_xbgpu(
     g: networkx.MultiDiGraph,
     configuration: Configuration,
-    sensors: SensorSet,
+    task_sensors: SensorSet,
     streams: Iterable[GpucbfXBStream],
 ) -> scheduler.LogicalNode:
     # Ensure that streams is a sequence, not just an iterable. Also put
@@ -971,8 +984,8 @@ def _make_xbgpu(
     ants = np.array(acv.input_labels).reshape(-1, 2)
     n_ants = ants.shape[0]
 
-    base_name = streams[0].name
-    xbgpu_group = LogicalGroup(f"xbgpu.{base_name}")
+    base_name = f"xb.{streams[0].name}"
+    xbgpu_group = LogicalGroup(base_name)
     g.add_node(xbgpu_group)
     dst_multicasts = []
     data_suspect_sensors = []
@@ -993,8 +1006,8 @@ def _make_xbgpu(
             initial_status=Sensor.Status.NOMINAL,
         )
         data_suspect_sensors.append(data_suspect_sensor)
+        re_prefix = re.escape(f"{base_name}.") + "[0-9]+" + re.escape(f".{stream.name}.")
 
-        escaped_name = re.escape(stream.name)
         stream_sensors: List[Sensor] = [
             # The timestamps are simply ADC sample counts
             Sensor(
@@ -1120,20 +1133,20 @@ def _make_xbgpu(
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.xeng-clip-cnt",
                     "Number of visibilities that saturated",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.xeng-clip-cnt"),
+                    name_regex=re.compile(f"{re_prefix}xeng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 SyncSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.rx.synchronised",
                     "For the latest accumulation, was data present from all F-Engines "
                     "for all X-Engines",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.rx.synchronised"),
+                    name_regex=re.compile(rf"{re_prefix}rx\.synchronised"),
                     n_children=stream.n_substreams,
                 ),
             ]
@@ -1178,34 +1191,34 @@ def _make_xbgpu(
                     initial_status=Sensor.Status.NOMINAL,
                 ),
                 SumSensor(
-                    sensors,
+                    task_sensors,
                     f"{stream.name}.beng-clip-cnt",
                     "Number of complex samples that saturated",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.beng-clip-cnt"),
+                    name_regex=re.compile(f"{re_prefix}beng-clip-cnt"),
                     n_children=stream.n_substreams,
                     auto_strategy=SensorSampler.Strategy.EVENT_RATE,
                     auto_strategy_parameters=(FAST_SENSOR_UPDATE_PERIOD, math.inf),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     float,
                     f"{stream.name}.quantiser-gain",
                     "Non-complex post-summation quantiser gain applied to this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.quantiser-gain"),
+                    name_regex=re.compile(f"{re_prefix}quantiser-gain"),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     bytes,
                     f"{stream.name}.delay",
                     "The delay settings of the inputs for this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.delay"),
+                    name_regex=re.compile(f"{re_prefix}delay"),
                 ),
                 LatestSensor(
-                    sensors,
+                    task_sensors,
                     bytes,
                     f"{stream.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
-                    name_regex=re.compile(rf"{escaped_name}\.[0-9]+\.weight"),
+                    name_regex=re.compile(f"{re_prefix}weight"),
                 ),
             ]
             stream_sensors.extend(bstream_sensors)
@@ -1263,9 +1276,11 @@ def _make_xbgpu(
     recv_buffer = free_chunks * chunk_size
 
     task_names = []
+    # Needed for send_enabled command-line arg for beam data streams
+    vgpu_streams = configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream)
     for i in range(n_engines):
         # One engine per section of the band
-        xbgpu = ProductLogicalTask(f"xb.{base_name}.{i}", streams=streams, index=i)
+        xbgpu = ProductLogicalTask(f"{base_name}.{i}", streams=streams, index=i)
         task_names.append(xbgpu.name)
         xbgpu.subsystem = "cbf"
         xbgpu.image = "katgpucbf"
@@ -1289,7 +1304,7 @@ def _make_xbgpu(
                 "gpucbf",
                 infiniband=ibv,
                 multicast_in={acv.name},
-                multicast_out={(stream, i) for stream in streams},
+                multicast_out={(stream.name, i) for stream in streams},
             )
         ]
         xbgpu.interfaces[0].bandwidth_in = acv.data_rate() / n_engines
@@ -1365,7 +1380,7 @@ def _make_xbgpu(
             ]
         )
 
-        for stream in streams:
+        for stream, dst_multicast in zip(streams, dst_multicasts):
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
                 output_config = {
                     "name": escape_format(stream.name),
@@ -1382,6 +1397,13 @@ def _make_xbgpu(
                     "dst": f"{{endpoints_vector[multicast.{stream.name}_spead][{i}]}}",
                     "pol": stream.src_pol,
                 }
+                if _has_downstream_dependencies(stream, vgpu_streams):
+                    output_config["send_enabled"] = True
+                    dst_multicast.initial_transmit_state = TransmitState.UP
+                else:
+                    output_config["send_enabled"] = False
+                    # initial_transmit_state is already initialised to TransmitState.DOWN
+
                 if stream.dither is not None:
                     output_config["dither"] = stream.dither
                 xbgpu.command += [
@@ -1449,22 +1471,23 @@ def _make_xbgpu(
         ]:
             xbgpu.sensor_renames[name] = [f"{stream.name}.{i}.{name}" for stream in streams]
 
-        # Rename sensors that are relevant to the stream rather than the Pipeline
+        # Rename sensors that are relevant to the stream rather than the Pipeline,
+        # and hide sensors that are only used to create aggregates.
         for stream in streams:
             if isinstance(stream, product_config.GpucbfBaselineCorrelationProductsStream):
-                renames = ["chan-range", "rx.synchronised", "xeng-clip-cnt"]
+                renames = ["chan-range"]
+                hide = ["rx.synchronised", "xeng-clip-cnt"]
             elif isinstance(stream, product_config.GpucbfTiedArrayChannelisedVoltageStream):
                 renames = [
                     "chan-range",
-                    "delay",
-                    "quantiser-gain",
-                    "weight",
-                    "beng-clip-cnt",
                     "tx.next-timestamp",
                     "dither-seed",
                 ]
+                hide = ["delay", "quantiser-gain", "weight", "beng-clip-cnt"]
             for name in renames:
                 xbgpu.sensor_renames[f"{stream.name}.{name}"] = f"{stream.name}.{i}.{name}"
+            for name in hide:
+                xbgpu.sensor_renames[f"{stream.name}.{name}"] = []
 
         xbgpu.static_gauges["xbgpu_expected_input_heaps_per_second"] = (
             acv.adc_sample_rate
@@ -1595,9 +1618,23 @@ def _make_vgpu(
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
+    # Observed data
+    # +-------------------------------------+
+    # |Narrowband         |16   |8    |4    |
+    # +-------------------------------------+
+    # |Bandwidth  (MHz)   |32   |64   |128  |
+    # |vgpu cpu usage (%) |12   |21   |42   |
+    # |vgpu res memory(M) |1200 |1299 |1629 |
+    # |vgpu gpu usage (%) |15   |29   |45   |
+    # |vgpu gpu memory(M) |2964 |3956 |6152 |
+    # +-------------------------------------+
+    bandwidth_mhz = stream.bandwidth * 1e-6
+    # Estimate required cpu resources
+    vgpu.cpus = (0.315 * bandwidth_mhz + 5) / 100
 
-    vgpu.cpus = 2.0
-    vgpu.mem = 8192
+    # Estimate required host memory
+    vgpu.mem = round(4.6 * bandwidth_mhz) + 1435
+
     vgpu.ports = ["port", "prometheus", "aiomonitor", "aiomonitor_webui", "aioconsole"]
     vgpu.wait_ports = ["port", "prometheus"]
     if not configuration.options.develop.less_resources:
@@ -1612,7 +1649,9 @@ def _make_vgpu(
         scheduler.InterfaceRequest(
             "gpucbf",
             infiniband=ibv,
-            multicast_in={src_stream.name for src_stream in stream.src_streams},
+            multicast_in={
+                (src_stream.name, i) for src_stream in tacv for i in range(src_stream.n_substreams)
+            },
             multicast_out={stream.name},
         )
     ]
@@ -1620,12 +1659,13 @@ def _make_vgpu(
         stream.tied_array_channelised_voltage[0].data_rate() / n_engines
     )
     vgpu.interfaces[0].bandwidth_out = stream.data_rate() / n_engines
-
     vgpu.gpus = [scheduler.GPURequest()]
-    # TODO: To ensure vgpu doesn't share the GPU with anything else.
-    # Revisit once vgpu is complete.
-    vgpu.gpus[0].compute = 1.0
-    vgpu.gpus[0].mem = _mb(6e9)  # TODO: 6 GB for now; revisit once vgpu is complete
+
+    # Estimate required GPU usage
+    vgpu.gpus[0].compute = (0.303 * bandwidth_mhz + 17) / 100
+
+    # Estimate required GPU memory
+    vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
 
     vgpu.command = (
         ["schedrr"]
@@ -1722,6 +1762,79 @@ def _make_vgpu(
     _add_task_sensors(g, [stream], [vgpu.name])
 
     return vgpu
+
+
+def _make_vlbi(
+    g: networkx.MultiDiGraph, configuration: Configuration, stream: product_config.VdifStream
+) -> scheduler.LogicalNode:
+    """Create a capture-time VLBI recorder task for a VDIF stream."""
+    source_stream = stream.source_stream
+    develop = configuration.options.develop
+    source_multicast = find_node(g, "multicast." + source_stream.name)
+    assert isinstance(source_multicast, LogicalMulticast)
+    task = ProductLogicalTask(f"vlbi.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 2.0
+    task.mem = 8 * 1024
+    size_bytes = getattr(source_stream, "size", None)
+    if size_bytes is not None:
+        task.disk = _mb(1024 * size_bytes + 1024)
+    task.interfaces = [
+        scheduler.InterfaceRequest(
+            "cbf",
+            affinity=not develop.disable_ibverbs,
+            infiniband=not develop.disable_ibverbs,
+            multicast_in={source_stream.name},
+        )
+    ]
+    task.interfaces[0].bandwidth_in = source_stream.data_rate()
+    task.volumes = [DATA_VOL]
+    task.image = "katsdpvlbi"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = False
+    task.metadata_katcp_sensors = False
+    task.transitions = CAPTURE_TRANSITIONS
+    task.ports = ["port"]
+    task.wait_ports = ["port"]
+    payload_bytes = (defaults.VGPU_SAMPLES_PER_FRAME * source_stream.bits_per_sample) // 8
+    frame_bytes = 32 + payload_bytes
+    n_threads = source_stream.n_chans * len(source_stream.pols)
+    j5a_mode = f"vdif_{payload_bytes}-{frame_bytes}-{source_stream.bits_per_sample}-{n_threads}"
+    command_lines = [
+        'endpoint="$1"',
+        'katcp_port="$2"',
+        'export J5A_NETPORT="${{endpoint/:/@}}"',
+        f"export J5A_PROTOCOL={develop.vlbi_recorder_protocol}",
+        f"export J5A_MODE={j5a_mode}",
+        'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"',
+        'export KATCP_PORT="$katcp_port"',
+        "export KATCP_ENABLE=true",
+        "export AUTOSTART_RECORD=false",
+        f"export DISK_PATHS={escape_format(DATA_VOL.container_path)}",
+    ]
+    if frame_bytes + 8 > 1500:
+        command_lines.append("export J5A_MTU=9000")
+        command_lines.append("export J5A_BUFF_SND=268435456")
+    command_lines.append("exec /usr/local/bin/entrypoint.sh")
+    task.command = [
+        "bash",
+        "-ceu",
+        "\n".join(command_lines),
+        "_",
+        f"{{endpoints[multicast.{source_stream.name}_vdif]}}",
+        "{ports[port]}",
+    ]
+    g.add_node(task)
+    g.add_edge(
+        task,
+        source_multicast,
+        port="vdif",
+        depends_resolve=True,
+        depends_init=True,
+        depends_ready=True,
+    )
+    return task
 
 
 def _make_cbf_simulator(
@@ -2888,7 +3001,7 @@ def _groupby(items: Iterable[_T], key: Callable[[_T], Any]) -> Iterable[Iterable
 
 
 def build_logical_graph(
-    configuration: Configuration, config_dict: dict, sensors: SensorSet
+    configuration: Configuration, config_dict: dict, task_sensors: SensorSet
 ) -> networkx.MultiDiGraph:
     # We mutate the configuration to align output channels to requirements.
     configuration = copy.deepcopy(configuration)
@@ -2918,12 +3031,18 @@ def build_logical_graph(
         stream_sensors=stream_sensors,
     )
 
-    # Add SPEAD endpoints to the graph.
+    # Add external stream endpoints to the graph.
     for stream in configuration.streams:
         if isinstance(stream, (product_config.CbfStream, product_config.DigBasebandVoltageStream)):
             url = stream.url
-            if url.scheme == "spead":
-                node = LogicalMulticast(stream.name, endpoint=Endpoint(url.host, url.port))
+            if isinstance(stream, product_config.CbfTiedArrayResampledVoltageStream):
+                port_name = "vdif"
+            else:
+                port_name = "spead"
+            if url.scheme == port_name:
+                node = LogicalMulticast(
+                    stream.name, endpoint=Endpoint(url.host, url.port), port_name=port_name
+                )
                 g.add_node(node)
 
     # cam2telstate node (optional: if we're simulating, we don't need it)
@@ -2970,10 +3089,12 @@ def build_logical_graph(
             g,
             configuration,
             streams=xbgpu_streams,
-            sensors=sensors,
+            task_sensors=task_sensors,
         )
     for vgpu_stream in configuration.by_class(product_config.GpucbfTiedArrayResampledVoltageStream):
         _make_vgpu(g, configuration, vgpu_stream)
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        _make_vlbi(g, configuration, vdif_stream)
 
     # Pair up spectral and continuum L0 outputs
     l0_done = set()
@@ -3521,6 +3642,38 @@ def _make_spectral_imager_report(
     return report
 
 
+def _make_vlbimeta(
+    g: networkx.MultiDiGraph,
+    configuration: Configuration,
+    capture_block_id: str,
+    stream: product_config.VdifStream,
+    dataset_stream: product_config.VisStream,
+) -> scheduler.LogicalNode:
+    """Create a post-processing task for VLBI metadata extraction."""
+    task = ProductLogicalTask(f"vlbimeta.{stream.name}", streams=[stream])
+    task.subsystem = "sdp"
+    task.cpus = 1.0
+    task.mem = 4 * 1024
+    task.volumes = [DATA_VOL]
+    task.image = "vlbimeta"
+    task.katsdpservices_config = False
+    task.katsdpservices_logging = False
+    task.pass_telstate = True
+    task.metadata_katcp_sensors = False
+    task.command = [
+        "vlbimeta.py",
+        escape_format(DATA_VOL.container_path),
+        escape_format(capture_block_id),
+        escape_format(stream.name),
+        "--dataset-stream-name",
+        escape_format(dataset_stream.name),
+        "--mode",
+        configuration.options.vlbimeta.mode,
+    ]
+    g.add_node(task)
+    return task
+
+
 async def build_postprocess_logical_graph(
     configuration: Configuration,
     capture_block_id: str,
@@ -3543,6 +3696,28 @@ async def build_postprocess_logical_graph(
             g, configuration, capture_block_id, cstream, telstate, telstate_endpoint, target_mapper
         )
 
+    cal_streams = list(configuration.by_class(product_config.CalStream))
+    if len(cal_streams) == 1:
+        vlbimeta_dataset_stream = cal_streams[0].vis
+    else:
+        vis_streams = list(configuration.by_class(product_config.VisStream))
+        if len(vis_streams) != 1:
+            raise ValueError(
+                "vlbimeta currently requires either exactly one sdp.cal stream or exactly one "
+                "sdp.vis stream"
+            )
+        vlbimeta_dataset_stream = vis_streams[0]
+
+    for vdif_stream in configuration.by_class(product_config.VdifStream):
+        if configuration.options.vlbimeta.mode != "disabled":
+            _make_vlbimeta(
+                g,
+                configuration,
+                capture_block_id,
+                vdif_stream,
+                vlbimeta_dataset_stream,
+            )
+
     # Note: this must only be run after all the sdp.continuum_image nodes have
     # been created, because spectral imager nodes depend on continuum imager
     # nodes.
@@ -3563,6 +3738,10 @@ async def build_postprocess_logical_graph(
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
+            if node.pass_telstate:
+                node.command.extend(
+                    ["--telstate", "{endpoints[telstate_telstate]}", "--name", node.name]
+                )
             g.add_edge(node, telstate_node, port="telstate", depends_ready=True, depends_kill=True)
 
     return g

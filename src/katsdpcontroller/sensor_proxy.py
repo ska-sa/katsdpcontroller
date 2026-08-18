@@ -17,7 +17,6 @@
 """Class for katcp connections that proxies sensors into a server"""
 
 import enum
-import functools
 import logging
 from typing import (
     Any,
@@ -78,17 +77,45 @@ class _FilterPredicate(Protocol):
 
 
 class SensorWatcher(aiokatcp.SensorWatcher):
-    """Mirrors sensors from a client into a server.
+    """Mirrors sensors from a client into a sensor set.
 
-    See :class:`SensorProxyClient` for an explanation of the parameters.
+    Parameters
+    ----------
+    client
+        Client to watch
+    sensors
+        Sensor set which will be updated
+    prefix
+        String prepended to the remote server's sensor names to obtain names
+        used on `server`. These should be unique per `server` to avoid
+        collisions.
+    rewrite_readings
+        If given, a function that is given a sensor and new reading from the
+        server, and returns a replacement reading.
+    renames
+        Mapping from the remote server's sensor names to sensor names for
+        `server`. Sensors found in this mapping do not have `prefix` applied.
+        The values may also be lists of strings, in which case the sensor
+        will be duplicated under each of these names.
+    close_action
+        Defines what to do with the sensors when the connection is closed.
+    notify
+        Callback which is called when there are changes to the sensor list.
+        If not specified, it defaults to sending an ``interface-changed``
+        inform to all clients of the server.
+    filter
+        Predicate used to decide which sensors are required. The default is
+        to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
     """
 
     def __init__(
         self,
         client: aiokatcp.Client,
-        server: aiokatcp.DeviceServer,
+        sensors: aiokatcp.SensorSet,
         prefix: str,
-        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
+        rewrite_readings: Optional[
+            Callable[[aiokatcp.Sensor, aiokatcp.Reading], aiokatcp.Reading]
+        ] = None,
         enum_types: Sequence[Type[enum.Enum]] = (),
         renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
         close_action: CloseAction = CloseAction.REMOVE,
@@ -98,20 +125,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         super().__init__(client, enum_types)
         self.prefix = prefix
         self.renames = renames if renames is not None else {}
-        self.server = server
-        # We keep track of the sensors after name rewriting but prior to gui-url rewriting
-        self.orig_sensors: aiokatcp.SensorSet
-        try:
-            self.orig_sensors = self.server.orig_sensors  # type: ignore
-        except AttributeError:
-            self.orig_sensors = aiokatcp.SensorSet()
-
-        self.rewrite_gui_urls = rewrite_gui_urls
+        # Note: cannot just be called sensors, because the base class already
+        # uses that name for its internal mirror.
+        self.target_sensors = sensors
+        self.rewrite_readings = rewrite_readings
         self.close_action = close_action
         if notify is not None:
             self.notify = notify
         else:
-            self.notify = functools.partial(server.mass_inform, "interface-changed", "sensor-list")
+            self.notify = lambda: None
         # Whether we need to call notify at the end of the batch
         self._need_notify = False
         self._filter = filter
@@ -134,28 +156,12 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         super().sensor_added(name, description, units, type_name, *args)
         for rewritten_name in self.rewrite_name(name):
             sensor = self.sensors[rewritten_name]
-            self.orig_sensors.add(sensor)
-            if (
-                self.rewrite_gui_urls is not None
-                and sensor.name.endswith(".gui-urls")
-                and sensor.stype is bytes
-            ):
-                new_value = self.rewrite_gui_urls(sensor)
-                sensor = aiokatcp.Sensor(
-                    sensor.stype,
-                    sensor.name,
-                    sensor.description,
-                    sensor.units,
-                    new_value,
-                    sensor.status,
-                )
-            self.server.sensors.add(sensor)
-        self._need_notify = True
+            self.target_sensors.add(sensor)
+            self._need_notify = True
 
     def _sensor_removed(self, name: str) -> None:
         """Like :meth:`sensor_removed`, but takes the rewritten name"""
-        self.server.sensors.pop(name, None)
-        self.orig_sensors.pop(name, None)
+        self.target_sensors.pop(name, None)
         self._need_notify = True
 
     def sensor_removed(self, name: str) -> None:
@@ -163,19 +169,15 @@ class SensorWatcher(aiokatcp.SensorWatcher):
         for rewritten_name in self.rewrite_name(name):
             self._sensor_removed(rewritten_name)
 
-    def sensor_updated(
-        self, name: str, value: bytes, status: aiokatcp.Sensor.Status, timestamp: float
+    def set_sensor_value(
+        self, sensor: aiokatcp.Sensor, value: Any, status: aiokatcp.Sensor.Status, timestamp: float
     ) -> None:
-        super().sensor_updated(name, value, status, timestamp)
-        for rewritten_name in self.rewrite_name(name):
-            sensor = self.sensors[rewritten_name]
-            if (
-                self.rewrite_gui_urls is not None
-                and rewritten_name.endswith(".gui-urls")
-                and sensor.stype is bytes
-            ):
-                value = self.rewrite_gui_urls(sensor)
-                self.server.sensors[rewritten_name].set_value(value, status, timestamp)
+        if self.rewrite_readings is not None:
+            reading = aiokatcp.Reading(timestamp=timestamp, status=status, value=value)
+            reading = self.rewrite_readings(sensor, reading)
+            super().set_sensor_value(sensor, reading.value, reading.status, reading.timestamp)
+        else:
+            super().set_sensor_value(sensor, value, status, timestamp)
 
     def batch_stop(self) -> None:
         super().batch_stop()
@@ -208,74 +210,10 @@ class SensorWatcher(aiokatcp.SensorWatcher):
             self.batch_start()
             for name in self.sensors.keys():
                 if self.close_action == CloseAction.UNREACHABLE:
-                    self._mark_unreachable(self.server.sensors[name])
-                    self._mark_unreachable(self.orig_sensors[name])
+                    self._mark_unreachable(self.target_sensors[name])
                 elif self.close_action == CloseAction.REMOVE:
                     self._sensor_removed(name)
             self.batch_stop()
-
-
-class SensorProxyClient(aiokatcp.Client):
-    """Client that mirrors sensors into a device server.
-
-    Parameters
-    ----------
-    server
-        Server to which sensors will be added
-    prefix
-        String prepended to the remote server's sensor names to obtain names
-        used on `server`. These should be unique per `server` to avoid
-        collisions.
-    rewrite_gui_urls
-        If given, a function that is given a ``.gui-urls`` sensor and returns a
-        replacement value. Note that the function is responsible for decoding
-        and encoding between JSON and :class:`bytes`.
-    renames
-        Mapping from the remote server's sensor names to sensor names for
-        `server`. Sensors found in this mapping do not have `prefix` applied.
-        The values may also be lists of strings, in which case the sensor
-        will be duplicated under each of these names.
-    close_action
-        Defines what to do with the sensors when the connection is closed.
-    notify
-        Callback which is called when there are changes to the sensor list.
-        If not specified, it defaults to sending an ``interface-changed``
-        inform to all clients of the server.
-    filter
-        Predicate used to decide which sensors are required. The default is
-        to use all of them. See :meth:`aiokatcp.AbstractSensorWatcher.filter`.
-    kwargs
-        Passed to the base class
-    """
-
-    def __init__(
-        self,
-        server: aiokatcp.DeviceServer,
-        prefix: str,
-        rewrite_gui_urls: Optional[Callable[[aiokatcp.Sensor], bytes]] = None,
-        enum_types: Sequence[Type[enum.Enum]] = (),
-        renames: Optional[Mapping[str, Union[str, Sequence[str]]]] = None,
-        close_action: CloseAction = CloseAction.REMOVE,
-        notify: Optional[Callable[[], Any]] = None,
-        filter: Optional[_FilterPredicate] = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        watcher = SensorWatcher(
-            self,
-            server,
-            prefix,
-            rewrite_gui_urls,
-            renames=renames,
-            close_action=close_action,
-            notify=notify,
-            filter=filter,
-        )
-        self._synced = watcher.synced
-        self.add_sensor_watcher(watcher)
-
-    async def wait_synced(self) -> None:
-        await self._synced.wait()
 
 
 class PrometheusInfo:
