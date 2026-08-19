@@ -1628,11 +1628,11 @@ def _make_vgpu(
         ),
     ]
 
-    for i, val in enumerate(threshold):
+    for i, val in enumerate(threshold, start=1):
         stream_sensors.append(
             Sensor(
                 float,
-                f"quantisation-threshold-{i}",
+                f"{stream.name}.quantisation-threshold-{i}",
                 "Quantisation threshold per value for all streams.",
                 default=val,
                 initial_status=Sensor.Status.NOMINAL,
@@ -1711,7 +1711,7 @@ def _make_vgpu(
             f"--fir-taps={defaults.VGPU_FIR_TAPS}",
             f"--hilbert-taps={defaults.VGPU_HILBERT_TAPS}",
             f"--passband={defaults.VGPU_PASSBAND}",
-            f"--threshold={threshold[0]}",  # TODO: Change VGPU threshold arg to be a list
+            f"--threshold={threshold[0]}",
             f"--power-int-time={defaults.VGPU_POWER_INT_TIME}",
             "--recv-interface={interfaces[gpucbf].name}",
             "--send-interface={interfaces[gpucbf].name}",
