@@ -1633,7 +1633,7 @@ def _make_vgpu(
             Sensor(
                 float,
                 f"{stream.name}.quantisation-threshold-{i}",
-                "Quantisation threshold per value for all streams.",
+                "Voltage threshold between the quantisation levels, in units of RMS voltage.",
                 default=val,
                 initial_status=Sensor.Status.NOMINAL,
             )
