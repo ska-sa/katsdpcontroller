@@ -1514,6 +1514,8 @@ def _make_vgpu(
     n_engines = 1
     n_substreams = 1
     n_recv_batches_per_chunk = 8  # TODO: Revisit once vgpu is complete
+    n_samples_per_frame = defaults.VGPU_SAMPLES_PER_FRAME
+    threshold = [defaults.VGPU_THRESHOLD]
     acv = stream.antenna_channelised_voltage
     sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
@@ -1619,7 +1621,25 @@ def _make_vgpu(
             default=json.dumps(stream.pols),
             initial_status=Sensor.Status.NOMINAL,
         ),
+        Sensor(
+            int,
+            f"{stream.name}.n-samples-per-frame",
+            "Number of samples per frame in the stream.",
+            default=n_samples_per_frame,
+            initial_status=Sensor.Status.NOMINAL,
+        ),
     ]
+
+    for i, val in enumerate(threshold, start=1):
+        stream_sensors.append(
+            Sensor(
+                float,
+                f"{stream.name}.quantisation-threshold-{i}",
+                "Voltage threshold between the quantisation levels, in units of RMS voltage.",
+                default=val,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
 
     for ss in stream_sensors:
         g.graph["stream_sensors"].add(ss)
@@ -1688,12 +1708,12 @@ def _make_vgpu(
             "--recv-pols=-y,+x",
             f"--send-bandwidth={stream.bandwidth}",
             f"--send-pols={','.join(stream.pols)}",
-            f"--send-samples-per-frame={defaults.VGPU_SAMPLES_PER_FRAME}",
+            f"--send-samples-per-frame={n_samples_per_frame}",
             f"--send-station={stream.station_id}",
             f"--fir-taps={defaults.VGPU_FIR_TAPS}",
             f"--hilbert-taps={defaults.VGPU_HILBERT_TAPS}",
             f"--passband={defaults.VGPU_PASSBAND}",
-            f"--threshold={defaults.VGPU_THRESHOLD}",
+            f"--threshold={threshold[0]}",
             f"--power-int-time={defaults.VGPU_POWER_INT_TIME}",
             "--recv-interface={interfaces[gpucbf].name}",
             "--send-interface={interfaces[gpucbf].name}",
