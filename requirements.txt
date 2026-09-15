@@ -149,7 +149,7 @@ katportalclient==0.2.2
     # via katsdpcontroller (setup.cfg)
 katsdpmodels==0.3
     # via katsdpcontroller (setup.cfg)
-katsdpservices==1.4
+katsdpservices @ git+https://github.com/ska-sa/katsdpservices@55ca637f92fd3524a158e36ecb282dda75b266ee
     # via
     #   katsdpcontroller (setup.cfg)
     #   katsdpservices
@@ -178,7 +178,7 @@ multidict==6.0.5
     #   yarl
 nest-asyncio==1.6.0
     # via dash
-netifaces==0.11.0
+netifaces-plus==0.12.5
     # via
     #   katsdpcontroller (setup.cfg)
     #   katsdpservices
