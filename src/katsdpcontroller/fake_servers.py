@@ -16,21 +16,21 @@
 
 """Katcp device servers that emulate various container images."""
 
-import re
 import asyncio
 import json
+import logging
 import numbers
+import re
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Mapping, Optional, Pattern, Sequence, Tuple, Union
 
 import numpy as np
 from aiokatcp import ClockState, DeviceStatus, FailReply, Sensor, SensorSet, Timestamp
 
 from .tasks import FakeDeviceServer
 
-import logging
-
 logger = logging.getLogger(__name__)
+
 
 def _format_complex(value: numbers.Complex) -> str:
     """Format a complex number for a katcp request.
@@ -129,32 +129,71 @@ def _add_steady_state_timestamp_sensor(sensors: SensorSet) -> None:
     )
 
 
-def update_sensors(sensors, patterns):
-    for name, sensor in list(sensors.items()):
-        if any(regex.search(name) for regex in patterns):
-            now = time.time()
-            if sensor.stype == int:
-                if sensor.value == 0:
-                    sensor.set_value(1, Sensor.Status.NOMINAL, now)
-                else:
-                    sensor.set_value(0, Sensor.Status.NOMINAL, now)
-            if sensor.stype == float:
-                if sensor.value == 0.0:
-                    sensor.set_value(1.0, Sensor.Status.NOMINAL, now)
-                else:
-                    sensor.set_value(0.0, Sensor.Status.NOMINAL, now)
-            if sensor.stype == bool:
-                if sensor.value == True:
-                    sensor.set_value(False, Sensor.Status.NOMINAL, now)
-                else:
-                    sensor.set_value(True, Sensor.Status.NOMINAL, now)
-            if sensor.stype == str:
-                if sensor.value == "a":
-                    sensor.set_value("b", Sensor.Status.NOMINAL, now)
-                else:
-                    sensor.set_value("a", Sensor.Status.NOMINAL, now)
-            if sensor.stype == Timestamp:
-                sensor.set_value(Timestamp(time.time() + 1), Sensor.Status.NOMINAL, now)
+def _update_sensor(sensor: Sensor) -> None:
+    """Change a fake sensor value so that a new reading is emitted."""
+    now = time.time()
+    if sensor.stype == int:
+        value = 1 if sensor.value == 0 else 0
+    elif sensor.stype == float:
+        value = 1.0 if sensor.value == 0.0 else 0.0
+    elif sensor.stype == bool:
+        value = not sensor.value
+    elif sensor.stype == str:
+        value = "b" if sensor.value == "a" else "a"
+    elif sensor.stype == Timestamp:
+        value = Timestamp(now)
+    else:
+        return
+    sensor.set_value(value, Sensor.Status.NOMINAL, now)
+
+
+def _match_sensor_names(
+    name: str, renames: Mapping[str, Union[str, Sequence[str]]], pattern: Pattern[str]
+) -> bool:
+    """Match the product-facing name, which may differ from the device name."""
+    renamed = renames.get(name, ())
+    if isinstance(renamed, str):
+        renamed = [renamed]
+    return any(pattern.fullmatch(alias) for alias in renamed)
+
+
+class _PeriodicSensorUpdates(FakeDeviceServer):
+    """Update preselected sensors at 1 or 2 Hz using one task per server."""
+
+    def _start_sensor_updates(
+        self, one_hz: Sequence[Sensor], two_hz: Sequence[Sensor] = ()
+    ) -> None:
+        self._sensor_update_task: Optional[asyncio.Task] = None
+        if one_hz or two_hz:
+            self._sensor_update_task = asyncio.create_task(self._run_sensor_updates(one_hz, two_hz))
+
+    async def _run_sensor_updates(self, one_hz: Sequence[Sensor], two_hz: Sequence[Sensor]) -> None:
+        loop = asyncio.get_running_loop()
+        interval = 0.5 if two_hz else 1.0
+        next_tick = loop.time()
+        tick = 0
+        while True:
+            next_tick += interval
+            await asyncio.sleep(max(0.0, next_tick - loop.time()))
+            tick += 1
+            try:
+                for sensor in two_hz:
+                    _update_sensor(sensor)
+                if not two_hz or tick % 2 == 0:
+                    for sensor in one_hz:
+                        _update_sensor(sensor)
+            except Exception:
+                logger.exception("Error updating fake sensors")
+
+    async def stop(self) -> None:
+        if self._sensor_update_task is not None:
+            self._sensor_update_task.cancel()
+            try:
+                await self._sensor_update_task
+            except asyncio.CancelledError:
+                pass
+        await super().stop()
+
 
 class FakeDsimDeviceServer(FakeDeviceServer):
     def __init__(self, *args, **kwargs) -> None:
@@ -175,25 +214,17 @@ class FakeDsimDeviceServer(FakeDeviceServer):
         return time.time()
 
 
-class FakeFgpuDeviceServer(FakeDeviceServer):
+class FakeFgpuDeviceServer(_PeriodicSensorUpdates):
     N_POLS = 2
     DEFAULT_GAIN = 1.0
 
-    UPDATE_SENSOR_PATTERN_STRINGS = [
-        r"dig-rms-dbfs",
-        r"dig-clip-cnt",
-        r"feng-clip-cnt",
-        r".*rx.*timestamp",
-        r".*rx.*unixtime",
-        r".*time.*esterror",
-        r".*time.*maxerror",
-        r".*time.*state",
-        r".*time.*synchronised"
-    ]
-
-    UPDATE_SENSOR_PATTERNS = [
-        re.compile(p) for p in UPDATE_SENSOR_PATTERN_STRINGS
-    ]
+    UPDATE_SENSOR_PATTERNS = (
+        re.compile(r"antenna-channelised-voltage\.m\d+[hv]\.feng-clip-cnt"),
+        re.compile(r"antenna-channelised-voltage\.m\d+[hv]\.rx\.timestamp"),
+        re.compile(r"antenna-channelised-voltage\.m\d+[hv]\.rx\.unixtime"),
+        re.compile(r"antenna-channelised-voltage\.m\d+[hv]\.dig-rms-dbfs"),
+        re.compile(r"antenna-channelised-voltage\.m011h\.dig-clip-cnt"),
+    )
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -251,6 +282,7 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                         initial_status=Sensor.Status.NOMINAL,
                     )
                 )
+        for pol in range(self.N_POLS):
             self.sensors.add(
                 Sensor(
                     int,
@@ -304,25 +336,16 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
-        self.start_sensor_updates()
-
-    def start_sensor_updates(self):
-        asyncio.create_task(self.update_sensors())
-
-    async def update_sensors(self):
-        try:
-            while True:
-                try:
-                    update_sensors(self.sensors, self.UPDATE_SENSOR_PATTERNS)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception('Error updating sensors.')
-
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
-
+        # Input sensors are renamed to antenna labels by the product controller.
+        one_hz = [
+            sensor
+            for name, sensor in self.sensors.items()
+            if any(
+                _match_sensor_names(name, self.logical_task.sensor_renames, pattern)
+                for pattern in self.UPDATE_SENSOR_PATTERNS
+            )
+        ]
+        self._start_sensor_updates(one_hz)
 
     def _check_stream_name(self, stream_name: str) -> None:
         """Validate that a stream name matches one of the outputs.
@@ -381,17 +404,21 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                 await self.request_gain(ctx, stream_name, pol, *values)
 
 
-class FakeXbgpuDeviceServer(FakeDeviceServer):
-
-    UPDATE_SENSOR_PATTERN_STRINGS = [
-        r"baseline-correlation-products.*rx.*synchronised",
-        r"\.xeng-clip-cnt",
-        r"\.tx\.next-timestamp"
-    ]
-
-    UPDATE_SENSOR_PATTERNS = [
-        re.compile(p) for p in UPDATE_SENSOR_PATTERN_STRINGS
-    ]
+class FakeXbgpuDeviceServer(_PeriodicSensorUpdates):
+    ONE_HZ_DEVICE_PATTERNS = (
+        re.compile(r"tied-array-channelised-voltage-[^.]+\.beng-clip-cnt"),
+        re.compile(r"tied-array-channelised-voltage-[^.]+\.tx\.next-timestamp"),
+    )
+    ONE_HZ_PRODUCT_PATTERNS = (
+        re.compile(r"baseline-correlation-products\.\d+\.rx\.(?:timestamp|unixtime)"),
+        re.compile(
+            r"tied-array-channelised-voltage-[^.]+\.\d+\.rx\.(?:timestamp|unixtime)"
+        ),
+    )
+    TWO_HZ_DEVICE_PATTERNS = (
+        re.compile(r"baseline-correlation-products\.rx\.synchronised"),
+        re.compile(r"baseline-correlation-products\.tx\.next-timestamp"),
+    )
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -538,7 +565,23 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
         _add_device_status_sensor(self.sensors)
         _add_rx_device_status_sensor(self.sensors)
         _add_steady_state_timestamp_sensor(self.sensors)
-        self.start_sensor_updates()
+        # Aggregate inputs are hidden from the product-facing sensor set, so
+        # match their device names. The shared rx sensors use their renamed names.
+        one_hz = [
+            sensor
+            for name, sensor in self.sensors.items()
+            if any(pattern.fullmatch(name) for pattern in self.ONE_HZ_DEVICE_PATTERNS)
+            or any(
+                _match_sensor_names(name, self.logical_task.sensor_renames, pattern)
+                for pattern in self.ONE_HZ_PRODUCT_PATTERNS
+            )
+        ]
+        two_hz = [
+            sensor
+            for name, sensor in self.sensors.items()
+            if any(pattern.fullmatch(name) for pattern in self.TWO_HZ_DEVICE_PATTERNS)
+        ]
+        self._start_sensor_updates(one_hz, two_hz)
 
     async def request_beam_weights(self, ctx, stream_name: str, *weights: float) -> None:
         """Set beam weights."""
@@ -555,23 +598,6 @@ class FakeXbgpuDeviceServer(FakeDeviceServer):
             parts = [float(x) for x in coefficient_set.split(":")]
             params.extend(parts)
         self.sensors[f"{stream_name}.delay"].value = repr(tuple(params))
-
-    def start_sensor_updates(self):
-        asyncio.create_task(self.update_sensors())
-
-    async def update_sensors(self):
-        try:
-            while True:
-                try:
-                    update_sensors(self.sensors, self.UPDATE_SENSOR_PATTERNS)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception('Error updating sensors.')
-
-                await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            pass
 
 
 class FakeVgpuDeviceServer(FakeDeviceServer):
