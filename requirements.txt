@@ -149,7 +149,7 @@ katportalclient==0.2.2
     # via katsdpcontroller (setup.cfg)
 katsdpmodels==0.3
     # via katsdpcontroller (setup.cfg)
-katsdpservices==1.4
+katsdpservices==1.5
     # via
     #   katsdpcontroller (setup.cfg)
     #   katsdpservices
@@ -178,10 +178,10 @@ multidict==6.0.5
     #   yarl
 nest-asyncio==1.6.0
     # via dash
-netifaces==0.11.0
-    # via katsdpservices
 netifaces-plus==0.12.5
-    # via katsdpcontroller (setup.cfg)
+    # via
+    #   katsdpcontroller (setup.cfg)
+    #   katsdpservices
 networkx==3.1
     # via katsdpcontroller (setup.cfg)
 numba==0.58.1
