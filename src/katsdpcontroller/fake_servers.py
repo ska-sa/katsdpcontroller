@@ -204,6 +204,8 @@ class FakeFgpuDeviceServer(FakeDeviceServer):
                         initial_status=Sensor.Status.NOMINAL,
                     )
                 )
+
+        for pol in range(self.N_POLS):
             self.sensors.add(
                 Sensor(
                     int,
