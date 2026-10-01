@@ -59,6 +59,7 @@ async def test_vlbi_recorder_uses_cbf_multicast_interface(mocker) -> None:
     command = vlbi_node.command[2]
     assert "export J5A_PROTOCOL=udps" in command
     assert 'export J5A_CBF_INTERFACE="{interfaces[cbf].name}"' in command
+    assert "export VLBI_STREAM_NAME=sdp_vdif" in command
 
 
 async def test_vlbimeta_uses_cal_vis_stream(mocker) -> None:

@@ -22,6 +22,7 @@ import logging
 import math
 import os.path
 import re
+import shlex
 import time
 import urllib.parse
 from typing import (
@@ -1837,6 +1838,7 @@ def _make_vlbi(
         "export KATCP_ENABLE=true",
         "export AUTOSTART_RECORD=false",
         f"export DISK_PATHS={escape_format(DATA_VOL.container_path)}",
+        f"export VLBI_STREAM_NAME={escape_format(shlex.quote(stream.name))}",
     ]
     if frame_bytes + 8 > 1500:
         command_lines.append("export J5A_MTU=9000")
