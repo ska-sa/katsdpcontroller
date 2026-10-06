@@ -3522,8 +3522,6 @@ class SchedulerBase:
             self._wakeup_launcher.clear()
             try:
                 await self._launch_once()
-            except asyncio.CancelledError:
-                raise  # Normal operation in close()
             except Exception:
                 logger.exception("Error in _launch_once")
 
@@ -4316,8 +4314,6 @@ class Scheduler(SchedulerBase, pymesos.Scheduler):
                     tasks = []
                     logger.debug("Requesting implicit reconciliation")
                 self._driver.reconcileTasks(tasks)
-            except asyncio.CancelledError:
-                raise
             except Exception:
                 logger.warning("Exception during task reconciliation", exc_info=True)
             await asyncio.sleep(self.reconciliation_interval)
