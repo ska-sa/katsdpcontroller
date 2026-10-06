@@ -1057,8 +1057,6 @@ class SubarrayProduct:
                 # To prevent trying again if we get a second forced-deconfigure.
                 self.current_capture_block = None
                 await self._capture_done_impl(capture_block)
-            except asyncio.CancelledError:
-                raise
             except Exception:
                 logger.exception(
                     "Failed to issue capture-done during shutdown request. "
@@ -1179,8 +1177,6 @@ class SubarrayProduct:
             await self._capture_done_impl(capture_block)
             if self.state == ProductState.ERROR and not error_expected:
                 raise FailReply("Subarray product went into ERROR while stopping capture")
-        except asyncio.CancelledError:
-            raise
         except Exception as exc:
             self.state = ProductState.ERROR
             done_exc = exc
