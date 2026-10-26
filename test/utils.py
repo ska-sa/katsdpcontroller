@@ -128,7 +128,7 @@ CONFIG = """{
             ],
             "n_chans": 2,
             "pols": ["x", "y"],
-            "station_id": "me"
+            "station_id": "Me"
         },
         "i0_antenna_channelised_voltage": {
             "type": "sim.cbf.antenna_channelised_voltage",
@@ -408,7 +408,7 @@ CONFIG_CBF_ONLY = """{
             ],
             "n_chans": 2,
             "pols": ["x", "y"],
-            "station_id": "me"
+            "station_id": "Me"
         }
     },
     "config": {}

@@ -1219,7 +1219,7 @@ class TestGpucbfTiedArrayResampledVoltageStream:
             "src_streams": ["beam_0x", "beam_0y"],
             "n_chans": 2,
             "pols": ["x", "y"],
-            "station_id": "me",
+            "station_id": "Me",
         }
 
     def test_from_config(
@@ -1230,7 +1230,7 @@ class TestGpucbfTiedArrayResampledVoltageStream:
         )
         assert tarv.n_chans == 2
         assert tarv.pols == ["x", "y"]
-        assert tarv.station_id == "me"
+        assert tarv.station_id == "Me"
         # 64 MHz passband * 2 channels * 2 pols * 2 (Nyquist sampling)
         assert tarv.data_rate(1.0, 0) == 512e6
 
