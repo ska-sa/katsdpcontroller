@@ -1522,6 +1522,8 @@ def _make_vgpu(
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
+
+    # Set extra fields for katsdpservices-using services to log to logstash
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
     vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
@@ -1529,7 +1531,6 @@ def _make_vgpu(
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
     g.add_node(vgpu)
-
     stream_sensors: List[Sensor] = [
         Sensor(
             float,
@@ -1692,6 +1693,12 @@ def _make_vgpu(
 
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
+    env = {
+        "CUPY_GPU_MEMORY_LIMIT": (1024**2),  # as bytes
+    }
+    vgpu.taskinfo.command.environment.setdefault("variables", []).extend(
+        [{"name": key, "value": value} for (key, value) in env.items()]
+    )
 
     vgpu.command = (
         ["schedrr"]
