@@ -1693,7 +1693,7 @@ def _make_vgpu(
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
     env = {
-        "CUPY_GPU_MEMORY_LIMIT": vgpu.gpus[0].mem * (1024**2),  # as bytes
+        "CUPY_GPU_MEMORY_LIMIT": (1024**2),  # as bytes
     }
     vgpu.taskinfo.command.environment.setdefault("variables", []).extend(
         [{"name": key, "value": value} for (key, value) in env.items()]
