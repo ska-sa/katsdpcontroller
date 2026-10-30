@@ -77,7 +77,7 @@ async def test_vlbimeta_uses_cal_vis_stream(mocker) -> None:
         "telstate.invalid:31000",
     )
     vlbimeta_node = next(node for node in graph if node.name == "vlbimeta.sdp_vdif")
-    assert vlbimeta_node.command[:7] == [
+    assert vlbimeta_node.command == [
         "vlbimeta.py",
         "/var/kat/data",
         "1234567890",
@@ -85,5 +85,9 @@ async def test_vlbimeta_uses_cal_vis_stream(mocker) -> None:
         "--dataset-stream-name",
         "sdp_l0",
         "--mode",
+        "antab",
+        "--telstate",
+        "{endpoints[telstate_telstate]}",
+        "--name",
+        "vlbimeta.sdp_vdif",
     ]
-    assert vlbimeta_node.command[7] == "antab"
