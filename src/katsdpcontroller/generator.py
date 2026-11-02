@@ -1521,8 +1521,6 @@ def _make_vgpu(
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
-
-    # Set extra fields for katsdpservices-using services to log to logstash
     vgpu.subsystem = "cbf"
     vgpu.image = "katgpucbf"
     vgpu.fake_katcp_server_cls = FakeVgpuDeviceServer
@@ -1692,11 +1690,10 @@ def _make_vgpu(
 
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
-    env = {
-        "CUPY_GPU_MEMORY_LIMIT": (1024**2),  # as bytes
-    }
-    vgpu.taskinfo.command.environment.setdefault("variables", []).extend(
-        [{"name": key, "value": value} for (key, value) in env.items()]
+
+    # Enforce GPU memory via CUDA; this value is small for testing purposes
+    vgpu.taskinfo.command.environment.setdefault("variables", []).append(
+        {"name": "CUPY_GPU_MEMORY_LIMIT", "value": 1024**2}
     )
 
     vgpu.command = (
