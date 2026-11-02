@@ -65,7 +65,7 @@ WEIGHT_PASS = 0.005  # Keep in sync with katgpucbf
 #: minimise the number of packets/second to process.
 GPUCBF_PACKET_PAYLOAD_BYTES = 8192
 #: Default number of samples per VDIF frame for gpucbf V-engine
-VGPU_SAMPLES_PER_FRAME = 20000
+VGPU_SAMPLES_PER_FRAME = 25000
 #: Default number of taps for the gpucbf V-engine rational filter
 VGPU_FIR_TAPS = 7201
 #: Default number of taps for the gpucbf V-engine sideband filter
