@@ -3696,6 +3696,10 @@ def _make_vlbimeta(
         escape_format(dataset_stream.name),
         "--mode",
         configuration.options.vlbimeta.mode,
+        "--telstate",
+        "{endpoints[telstate_telstate]}",
+        "--name",
+        task.name,
     ]
     g.add_node(task)
     return task
@@ -3765,10 +3769,6 @@ async def build_postprocess_logical_graph(
             seen.add(node.name)
             assert node.image in IMAGES, f"{node.image} missing from IMAGES"
             # Connect every task to telstate
-            if node.pass_telstate:
-                node.command.extend(
-                    ["--telstate", "{endpoints[telstate_telstate]}", "--name", node.name]
-                )
             g.add_edge(node, telstate_node, port="telstate", depends_ready=True, depends_kill=True)
 
     return g

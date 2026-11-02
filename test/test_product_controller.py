@@ -1094,6 +1094,28 @@ class TestController(BaseTestController):
     """Test :class:`katsdpcontroller.product_controller.DeviceServer` by mocking the scheduler."""
 
     @staticmethod
+    def _assert_imaging_postprocess_arguments(
+        capture_block: product_controller.CaptureBlock,
+    ) -> None:
+        """Imaging commands must not receive the extra arguments intended for vlbimeta."""
+        assert capture_block.postprocess_physical_graph is not None
+        expected_telstate_counts = {
+            "continuum_image": 1,
+            "spectral_image": 0,
+            "spectral_image_report": 0,
+        }
+        seen = set()
+        for node in capture_block.postprocess_physical_graph:
+            task = node.logical_node
+            task_type = task.name.split(".", 1)[0]
+            if task_type in expected_telstate_counts:
+                assert isinstance(task, scheduler.LogicalTask)
+                assert "--name" not in task.command
+                assert task.command.count("--telstate") == expected_telstate_counts[task_type]
+                seen.add(task_type)
+        assert seen == expected_telstate_counts.keys()
+
+    @staticmethod
     def _postprocess_task_count(capture_block: product_controller.CaptureBlock) -> int:
         assert capture_block.postprocess_physical_graph is not None
         return sum(
@@ -1770,6 +1792,7 @@ class TestController(BaseTestController):
         # Check that postprocessing ran and didn't fail
         assert product.capture_blocks == {}
         assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
+        self._assert_imaging_postprocess_arguments(capture_block)
 
     async def test_capture_done_disable_batch(
         self, client: aiokatcp.Client, server: DeviceServer, dummy_sched: DummyScheduler
@@ -1810,6 +1833,7 @@ class TestController(BaseTestController):
 
         assert product.capture_blocks == {}
         assert dummy_sched.n_batch_tasks == self._postprocess_task_count(capture_block)
+        self._assert_imaging_postprocess_arguments(capture_block)
 
     async def test_capture_done_busy(self, client: aiokatcp.Client):
         """Capture-done fails if an asynchronous operation is already in progress"""
